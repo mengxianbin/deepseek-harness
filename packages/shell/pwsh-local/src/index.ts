@@ -1,6 +1,6 @@
 /**
  * Local PowerShell Service Provider for the bash capability seam. Each command runs
- * as `pwsh -NoLogo -NoProfile -NonInteractive -Command <command>` in a managed
+ * as `pwsh -NoLogo -NoProfile -NonInteractive -Command <preamble + command + exit capture>` in a managed
  * process spawned through `ctx.subprocess`; the executor owns command
  * defaulting, deadlines and cause classification, the model-friendly terminal
  * environment, and the model-facing stdout/stderr merge for background reads.
@@ -9,6 +9,8 @@
  * itself parses the text, and no intermediate shell exists, so there is no
  * shell-quoting layer to escape (the `bash -c` string domain has no
  * equivalent here). Native Win32 paths (`C:\...`) pass through unchanged.
+ * The command carries a trailing exit capture (see EXIT_CODE_CAPTURE) so
+ * the settled process exit code is the command's own, not the -Command fold.
  *
  * @module @deepseek-ai/dsh-pwsh-local
  */
@@ -47,6 +49,23 @@ export const ENV_OVERRIDES = {
  */
 export const ENCODING_PREAMBLE =
   '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $OutputEncoding = [System.Text.UTF8Encoding]::new($false); '
+
+/**
+ * Statement block appended after every command to preserve its exit code.
+ *
+ * PowerShell's `-Command` folds any non-zero NATIVE exit into 1 (only an
+ * explicit `exit N` statement propagates), which would demote a hook's
+ * blocking exit 2 into a non-blocking 1. The block captures `$?` first,
+ * then prefers the native `$LASTEXITCODE` when one ran, else falls back to
+ * the captured `$?` (0/1) — the same precedence `dsh-tool-pwsh-persistent`
+ * has always applied. The leading newline strands a trailing `#comment` so
+ * it cannot swallow the block; an explicit `exit N` inside the command
+ * terminates before this block and keeps its code unchanged. Forced
+ * termination (kill/timeout) never reaches this block, so the Windows
+ * exit-1 termination stamp is unaffected.
+ */
+export const EXIT_CODE_CAPTURE =
+  '\n$__dsh_ok = $?; if ($null -ne $LASTEXITCODE) { exit [int]$LASTEXITCODE }; if ($__dsh_ok) { exit 0 }; exit 1'
 
 /** Default SIGTERM→SIGKILL grace period (the `graceMs` config). */
 const DEFAULT_GRACE_MS = 3_000
@@ -217,7 +236,7 @@ export class PwshLocalExecutor extends ShellExecutor {
    * `@deepseek-ai/dsh-pwsh-sandbox`).
    */
   protected argv(spec: ShellExecSpec): string[] {
-    return [this.pwshPath, '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', `${ENCODING_PREAMBLE}${spec.command}`]
+    return [this.pwshPath, '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', `${ENCODING_PREAMBLE}${spec.command}${EXIT_CODE_CAPTURE}`]
   }
 
   /** Map one resolved spec plus its argv onto a fully-specified subprocess spawn. */
