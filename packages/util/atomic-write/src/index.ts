@@ -12,8 +12,28 @@
  */
 
 import { createHash, randomBytes } from 'node:crypto'
+import { existsSync, lstatSync, readlinkSync } from 'node:fs'
 import { lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { dirname, isAbsolute, resolve } from 'node:path'
+
+/**
+ * Resolve a path through a symlink (or Windows junction) that points at a file.
+ * Native file APIs cannot open a directory junction whose target is a file —
+ * reads surface ENOENT/EACCES and rename-over-link EPERM — but `readlink`
+ * still yields the stored target. Unresolvable or non-link paths pass through.
+ * @param filename Absolute path that may be such a link.
+ * @returns The link's target when it names an existing file, otherwise `filename`.
+ */
+export function resolveLinkedPath(filename: string): string {
+  try {
+    if (!lstatSync(filename).isSymbolicLink()) return filename
+    const target = readlinkSync(filename)
+    const resolved = isAbsolute(target) ? target : resolve(dirname(filename), target)
+    return existsSync(resolved) ? resolved : filename
+  } catch {
+    return filename
+  }
+}
 
 const WINDOWS_TRANSIENT_RENAME_ERRORS: ReadonlySet<string> = new Set(['EACCES', 'EBUSY', 'EPERM'])
 const WINDOWS_RENAME_RETRY_INITIAL_MS = 20

@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
+import { resolveLinkedPath, withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { Context } from '@deepseek-ai/cordis'
 import type { EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
 import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
@@ -792,7 +792,7 @@ export class PluginManager extends TypertRemoteService {
 
   private diskState(): string {
     return ['package.json', 'cordis.patch.yml', 'pnpm-workspace.yaml', PROFILE_COMPATIBILITY_FILENAME].map((file) => {
-      try { return readFileSync(join(this.profile.dir, file), 'utf8') }
+      try { return readFileSync(resolveLinkedPath(join(this.profile.dir, file)), 'utf8') }
       catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''
         throw error

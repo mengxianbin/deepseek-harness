@@ -2,6 +2,7 @@
 
 import { existsSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
+import { resolveLinkedPath } from '@deepseek-ai/dsh-atomic-write'
 import { PROFILE_PATCH_FILENAME, readProfileManifest } from './profile.ts'
 import { writeProfileBundles } from './profile-plugins.ts'
 
@@ -17,7 +18,7 @@ import { writeProfileBundles } from './profile-plugins.ts'
  */
 export function sanitizeProfile(binName: string, profileDir: string, bundles: readonly string[]): string | undefined {
   const manifest = existsSync(join(profileDir, 'package.json')) ? readProfileManifest(binName, profileDir) : undefined
-  const patchPath = join(profileDir, PROFILE_PATCH_FILENAME)
+  const patchPath = resolveLinkedPath(join(profileDir, PROFILE_PATCH_FILENAME))
   const backupBase = `${patchPath}.bak-${Date.now()}`
   let backupPath: string | undefined = backupBase
   let ordinal = 0

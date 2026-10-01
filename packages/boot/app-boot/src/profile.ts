@@ -27,6 +27,7 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import type { EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
 import { applyEntryPatches, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { resolveLinkedPath } from '@deepseek-ai/dsh-atomic-write'
 import type { DshBundleManifest, DshPackageManifest } from '@deepseek-ai/dsh-package-manifest'
 import { evaluatePluginCompatibility, pluginCompatibilityWarning } from './plugin-compatibility.ts'
 import { readProfileVersionExemptions } from './profile-compatibility.ts'
@@ -680,7 +681,7 @@ export function loadProfileDirectory(
       skippedBundles.push({ packageName, reason: String(error) })
     }
   }
-  const patchPath = join(dir, PROFILE_PATCH_FILENAME)
+  const patchPath = resolveLinkedPath(join(dir, PROFILE_PATCH_FILENAME))
   const patches = options.userLayer !== false && existsSync(patchPath)
     ? loadOverlayPatches(binName, patchPath)
     : []

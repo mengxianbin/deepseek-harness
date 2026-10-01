@@ -16,6 +16,7 @@ import Loader, { type Entry, type EntryOptions } from '@deepseek-ai/cordis-plugi
 import Include, { applyEntryPatches, entryListSchema, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import Group from '@deepseek-ai/cordis-plugin-group'
 import { dshHomePath, resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { resolveLinkedPath } from '@deepseek-ai/dsh-atomic-write'
 import { createLaunchEnvironmentSnapshot, type LaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
 export { readProfilePatches, resolveTelemetryPatch, type ProfileContext, type ProfilePnpmInvocation } from './profile-context.ts'
 export { sanitizeProfile } from './profile-sanitize.ts'
@@ -313,9 +314,10 @@ export async function reconcileProfilePatches(
  * @returns the parsed patches, or `undefined` when the file does not exist.
  */
 export function loadOptionalPatches(binName: string, file: string): PatchOptions[] | undefined {
+  const resolved = resolveLinkedPath(file)
   let content: string
   try {
-    content = readFileSync(file, 'utf8')
+    content = readFileSync(resolved, 'utf8')
   } catch (error) {
     if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') return undefined
     throw new Error(`${binName}: failed to read patches ${file}: ${String(error)}`)
@@ -333,9 +335,10 @@ export function loadOptionalPatches(binName: string, file: string): PatchOptions
  * @returns the parsed patch list.
  */
 export function loadOverlayPatches(binName: string, file: string): PatchOptions[] {
+  const resolved = resolveLinkedPath(file)
   let content: string
   try {
-    content = readFileSync(file, 'utf8')
+    content = readFileSync(resolved, 'utf8')
   } catch (error) {
     throw new Error(`${binName}: failed to read overlay ${file}: ${String(error)}`)
   }

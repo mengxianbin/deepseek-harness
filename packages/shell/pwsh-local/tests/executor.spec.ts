@@ -801,25 +801,25 @@ describe.skipIf(!hasPwsh)('process lifecycle ownership (the subprocess service, 
 describe.skipIf(!hasPwsh)('exit-code fidelity (the -Command exit capture)', () => {
   it('propagates a native exit 2 — the hook blocking code the -Command fold would demote to 1', async () => {
     const { bash } = await setup()
-    const result = await bash.run(bash.resolve({ command: 'node -e "process.exit(2)"' }))
+    const result = await run(bash, bash.resolve({ command: 'node -e "process.exit(2)"' }))
     expect(result.exitCode).toBe(2)
   })
 
   it('keeps a native exit 0 at 0', async () => {
     const { bash } = await setup()
-    const result = await bash.run(bash.resolve({ command: 'node -e "process.exit(0)"' }))
+    const result = await run(bash, bash.resolve({ command: 'node -e "process.exit(0)"' }))
     expect(result.exitCode).toBe(0)
   })
 
   it('preserves an explicit exit N statement (terminates before the capture)', async () => {
     const { bash } = await setup()
-    const result = await bash.run(bash.resolve({ command: 'exit 7' }))
+    const result = await run(bash, bash.resolve({ command: 'exit 7' }))
     expect(result.exitCode).toBe(7)
   })
 
   it('falls back to 1 for a PowerShell-only failure with no native exit code', async () => {
     const { bash } = await setup()
-    const result = await bash.run(bash.resolve({
+    const result = await run(bash, bash.resolve({
       command: 'Get-Item (Join-Path $env:SystemRoot "definitely-missing-dsh-spec") -ErrorAction Continue',
     }))
     expect(result.exitCode).toBe(1)
@@ -827,13 +827,13 @@ describe.skipIf(!hasPwsh)('exit-code fidelity (the -Command exit capture)', () =
 
   it('a trailing #comment cannot swallow the capture (the leading newline strands it)', async () => {
     const { bash } = await setup()
-    const result = await bash.run(bash.resolve({ command: 'node -e "process.exit(2)" # trailing comment' }))
+    const result = await run(bash, bash.resolve({ command: 'node -e "process.exit(2)" # trailing comment' }))
     expect(result.exitCode).toBe(2)
   })
 
   it('prefers the last native exit code over a trailing PowerShell outcome (LASTEXITCODE priority)', async () => {
     const { bash } = await setup()
-    const result = await bash.run(bash.resolve({
+    const result = await run(bash, bash.resolve({
       command: 'node -e "process.exit(0)"; Get-Item (Join-Path $env:SystemRoot "definitely-missing-dsh-spec") -ErrorAction Continue',
     }))
     expect(result.exitCode).toBe(0)
