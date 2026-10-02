@@ -1654,13 +1654,6 @@ export interface PiAiProviderProfile {
   defaultInput?: PiAiModality[]
   /** Provider request headers, validated against Fetch when the profile resolves; Harness attribution wins reserved names. */
   headers?: Record<string, string>
-  /**
-   * Request header that carries the conversation id, for gateways that route
-   * or optimize per session (example: `x-session-id`). A request without
-   * a session id sends nothing, and the value replaces the same name in
-   * {@link PiAiProviderProfile.headers}.
-   */
-  sessionHeader?: string
   /** Provider-neutral pi-ai reasoning level. */
   reasoning?: ModelThinkingLevel
   /** Token budgets used by reasoning providers that support them. */
