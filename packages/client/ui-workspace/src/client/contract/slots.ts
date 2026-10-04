@@ -232,7 +232,7 @@ export type WorkspaceBrowserInjected = {
   closeAddWorkspace: () => void
   /** Publish directory interaction occupancy for command availability. */
   setDirectoryBusy: (busy: boolean) => void
-  /** Dismiss the shortcut's fork-failure notification. */
+  /** Dismiss the fork-failure notification (raised by the menu row and the shortcut alike). */
   dismissForkError: () => void
   /**
    * Start a New Session in a Workspace: reuse-or-create its blank session and

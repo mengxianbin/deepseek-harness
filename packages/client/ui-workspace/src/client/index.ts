@@ -41,7 +41,7 @@ import {
   type RenameSessionInjected, type RowToast, type RowToastInjected, type RowToastState, type SessionRenameDialogInjected,
   type WorkspaceBrowserInjected, type WorkspacePickerInjected,
 } from './contract/slots.ts'
-import { createWorkspaceShortcutControls, installWorkspaceShortcuts } from './shortcuts.ts'
+import { createWorkspaceShortcutControls, forkFailureReason, installWorkspaceShortcuts } from './shortcuts.ts'
 import { UiWorkspaceService } from './navigation.ts'
 import { createWorkspaceViewStore } from './stores.ts'
 import { WorkspaceBrowser } from './rows/WorkspaceBrowser.tsx'
@@ -211,8 +211,13 @@ export function apply(ctx: Context): void {
     forkSession: (sessionId) => {
       uiWorkspace.forkSession(sessionId, (childId) => {
         ctx.get('productAnalytics')?.track('branch_session_click', { session_id: childId, parent_session_id: sessionId, click_position: 'sidebar' })
-      }).catch(() => {
-        // Fork or child-title failure leaves the list as it was.
+      }).catch((error: unknown) => {
+        // The list keeps its shape, but a fork that never happened cannot stay
+        // silent: the Host refused it (no completed turn, or a source Session
+        // it cannot read/validate), so raise the same notice the shortcut path
+        // uses and keep the detail in the console for a report.
+        console.warn('session fork rejected:', error)
+        shortcutControls.forkFailed(forkFailureReason(error))
       })
     },
   })

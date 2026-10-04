@@ -521,6 +521,37 @@ describe('ui-workspace apply', () => {
     expect(unarchiveSession).toHaveBeenCalledWith('session')
   })
 
+  it('surfaces a rejected menu fork through the browser notice instead of staying silent', async () => {
+    const b = await bench()
+    onTestFinished(() => b.ctx.fiber.dispose())
+    const rejection = new RemoteError('gateway/internal', 'fork source unavailable for session "session"', {})
+    b.fork.mockRejectedValueOnce(rejection)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    onTestFinished(() => { warn.mockRestore() })
+    declare(b.slots, 'sidebar.workspaces', 'shell.overlay')
+    await b.ctx.plugin({ inject: [...inject], apply }).await()
+
+    const fork = faceOf(entry(b.slots, MENU_ITEM, 'fork')) as ForkSessionInjected
+    fork.forkSession('session' as never)
+
+    const browser = faceOf(b.slots.entries('sidebar.workspaces')[0]!) as WorkspaceBrowserInjected
+    await vi.waitFor(() => {
+      expect(browser.hooks.workspaceShortcuts.getSnapshot().forkError).toMatchObject({ reason: 'failed' })
+    })
+    expect(warn).toHaveBeenCalledWith('session fork rejected:', rejection)
+
+    // The same notice the Host refusal path raises: no completed turn reads as
+    // its own copy rather than the generic failure.
+    browser.dismissForkError()
+    b.fork.mockRejectedValueOnce(Object.assign(new Error('no completed turn'), {
+      name: 'SessionForkError', rpcError: { code: 'session/fork-unavailable' },
+    }))
+    fork.forkSession('session' as never)
+    await vi.waitFor(() => {
+      expect(browser.hooks.workspaceShortcuts.getSnapshot().forkError).toMatchObject({ reason: 'unavailable' })
+    })
+  })
+
   it('routes browser actions and picker creation to the services', async () => {
     const b = await bench()
     declare(b.slots, 'sidebar.workspaces', 'conversation.hero.workspace')
