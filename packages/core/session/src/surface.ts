@@ -163,11 +163,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * Require one durable tool-call identity.
+ * The released format reads these with the same nonempty rule, so accepting a
+ * blank id here would only move the failure to the backend flush — where the
+ * poisoned row is already in the log and the Session can never be opened again.
+ * @param value - candidate id from a tool-call block, `tool/call`, or a tool-role result.
+ * @param subject - event location to include in the validation error.
+ * @returns the id, once proven a nonempty string.
+ * @throws when the id is missing, not a string, or empty.
+ */
+function nonemptyToolCallId(value: unknown, subject: string): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(`${subject} requires a nonempty tool call id`)
+  }
+  return value
+}
+
+/**
  * Reject noncanonical request-header fields, developer roles/content, and contradictory tool failure metadata.
  * This does not validate complete event payloads or embedded provider streams.
  * @param event - event whose locally related payload fields are inspected.
  * @param subject - event location to include in validation errors.
- * @throws when request-header fields, developer roles/content, or tool failure metadata are invalid.
+ * @throws when request-header fields, developer roles/content, tool identities, or tool failure metadata are invalid.
  */
 export function validateSessionEventData(
   event: Pick<SessionEvent, 'type' | 'data'>,
@@ -215,12 +232,34 @@ export function validateSessionEventData(
     if (isRecord(defaults) && Object.keys(defaults).length === 0) {
       throw new Error(`${subject} must omit empty adapterDefaults`)
     }
+  } else if (event.type === 'assistant/message') {
+    if (!isRecord(data)) throw new Error(`${subject} data must be an object`)
+    const message = data['message']
+    if (!isRecord(message) || !Array.isArray(message['content'])) return
+    for (const block of message['content']) {
+      if (isRecord(block) && block['type'] === 'tool-call') {
+        nonemptyToolCallId(block['id'], `${subject} tool-call block`)
+      }
+    }
+  } else if (event.type === 'tool/call') {
+    if (!isRecord(data)) throw new Error(`${subject} data must be an object`)
+    nonemptyToolCallId(data['callId'], subject)
   } else if (event.type === 'tool/result') {
     if (!isRecord(data)) throw new Error(`${subject} data must be an object`)
-    if (data['error'] === undefined) return
     const message = data['message']
-    if (!isRecord(message) || message['isError'] !== true) {
+    if (data['error'] !== undefined && (!isRecord(message) || message['isError'] !== true)) {
       throw new Error(`${subject} error requires message.isError === true`)
+    }
+    // Only first-class tool-role results carry the identities the released
+    // format cross-checks; every other shape belongs to the canonical message
+    // validator, which reports it with its own wording.
+    if (!isRecord(message) || message['role'] !== 'tool') return
+    const toolCallId = nonemptyToolCallId(message['toolCallId'], subject)
+    const source = message['source']
+    if (!isRecord(source) || typeof source['callId'] !== 'string') return
+    nonemptyToolCallId(source['callId'], `${subject} tool source`)
+    if (source['callId'] !== toolCallId) {
+      throw new Error(`${subject} message has mismatched tool call ids`)
     }
   }
 }
