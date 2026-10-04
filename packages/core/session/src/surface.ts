@@ -163,6 +163,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * A durable tool-call identity was blank at the append site.
+ * Emitted instead of a plain Error so listeners can classify the rejection
+ * (the degradation signal counts these) without matching message wording.
+ */
+export class NonEmptyToolCallIdError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'NonEmptyToolCallIdError'
+  }
+}
+
+/**
  * Require one durable tool-call identity.
  * The released format reads these with the same nonempty rule, so accepting a
  * blank id here would only move the failure to the backend flush — where the
@@ -170,11 +182,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * @param value - candidate id from a tool-call block, `tool/call`, or a tool-role result.
  * @param subject - event location to include in the validation error.
  * @returns the id, once proven a nonempty string.
- * @throws when the id is missing, not a string, or empty.
+ * @throws {NonEmptyToolCallIdError} when the id is missing, not a string, or empty.
  */
 function nonemptyToolCallId(value: unknown, subject: string): string {
   if (typeof value !== 'string' || value.length === 0) {
-    throw new Error(`${subject} requires a nonempty tool call id`)
+    throw new NonEmptyToolCallIdError(`${subject} requires a nonempty tool call id`)
   }
   return value
 }
