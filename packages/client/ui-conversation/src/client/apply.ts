@@ -30,6 +30,7 @@ import { ComposerBlockRegistry } from './input/blocks.ts'
 import type { ComposerBlock } from './contract/composer-blocks.ts'
 import { InputHub } from './input/hub.ts'
 import { ComposerSubmissionPolicy } from './input/submission-policy.ts'
+import { StopGate } from './stop-gate.ts'
 import { queueDockEntry } from './queue/QueueDock.tsx'
 import { EnterBehaviorRow } from './settings/EnterBehaviorRow.tsx'
 import type { EnterBehaviorRowInjected } from './settings/EnterBehaviorRow.tsx'
@@ -228,13 +229,36 @@ export function apply(ctx: Context, config: Config = Config({})): void {
     }
   }, 'ui-conversation: View selection')
 
+  /** Live stop-suppression window; `shortcuts.stopSequenceMs` governs it once the service injects. */
+  let stopWindowMs = 500
+  /** Send-window suppression, mirroring the OS double-click band's lower half. */
+  const sendWindowMs = 300
+  /**
+   * One gate per session: a stop may run only once it falls outside both the
+   * last accepted send and the Send→Stop flip. Per-session scope keeps parallel
+   * conversations from swallowing each other's clicks.
+   */
+  const stopGates = new Map<SessionId, StopGate>()
+  const gateFor = (sessionId: SessionId): StopGate => {
+    let gate = stopGates.get(sessionId)
+    if (gate === undefined) {
+      gate = new StopGate(() => ({ sendWindowMs, stopWindowMs }))
+      stopGates.set(sessionId, gate)
+    }
+    return gate
+  }
   const stop = (sessionId: SessionId): void => {
+    // All three stop entries funnel here — the primary button's flipped
+    // branch, the standalone stop button, and the Esc-Esc chord — so one gate
+    // covers every entry the double-click accident could reach.
+    if (!gateFor(sessionId).allowStop()) return
     scopedConversation(sessions, sessionId).cancel().catch((_error: unknown) => {
       // Stop failure is published through Session promptError.
     })
   }
   const stopShortcut = createSnapshotStore<readonly string[]>([])
   ctx.inject(['shortcuts'], (scope) => {
+    stopWindowMs = scope.shortcuts.stopSequenceMs
     const fixedInputs: readonly ShortcutFixedCommand[] = [
       { id: 'fixed.send' as ShortcutCommandId, label: () => t('input.send'), keys: ['Enter'],
         bindings: [{ code: 'Enter', modifiers: [] }], group: 'input' },
@@ -517,6 +541,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
             })
           },
         stop: () => { stop(sessionId) },
+        stopGate: gateFor(sessionId),
         hooks: {
           stopShortcut,
           busyEnter: submissionPolicy.busyEnter,

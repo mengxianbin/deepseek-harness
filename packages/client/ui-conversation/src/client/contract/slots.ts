@@ -18,6 +18,7 @@ import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import type { ComposerBlock } from './composer-blocks.ts'
 import type { DraftAttachmentId, InputActions, InputNotice, InputState } from './input.ts'
 import type { ComposerKeyboard, EditSelection } from './draft-editor.ts'
+import type { StopGate } from '../stop-gate.ts'
 import type { createConversationStore } from '../stores.ts'
 import type { BusyEnterBehavior } from './composer-submission.ts'
 import type { ConversationSnapshot } from './snapshot.ts'
@@ -390,6 +391,14 @@ export interface ComposerBarInjected {
   retryFileUpload: ((id: DraftAttachmentId) => void) | undefined
   toggleCommandMenu: ((selection: EditSelection) => void) | undefined
   stop: (() => void) | undefined
+  /**
+   * Per-session send/stop debounce: it timestamps an accepted send and the
+   * Send→Stop flip so a stop landing inside either window is swallowed — the
+   * second click of the double-click accident. The bar records the flip and
+   * asks the gate before firing a send; `stop` itself is gated once at its
+   * single convergence point, so this face only feeds it the flip time.
+   */
+  stopGate?: StopGate | undefined
   hooks: {
     /** Readable sequence while the fixed Stop command is registered. */
     stopShortcut: ObservableSnapshot<readonly string[]>
