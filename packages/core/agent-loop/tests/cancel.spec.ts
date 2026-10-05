@@ -185,7 +185,10 @@ describe('Agent.cancel()', () => {
     const idle = waitForIdle(ctx, agent)
     send(agent, 'wake it')
     await idle
-    expect(userTexts(agent)).toEqual(['wake it'])
+    // The claimed prompt was deferred while the surface was still virgin; this
+    // wake opens the first step, so it materializes behind the system head.
+    // Recorded, but it never reached the model (requests stay at 1).
+    expect(userTexts(agent)).toEqual(['preserved', 'wake it'])
     expect(adapter.requests).toHaveLength(1)
   })
 
@@ -956,14 +959,17 @@ describe('Agent.cancel()', () => {
     send(agent, 'B')
 
     await idle
-    expect(userTexts(agent)).toEqual(['B'])
+    // `A` was claimed before the cancel landed, so the deferred claim
+    // materializes behind this turn's system head — recorded, but it never
+    // reached the model (requests stay at 1).
+    expect(userTexts(agent)).toEqual(['A', 'B'])
     expect(agent.inbox.nextTurn).toHaveLength(0)
     expect(adapter.requests).toHaveLength(1)
 
     const replacementIdle = waitForIdle(ctx, agent)
     send(agent, 'C')
     await replacementIdle
-    expect(userTexts(agent)).toEqual(['B', 'C'])
+    expect(userTexts(agent)).toEqual(['A', 'B', 'C'])
     expect(adapter.requests).toHaveLength(2)
     expect(agent.session.snapshotEvents().filter(event => event.type === 'turn/end')).toHaveLength(3)
   })

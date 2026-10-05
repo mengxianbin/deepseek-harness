@@ -129,6 +129,15 @@ export class ReactLoopAgent implements Agent {
    * discards it, matching the gate semantics those decisions encode).
    */
   private unrecordedClaim: UserMessage[] = []
+  /**
+   * Claimed input deferred across turns: written when the session's surface is
+   * still empty (no `system/message` committed yet). Appending a user message
+   * there would displace the system prompt from surface node 0, so the residue
+   * waits until the next `step()` has committed the system head, then
+   * materializes ahead of that step's own input. Survives only in-process —
+   * the `agent/inbox/spliced` claim stays in the log for recovery.
+   */
+  private deferredClaim: UserMessage[] = []
 
   constructor(
     private loopCtx: Context,
@@ -410,22 +419,28 @@ export class ReactLoopAgent implements Agent {
       // empty rewrite clear the residue on purpose, so a blocked prompt still
       // never reaches the transcript.
       //
-      // The write-back is skipped on a virgin surface: the loop reserves
-      // surface node 0 for the system prompt (`SessionEventMap['system/message']`,
-      // asserted by `systemOf`/`request.system`), and on a session whose first
-      // turn died before the first `system/message` commit there is no position
-      // after the head yet — appending would displace it for every later request.
-      // The claim splice in the log still carries that prompt for recovery.
+      // The write-back is deferred while the surface is still virgin: the loop
+      // reserves surface node 0 for the system prompt (`SessionEventMap`
+      // ['system/message'], asserted by `systemOf`/`request.system`), and on a
+      // session whose first turn died before the first `system/message` commit
+      // there is no position after the head yet — appending would displace it
+      // for every later request. Those claims move to `deferredClaim` and
+      // materialize at the next `step()`, after that step commits the system
+      // head. Mid-session (head already present) they are written immediately.
       const stranded = this.unrecordedClaim
       this.unrecordedClaim = []
       let failure: unknown
-      if (stranded.length > 0 && this.session.surface.nodes.length > 0) {
-        try {
-          for (const message of stranded) {
-            this.session.append('user/message', message, { surfaceOp: 'append' })
+      if (stranded.length > 0) {
+        if (this.session.surface.nodes.length > 0) {
+          try {
+            for (const message of stranded) {
+              this.session.append('user/message', message, { surfaceOp: 'append' })
+            }
+          } catch (error: unknown) {
+            failure = error
           }
-        } catch (error: unknown) {
-          failure = error
+        } else {
+          this.deferredClaim.push(...stranded)
         }
       }
       try {
@@ -468,6 +483,13 @@ export class ReactLoopAgent implements Agent {
         this.session.append('system/message', { turn, step, message }, intent)
       }
       if (firstAttempt) {
+        // The system head was committed above, so claims deferred while the
+        // surface was virgin can take their position behind it (in claim
+        // order) instead of displacing node 0.
+        for (const message of this.deferredClaim) {
+          this.session.append('user/message', message, { surfaceOp: 'append' })
+        }
+        this.deferredClaim = []
         for (const message of decision.messages) {
           this.session.append('user/message', message, { surfaceOp: 'append' })
         }
