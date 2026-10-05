@@ -118,6 +118,17 @@ export class ReactLoopAgent implements Agent {
   private readonly systemPrompt: SystemPromptProjection
   /** Identities fully frozen by this loop; weak references do not retain replaced history. */
   private readonly frozenMessages = new WeakSet<Message>()
+  /**
+   * Input this turn claimed out of the durable inbox but has not yet recorded
+   * as `user/message`. The claim removes it from the projection immediately,
+   * while materialization waits behind several abortable awaits (prompt
+   * assembly, the pre-step waterfall, request preparation); an abort landing in
+   * that window would otherwise drop the message from the transcript AND the
+   * queue. `turn()`'s closing path flushes this residue, and a resolved
+   * pre-step decision replaces it (a `reject` or an empty rewrite deliberately
+   * discards it, matching the gate semantics those decisions encode).
+   */
+  private unrecordedClaim: UserMessage[] = []
 
   constructor(
     private loopCtx: Context,
@@ -272,6 +283,9 @@ export class ReactLoopAgent implements Agent {
     if (this.phase.kind !== 'running') throw new Error(`agent "${this.id}": pre-step outside running phase`)
     const signal = this.phase.abort.signal
     const claimed = this.inbox.claim(target, position.turn)
+    // The claim already dropped these from the durable projection; track them
+    // until `step()` records them so an abort can still flush them to the log.
+    this.unrecordedClaim = [...claimed]
     const assembly = await this.loopCtx.systemPrompt.assemble(assembleContextFor(this, signal))
     signal.throwIfAborted()
     const sections = renderContextSections(assembly)
@@ -283,8 +297,14 @@ export class ReactLoopAgent implements Agent {
         messages: context === undefined ? claimed : [...claimed, context],
       }),
     )
+    if (decision.kind === 'reject') {
+      // A gate that blocks the proposal discards it deliberately: nothing was
+      // admitted, so the claimed input must NOT reach the transcript.
+      this.unrecordedClaim = []
+      return decision
+    }
+    this.unrecordedClaim = [...decision.messages]
     signal.throwIfAborted()
-    if (decision.kind === 'reject') return decision
     return { ...decision, assembly }
   }
 
@@ -383,12 +403,40 @@ export class ReactLoopAgent implements Agent {
       }
       this.throwError(error)
     } finally {
+      // A claim that never reached `step()` must not vanish: the durable inbox
+      // projection already dropped it, so an abort anywhere between
+      // `inbox.claim()` and the `user/message` append would otherwise lose the
+      // prompt from BOTH the queue and the log (the claim race). `reject` and an
+      // empty rewrite clear the residue on purpose, so a blocked prompt still
+      // never reaches the transcript.
+      //
+      // The write-back is skipped on a virgin surface: the loop reserves
+      // surface node 0 for the system prompt (`SessionEventMap['system/message']`,
+      // asserted by `systemOf`/`request.system`), and on a session whose first
+      // turn died before the first `system/message` commit there is no position
+      // after the head yet — appending would displace it for every later request.
+      // The claim splice in the log still carries that prompt for recovery.
+      const stranded = this.unrecordedClaim
+      this.unrecordedClaim = []
+      let failure: unknown
+      if (stranded.length > 0 && this.session.surface.nodes.length > 0) {
+        try {
+          for (const message of stranded) {
+            this.session.append('user/message', message, { surfaceOp: 'append' })
+          }
+        } catch (error: unknown) {
+          failure = error
+        }
+      }
       try {
         // oxlint-disable-next-line typescript/no-non-null-assertion -- every exit assigns a turn ending
         this.session.append('turn/end', { turn, reason: turnEnds! })
       } catch (error: unknown) {
-        this.throwError(error)
+        failure = failure === undefined
+          ? error
+          : new AggregateError([failure, error], 'Turn could not be closed and its claimed input could not be recorded', { cause: error })
       }
+      if (failure !== undefined) this.throwError(failure)
     }
     if (!this.inbox.hasPending) return false
     phase.abort = new AbortController()
@@ -423,6 +471,8 @@ export class ReactLoopAgent implements Agent {
         for (const message of decision.messages) {
           this.session.append('user/message', message, { surfaceOp: 'append' })
         }
+        // Materialized: an abort after this point must not record them twice.
+        this.unrecordedClaim = []
       }
       firstAttempt = false
       const request = this.buildRequest(config, preparedCall, assembly.tools, { turn, step }, startsRequestSeries, signal)

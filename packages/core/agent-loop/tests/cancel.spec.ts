@@ -429,7 +429,10 @@ describe('Agent.cancel()', () => {
     send(agent, 'later')
     await idle
     expect(adapter.requests).toHaveLength(2)
-    expect(userTexts(agent)).toEqual(['first', 'later'])
+    // The replacement was claimed before the cancel landed, so the claim-race
+    // write-back keeps it in the transcript — recorded, but never modelled
+    // (requests stay at 2: only `first` and `later` reached the model).
+    expect(userTexts(agent)).toEqual(['first', 'cancelled replacement', 'later'])
   })
 
   it('replacement work queued after idle-listener cancellation replays at convergence', async () => {
@@ -460,14 +463,17 @@ describe('Agent.cancel()', () => {
     // The wake sent after the cancel fired is latched: the surviving
     // replacement runs at convergence without a third message.
     expect(adapter.requests).toHaveLength(2)
-    expect(userTexts(agent)).toEqual(['first', 'surviving replacement'])
+    // The cancelled replacement was already claimed when the abort landed, so
+    // the claim-race write-back records it instead of dropping it; it never
+    // reached the model (requests stay at 2).
+    expect(userTexts(agent)).toEqual(['first', 'cancelled replacement', 'surviving replacement'])
     expect(agent.inbox.nextTurn).toHaveLength(0)
 
     const idle = waitForIdle(ctx, agent)
     send(agent, 'wake it')
     await idle
     expect(adapter.requests).toHaveLength(3)
-    expect(userTexts(agent)).toEqual(['first', 'surviving replacement', 'wake it'])
+    expect(userTexts(agent)).toEqual(['first', 'cancelled replacement', 'surviving replacement', 'wake it'])
   })
 
   it('cancel() mid-step aborts the active turn and drops every queued tail item', async () => {
@@ -1148,5 +1154,56 @@ describe('Agent.cancel()', () => {
     expect(turnEnd?.type === 'turn/end' && turnEnd.data.reason)
       .toEqual({ kind: 'aborted', reason: { kind: 'user' } })
     await ctx.fiber.dispose()
+  })
+
+  it('an abort inside the claim-to-materialize window still records the prompt (claim race)', async () => {
+    const adapter = new MockAdapter([textResponse('seed reply'), textResponse('resume reply')])
+    const ctx = await harness(adapter)
+    const agent = await ctx.agentLoop.create(SessionId('claim-race-writeback'), { provider: 'mock', model: 'mock' })
+
+    // The incident landed at turn 12 of a live session, whose surface already
+    // carries its system head. Reproduce that state with one completed turn.
+    send(agent, 'seed')
+    await waitForIdle(ctx, agent)
+    expect(userTexts(agent)).toEqual(['seed'])
+
+    // Hold the proposal inside `agent/pre-step`: the claim has happened, no
+    // `step/start` has been opened, and the `user/message` append is still
+    // ahead — exactly the window the abort won in the incident.
+    let armed = false
+    const claimed = Promise.withResolvers<undefined>()
+    const disposeBlock = ctx.on('agent/pre-step', async ({ agent: subject, signal }, next) => {
+      if (subject !== agent || !armed) return next()
+      claimed.resolve(undefined)
+      if (!signal.aborted) {
+        await new Promise<void>((resolve) => {
+          signal.addEventListener('abort', () => { resolve() }, { once: true })
+        })
+      }
+      return next()
+    })
+
+    armed = true
+    const idle = waitForIdle(ctx, agent)
+    send(agent, 'the prompt that must survive')
+    await claimed.promise
+    agent.cancel({ kind: 'user' })
+    await idle
+    disposeBlock()
+
+    // The queue released the message and the turn never reached a step, so
+    // without the write-back the prompt would be in neither queue nor log.
+    expect(agent.inbox.nextTurn).toHaveLength(0)
+    expect(agent.session.snapshotEvents().filter(event => event.type === 'step/start')).toHaveLength(1)
+    expect(userTexts(agent)).toEqual(['seed', 'the prompt that must survive'])
+    const endings = agent.session.snapshotEvents()
+      .flatMap(event => event.type === 'turn/end' ? [event.data.reason] : [])
+    expect(endings.at(-1)).toEqual({ kind: 'aborted', reason: { kind: 'user' } })
+
+    // The next request carries it, so the model reads it on the following round.
+    const resumed = waitForIdle(ctx, agent)
+    send(agent, 'continue')
+    await resumed
+    expect(JSON.stringify(adapter.requests.at(-1)?.messages)).toContain('the prompt that must survive')
   })
 })
