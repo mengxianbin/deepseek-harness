@@ -478,6 +478,19 @@ export type SurfaceIntent<T extends SurfaceEventType = SurfaceEventType> = {
 })
 
 /**
+ * Log-only append options for non-surface events: surface metadata stays
+ * forbidden (the compiler keeps it off these events), while `ignorable` marks
+ * the record one whose type a reader without this vocabulary may skip. The
+ * envelope semantics are {@link SessionEvent.ignorable} — a writer sets it
+ * only on informational records whose loss cannot distort reconstruction for
+ * readers that already know how to interpret the log without them.
+ */
+export type LogIntent = {
+  /** Skip-safety marker for readers whose build predates this event type. */
+  ignorable?: true
+}
+
+/**
  * One immutable entry in the session log.
  *
  * A proper discriminated union over `type` (not independent `type`/`data`

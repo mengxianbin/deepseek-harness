@@ -134,8 +134,11 @@ export class ReactLoopAgent implements Agent {
    * still empty (no `system/message` committed yet). Appending a user message
    * there would displace the system prompt from surface node 0, so the residue
    * waits until the next `step()` has committed the system head, then
-   * materializes ahead of that step's own input. Survives only in-process —
-   * the `agent/inbox/spliced` claim stays in the log for recovery.
+   * materializes ahead of that step's own input. Survives a process restart
+   * or fork seed: the same push writes an `agent/claim-deferred` record, and
+   * this field is re-seeded from the `deferredClaim` projection on construction
+   * (idempotent by id — a claim whose `user/message` already committed folds
+   * away before construction reads it).
    */
   private deferredClaim: UserMessage[] = []
 
@@ -153,6 +156,10 @@ export class ReactLoopAgent implements Agent {
     /* v8 ignore next -- the loop registers its own turnBoundary unit, so the key is always present */
     const lastTurn = this.loopCtx.sessionProjections.stateOf(session, 'turnBoundary')?.lastTurn ?? 0
     this.phase = { kind: 'idle', lastTurn }
+    // Restart/fork restoration: claims deferred before the previous process
+    // died are the projection's pending set (records without a materializing
+    // `user/message`), so the next step can commit them behind the system head.
+    this.deferredClaim = [...(this.ctx.sessionProjections.stateOf(session, 'deferredClaim')?.messages ?? [])]
     this.runtimeContext = new RuntimeContextProjection(this.ctx, session)
     this.systemPrompt = new SystemPromptProjection(session)
     // Single assembly point: every loop agent (web/tui/acp/headless/subagent)
@@ -440,7 +447,15 @@ export class ReactLoopAgent implements Agent {
             failure = error
           }
         } else {
+          // Memory first: if the durable record below fails to append, the
+          // in-process claim still materializes at the next step (the failure
+          // is reported through `failure` exactly like the write-back above).
           this.deferredClaim.push(...stranded)
+          try {
+            this.session.append('agent/claim-deferred', { turn, messages: stranded }, { ignorable: true })
+          } catch (error: unknown) {
+            failure = error
+          }
         }
       }
       try {

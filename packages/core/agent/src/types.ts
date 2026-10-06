@@ -44,6 +44,12 @@ export interface InboxState {
   readonly 'next-step': readonly UserMessage[]
 }
 
+/** Complete deferred-claim value reconstructed from durable defer events. */
+export interface DeferredClaimState {
+  /** Claimed input parked while the surface was still virgin, not yet materialized as `user/message`. */
+  readonly messages: readonly UserMessage[]
+}
+
 /**
  * Wire-JSON pending Inbox value. Each message round-trips the session log
  * losslessly, but the fold state's full `UserMessage` type cannot cross a
@@ -59,6 +65,8 @@ declare module '@deepseek-ai/dsh-session-projection/types' {
   interface SessionProjectionStateMap {
     /** Pending agent input reconstructed from durable inbox splices. */
     inbox: InboxState
+    /** Claimed input deferred on a virgin surface, reconstructed from durable defer events. */
+    deferredClaim: DeferredClaimState
   }
   interface SessionProjectionMap {
     /** Pending agent input reconstructed from durable inbox splices. */
@@ -100,5 +108,18 @@ declare module '@deepseek-ai/dsh-session/types' {
       inserted: UserMessage[]
       outcome?: 'canceled'
     }
+    /**
+     * Claimed input the loop deferred because the surface was still virgin (no
+     * `system/message` committed yet): appending a `user/message` there would
+     * displace the system prompt from surface node 0, so the residue waits for
+     * the next `step()`. Written beside the loop's in-memory push so a process
+     * restart or fork seed can restore the prompt the claim race stranded; the
+     * materializing `user/message` carries the same id, which the
+     * `deferredClaim` projection folds away (restoration is idempotent by id).
+     * Appended with `ignorable: true`: a reader without this vocabulary can
+     * safely skip the record (it could not reconstruct the claim anyway),
+     * while this build folds it back into pending input.
+     */
+    'agent/claim-deferred': { turn: number; messages: UserMessage[] }
   }
 }
