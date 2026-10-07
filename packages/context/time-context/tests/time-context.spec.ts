@@ -466,7 +466,10 @@ describe('real agent-loop request history', () => {
 
     expect(contextTexts(agent.session)).toHaveLength(0)
     expect(adapter.requests).toHaveLength(0)
-    expect(agent.session.snapshotEvents().some(event => event.type === 'step/start')).toBe(false)
+    // α (G1′): the aborted claim writes back behind one synthetic step, so the
+    // boundary exists — but no model step ran and no reading was committed.
+    expect(agent.session.snapshotEvents().filter(event => event.type === 'step/start')).toHaveLength(1)
+    expect(agent.session.snapshotEvents().some(event => event.type === 'assistant/attempt')).toBe(false)
     await ctx.fiber.dispose()
   })
 

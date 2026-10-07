@@ -92,7 +92,11 @@ export class SystemPromptProjection {
       return [{ message: createSystemMessage(rendered), intent: { surfaceOp: 'append' } }]
     }
     const latest = nodes.findLast(node => node.text !== '') ?? head
-    if (!input.inHistory || input.startsSeries || rendered.length === 0) {
+    // `latest.text === ''`: every retained node is empty — the synthetic abort
+    // head (α) wrote an empty system placeholder at node 0. Replace it with the
+    // real prompt instead of appending beside it, which would leave the empty
+    // head first for every later request.
+    if (!input.inHistory || input.startsSeries || rendered.length === 0 || latest.text === '') {
       const updates = nodes.slice(1).filter(node => node.text !== '')
         .map(node => this.replace(node.seq, ''))
       if (head.text !== rendered) updates.push(this.replace(head.seq, rendered))

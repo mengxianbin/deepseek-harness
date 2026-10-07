@@ -394,8 +394,17 @@ describe('prepared-route prompt admission', () => {
     await h.agent.whenIdle()
     expect(h.capable.requests).toHaveLength(0)
     const types = h.agent.session.snapshotEvents().map(event => event.type)
-    expect(types.filter(type => type === 'step/start' || type === 'step/end')).toEqual(['step/start', 'step/end'])
-    expect(types.filter(type => ['system/message', 'user/message', 'request/header'].includes(type))).toEqual([])
+    // α (G1'): the aborted claim writes back behind one synthetic step, so the
+    // balanced empty step above is followed by the sandwich — same-source step
+    // number `phase.step + 1` = 2 (D-S1), still no model step or request.
+    expect(types.filter(type => type === 'step/start' || type === 'step/end'))
+      .toEqual(['step/start', 'step/end', 'step/start', 'step/end'])
+    expect(types.filter(type => ['system/message', 'user/message', 'request/header'].includes(type)))
+      .toEqual(['system/message', 'user/message'])
+    const sandwich = h.agent.session.snapshotEvents().filter(event => event.type === 'step/start').at(-1)
+    expect(sandwich?.data).toMatchObject({ turn: 1, step: 2 })
+    const head = h.agent.session.snapshotEvents().findLast(event => event.type === 'system/message')
+    expect(head?.data).toMatchObject({ turn: 1, step: 2 })
   })
 
   it('keeps generic config changes and concurrent selection on the same prepared route', async () => {

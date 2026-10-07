@@ -177,7 +177,11 @@ describe('Agent.cancel()', () => {
       event.type === 'agent/inbox/spliced' && event.data.outcome === 'canceled')).toBe(false)
     await agent.whenIdle()
     expect(agent.inbox.nextTurn).toHaveLength(0)
-    expect(userTexts(agent)).toEqual([])
+    // α (G1'): the claimed prompt is written back immediately behind the
+    // synthetic abort step instead of parking until the next successful step.
+    expect(userTexts(agent)).toEqual(['preserved'])
+    expect(agent.session.snapshotEvents().filter(event => event.type === 'step/start')).toHaveLength(1)
+    expect(agent.session.snapshotEvents().filter(event => event.type === 'agent/claim-deferred')).toHaveLength(0)
     expect(adapter.requests).toHaveLength(0)
     expect(agent.session.snapshotEvents().findLast(event => event.type === 'turn/end')?.data.reason)
       .toEqual({ kind: 'aborted', reason: { kind: 'user' } })
@@ -185,9 +189,9 @@ describe('Agent.cancel()', () => {
     const idle = waitForIdle(ctx, agent)
     send(agent, 'wake it')
     await idle
-    // The claimed prompt was deferred while the surface was still virgin; this
-    // wake opens the first step, so it materializes behind the system head.
-    // Recorded, but it never reached the model (requests stay at 1).
+    // The prompt was already recorded at abort time; this wake opens the first
+    // real step behind the synthetic head. Recorded, but the abort itself
+    // never reached the model (requests stay at 1).
     expect(userTexts(agent)).toEqual(['preserved', 'wake it'])
     expect(adapter.requests).toHaveLength(1)
   })
@@ -333,7 +337,7 @@ describe('Agent.cancel()', () => {
     expect(userTexts(agent)).toEqual(['active'])
   })
 
-  it('cancel after waking send closes its synchronously opened turn without a step', async () => {
+  it('cancel after waking send closes its synchronously opened turn with only the synthetic abort step', async () => {
     const adapter = new MockAdapter([textResponse('should not run')])
     const ctx = await harness(adapter)
     const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
@@ -344,9 +348,11 @@ describe('Agent.cancel()', () => {
 
     await new Promise(r => setTimeout(r, 30))
 
-    expect(userTexts(agent)).toEqual([])
+    // α (G1'): the synchronously claimed prompt is written back behind the
+    // synthetic abort step; the second send stays unclaimed in the inbox.
+    expect(userTexts(agent)).toEqual(['drop me first'])
     expect(agent.session.snapshotEvents().filter(event => event.type === 'turn/start')).toHaveLength(1)
-    expect(agent.session.snapshotEvents().filter(event => event.type === 'step/start')).toHaveLength(0)
+    expect(agent.session.snapshotEvents().filter(event => event.type === 'step/start')).toHaveLength(1)
     expect(agent.session.snapshotEvents().findLast(event => event.type === 'turn/end')?.data.reason)
       .toEqual({ kind: 'aborted', reason: { kind: 'user' } })
     expect(agent.status).toBe('idle')

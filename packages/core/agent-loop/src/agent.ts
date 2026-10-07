@@ -21,6 +21,7 @@ import {
   LlmError,
   createAssistantMessage,
   createDeveloperMessage,
+  createSystemMessage,
   errorChain,
   markAgentLoopRequest,
 } from '@deepseek-ai/dsh-llm'
@@ -426,14 +427,18 @@ export class ReactLoopAgent implements Agent {
       // empty rewrite clear the residue on purpose, so a blocked prompt still
       // never reaches the transcript.
       //
-      // The write-back is deferred while the surface is still virgin: the loop
-      // reserves surface node 0 for the system prompt (`SessionEventMap`
+      // Mid-session (surface head already present) the claims are written back
+      // immediately. While the surface is still virgin the loop reserves
+      // surface node 0 for the system prompt (`SessionEventMap`
       // ['system/message'], asserted by `systemOf`/`request.system`), and on a
       // session whose first turn died before the first `system/message` commit
       // there is no position after the head yet — appending would displace it
-      // for every later request. Those claims move to `deferredClaim` and
-      // materialize at the next `step()`, after that step commits the system
-      // head. Mid-session (head already present) they are written immediately.
+      // for every later request. Those claims are instead written back behind a
+      // synthetic step sandwich (α, G1': see the branch below), which makes the
+      // aborted prompt visible at once; only a failed write parks them in
+      // `deferredClaim` to materialize at the next step (D6 fallback).
+      // `reject` and an empty rewrite clear the residue on purpose, so a
+      // blocked prompt still never reaches the transcript.
       const stranded = this.unrecordedClaim
       this.unrecordedClaim = []
       let failure: unknown
@@ -447,14 +452,45 @@ export class ReactLoopAgent implements Agent {
             failure = error
           }
         } else {
-          // Memory first: if the durable record below fails to append, the
-          // in-process claim still materializes at the next step (the failure
-          // is reported through `failure` exactly like the write-back above).
-          this.deferredClaim.push(...stranded)
+          // Write the claims back at once behind a synthetic step sandwich
+          // (α, G1'): `step/start → empty system head → step/end → claims`.
+          // The empty head takes surface node 0 so later materialization no
+          // longer displaces it, and the aborted prompt becomes visible in the
+          // transcript immediately instead of waiting for the next successful
+          // step(). The step number shares `phase.step + 1` with the loop above
+          // (D-S1): a turn that already spent a balanced empty step must
+          // synthesize the NEXT number, or the log reads back corrupted.
+          let sandwich: (() => void) | undefined
+          const written = new Set<UserMessage>()
           try {
-            this.session.append('agent/claim-deferred', { turn, messages: stranded }, { ignorable: true })
+            const synStep = phase.step + 1
+            this.session.append('step/start', { turn, step: synStep })
+            sandwich = () => this.session.append('step/end', { turn, step: synStep })
+            this.session.append('system/message', { turn, step: synStep, message: createSystemMessage('') }, { surfaceOp: 'append' })
+            sandwich()
+            sandwich = undefined
+            for (const message of stranded) {
+              this.session.append('user/message', message, { surfaceOp: 'append' })
+              written.add(message)
+            }
           } catch (error: unknown) {
+            // A failed sandwich write still parks the claims — memory first,
+            // then the durable record — exactly like the write-back failure
+            // above, and the failure itself is reported through `failure`.
+            // Balance a step/start the failure may have left open first: an
+            // unbalanced step would corrupt the read-back. Only claims that
+            // never reached the log may park — one already written would
+            // double (in-process at the next step, and across a restart
+            // through the defer fold).
+            try { sandwich?.() } catch { /* best effort: report the original failure below */ }
             failure = error
+            const unwritten = stranded.filter(message => !written.has(message))
+            this.deferredClaim.push(...unwritten)
+            try {
+              this.session.append('agent/claim-deferred', { turn, messages: unwritten }, { ignorable: true })
+            } catch (fallbackError: unknown) {
+              failure = new AggregateError([error, fallbackError], 'Turn claims could not be written back and the durable defer record failed too', { cause: fallbackError })
+            }
           }
         }
       }

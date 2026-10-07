@@ -95,7 +95,7 @@ describe('loop-level canonical tool order', () => {
     expect(Object.isFrozen(adapter.requests[0])).toBe(true)
   })
 
-  it('closes a no-step turn when toolOrder names an unregistered tool', async () => {
+  it('closes a no-model-step turn when toolOrder names an unregistered tool', async () => {
     const adapter = new MockAdapter([textResponse('never sent')])
     const ctx = await harness(adapter, ['ghost', TOOL_ORDER_REST])
     registerNamed(ctx, 'alpha')
@@ -106,7 +106,9 @@ describe('loop-level canonical tool order', () => {
     expect(foldRequestHeader(agent.session.snapshotEvents())).toBeUndefined()
     expect(agent.session.snapshotEvents().some(e => e.type === 'turn/start')).toBe(true)
     expect(agent.session.snapshotEvents().some(e => e.type === 'turn/end')).toBe(true)
-    expect(agent.session.snapshotEvents().some(e => e.type === 'step/start')).toBe(false)
-    expect(agent.session.snapshotEvents().some(e => e.type === 'step/end')).toBe(false)
+    // α (G1′): the aborted claim writes back behind one synthetic step; no
+    // model step or request header ever exists.
+    expect(agent.session.snapshotEvents().filter(e => e.type === 'step/start')).toHaveLength(1)
+    expect(agent.session.snapshotEvents().filter(e => e.type === 'step/end')).toHaveLength(1)
   })
 })

@@ -987,8 +987,11 @@ describe('turn and step boundary recovery', () => {
     expect(boundaryCounts(agent)).toMatchObject({
       turnStart: 1,
       turnEnd: 1,
-      stepStart: 0,
-      stepEnd: 0,
+      // α (G1′): the veto consumed the real boundary, but the abort write-back
+      // still synthesizes its own sandwich step — a rejected append stays
+      // rejected without inventing THAT boundary.
+      stepStart: 1,
+      stepEnd: 1,
       errors: 1,
     })
     expect(agent.session.snapshotEvents().findLast(event => event.type === 'turn/end')).toMatchObject({
@@ -1094,7 +1097,7 @@ describe('turn and step boundary recovery', () => {
     expect(e.some(x => x.type === 'turn/end' && x.data.reason.kind === 'error')).toBe(false)
   })
 
-  it('contains a pre-step throw after disposal inside a balanced no-step turn', async () => {
+  it('contains a pre-step throw after disposal inside a balanced no-model-step turn', async () => {
     const adapter = new MockAdapter([textResponse('never reached')])
     const ctx = await balancedHarness(adapter)
     let agent!: Agent
@@ -1122,7 +1125,11 @@ describe('turn and step boundary recovery', () => {
       .toEqual(['turn/start', 'turn/end'])
     expect(e.find(x => x.type === 'turn/end')?.data.reason)
       .toEqual({ kind: 'aborted', reason: { kind: 'disposed' } })
-    expect(e.some(x => x.type === 'step/start')).toBe(false)
+    // α (G1′): the aborted claim writes back behind one synthetic step; no
+    // model step ever ran.
+    expect(e.filter(x => x.type === 'step/start')).toHaveLength(1)
+    expect(e.filter(x => x.type === 'step/end')).toHaveLength(1)
+    expect(e.some(x => x.type === 'assistant/attempt')).toBe(false)
     expect(errorEmits).toHaveLength(0)
   })
 
@@ -1306,7 +1313,7 @@ describe('tool result call identity', () => {
 })
 
 describe('disposal and cancellation during pre-step assembly', () => {
-  it('disposal during system-prompt assembly closes a no-step turn', { timeout: 30000 }, async () => {
+  it('disposal during system-prompt assembly closes a no-model-step turn', { timeout: 30000 }, async () => {
     // Start disposal, then release assembly. Do not await disposal first: it
     // waits for the blocked driver to exit.
     const adapter = new MockAdapter(['hang'])
@@ -1353,13 +1360,14 @@ describe('disposal and cancellation during pre-step assembly', () => {
     const e = agent.session.snapshotEvents()
     expect(e.filter(x => x.type === 'turn/start' || x.type === 'turn/end').map(x => x.type))
       .toEqual(['turn/start', 'turn/end'])
-    expect(e.some(x => x.type === 'step/start')).toBe(false)
-    expect(e.some(x => x.type === 'step/end')).toBe(false)
+    // α (G1′): only the synthetic abort step; no model step ran.
+    expect(e.filter(x => x.type === 'step/start')).toHaveLength(1)
+    expect(e.filter(x => x.type === 'step/end')).toHaveLength(1)
     expect(e.some(x => x.type === 'assistant/attempt')).toBe(false)
     expect(reasons).toEqual([{ kind: 'aborted', reason: { kind: 'disposed' } }])
   })
 
-  it('cancel during system-prompt assembly closes a no-step turn', { timeout: 30000 }, async () => {
+  it('cancel during system-prompt assembly closes a no-model-step turn', { timeout: 30000 }, async () => {
     const adapter = new MockAdapter([textResponse('should not appear')])
     let releaseAssemble!: () => void
     const blocker = new Promise<void>(r => void (releaseAssemble = r))
@@ -1401,15 +1409,16 @@ describe('disposal and cancellation during pre-step assembly', () => {
     const e = agent.session.snapshotEvents()
     expect(e.filter(x => x.type === 'turn/start' || x.type === 'turn/end').map(x => x.type))
       .toEqual(['turn/start', 'turn/end'])
-    expect(e.some(x => x.type === 'step/start')).toBe(false)
-    expect(e.some(x => x.type === 'step/end')).toBe(false)
+    // α (G1′): only the synthetic abort step; the prompt stays out of the model.
+    expect(e.filter(x => x.type === 'step/start')).toHaveLength(1)
+    expect(e.filter(x => x.type === 'step/end')).toHaveLength(1)
     expect(e.some(x => x.type === 'assistant/attempt')).toBe(false)
     expect(e.some(x => x.type === 'assistant/message')).toBe(false)
     expect(adapter.requests).toHaveLength(0)
     expect(reasons).toEqual([{ kind: 'aborted', reason: { kind: 'user' } }])
   })
 
-  it('disposal during pre-step closes a no-step turn', { timeout: 15000 }, async () => {
+  it('disposal during pre-step closes a no-model-step turn', { timeout: 15000 }, async () => {
     // Start disposal, then release pre-step; awaiting disposal first would deadlock on the blocked driver.
     const adapter = new MockAdapter(['hang'])
     let releasePreStep!: () => void
@@ -1447,16 +1456,19 @@ describe('disposal and cancellation during pre-step assembly', () => {
     await disposalDone
     await driverDone(agent)
 
-    // The post-listener cancellation check catches disposal before any step or LLM call.
+    // The post-listener cancellation check catches disposal before any model
+    // step or LLM call; α (G1′) still writes the claim back behind one
+    // synthetic step.
     const e = agent.session.snapshotEvents()
     expect(e.filter(x => x.type === 'turn/start' || x.type === 'turn/end').map(x => x.type))
       .toEqual(['turn/start', 'turn/end'])
-    expect(e.some(x => x.type === 'step/start')).toBe(false)
+    expect(e.filter(x => x.type === 'step/start')).toHaveLength(1)
+    expect(e.filter(x => x.type === 'step/end')).toHaveLength(1)
     expect(e.some(x => x.type === 'assistant/attempt')).toBe(false)
     expect(reasons).toEqual([{ kind: 'aborted', reason: { kind: 'disposed' } }])
   })
 
-  it('cancel during pre-step closes a no-step turn', { timeout: 15000 }, async () => {
+  it('cancel during pre-step closes a no-model-step turn', { timeout: 15000 }, async () => {
     // Release pre-step after cancellation to exercise the post-listener check.
     const adapter = new MockAdapter(['hang'])
     let releasePreStep!: () => void
@@ -1498,7 +1510,9 @@ describe('disposal and cancellation during pre-step assembly', () => {
     const e = agent.session.snapshotEvents()
     expect(e.filter(x => x.type === 'turn/start' || x.type === 'turn/end').map(x => x.type))
       .toEqual(['turn/start', 'turn/end'])
-    expect(e.some(x => x.type === 'step/start')).toBe(false)
+    // α (G1′): only the synthetic abort step; no model step ran.
+    expect(e.filter(x => x.type === 'step/start')).toHaveLength(1)
+    expect(e.filter(x => x.type === 'step/end')).toHaveLength(1)
     expect(e.some(x => x.type === 'assistant/attempt')).toBe(false)
     expect(reasons).toEqual([{ kind: 'aborted', reason: { kind: 'user' } }])
   })
