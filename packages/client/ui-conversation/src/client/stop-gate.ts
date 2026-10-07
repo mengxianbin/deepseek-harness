@@ -19,12 +19,33 @@ export interface StopGateWindows {
  * clicks; the windows arrive as a thunk so a live config value (rather than a
  * construction-time copy) governs every check.
  */
+/** Why a press was refused: which window swallowed it. */
+export type SwallowKind = 'send' | 'stop'
+
 export class StopGate {
   /** `-Infinity` keeps the first check open regardless of the clock origin. */
   private sendAt = Number.NEGATIVE_INFINITY
   private flipAt = Number.NEGATIVE_INFINITY
+  /** Refusal listeners: a swallowed click has no other effect to observe. */
+  private readonly swallows = new Set<(kind: SwallowKind) => void>()
 
   constructor(private readonly windows: () => StopGateWindows) {}
+
+  /**
+   * Observe refused checks — the only surface where the UI can say the press
+   * went nowhere. Fires once per refused attempt (a retried stop is observed
+   * again), never on an accepted one.
+   * @param listener - called with the window that refused the press.
+   * @returns unsubscribe.
+   */
+  subscribeSwallow(listener: (kind: SwallowKind) => void): () => void {
+    this.swallows.add(listener)
+    return () => { this.swallows.delete(listener) }
+  }
+
+  private noteSwallow(kind: SwallowKind): void {
+    for (const listener of this.swallows) listener(kind)
+  }
 
   /**
    * Whether a send may fire. An accepted send stamps the gate so the stop that
@@ -33,7 +54,10 @@ export class StopGate {
    * @returns whether the send proceeds.
    */
   allowSend(now: number = performance.now()): boolean {
-    if (now - this.sendAt < this.windows().sendWindowMs) return false
+    if (now - this.sendAt < this.windows().sendWindowMs) {
+      this.noteSwallow('send')
+      return false
+    }
     this.sendAt = now
     return true
   }
@@ -54,6 +78,8 @@ export class StopGate {
    */
   allowStop(now: number = performance.now()): boolean {
     const { stopWindowMs } = this.windows()
-    return now - this.sendAt >= stopWindowMs && now - this.flipAt >= stopWindowMs
+    if (now - this.sendAt >= stopWindowMs && now - this.flipAt >= stopWindowMs) return true
+    this.noteSwallow('stop')
+    return false
   }
 }

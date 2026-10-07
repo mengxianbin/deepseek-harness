@@ -383,7 +383,7 @@
      fill in both themes (design 34:10465). */
   color: #fff;
   cursor: pointer;
-  transition: background-color 100ms ease;
+  transition: background-color 100ms ease, opacity 150ms ease;
   /* Opts out of the row's 2px downward shift (.row top pad): the send circle
      keeps its original seat while the smaller chips sit lower. Transform, not
      margin, so flex centering math is untouched. */
@@ -397,6 +397,13 @@
 .primary:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/* Swallowed-click feedback (the gate's B P5): the press was refused, so the
+   button reads as briefly inert instead of dead. Opacity rides the shared
+   transition so the dim ramps in and out with the state rather than snapping. */
+.primarySwallowed {
+  opacity: 0.45;
 }
 
 .retry {

@@ -29,6 +29,7 @@ import type {} from '@deepseek-ai/dsh-goal/client'
 // api-remotes import already places it in every client program.
 import type { Translate } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ComposerBarProps } from '../contract/slots.ts'
+import type { SwallowKind } from '../stop-gate.ts'
 import { DraftEditor } from '../input/editor/DraftEditor.tsx'
 import {
   focusDraftEditor, installDraftFilePicker, installDraftKeymap, installDraftWheel,
@@ -94,6 +95,27 @@ export const InputBar = memo(function InputBar({
     setToast({ seq: toastSeq.current, text })
   }, [])
   const dismissToast = useCallback(() => { setToast(null) }, [])
+  // Swallowed-click feedback (the gate's B P5): a refused press produces no
+  // other effect, so the gate's refusal is surfaced through the transient
+  // banner above and echoed by a brief inert look on the primary buttons.
+  // showToast re-keys per swallow, so a repeat re-announces; the dim restarts
+  // its own timer instead of stacking, and unmount clears both subscription
+  // and pending timer.
+  const [swallowed, setSwallowed] = useState(false)
+  const swallowTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => {
+    if (stopGate === undefined) return
+    const unsubscribe = stopGate.subscribeSwallow((kind: SwallowKind) => {
+      setSwallowed(true)
+      showToast(kind === 'send' ? t('input.swallowed.send') : t('input.swallowed.stop'))
+      if (swallowTimer.current !== undefined) clearTimeout(swallowTimer.current)
+      swallowTimer.current = setTimeout(() => { setSwallowed(false) }, 600)
+    })
+    return () => {
+      unsubscribe()
+      if (swallowTimer.current !== undefined) clearTimeout(swallowTimer.current)
+    }
+  }, [stopGate, showToast, t])
   // The deployment's image-intake limits (absent while no attachment service
   // is composed — the pre-check below then defers entirely to the host).
   const imageLimits = useProjection('imageLimits')
@@ -471,7 +493,7 @@ export const InputBar = memo(function InputBar({
               <Tooltip label={t('input.stop')} shortcutKeys={stopKeys} side="top" delayMs={500} disabled={stop === undefined}>
                 <button
                   type="button"
-                  className={css.primary}
+                  className={clsx(css.primary, swallowed && css.primarySwallowed)}
                   aria-label={t('input.stop')}
                   disabled={stop === undefined}
                   onMouseDown={keepFocus}
@@ -486,7 +508,7 @@ export const InputBar = memo(function InputBar({
             <Tooltip label={primaryStops ? t('input.stop') : primaryLabel} shortcutKeys={primaryStops ? stopKeys : undefined} side="top" delayMs={500} disabled={primaryDisabled}>
               <button
                 type="button"
-                className={css.primary}
+                className={clsx(css.primary, swallowed && css.primarySwallowed)}
                 aria-label={primaryLabel}
                 disabled={primaryDisabled}
                 onMouseDown={keepFocus}

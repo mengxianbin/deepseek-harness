@@ -45,4 +45,39 @@ describe('StopGate', () => {
     const subject = gate()
     expect(subject.allowStop(10)).toBe(true)
   })
+
+  it('reports each refused send to subscribers, once per attempt', () => {
+    const subject = gate()
+    const kinds: string[] = []
+    const unsubscribe = subject.subscribeSwallow((kind) => { kinds.push(kind) })
+    expect(subject.allowSend(1_000)).toBe(true)
+    expect(subject.allowSend(1_100)).toBe(false)
+    expect(subject.allowSend(1_200)).toBe(false)
+    expect(kinds).toEqual(['send', 'send'])
+    unsubscribe()
+    expect(subject.allowSend(1_250)).toBe(false)
+    expect(kinds).toEqual(['send', 'send'])
+  })
+
+  it('reports a refused stop once per attempt while an accepted one stays silent', () => {
+    const subject = gate()
+    const kinds: string[] = []
+    subject.subscribeSwallow((kind) => { kinds.push(kind) })
+    subject.noteStopFlip(1_000)
+    expect(subject.allowStop(1_100)).toBe(false)
+    expect(subject.allowStop(1_400)).toBe(false)
+    expect(kinds).toEqual(['stop', 'stop'])
+    expect(subject.allowStop(1_500)).toBe(true)
+    expect(kinds).toEqual(['stop', 'stop'])
+  })
+
+  it('stays silent while every check passes', () => {
+    const subject = gate()
+    const kinds: string[] = []
+    subject.subscribeSwallow((kind) => { kinds.push(kind) })
+    expect(subject.allowSend(0)).toBe(true)
+    // Past both windows from the accepted send — outside them, the stop is deliberate.
+    expect(subject.allowStop(600)).toBe(true)
+    expect(kinds).toEqual([])
+  })
 })

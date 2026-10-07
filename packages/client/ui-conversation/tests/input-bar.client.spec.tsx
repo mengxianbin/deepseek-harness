@@ -33,6 +33,7 @@ import type {
 import type { DraftAttachmentId } from '../src/client/contract/input.ts'
 import { InputBar } from '../src/client/skeleton/InputBar.tsx'
 import type { InputBarProps } from '../src/client/skeleton/InputBar.tsx'
+import { StopGate } from '../src/client/stop-gate.ts'
 import { en, zh } from '../src/client/locales.ts'
 
 // Every fixture carries the resource hook the resources plugin merges into GlobalStandardProps.
@@ -75,6 +76,8 @@ interface BenchOptions {
   }
   draft?: string
   running?: boolean
+  /** The gate under test: absent, the bar mounts without one (ordinary benches). */
+  stopGate?: StopGate
   subagent?: Exclude<SessionSnapshot['subagent'], null>
   disabled?: boolean
   inert?: boolean
@@ -210,6 +213,7 @@ function bench(over?: BenchOptions) {
     useLexicon: bindSnapshotSelector(shell.lexicon),
     useMenuLauncher: bindSnapshotSelector(menuLauncher),
     stop,
+    ...(over?.stopGate !== undefined ? { stopGate: over.stopGate } : {}),
     // Mirrors the real lookup chain (conversation namespace, then common).
     t: over?.t ?? makeTranslate(zh, commonZh),
     renderSlot,
@@ -1776,4 +1780,30 @@ it('places context usage below the composer and hides it until the activity clos
   fireEvent.click(view.getByRole('button', { name: '上下文已用 25%' }))
   expect(view.getByRole('dialog', { name: '上下文已用' })).toBeTruthy()
   expect(view.getByRole('button', { name: '发送消息' })).toBeTruthy()
+})
+
+describe('swallowed-click feedback', () => {
+  it('announces and dims the button when the send window refuses the press', () => {
+    const gate = new StopGate(() => ({ sendWindowMs: 300, stopWindowMs: 500 }))
+    // A send the user already meant — it stamps the window this next click falls into.
+    gate.allowSend()
+    const { button, view, sink } = bench({ draft: 'hello', stopGate: gate })
+    fireEvent.click(button)
+    expect(sink).not.toHaveBeenCalled()
+    expect(view.getByRole('alert').textContent ?? '').toContain('两次点击间隔太短，发送已忽略')
+    expect(button.className).toContain('primarySwallowed')
+  })
+
+  it('announces when the stop window refuses a stop arriving right after the flip', () => {
+    const gate = new StopGate(() => ({ sendWindowMs: 300, stopWindowMs: 500 }))
+    const { view } = bench({ stopGate: gate })
+    act(() => {
+      // The render-detected Send→Stop flip opens the window; apply's single
+      // stop() is where the refusal itself happens — the bar observes it by
+      // subscription, the same path every stop entry funnels through.
+      gate.noteStopFlip()
+      gate.allowStop()
+    })
+    expect(view.getByRole('alert').textContent ?? '').toContain('两次操作间隔太短，停止已忽略')
+  })
 })
