@@ -1785,9 +1785,10 @@ it('places context usage below the composer and hides it until the activity clos
 describe('swallowed-click feedback', () => {
   it('announces and dims the button when the send window refuses the press', () => {
     const gate = new StopGate(() => ({ sendWindowMs: 300, stopWindowMs: 500 }))
-    // A send the user already meant — it stamps the window this next click falls into.
-    gate.allowSend()
     const { button, view, sink } = bench({ draft: 'hello', stopGate: gate })
+    // A send the user already meant — stamped after the render so only the
+    // click itself has to land inside the window, never the bench setup.
+    gate.allowSend()
     fireEvent.click(button)
     expect(sink).not.toHaveBeenCalled()
     expect(view.getByRole('alert').textContent ?? '').toContain('两次点击间隔太短，发送已忽略')

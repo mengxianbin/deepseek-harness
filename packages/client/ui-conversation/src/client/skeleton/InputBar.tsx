@@ -109,11 +109,16 @@ export const InputBar = memo(function InputBar({
       setSwallowed(true)
       showToast(kind === 'send' ? t('input.swallowed.send') : t('input.swallowed.stop'))
       if (swallowTimer.current !== undefined) clearTimeout(swallowTimer.current)
+      // 600ms = the default stop window (500) + 100ms margin, also covering the
+      // 300ms send window; a stopSequenceMs configured above it lets the gate
+      // outlast the dim — visual only, the refusal itself still lands.
       swallowTimer.current = setTimeout(() => { setSwallowed(false) }, 600)
     })
     return () => {
       unsubscribe()
       if (swallowTimer.current !== undefined) clearTimeout(swallowTimer.current)
+      // A gate/locale swap while dimmed must not leave the inert look behind.
+      setSwallowed(false)
     }
   }, [stopGate, showToast, t])
   // The deployment's image-intake limits (absent while no attachment service

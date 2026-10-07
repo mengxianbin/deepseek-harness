@@ -8,6 +8,9 @@ export interface StopGateWindows {
   readonly stopWindowMs: number
 }
 
+/** Why a press was refused: which window swallowed it. */
+export type SwallowKind = 'send' | 'stop'
+
 /**
  * One gate per session. The double-click accident needs two events: a send the
  * user actually meant, and the primary button flipping to Stop behind it. The
@@ -19,9 +22,6 @@ export interface StopGateWindows {
  * clicks; the windows arrive as a thunk so a live config value (rather than a
  * construction-time copy) governs every check.
  */
-/** Why a press was refused: which window swallowed it. */
-export type SwallowKind = 'send' | 'stop'
-
 export class StopGate {
   /** `-Infinity` keeps the first check open regardless of the clock origin. */
   private sendAt = Number.NEGATIVE_INFINITY
@@ -34,7 +34,8 @@ export class StopGate {
   /**
    * Observe refused checks — the only surface where the UI can say the press
    * went nowhere. Fires once per refused attempt (a retried stop is observed
-   * again), never on an accepted one.
+   * again), never on an accepted one. Listeners run inside the check itself
+   * and must not throw: a throw would propagate out of allowSend/allowStop.
    * @param listener - called with the window that refused the press.
    * @returns unsubscribe.
    */
