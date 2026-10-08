@@ -27,6 +27,7 @@ import type {
   SessionTitleModelIdentity,
   SessionTitleProviderRequest,
   SessionTitleProviderResult,
+  SessionTitleSource,
   SessionTitleUserMessage,
 } from '@deepseek-ai/dsh-session-title'
 
@@ -151,8 +152,46 @@ export type SessionTitleLlmMessageSelector = (
   messages: readonly SessionTitleUserMessage[],
 ) => readonly SessionTitleUserMessage[]
 
+/** Latest accepted title handed to a cadence that rewrites an already-titled session. */
+export interface SessionTitleLlmAnchor {
+  /** Latest accepted title text, already normalized by the title service. */
+  readonly title: string
+  /**
+   * Source of that accepted title: `fallback` is provisional wording derived
+   * from the first message, `provider` is a prior generated revision, and
+   * `user` is a pinned explicit rename (unreachable for automatic work).
+   */
+  readonly source: SessionTitleSource['kind']
+}
+
+/** Optional cadence context carried into one generation by its registering plugin. */
+export interface SessionTitleLlmCadence {
+  /** Cadence that scheduled this revision; `all-prompts` adds the whole-session instruction. */
+  readonly automatic: SessionTitleAutomaticMode
+  /** Latest accepted title the revision may keep; absent before any title is accepted. */
+  readonly anchor?: SessionTitleLlmAnchor
+}
+
+/**
+ * Read the latest accepted title as a stability anchor for one revision.
+ * @param ctx - context exposing the title service.
+ * @param request - service-owned session whose log folds the current title.
+ * @returns the frozen anchor, or `undefined` before any title is accepted.
+ */
+function currentTitleAnchor(
+  ctx: Context,
+  request: SessionTitleProviderRequest,
+): SessionTitleLlmAnchor | undefined {
+  const snapshot = ctx.sessionTitle.get(request.session)
+  if (snapshot === undefined) return undefined
+  return deepFreeze({ title: snapshot.title, source: snapshot.source.kind })
+}
+
 /**
  * Register one model-backed provider through the shared configuration and call policy.
+ * The `all-prompts` cadence additionally receives the latest accepted title as a
+ * stability anchor plus whole-session instruction; `first-prompt` keeps the
+ * anchorless single-shot framing.
  * @param ctx - context exposing the title and LLM services.
  * @param config - untrusted required deployment policy.
  * @param id - stable plugin id recorded with generated titles.
@@ -172,7 +211,18 @@ export function registerSessionTitleLlmProvider(
     id: titleProvider,
     automatic,
     async generate(request) {
-      return generateSessionTitleWithLlm(ctx, resolved, request, selectMessages(request.messages), titleProvider)
+      // Only a cadence that rewrites an existing title gets the anchor; the
+      // first-prompt cadence titles a session once and never revises.
+      const anchor = automatic === 'all-prompts' ? currentTitleAnchor(ctx, request) : undefined
+      const cadence: SessionTitleLlmCadence = anchor === undefined ? { automatic } : { automatic, anchor }
+      return generateSessionTitleWithLlm(
+        ctx,
+        resolved,
+        request,
+        selectMessages(request.messages),
+        titleProvider,
+        cadence,
+      )
     },
   })
 }
@@ -191,19 +241,46 @@ function resolveRoute(
   return request.route
 }
 
+/**
+ * Extra system lines for the cadence that rewrites an existing title: the
+ * session list is scanned coarsely across many concurrent sessions, so a
+ * title that follows the newest message alone fails at that distance.
+ */
+const WHOLE_SESSION_GUIDANCE: readonly string[] = [
+  'Name the session as a whole: one dominant, coarse-grained subject that fits the entire conversation, never the newest message or a single round.',
+  'Keep the title stable: unless the overall subject genuinely changed, return the current title unchanged.',
+  'A follow-up, a subtask, a child-session prompt, or a side detail inside the same subject is not a subject change.',
+  'A current title whose source is "fallback" is provisional wording: replace it with the session\'s real subject.',
+]
+
 /** Stable language-aware system instruction shared by both provider plugins. */
-function systemPrompt(config: ResolvedSessionTitleLlmConfig): string {
+function systemPrompt(
+  config: ResolvedSessionTitleLlmConfig,
+  automatic?: SessionTitleAutomaticMode,
+): string {
   return [
     'Create a concise title for an AI coding-assistant session from the supplied human messages.',
     'Return only the title on one line, **in plain text of natural language**, with no quotes, prefix, explanation, Markdown, XML, or terminal control codes. No code is allowed.',
     'Use the language of the messages.',
     `Aim for about ${config.targetWords} words in non-CJK languages or ${config.targetCjkCharacters} CJK characters.`,
+    ...(automatic === 'all-prompts' ? WHOLE_SESSION_GUIDANCE : []),
   ].join('\n')
 }
 
 /** Frame exact messages as JSON so user text cannot break structural delimiters. */
-function frameMessages(messages: readonly SessionTitleUserMessage[]): string {
-  return `Generate the session title from this JSON array of human messages:\n${JSON.stringify(messages)}`
+function frameMessages(
+  messages: readonly SessionTitleUserMessage[],
+  anchor?: SessionTitleLlmAnchor,
+): string {
+  if (anchor === undefined) {
+    return `Generate the session title from this JSON array of human messages:\n${JSON.stringify(messages)}`
+  }
+  return [
+    'Revise the session title for the whole session. Current accepted title as JSON:',
+    JSON.stringify(anchor),
+    'All eligible human messages of the session as a JSON array:',
+    JSON.stringify(messages),
+  ].join('\n')
 }
 
 /** Translate terminal finish reasons into an auxiliary-call failure. */
@@ -233,6 +310,7 @@ function finishError(finish: FinishReason): Error | undefined {
  * @param request - service-owned session, route, message snapshot, and cancellation.
  * @param selectedMessages - exact provider-selected subset to frame and attribute.
  * @param titleProvider - registered title-provider identity recorded with the request.
+ * @param cadence - optional cadence that scheduled this revision plus its stability anchor; absent keeps the single-shot framing.
  * @returns normalized non-empty title, exact source seqs, and used model route.
  */
 export async function generateSessionTitleWithLlm(
@@ -241,12 +319,13 @@ export async function generateSessionTitleWithLlm(
   request: SessionTitleProviderRequest,
   selectedMessages: readonly SessionTitleUserMessage[],
   titleProvider: SessionTitleProviderId,
+  cadence?: SessionTitleLlmCadence,
 ): Promise<SessionTitleProviderResult> {
   request.signal.throwIfAborted()
   if (selectedMessages.length === 0) {
     throw new Error('session-title-llm: at least one source message is required')
   }
-  const framedInput = frameMessages(selectedMessages)
+  const framedInput = frameMessages(selectedMessages, cadence?.anchor)
   const inputBytes = Buffer.byteLength(framedInput, 'utf8')
   if (inputBytes > config.maxInputBytes) {
     throw new Error(`session-title-llm: input is ${inputBytes} bytes, exceeding maxInputBytes ${config.maxInputBytes}`)
@@ -256,7 +335,7 @@ export async function generateSessionTitleWithLlm(
     content: [{ type: 'text', text: framedInput }],
     source: { kind: 'dsh-session-title-llm' },
   })]
-  const system = systemPrompt(config)
+  const system = systemPrompt(config, cadence?.automatic)
   using callDeadline = deadline(request.signal, config.timeoutMs, SESSION_TITLE_TIMEOUT_CODE)
   const options: GenerateOptions = deepFreeze({
     provider: route.provider,

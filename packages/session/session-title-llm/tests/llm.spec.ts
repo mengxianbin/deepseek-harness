@@ -173,6 +173,45 @@ describe('generateSessionTitleWithLlm', () => {
       })
   })
 
+  it('adds the whole-session instruction and the current-title anchor only for a revising cadence', async () => {
+    const { ctx, adapter } = await withScript(SCRIPT)
+    const config = resolveSessionTitleLlmConfig(CONFIG)
+    const promptText = (index: number): string => {
+      const content = adapter.requests[index]?.messages[0]?.content[0]
+      return content?.type === 'text' ? content.text : ''
+    }
+
+    const singleShot = request(ctx)
+    await generateSessionTitleWithLlm(ctx, config, singleShot, singleShot.messages, TITLE_PROVIDER, {
+      automatic: 'first-prompt',
+    })
+    expect(adapter.requests[0]?.system).not.toContain('Name the session as a whole')
+    expect(promptText(0)).toContain('Generate the session title from this JSON array of human messages:')
+    expect(promptText(0)).not.toContain('Current accepted title as JSON:')
+
+    const unanchored = request(ctx)
+    await generateSessionTitleWithLlm(ctx, config, unanchored, unanchored.messages, TITLE_PROVIDER, {
+      automatic: 'all-prompts',
+    })
+    expect(adapter.requests[1]?.system).toContain('Name the session as a whole')
+    expect(promptText(1)).not.toContain('Current accepted title as JSON:')
+
+    const revision = request(ctx)
+    await generateSessionTitleWithLlm(ctx, config, revision, revision.messages, TITLE_PROVIDER, {
+      automatic: 'all-prompts',
+      anchor: { title: '会话标题机制调研', source: 'provider' },
+    })
+    const system = adapter.requests[2]?.system ?? ''
+    expect(system).toContain('Name the session as a whole')
+    expect(system).toContain('Keep the title stable')
+    expect(system).toContain('child-session prompt')
+    expect(system).toContain('provisional wording')
+    expect(promptText(2)).toContain('Current accepted title as JSON:')
+    expect(promptText(2)).toContain('{"title":"会话标题机制调研","source":"provider"}')
+    expect(promptText(2)).toContain('first prompt')
+    expect(promptText(2)).toContain('第二个问题')
+  })
+
   it('uses paired explicit overrides and bounds the final framed input before model dispatch', async () => {
     const ctx = new Context()
     await ctx.plugin(SessionStore)

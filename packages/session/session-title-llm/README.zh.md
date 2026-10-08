@@ -29,7 +29,7 @@ kind: "package-library"
 
 ### 注册提供方
 
-提供方插件调用 `registerSessionTitleLlmProvider(ctx, config, id, automatic, selectMessages)`；辅助函数验证共享配置、在 `ctx.sessionTitle` 上注册提供方，并让每次生成都经过共享策略。两个随附插件以各自的 `first-prompt` 与 `all-prompts` 节奏和消息选择器注册；服务上的第二次注册会立即抛出。
+提供方插件调用 `registerSessionTitleLlmProvider(ctx, config, id, automatic, selectMessages)`；辅助函数验证共享配置、在 `ctx.sessionTitle` 上注册提供方，并让每次生成都经过共享策略。两个随附插件以各自的 `first-prompt` 与 `all-prompts` 节奏和消息选择器注册；服务上的第二次注册会立即抛出。节奏同时决定请求形态：`first-prompt` 保持无锚的单次封装，`all-prompts` 额外携带最新已接受标题作为稳定锚与整体主题指引。
 
 ### 路由与失败约定
 
@@ -72,7 +72,7 @@ kind: "package-library"
 
 ### 请求流程
 
-生成在注册时校验一次配置；每次修订把选中的消息封装为 JSON，依据 `maxInputBytes` 检查封装提示词的 UTF-8 字节数，解析路由（显式对或已记录 `request/header`），追加一条携带确切可分发请求的仅日志 `session/title-llm-request` 事件，然后在组合的超时与取消截止时间内通过 `ctx.llm` 流式生成。分发的封套携带 `purpose: 'session-title'`，且有意不包含 agent loop 的进程本地请求身份；DeepSeek 适配器根据该用途禁用思考，使少量输出预算全部用于可见标题文本，其他适配器负责自身用途专用行为。输出只组装为文本块；工具调用、格式错误或空输出与非 stop 结束原因都会拒绝，后续模型失败会保留请求记录。
+生成在注册时校验一次配置；每次修订把选中的消息封装为 JSON（`all-prompts` 节奏还会把当前已接受标题作为稳定锚一并封装），依据 `maxInputBytes` 检查封装提示词的 UTF-8 字节数，解析路由（显式对或已记录 `request/header`），追加一条携带确切可分发请求的仅日志 `session/title-llm-request` 事件，然后在组合的超时与取消截止时间内通过 `ctx.llm` 流式生成。分发的封套携带 `purpose: 'session-title'`，且有意不包含 agent loop 的进程本地请求身份；DeepSeek 适配器根据该用途禁用思考，使少量输出预算全部用于可见标题文本，其他适配器负责自身用途专用行为。输出只组装为文本块；工具调用、格式错误或空输出与非 stop 结束原因都会拒绝，后续模型失败会保留请求记录。
 
 </details>
 
@@ -98,7 +98,7 @@ kind: "package-library"
 
 #### 模型看到什么
 
-标题模型会收到固定系统指令，要求以输入语言返回一个简洁且无装饰的标题；该指令包含所配置的词数与 CJK 字符数目标。它唯一的用户消息包含一个 JSON 数组，其中是精确选中的用户消息及其 seq。
+标题模型会收到固定系统指令，要求以输入语言返回一个简洁且无装饰的标题；该指令包含所配置的词数与 CJK 字符数目标。它唯一的用户消息包含一个 JSON 数组，其中是精确选中的用户消息及其 seq。对 `all-prompts` 节奏，系统指令额外要求标题覆盖整个会话的单一主导粗粒度主题、主题未变时保持原措辞，并替换临时的 `fallback` 标题；用户消息除消息数组外还会携带当前已接受标题的 JSON 对象。
 
 #### Token 影响
 
@@ -115,7 +115,7 @@ kind: "package-library"
 
 这些限制定义被接受的生成形态。它们是当前包约束。
 
-- **仅文本输出**——辅助函数只接受文本输出并拒绝工具调用；不公开结构化输出适配器或提供方专用提示词变体。
+- **仅文本输出**——辅助函数只接受文本输出并拒绝工具调用；不公开结构化输出适配器或调用方可配置的提示词变体。指令仅随注册节奏变化：`first-prompt` 保持无锚封装，`all-prompts` 增加整体主题指引与已接受标题锚。
 - **整体提示词字节上限**——它对整个封装用户提示词强制执行字节上限，而不是剪裁单条消息或应用保留策略。
 
 <a id="dev-note"></a>

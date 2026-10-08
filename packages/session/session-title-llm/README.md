@@ -29,7 +29,7 @@ As a deployment, configure this policy through the [first-prompt](../session-tit
 
 ### Registering a provider
 
-A provider plugin calls `registerSessionTitleLlmProvider(ctx, config, id, automatic, selectMessages)`; the helper validates the shared config, registers the provider on `ctx.sessionTitle`, and runs every generation through the shared policy. The two shipped plugins register the `first-prompt` and `all-prompts` cadences with their message selectors, and a second registration on the service throws.
+A provider plugin calls `registerSessionTitleLlmProvider(ctx, config, id, automatic, selectMessages)`; the helper validates the shared config, registers the provider on `ctx.sessionTitle`, and runs every generation through the shared policy. The two shipped plugins register the `first-prompt` and `all-prompts` cadences with their message selectors, and a second registration on the service throws. The cadence also shapes the request: `first-prompt` keeps the anchorless single-shot framing, while `all-prompts` additionally carries the latest accepted title as a stability anchor together with whole-session guidance.
 
 ### Route and failure contract
 
@@ -72,7 +72,7 @@ One shared policy so provider plugins cannot drift: config validation, route res
 
 ### Request flow
 
-A generation validates the config once at registration; each revision frames the selected messages as JSON, measures the framed prompt's UTF-8 bytes against `maxInputBytes`, resolves the route (the explicit pair or the logged `request/header`), appends a log-only `session/title-llm-request` event carrying the exact dispatchable request, then streams through `ctx.llm` under a composed timeout and cancellation deadline. The dispatched envelope carries `purpose: 'session-title'` and deliberately lacks the agent loop's process-local request identity; the DeepSeek adapter maps that purpose to thinking-disabled so the small output budget is reserved for visible title text, and other adapters own their purpose-specific behavior. Output assembles into text blocks only; tool calls, malformed or empty output, and non-stop finish reasons reject, and a later model failure leaves the request record intact.
+A generation validates the config once at registration; each revision frames the selected messages as JSON (for the `all-prompts` cadence, together with the current accepted title as a stability anchor), measures the framed prompt's UTF-8 bytes against `maxInputBytes`, resolves the route (the explicit pair or the logged `request/header`), appends a log-only `session/title-llm-request` event carrying the exact dispatchable request, then streams through `ctx.llm` under a composed timeout and cancellation deadline. The dispatched envelope carries `purpose: 'session-title'` and deliberately lacks the agent loop's process-local request identity; the DeepSeek adapter maps that purpose to thinking-disabled so the small output budget is reserved for visible title text, and other adapters own their purpose-specific behavior. Output assembles into text blocks only; tool calls, malformed or empty output, and non-stop finish reasons reject, and a later model failure leaves the request record intact.
 
 </details>
 
@@ -98,7 +98,7 @@ Read these pages when the generation policy is not enough. They move from the se
 
 #### What the model sees
 
-The title model receives a fixed system instruction to return one concise unadorned title in the input language, including the configured word and CJK-character targets. Its one user message contains a JSON array of the exact selected human messages and their seqs.
+The title model receives a fixed system instruction to return one concise unadorned title in the input language, including the configured word and CJK-character targets. Its one user message contains a JSON array of the exact selected human messages and their seqs. For the `all-prompts` cadence the system instruction additionally demands one dominant, coarse-grained subject for the session as a whole, unchanged wording while that subject holds, and replacement of a provisional `fallback` title, and the user message carries the current accepted title as a JSON object alongside the message array.
 
 #### Token effect
 
@@ -115,7 +115,7 @@ No main-request invalidation. Auxiliary cache reuse is provider-specific; the fi
 
 These limits define the accepted generation shapes. They are current package constraints.
 
-- **Text output only** — the helper accepts text output and rejects tool calls; structured-output adapters and provider-specific prompt variants are not exposed.
+- **Text output only** — the helper accepts text output and rejects tool calls; structured-output adapters and caller-configurable prompt variants are not exposed. The instruction varies only by the registered cadence: `first-prompt` stays anchorless, `all-prompts` adds whole-session guidance and the accepted-title anchor.
 - **Whole-prompt byte ceiling** — it enforces a byte ceiling for the whole framed user prompt rather than clipping individual messages or applying a retention policy.
 
 <a id="dev-note"></a>

@@ -71,6 +71,11 @@ describe('all-messages LLM title provider', () => {
     const content = adapter.requests[0]?.messages[0]?.content[0]
     expect(content?.type === 'text' && content.text).toContain('inherited prompt')
     expect(content?.type === 'text' && content.text).toContain('latest prompt')
+    // Whole-session instruction plus the accepted title offered as a stability anchor.
+    expect(adapter.requests[0]?.system).toContain('Name the session as a whole')
+    expect(adapter.requests[0]?.system).toContain('Keep the title stable')
+    expect(content?.type === 'text' && content.text).toContain('Current accepted title as JSON:')
+    expect(content?.type === 'text' && content.text).toContain('{"title":"Inherited fallback","source":"fallback"}')
     expect(ctx.sessionTitle.get(session)).toMatchObject({
       messageSeqs: [inherited.seq, latest.seq],
     })

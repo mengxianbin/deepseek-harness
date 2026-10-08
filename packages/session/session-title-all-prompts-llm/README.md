@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-session-title-all-prompts-llm` summarizes every eligible human message through `ctx.llm` as an optional `ctx.sessionTitle` provider. It registers the `all-prompts` cadence and starts a new revision after each new human prompt, using seeded history and child-session prompts. A newer revision aborts and supersedes older work, and even a provider that ignores cancellation cannot commit stale output. It uses the complete required shared LLM configuration from `dsh-session-title-llm`, so route, prompt, budget, and cancellation behavior cannot drift. Automatic behavior and configuration come first; the implementation is a thin registration over the shared policy.
+`dsh-session-title-all-prompts-llm` summarizes every eligible human message through `ctx.llm` as an optional `ctx.sessionTitle` provider. It registers the `all-prompts` cadence and starts a revision after each new human prompt, using seeded history and child-session prompts; a revision names the session's dominant coarse-grained subject and keeps that wording while the subject holds. A newer revision aborts and supersedes older work, so even a cancellation-ignoring provider cannot commit stale output. It uses the complete required shared LLM configuration from `dsh-session-title-llm`, so route, prompt, budget, and cancellation cannot drift. Automatic behavior and configuration come first; the implementation is a thin registration over the shared policy.
 
 ## Table of Contents
 
@@ -29,7 +29,7 @@ Mount this plugin beside the title service when a session should be retitled as 
 
 ### When titles are generated
 
-A new revision starts after each new eligible human prompt, including prompts in child sessions; the generation folds all eligible messages through the current revision, seeded history included. A newer revision aborts and supersedes older work, so a stale completion can never commit. An automatic failure — including input over `maxInputBytes`, which fails instead of truncating history — warns and keeps the prior title; `ctx.sessionTitle.refresh()` is the explicit retry.
+A new revision starts after each new eligible human prompt, including prompts in child sessions; the generation folds all eligible messages through the current revision, seeded history included. Each revision is framed as a whole-session rewrite: the current accepted title travels with the messages, the instruction asks for one dominant coarse-grained subject instead of the newest message, and the previous wording is to be returned unchanged while that subject holds. A newer revision aborts and supersedes older work, so a stale completion can never commit. An automatic failure — including input over `maxInputBytes`, which fails instead of truncating history — warns and keeps the prior title; `ctx.sessionTitle.refresh()` is the explicit retry.
 
 ### Configuration
 
@@ -86,7 +86,7 @@ Read these pages when the provider contract is not enough. They move from the sh
 
 #### What the model sees
 
-The title model receives the shared title instruction and a JSON array of all eligible human messages through the current revision, in log order with exact seqs. Seeded history is included.
+The title model receives the shared title instruction extended with whole-session guidance, plus a JSON object of the current accepted title and its source and a JSON array of all eligible human messages through the current revision, in log order with exact seqs. Seeded history is included.
 
 #### Token effect
 
@@ -104,7 +104,7 @@ No main-request invalidation. Auxiliary input grows or changes after each prompt
 These limits define how the provider treats long and heterogeneous sessions. They are current package constraints.
 
 - **No summarization-of-summaries** — input overflow retains the prior title; this provider has no summarization-of-summaries or retention policy for very long sessions.
-- **Messages are treated equally** — it treats all eligible human messages alike and offers no weighting, filtering, or manual-title precedence.
+- **Messages are treated equally** — it treats all eligible human messages alike and offers no weighting or filtering; the current accepted title is framed only as a stability anchor and never decides which messages count.
 
 <a id="dev-note"></a>
 ### Dev Note
