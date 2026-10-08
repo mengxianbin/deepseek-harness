@@ -86,6 +86,9 @@ describe('first-prompt LLM title provider', () => {
       const content = options.messages[0]?.content[0]
       expect(content?.type === 'text' && content.text).toContain('first input')
       expect(content?.type === 'text' && content.text).not.toContain('second input must be ignored')
+      // The single-shot cadence stays anchorless: no whole-session rewrite rule, no current title.
+      expect(options.system).not.toContain('Name the session as a whole')
+      expect(content?.type === 'text' && content.text).not.toContain('Current accepted title as JSON:')
     }
     expect(ctx.sessionTitle.get(session)).toMatchObject({ messageSeqs: [first.seq] })
   })
