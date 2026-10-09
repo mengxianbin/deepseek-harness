@@ -305,14 +305,16 @@ export class ReactLoopAgent implements Agent {
     this.unrecordedClaim = [...claimed]
     const assembly = await this.loopCtx.systemPrompt.assemble(assembleContextFor(this, signal))
     signal.throwIfAborted()
-    const sections = renderContextSections(assembly)
-    const context = this.runtimeContext.project(joinContextSections(sections), sections)
     const decision = await this.dispatch.waterfall(
       'agent/pre-step', { messages: claimed, ...position, signal },
-      (): Promise<PreStepDecision> => Promise.resolve<PreStepDecision>({
-        kind: 'enter',
-        messages: context === undefined ? claimed : [...claimed, context],
-      }),
+      (): Promise<PreStepDecision> => {
+        const sections = renderContextSections(assembly)
+        const context = this.runtimeContext.project(joinContextSections(sections), sections)
+        return Promise.resolve<PreStepDecision>({
+          kind: 'enter',
+          messages: context === undefined ? claimed : [...claimed, context],
+        })
+      },
     )
     if (decision.kind === 'reject') {
       // A gate that blocks the proposal discards it deliberately: nothing was
@@ -529,6 +531,10 @@ export class ReactLoopAgent implements Agent {
     let blankCallRetryUsed = false
     while (true) {
       const { config, preparedCall } = await this.prepareRequest(turn, step, signal)
+      const currentContext = this.loopCtx.systemPrompt.refreshContext(assembly, assembleContextFor(this, signal))
+      const sections = renderContextSections(currentContext)
+      const context = this.runtimeContext.project(joinContextSections(sections), sections)
+      signal.throwIfAborted()
       const startsRequestSeries = firstAttempt && decision.startsRequestSeries === true
       const commits = this.systemPrompt.project(renderedPrompt, {
         inHistory: preparedCall?.systemPromptUpdate === 'in-history',
@@ -539,6 +545,7 @@ export class ReactLoopAgent implements Agent {
       for (const { message, intent } of commits) {
         this.session.append('system/message', { turn, step, message }, intent)
       }
+      let contextAdmitted = false
       if (firstAttempt) {
         // The system head was committed above, so claims deferred while the
         // surface was virgin can take their position behind it (in claim
@@ -548,10 +555,20 @@ export class ReactLoopAgent implements Agent {
         }
         this.deferredClaim = []
         for (const message of decision.messages) {
-          this.session.append('user/message', message, { surfaceOp: 'append' })
+          if (message.source.kind === 'runtime-context') {
+            if (context !== undefined && !contextAdmitted) {
+              this.session.append('user/message', context, { surfaceOp: 'append' })
+              contextAdmitted = true
+            }
+          } else {
+            this.session.append('user/message', message, { surfaceOp: 'append' })
+          }
         }
         // Materialized: an abort after this point must not record them twice.
         this.unrecordedClaim = []
+      }
+      if (context !== undefined && !contextAdmitted) {
+        this.session.append('user/message', context, { surfaceOp: 'append' })
       }
       firstAttempt = false
       const request = this.buildRequest(config, preparedCall, assembly.tools, { turn, step }, startsRequestSeries, signal)
