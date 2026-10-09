@@ -26,11 +26,13 @@ export const DEGRADATION_NOTICE_THRESHOLD = 2
  * Walk an AggregateError / `cause` chain for a blank tool-call rejection.
  * The turn boundary can wrap the append failure (recovery append failing on
  * the same poisoned row), so the classifier must see through one wrapper level.
+ * Shared with the agent-loop single-retry guard (2026-10-09): the loop
+ * re-issues the step request once for exactly this failure class.
  * @param error - candidate failure from `agent/error`.
  * @param depth - recursion guard; wrapper chains are shallow by construction.
  * @returns whether this failure (or one it wraps) is a blank tool-call rejection.
  */
-function isBlankToolCallRejection(error: unknown, depth = 0): boolean {
+export function isBlankToolCallRejection(error: unknown, depth = 0): boolean {
   if (error instanceof NonEmptyToolCallIdError) return true
   if (depth >= 5 || error === null || typeof error !== 'object') return false
   if (error instanceof AggregateError) {

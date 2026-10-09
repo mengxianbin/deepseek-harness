@@ -15,7 +15,7 @@ import type {
   PreStepDecision,
   RequestErrorAction,
 } from '@deepseek-ai/dsh-agent'
-import { agentEvents, assembleContextFor, installDegradationNotice } from '@deepseek-ai/dsh-agent'
+import { agentEvents, assembleContextFor, installDegradationNotice, isBlankToolCallRejection } from '@deepseek-ai/dsh-agent'
 import type { GenerateOptions, LlmCallConfig, Message, PreparedLlmCall } from '@deepseek-ai/dsh-llm'
 import {
   LlmError,
@@ -521,6 +521,12 @@ export class ReactLoopAgent implements Agent {
     const { assembly } = decision
     const renderedPrompt = renderPrompt(assembly)
     let firstAttempt = true
+    // One bounded self-heal per step (2026-10-09 fork patch): a blank
+    // tool-call id is rejected at the append site, so the poisoned
+    // assistant/message never enters the log and re-issuing this step's
+    // request is idempotent. Cap = 1 (防连环空烧); a second rejection
+    // propagates, fires agent/error, and feeds the degradation notice as before.
+    let blankCallRetryUsed = false
     while (true) {
       const { config, preparedCall } = await this.prepareRequest(turn, step, signal)
       const startsRequestSeries = firstAttempt && decision.startsRequestSeries === true
@@ -664,6 +670,13 @@ export class ReactLoopAgent implements Agent {
         return concluded ? { kind: 'completed' } : null
       } catch (error: unknown) {
         if (!live.ended) live.abandon()
+        if (!blankCallRetryUsed && isBlankToolCallRejection(error)) {
+          // The rejected row is not in the log (append refused it), so the
+          // retry rebuilds the exact same request from durable history — the
+          // model gets one fresh chance to emit a well-formed tool call.
+          blankCallRetryUsed = true
+          continue
+        }
         throw error
       }
     }
