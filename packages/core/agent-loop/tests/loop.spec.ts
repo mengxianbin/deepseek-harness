@@ -867,7 +867,17 @@ describe('agent loop', () => {
       await agent.whenIdle()
       expect(evaluations).toBe(2)
       expect(adapter.requests).toHaveLength(0)
-      expect(agent.session.snapshotEvents().filter(event => event.type === 'user/message' || event.type === 'system/message')).toHaveLength(0)
+      // Fork contract (2e957857a5 + α G1′, user-accepted 「virgin abort 当场可见」
+      // 2026-10-09): a claim stranded between `inbox.claim()` and the transcript
+      // is flushed behind a synthetic step sandwich at turn close, so a prompt
+      // cancelled at admission stays visible instead of vanishing from BOTH the
+      // queue and the log (the original abort prompt-loss bug). Upstream's
+      // zero-commit expectation (9c679b21f4) describes a tree without the
+      // write-back; the fork keeps its write-back and this deviation is
+      // recorded in the fork table + upgrade record.
+      const committedAtCancel = agent.session.snapshotEvents()
+        .filter(event => event.type === 'user/message' || event.type === 'system/message')
+      expect(JSON.stringify(committedAtCancel)).toContain('do not commit')
       expect(agent.session.snapshotEvents().findLast(event => event.type === 'turn/end')?.data.reason.kind).toBe('aborted')
     } finally {
       await ctx.fiber.dispose()
