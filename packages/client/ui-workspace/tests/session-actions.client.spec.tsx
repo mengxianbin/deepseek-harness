@@ -427,6 +427,23 @@ describe('SessionArchiveConfirmDialog', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
+  it('collapses a multi-line command label to one clipped line and keeps the full text on the hover title', () => {
+    const command = `pwsh -NoProfile -File D:\\tech\\m-note\\scripts\\job-market\\round-orchestrate.ps1 -Resume 20261009T102039 -From S0.5\n${'Start-Sleep 20; $file = Get-ChildItem $jdir\n'.repeat(40)}`
+    const { ask } = archiveDialog(vi.fn(async () => {}))
+    ask([{ kind: 'job', items: [{ id: 'pwsh-763', label: '  \n\t ' }, { id: 'pwsh-762', label: command }] }])
+    const rows = [...screen.getByRole('list', { name: '将被停止的工作' }).querySelectorAll('li')]
+    expect(rows).toHaveLength(1)
+    const text = rows[0]!.textContent ?? ''
+    // One clipped line: no raw newline survives, and the long name ends at the cap with an ellipsis.
+    expect(text).not.toContain('\n')
+    expect(text.endsWith('…')).toBe(true)
+    expect(text.length).toBeLessThanOrEqual('1 个后台任务：'.length + 'pwsh-763、'.length + 96)
+    // The unclipped command stays on the hover title, whitespace-collapsed; a blank label falls back to the id.
+    expect(rows[0]!.getAttribute('title')).toBe(
+      `pwsh-763、${command.replace(/\s+/g, ' ').trim()}`,
+    )
+  })
+
   it('keeps the dialog open with a rejection surfaced, and Cancel settles without archiving', async () => {
     const stopAndArchiveSession = vi.fn<SessionArchiveConfirmInjected['stopAndArchiveSession']>()
       .mockRejectedValueOnce(new Error('stop exploded'))

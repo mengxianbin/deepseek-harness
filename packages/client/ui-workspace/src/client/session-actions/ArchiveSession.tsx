@@ -7,7 +7,7 @@
  * live in the injected callbacks, not here.
  */
 import { useState } from 'react'
-import type { SessionActivity } from '@deepseek-ai/dsh-api-workspace-controller/client'
+import type { SessionActivity, SessionActivityItem } from '@deepseek-ai/dsh-api-workspace-controller/client'
 // Type-only: the family keys each provider merges; a key this program did not compile takes the generic line.
 import type {} from '@deepseek-ai/dsh-agent/types'
 import type {} from '@deepseek-ai/dsh-jobs/view'
@@ -142,13 +142,51 @@ function ArchiveConfirmForm({ request, stopAndArchiveSession, onSettle, t }: {
     >
       <ul className={browserCss.archiveActivity} aria-label={t('archive.confirm.activity')}>
         {request.activity.map((entry, index) => (
-          <li key={`${entry.kind}-${String(index)}`}>{activityLine(entry, t)}</li>
+          <li key={`${entry.kind}-${String(index)}`} title={activityTitle(entry, t)}>{activityLine(entry, t)}</li>
         ))}
       </ul>
       {archiving && <div className={browserCss.deleteStatus} role="status">{t('archive.confirm.pending')}</div>}
       {error !== null && <div className={browserCss.renameError} role="alert">{error}</div>}
     </Modal>
   )
+}
+
+/**
+ * Display cap for one activity item's name. A job's label is its full command
+ * line — frequently multi-line shell source — which, printed verbatim, let a
+ * 60-line script fill the dialog past the window (2026-10-09 立项 UX 缺陷).
+ * The cap keeps each item to about one dialog line; the unclipped text stays
+ * reachable on the row's hover title.
+ */
+const ACTIVITY_NAME_LIMIT = 96
+
+/**
+ * One item's display name: whitespace collapsed to a single line and clipped
+ * at {@link ACTIVITY_NAME_LIMIT}. A label that collapses to nothing falls back
+ * to the item id, the family's own identity.
+ * @param item - the reported activity item.
+ * @returns the name shown in the dialog line.
+ */
+function activityName(item: SessionActivityItem): string {
+  const flat = (item.label ?? item.id).replace(/\s+/g, ' ').trim()
+  if (flat === '') return item.id
+  return flat.length > ACTIVITY_NAME_LIMIT ? `${flat.slice(0, ACTIVITY_NAME_LIMIT - 1)}…` : flat
+}
+
+/**
+ * The unclipped names of one family's items, whitespace-collapsed so a hover
+ * title stays one readable line, or nothing for a family without items (the
+ * title attribute is then omitted rather than rendered empty).
+ * @param entry - the reported family.
+ * @param t - the locale seat.
+ * @returns the full text for the row's `title`, or undefined.
+ */
+function activityTitle(entry: SessionActivity, t: SessionArchiveConfirmProps['t']): string | undefined {
+  const items = entry.items ?? []
+  if (items.length === 0) return undefined
+  return items
+    .map(item => ((item.label ?? item.id).replace(/\s+/g, ' ').trim() || item.id))
+    .join(t('archive.confirm.listSeparator'))
 }
 
 /**
@@ -159,7 +197,7 @@ function ArchiveConfirmForm({ request, stopAndArchiveSession, onSettle, t }: {
 function activityLine(entry: SessionActivity, t: SessionArchiveConfirmProps['t']): string {
   const items = entry.items ?? []
   const n = items.length
-  const names = items.map(item => item.label ?? item.id).join(t('archive.confirm.listSeparator'))
+  const names = items.map(activityName).join(t('archive.confirm.listSeparator'))
   const plural = n === 1 ? 'one' : 'other'
   switch (entry.kind) {
     case 'turn': return t('archive.confirm.turn')

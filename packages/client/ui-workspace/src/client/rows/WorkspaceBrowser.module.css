@@ -595,6 +595,11 @@
   font-size: 13px;
   line-height: 20px;
   color: var(--dsw-alias-label-primary);
+  /* Defense under the clipped names: a long item roster or a wrapped
+     unbroken token can still grow, so the list scrolls instead of outgrowing
+     the dialog window. */
+  max-height: 40vh;
+  overflow-y: auto;
 }
 
 .archiveActivity li {
