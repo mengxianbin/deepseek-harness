@@ -84,6 +84,7 @@ function systemPrompt(config: ResolvedConfig, hasCurrentTitle: boolean): string 
     'Return only the title on one line, **in plain text of natural language**, with no quotes, prefix, explanation, Markdown, XML, or terminal control codes. No code is allowed.',
     'Use the language of the messages.',
     `Aim for about ${config.targetWords} words in non-CJK languages or ${config.targetCjkCharacters} CJK characters.`,
+    'Name the session as a whole: one dominant, coarse-grained subject that fits the entire conversation, never the newest message or a single round.',
     'If the messages give little to name, still return a short best-effort title, such as Greeting, instead of explaining.',
     ...hasCurrentTitle ? [
       'An existing title is supplied as currentTitle. If it still accurately describes the main topic or task, return it exactly unchanged.',

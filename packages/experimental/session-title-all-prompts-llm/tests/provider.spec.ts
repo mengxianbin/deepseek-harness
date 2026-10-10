@@ -68,6 +68,7 @@ const SYSTEM_BASE = [
   'Return only the title on one line, **in plain text of natural language**, with no quotes, prefix, explanation, Markdown, XML, or terminal control codes. No code is allowed.',
   'Use the language of the messages.',
   'Aim for about 5 words in non-CJK languages or 10 CJK characters.',
+  'Name the session as a whole: one dominant, coarse-grained subject that fits the entire conversation, never the newest message or a single round.',
   'If the messages give little to name, still return a short best-effort title, such as Greeting, instead of explaining.',
 ].join('\n')
 const SYSTEM_WITH_TITLE = `${SYSTEM_BASE}\n${[
