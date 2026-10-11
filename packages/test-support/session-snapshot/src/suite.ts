@@ -20,7 +20,7 @@
 
 import { readFile, readdir, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { isSurfaceEligibleType } from '@deepseek-ai/dsh-session/surface'
 import { SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 import { describe, expect, it } from 'vitest'
@@ -519,6 +519,34 @@ export function parseToolSchemasSnapshot(snapshot: string): ToolSchemasSnapshot 
     throw new Error('acp-snapshot: tool-schema snapshot must carry array-valued initial and changes fields')
   }
   return { initial, changes }
+}
+
+/** How many committed pointer hops one sidecar read may follow. */
+const SNAPSHOT_SIDECAR_POINTER_MAX_HOPS = 3
+
+/**
+ * Read one sidecar file, following a committed corpus pointer (a one-line
+ * relative path) to the owning scenario's copy. The corpus stores each
+ * distinct prompt and tool-schema snapshot once: a class pin that lends its
+ * sidecar keeps a pointer file, so comparison reads must resolve it, while
+ * dedup and canonical-form checks keep reading raw file bytes. Content that
+ * is not a single relative path passes through byte-for-byte.
+ *
+ * @param path - absolute sidecar path within the snapshot corpus.
+ * @returns the resolved sidecar content.
+ * @throws If a pointer chain exceeds {@link SNAPSHOT_SIDECAR_POINTER_MAX_HOPS}.
+ */
+export async function readSnapshotSidecar(path: string): Promise<string> {
+  let current = path
+  for (let hops = 0; ; hops++) {
+    const content = await readFile(current, 'utf8')
+    const pointer = content.trim()
+    if (!/^\.\.?(?:[\\/][^\r\n]+)+$/.test(pointer)) return content
+    if (hops >= SNAPSHOT_SIDECAR_POINTER_MAX_HOPS) {
+      throw new Error(`acp-snapshot: sidecar pointer chain exceeds ${SNAPSHOT_SIDECAR_POINTER_MAX_HOPS} hops: ${path}`)
+    }
+    current = resolve(dirname(current), pointer)
+  }
 }
 
 /**
@@ -1496,18 +1524,16 @@ export function defineAcpSnapshotSuite(options: SnapshotSuiteOptions): void {
         const [pinningFixtureFile] = await sessionFixtures(pinningDir)
         const pinnedFixture = await readFile(join(pinningDir, pinningFixtureFile as string), 'utf8')
         const pinned = pinningHeaderPayloads(pinnedFixture, fixtureContext(pinnedFixture))
-        const promptSnapshot = await readFile(
+        const promptSnapshot = await readSnapshotSidecar(
           join(snapshotsDir, promptSource.name, SYSTEM_PROMPT_SNAPSHOT),
-          'utf8',
         )
         const initialPromptSnapshot = initialSystemPromptSnapshot(promptSnapshot)
         expect(pinned.length, `the pinning fixture (${pinningScenario.name}) has an unexpected request/header count`)
           .toBe(1 + (pinningScenario.expectedHeaderChanges ?? 0))
         expect(parseSystemPromptSnapshot(promptSnapshot).changes.length, `the prompt source (${promptSource.name}) has an unexpected system prompt change count`)
           .toBe(pinningScenario.expectedPromptChanges ?? 0)
-        const toolSchemasSnapshot = await readFile(
+        const toolSchemasSnapshot = await readSnapshotSidecar(
           join(snapshotsDir, schemaSource.name, TOOL_SCHEMAS_SNAPSHOT),
-          'utf8',
         )
         const toolSchemas = parseToolSchemasSnapshot(toolSchemasSnapshot)
         const pinnedSchemaSets = [toolSchemas.initial, ...toolSchemas.changes]
@@ -1519,7 +1545,7 @@ export function defineAcpSnapshotSuite(options: SnapshotSuiteOptions): void {
         ))
         const childPinnedSchemas = new Map<number, unknown[][]>()
         for (const index of childSchemaPins) {
-          const sidecar = await readFile(join(dir, childToolSchemasSnapshot(index)), 'utf8')
+          const sidecar = await readSnapshotSidecar(join(dir, childToolSchemasSnapshot(index)))
           const parsed = parseToolSchemasSnapshot(sidecar)
           childPinnedSchemas.set(index, [parsed.initial, ...parsed.changes])
         }
@@ -1527,7 +1553,7 @@ export function defineAcpSnapshotSuite(options: SnapshotSuiteOptions): void {
         for (const index of childPromptPins) {
           childPinnedPrompts.set(
             index,
-            await readFile(join(dir, childSystemPromptSnapshot(index)), 'utf8'),
+            await readSnapshotSidecar(join(dir, childSystemPromptSnapshot(index))),
           )
         }
         for (const [logIndex, log] of result.sessionLogs.entries()) {
@@ -1675,15 +1701,13 @@ export function defineAcpSnapshotSuite(options: SnapshotSuiteOptions): void {
         const [fixtureFile] = await sessionFixtures(fixtureDir)
         const fixture = await readFile(join(fixtureDir, fixtureFile as string), 'utf8')
         const headers = pinningHeaderPayloads(fixture, fixtureContext(fixture))
-        const promptSnapshot = await readFile(
+        const promptSnapshot = await readSnapshotSidecar(
           join(snapshotsDir, promptSource.name, SYSTEM_PROMPT_SNAPSHOT),
-          'utf8',
         )
         expect(headers.length, `${scenario.name}: unexpected request/header count`)
           .toBe(1 + (scenario.expectedHeaderChanges ?? 0))
-        const toolSchemasSnapshot = await readFile(
+        const toolSchemasSnapshot = await readSnapshotSidecar(
           join(snapshotsDir, schemaSource.name, TOOL_SCHEMAS_SNAPSHOT),
-          'utf8',
         )
         const toolSchemas = parseToolSchemasSnapshot(toolSchemasSnapshot)
         const schemaSets = [toolSchemas.initial, ...toolSchemas.changes]
@@ -1741,7 +1765,7 @@ export function defineAcpSnapshotSuite(options: SnapshotSuiteOptions): void {
           const sidecar = await readFile(join(dir, file), 'utf8')
           /* v8 ignore next -- registration guarantees every scenario class has resolved sources. */
           const promptSource = promptSourceByClass.get(classOf(scenario)) ?? scenario
-          const classPin = await readFile(join(snapshotsDir, promptSource.name, SYSTEM_PROMPT_SNAPSHOT), 'utf8')
+          const classPin = await readSnapshotSidecar(join(snapshotsDir, promptSource.name, SYSTEM_PROMPT_SNAPSHOT))
           assertChildSystemPromptSnapshot(sidecar, initialSystemPromptSnapshot(classPin), `${scenario.name}/${file}`)
         }
       }

@@ -1,7 +1,7 @@
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, describe, expect, it } from 'vitest'
 import {
@@ -34,6 +34,7 @@ import {
   normalizedToolSchemas,
   parseSystemPromptSnapshot,
   parseToolSchemasSnapshot,
+  readSnapshotSidecar,
   refreshFixtureReplacements,
   reconcileCatalogCreationTimes,
   scenarioSkipped,
@@ -1614,5 +1615,47 @@ describe('raw parent and child catalog clocks', () => {
   it('preserves partial corpora and unrelated rows verbatim', () => {
     const partial = parent(200) + '{"type":"feedback/record","data":null}\n'
     expect(reconcileCatalogCreationTimes([partial], 'validate')).toEqual([partial])
+  })
+})
+
+describe('readSnapshotSidecar', () => {
+  const root = mkdtempSync(join(tmpdir(), 'sidecar-pointer-'))
+  const owner = join(root, 'owner')
+  const scenario = join(root, 'scenario')
+  afterAll(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('returns non-pointer content byte-for-byte', async () => {
+    mkdirSync(owner, { recursive: true })
+    const canonical = '{"initial":[],"changes":[]}\n'
+    writeFileSync(join(owner, 'tool-schemas.expected.json'), canonical)
+    expect(await readSnapshotSidecar(join(owner, 'tool-schemas.expected.json'))).toBe(canonical)
+  })
+
+  it('follows a committed relative pointer to the owning copy', async () => {
+    mkdirSync(owner, { recursive: true })
+    mkdirSync(scenario, { recursive: true })
+    const canonical = '{"initial":[{"name":"snapshot_ping"}],"changes":[]}\n'
+    writeFileSync(join(owner, 'tool-schemas.expected.json'), canonical)
+    writeFileSync(join(scenario, 'tool-schemas.expected.json'), '../owner/tool-schemas.expected.json\n')
+    expect(await readSnapshotSidecar(join(scenario, 'tool-schemas.expected.json'))).toBe(canonical)
+  })
+
+  it('follows a pointer chain and fails loud past the hop cap', async () => {
+    mkdirSync(owner, { recursive: true })
+    writeFileSync(join(owner, 'system-prompt.expected.md'), 'You are an agent.\n')
+    let from = owner
+    for (let hop = 1; hop <= 3; hop++) {
+      const dir = join(root, `hop${hop}`)
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(join(dir, 'system-prompt.expected.md'), `../${basename(from)}/system-prompt.expected.md\n`)
+      from = dir
+    }
+    expect(await readSnapshotSidecar(join(from, 'system-prompt.expected.md'))).toBe('You are an agent.\n')
+    mkdirSync(join(root, 'deep'), { recursive: true })
+    writeFileSync(join(root, 'deep', 'system-prompt.expected.md'), '../hop3/system-prompt.expected.md\n')
+    await expect(readSnapshotSidecar(join(root, 'deep', 'system-prompt.expected.md')))
+      .rejects.toThrow('sidecar pointer chain exceeds 3 hops')
   })
 })
