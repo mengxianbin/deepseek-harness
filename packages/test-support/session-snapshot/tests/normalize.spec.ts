@@ -133,6 +133,20 @@ describe('normalizeStdout', () => {
     expect(frame).toEqual({ cwd: '{{cwd}}', path: '{{cwd}}/nested/proof.txt' })
   })
 
+  it('scrubs the JSON-escaped cwd spelling embedded by JSON.stringify(path)', () => {
+    const windowsCtx: NormalizeContext = {
+      sessionIds: [],
+      cwd: String.raw`C:\Users\runneradmin\AppData\Local\Temp\acp-snap-cwd-abc123`,
+    }
+    // working-directory `contextText` renders `Current working directory:
+    // ${JSON.stringify(path)}.`, which doubles every backslash in the message
+    // text on Windows; replay tokenization must still land on `{{cwd}}`.
+    const message = `Current working directory: ${JSON.stringify(windowsCtx.cwd)}.`
+    const raw = JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { text: message } })
+    const frame = JSON.parse(normalizeStdout(raw, windowsCtx)) as { params: { text: string } }
+    expect(frame.params.text).toBe('Current working directory: "{{cwd}}".')
+  })
+
   it('canonicalizes only cwd-rooted path separators', () => {
     const windowsCtx: NormalizeContext = {
       sessionIds: [],

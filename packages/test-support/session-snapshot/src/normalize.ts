@@ -120,7 +120,14 @@ function cwdSpellings(ctx: NormalizeContext): string[] {
   const macAliases = spellings
     .filter(spelling => spelling.startsWith('/') && !spelling.startsWith('/private/'))
     .map(spelling => `/private${spelling}`)
-  return [...new Set([...spellings, ...macAliases])]
+  const base = [...new Set([...spellings, ...macAliases])]
+  // Context messages may embed `JSON.stringify(path)` (working-directory
+  // `contextText`), whose escaping doubles every backslash on Windows. Cover
+  // the escaped inner spelling too, or replay tokenization misses the message
+  // while the recorded golden already carries `{{cwd}}` (platform-symmetric
+  // no-op when a spelling needs no escaping).
+  const jsonEscaped = base.map(spelling => JSON.stringify(spelling).slice(1, -1))
+  return [...new Set([...base, ...jsonEscaped])]
     .sort((left, right) => right.length - left.length)
 }
 
