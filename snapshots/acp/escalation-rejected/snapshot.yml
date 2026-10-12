@@ -5,4 +5,6 @@ composition: acp-default
 recording: live
 header:
   class: acp-default
+# fork/dsh-local: win32 bash->pwsh platform fork (F4) — POSIX-only recording
+platform: posix
 permission: workspace-write

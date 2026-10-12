@@ -6,3 +6,5 @@ recording: live
 header:
   class: ptc-shell
   pin: true
+# fork/dsh-local: win32 bash->pwsh platform fork (F4) — POSIX-only recording
+platform: posix

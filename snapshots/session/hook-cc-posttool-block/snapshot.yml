@@ -5,5 +5,7 @@ composition: default
 recording: live
 header:
   class: default
+# fork/dsh-local: win32 bash->pwsh platform fork (F4) — POSIX-only recording
+platform: posix
 workspace:
   final: true
