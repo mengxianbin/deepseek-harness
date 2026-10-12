@@ -1027,7 +1027,7 @@ describe('TypeScript SDK snapshots over the jsonrpc runtime', () => {
 
       if (recording) {
         expectedContents = redactSessionSnapshotIds(stabilizeFixtureMessageIds(
-          ordered.map(log => scrubSessionSnapshot(tokenizeSessionFixtureCwd(log.content))),
+          ordered.map(log => scrubSessionSnapshot(tokenizeSessionFixtureCwd(log.content, actualContext))),
           expectedContents,
         ))
       }
@@ -1045,6 +1045,7 @@ describe('TypeScript SDK snapshots over the jsonrpc runtime', () => {
           if (existing === undefined) throw new Error(`no fixture for persisted log ${index}`)
           return scrubSessionSnapshot(tokenizeSessionFixtureCwd(
             stabilizeRefreshLog(log.content, existing, replacements, actualContext),
+            actualContext,
           ))
         })
         expectedContents = redactSessionSnapshotIds(stabilizeFixtureMessageIds(reconcileCatalogCreationTimes(refreshed, 'preserve-headers'), expectedContents))
