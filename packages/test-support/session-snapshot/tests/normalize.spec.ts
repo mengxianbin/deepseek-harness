@@ -1048,6 +1048,26 @@ describe('tokenizeSessionFixtureCwd', () => {
     expect(tokenizeSessionFixtureCwd(out)).toBe(out)
   })
 
+  it('tokenizes regenerated context messages when a replayed header keeps the cwd token', () => {
+    const runCwd = String.raw`C:\Users\runner\AppData\Local\Temp\acp-snap-cwd-abc123`
+    const message = `Current working directory: ${JSON.stringify(runCwd)}.`
+    const raw = [
+      JSON.stringify({ type: 'session', id: 's', createdAt: 1, cwd: '{{cwd}}' }),
+      JSON.stringify({
+        type: 'user/message',
+        data: { content: [{ type: 'text', text: message }], role: 'user', id: 'm1' },
+      }),
+      '',
+    ].join('\n')
+
+    const out = tokenizeSessionFixtureCwd(raw, { sessionIds: [], cwd: runCwd })
+    expect(out).toContain('"cwd":"{{cwd}}"')
+    expect(out).toContain('Current working directory: \\"{{cwd}}\\".')
+    expect(out).not.toContain('runner')
+    // Without the run context the token header alone cannot reach the message.
+    expect(tokenizeSessionFixtureCwd(raw)).toContain('runner')
+  })
+
   it('rejects a log without a session cwd', () => {
     expect(() => tokenizeSessionFixtureCwd('')).toThrow(
       'acp-snapshot: cannot tokenize a cwd without a basename',

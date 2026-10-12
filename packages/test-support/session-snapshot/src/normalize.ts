@@ -280,19 +280,29 @@ function tokenizeFixtureValue(
  * path.
  *
  * @param rawLog The raw or refresh-stabilized session JSONL fixture.
+ * @param runContext The live run's volatile values. A replayed fixture header
+ * keeps its committed `{{cwd}}` token while the run regenerates context
+ * messages with the real generated cwd, so the token alone cannot tokenize
+ * those write-backs; the run's spellings close that gap.
  * @returns Compact JSONL whose known cwd spellings become `{{cwd}}`.
  * @throws If a non-empty line is invalid JSON or the session cwd has no basename.
  */
-export function tokenizeSessionFixtureCwd(rawLog: string): string {
+export function tokenizeSessionFixtureCwd(rawLog: string, runContext?: NormalizeContext): string {
   const lines = rawLog.split('\n')
   const firstLine = lines.find(line => line.trim().length > 0)
   const header = firstLine === undefined ? undefined : JSON.parse(firstLine) as { cwd?: unknown }
-  const cwd = typeof header?.cwd === 'string' ? header.cwd : ''
+  const headerCwd = typeof header?.cwd === 'string' ? header.cwd : ''
+  const runCwd = runContext?.cwd ?? ''
+  const cwd = headerCwd === CWD && runCwd !== '' ? runCwd : headerCwd
   const basename = cwd.split(/[\\/]/).at(-1)
   if (basename === undefined || basename.length === 0) {
     throw new Error('acp-snapshot: cannot tokenize a cwd without a basename')
   }
-  const ctx: NormalizeContext = { sessionIds: [], cwd }
+  const ctx: NormalizeContext = {
+    sessionIds: [],
+    cwd,
+    cwdAliases: [...new Set([cwd, ...runContext?.cwdAliases ?? []])].slice(1),
+  }
   return lines.map((line) => {
     if (line.trim().length === 0) return line
     return JSON.stringify(tokenizeFixtureValue(JSON.parse(line), ctx, basename))

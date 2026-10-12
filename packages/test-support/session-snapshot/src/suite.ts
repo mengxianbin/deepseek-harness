@@ -1393,8 +1393,11 @@ export function defineAcpSnapshotSuite(options: SnapshotSuiteOptions): void {
 
         // Record writes live model fixtures; keyless refresh writes every comparable replayed
         // fixture. Pinning JSONL keeps prefixes but moves prompts and schemas into sidecars.
+        // The run's context reaches the tokenizer: a replayed fixture header keeps its
+        // committed `{{cwd}}` token while the run regenerates context messages with the
+        // real generated cwd.
         const portableFixture = scenario.workspaceParent === undefined
-          ? tokenizeSessionFixtureCwd
+          ? (log: string): string => tokenizeSessionFixtureCwd(log, ctx)
           : (log: string): string => log
         const writesSessionFixtures = writesCurrentSessionFixtures(manifest, mode)
           && ((RECORDING && scenario.recorded && scenario.hasModelTurn) || (REFRESHING && comparesLog))
