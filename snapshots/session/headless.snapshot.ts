@@ -1,7 +1,7 @@
 /** Recorded-session replay through the shipped headless `dsh` profile. */
 
 import { startHttpMcpFixture } from '../../packages/mcp/mcp-client/tests/http-fixture.ts'
-import { cp, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises'
+import { cp, copyFile, link, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
@@ -488,6 +488,26 @@ async function seedWorkspace(scenario: HeadlessScenario, cwd: string): Promise<v
 const WORKTREE_CHECKOUT_FILTER = "printf 'FILTERED CHECKOUT CONTENT\\n'"
 const WORKTREE_CHECKOUT_ATTRIBUTES = 'tracked.txt filter=dsh-snapshot-checkout\n'
 
+/**
+ * Link one workspace fixture binary, degrading when the session cannot create
+ * symlinks: a non-elevated Windows session (no symlink privilege, Developer
+ * Mode off) refuses creation with EPERM. The fixture only needs a resolvable
+ * path to the target, so fall back to a same-volume hard link and then to a
+ * copy; symlink-capable sessions keep the real link.
+ */
+async function linkFixtureBinary(target: string, path: string): Promise<void> {
+  try {
+    await symlink(target, path)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EPERM') throw error
+    try {
+      await link(target, path)
+    } catch {
+      await copyFile(target, path)
+    }
+  }
+}
+
 const workspaceSetups: Record<string, (cwd: string) => Promise<void>> = {
   async 'windows-acl-skill'(cwd) {
     const target = join(cwd, '.dsh', 'skills', 'diagnose-windows-sandbox-acl', 'SKILL.md')
@@ -496,8 +516,8 @@ const workspaceSetups: Record<string, (cwd: string) => Promise<void>> = {
   },
   async 'office-skills'(cwd) {
     await cp(join(repoRoot, 'packages/skill/skill-office/assets'), join(cwd, 'office-skills'), { recursive: true })
-    await symlink(process.execPath, join(cwd, 'office-node'))
-    await symlink(join(repoRoot, 'packages/skill/skill-office/node_modules/@deepseek-ai/libreoffice-kit/lib/cli.js'), join(cwd, 'office-cli.js'))
+    await linkFixtureBinary(process.execPath, join(cwd, 'office-node'))
+    await linkFixtureBinary(join(repoRoot, 'packages/skill/skill-office/node_modules/@deepseek-ai/libreoffice-kit/lib/cli.js'), join(cwd, 'office-cli.js'))
   },
   async 'git-worktree'(cwd) {
     snapshotGit(cwd, ['init', '--initial-branch=main', '--object-format=sha1'])
