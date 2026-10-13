@@ -110,10 +110,15 @@ describe('session format guard through the assembled app', () => {
           version: SESSION_FORMAT_VERSION,
         })
         expect(current.trimEnd().split('\n').length).toBeGreaterThan(closedTurn().length + 1)
-        // `session.lock` is the write handle's kernel lock file, published
-        // with the first materializing write and kept across release.
+        // `session.lock` is the POSIX write handle's kernel lock file,
+        // published with the first materializing write and kept across
+        // release. Windows locks through a kernel semaphore handle instead
+        // and never materializes the file (session-persistence-jsonl
+        // lease.ts / win32.ts), so its directory holds only the logs.
         expect((await readdir(dirname(sourcePath))).sort())
-          .toEqual(['session.jsonl', 'session.lock', generationLogFilename(SESSION_FORMAT_VERSION, 'none')])
+          .toEqual(process.platform === 'win32'
+            ? ['session.jsonl', generationLogFilename(SESSION_FORMAT_VERSION, 'none')]
+            : ['session.jsonl', 'session.lock', generationLogFilename(SESSION_FORMAT_VERSION, 'none')])
       },
     })
   }, LOADER_SMOKE_TEST_TIMEOUT_MS)
