@@ -6,6 +6,9 @@
  * @module @deepseek-ai/dsh-session-snapshot/normalize
  */
 
+import { existsSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   decodeSeqRanges,
 } from '@deepseek-ai/dsh-session'
@@ -17,6 +20,7 @@ const SESSION_ID = '{{sessionId}}'
 const MESSAGE_ID = '{{messageId}}'
 const USED_TOKENS = '{{usedTokens}}'
 const CWD = '{{cwd}}'
+const HARNESS = '{{harness}}'
 const SYSTEM = '{{system}}'
 const TOOLS = '{{tools}}'
 const EVENT_TIME = '{{eventTime}}'
@@ -173,6 +177,40 @@ function replaceCwd(value: string, ctx: NormalizeContext, replacement: string): 
   return out
 }
 
+/**
+ * The checkout root this normalizer ships inside. Recorded error stacks embed
+ * absolute source URLs (`file:///…/packages/…`), so a golden refreshed on one
+ * machine carries that machine's checkout path; tokenizing every spelling of
+ * the local root keeps committed goldens portable and comparisons symmetric on
+ * every machine — the same role `{{cwd}}` plays for the temporary workspace.
+ */
+export const HARNESS_ROOT = ((): string => {
+  let dir = dirname(fileURLToPath(import.meta.url))
+  for (;;) {
+    if (existsSync(join(dir, 'snapshots', 'session')) && existsSync(join(dir, 'packages'))) return dir
+    const parent = dirname(dir)
+    if (parent === dir) return ''
+    dir = parent
+  }
+})()
+
+/** Every textual spelling of the checkout root (native, URL-form, JSON-escaped), longest-first. */
+const HARNESS_SPELLINGS: readonly string[] = HARNESS_ROOT === ''
+  ? []
+  : [...new Set([
+    HARNESS_ROOT,
+    HARNESS_ROOT.split('\\').join('/'),
+    JSON.stringify(HARNESS_ROOT).slice(1, -1),
+    JSON.stringify(HARNESS_ROOT.split('\\').join('/')).slice(1, -1),
+  ])].sort((left, right) => right.length - left.length)
+
+/** Replace every checkout-root spelling with the portable token, at path boundaries only. */
+function replaceHarness(value: string): string {
+  let out = value
+  for (const spelling of HARNESS_SPELLINGS) out = replaceCwdSpelling(out, spelling, HARNESS)
+  return out
+}
+
 /** Replace cwd, session ids, and any stray UUID with stable tokens in a string. */
 function scrubString(
   value: string,
@@ -181,6 +219,7 @@ function scrubString(
   identityMode: 'legacy' | 'preserve',
 ): string {
   let out = replaceCwd(value, ctx, CWD)
+  out = replaceHarness(out)
   // Filesystem APIs can report one directory with several spellings. Replace
   // every known spelling longest-first so a shorter alias cannot corrupt a
   // longer one before it is tokenized. macOS additionally symlinks
@@ -247,7 +286,8 @@ function escapeRegExp(value: string): string {
 
 /** Replace any absolute spelling whose final segment is the generated cwd basename. */
 function tokenizeFixtureString(value: string, ctx: NormalizeContext, basename: string): string {
-  const exact = replaceCwd(value, ctx, CWD)
+  let exact = replaceCwd(value, ctx, CWD)
+  exact = replaceHarness(exact)
   const absoluteCwd = new RegExp(
     String.raw`(?:[A-Za-z]:)?[\\/](?:[^\\/\s<>"]+[\\/])*${escapeRegExp(basename)}`
     + String.raw`(?=$|[\\/\s<>'"()\[\]{},;:!?=])`,

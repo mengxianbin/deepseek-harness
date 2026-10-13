@@ -3,6 +3,7 @@ import { SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 import { prepareSessionSnapshotFixtureForComparison } from '@deepseek-ai/dsh-llm-replay'
 import {
   type NormalizeContext,
+  HARNESS_ROOT,
   extractSnapshotSpillPaths,
   normalizeSessionLog,
   normalizeSessionFormatMetadata,
@@ -1306,5 +1307,49 @@ describe('scrubToolSchemas', () => {
     expect(out).toContain('full prompt')
     expect(out.split('\n')[3]).toBe(toolless)
     expect(scrubToolSchemas(out)).toBe(out)
+  })
+})
+
+describe('checkout root tokenization (F9)', () => {
+  const header = JSON.stringify({
+    type: 'session',
+    id: '11111111-2222-3333-4444-555555555555',
+    createdAt: 9,
+    cwd: '{{cwd}}',
+  })
+  const forwardRoot = HARNESS_ROOT.split('\\').join('/')
+
+  it('tokenizes the checkout root out of regenerated error stacks on both comparison sides', () => {
+    const stack = `Error: Cannot find module 'file:///${forwardRoot}/packages/a/b.ts'`
+    const raw = [
+      header,
+      JSON.stringify({ type: 'tool/result', seq: 1, time: 2, data: { content: [{ type: 'text', text: stack }] } }),
+      '',
+    ].join('\n')
+    const golden = raw.replace(`file:///${forwardRoot}/`, 'file:///{{harness}}/')
+
+    const [actualNormalized] = normalizeSessionSnapshots([raw], ctx)
+    const [goldenNormalized] = normalizeSessionSnapshots([golden], ctx)
+    expect(actualNormalized).toContain('file:///{{harness}}/packages/a/b.ts')
+    expect(actualNormalized).toBe(goldenNormalized)
+  })
+
+  it('stores the checkout root while refreshing a fixture write-back', () => {
+    const nativeRoot = `${HARNESS_ROOT}\\packages\\a\\b.ts`
+    const raw = [
+      header,
+      JSON.stringify({
+        type: 'tool/result',
+        seq: 1,
+        time: 2,
+        data: { content: [{ type: 'text', text: `stack at (${nativeRoot})` }] },
+      }),
+      '',
+    ].join('\n')
+
+    const out = tokenizeSessionFixtureCwd(raw)
+    expect(out).toContain(String.raw`stack at ({{harness}}\\packages\\a\\b.ts)`)
+    expect(out).not.toContain(HARNESS_ROOT)
+    expect(tokenizeSessionFixtureCwd(out)).toBe(out)
   })
 })

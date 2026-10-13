@@ -21,6 +21,16 @@ import { assertSnapshotCorpusPolicy } from './session-snapshot-corpus-policy.ts'
 
 const repoRoot = resolve(import.meta.dirname, '..')
 const corpusRoot = join(repoRoot, 'snapshots')
+// The refresh write-back tokenizes the local checkout root ({{harness}}); a committed
+// fixture that still names it is a machine-bound leak. Cover raw, URL-form, and
+// JSON-escaped spellings — the same blind spot family that hid repo paths behind the
+// `{{cwd}}`-only gate (F9).
+const checkoutSpellings = [
+  repoRoot,
+  repoRoot.split('\\').join('/'),
+  JSON.stringify(repoRoot).slice(1, -1),
+  JSON.stringify(repoRoot.split('\\').join('/')).slice(1, -1),
+]
 const profiles = ['acp', 'sdk', 'session', 'web'] as const
 const snapshotAdapters = [
   'apps/web/tests/code-language.snapshot.ts',
@@ -180,6 +190,8 @@ it('keeps every recorded session owned, pinned, redacted, and header-scrubbed', 
     for (const [index, fixture] of fixtures.entries()) {
       expect(scrubSystemPrompts(fixture), `${key}/${names[index]}: system prompt must be a sidecar`).toBe(fixture)
       expect(scrubToolSchemas(fixture), `${key}/${names[index]}: tool schemas must be a sidecar`).toBe(fixture)
+      const leaked = checkoutSpellings.filter(spelling => fixture.includes(spelling))
+      expect(leaked, `${key}/${names[index]}: committed fixture must not carry the checkout path`).toEqual([])
     }
     for (const index of manifest.header.childSystemPrompts ?? []) {
       expect(names[index], `${key}: child prompt index ${index}`).toBeDefined()

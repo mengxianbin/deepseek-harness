@@ -22,7 +22,10 @@
         providerName: acp-diagnostic
         command: !!js process.execPath
         args:
-          - !!js "decodeURIComponent(new URL('../../../packages/subagent/subagent-acp/tests/mock-acp-server.ts', 'file://' + process.env.DSH_SNAPSHOT_FILE).pathname)"
+          # fork/dsh-local (F9): resolve via path.join instead of a file URL — WHATWG keeps
+          # the Windows drive letter (`file:///D:/…` → pathname `/D:/…`), which resolves onto
+          # the cwd drive as `C:\D:\…` and Cannot-find-module; path.join handles both platforms.
+          - !!js "process.getBuiltinModule('node:path').join(process.env.DSH_SNAPSHOT_FILE, '..', '..', '..', '..', 'packages/subagent/subagent-acp/tests/mock-acp-server.ts')"
         permission: reject
         env:
           MOCK_PERMISSION: '1'
