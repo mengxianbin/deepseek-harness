@@ -21,22 +21,12 @@ describe('workspace snapshots', () => {
     await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true })))
   })
 
-  it('captures readable text, binary bytes, links, and empty directories in path order', async (ctx) => {
+  it('captures readable text, binary bytes, links, and empty directories in path order', async () => {
     const directory = await root()
     await writeFile(join(directory, 'a.txt'), 'hello\n')
     await writeFile(join(directory, 'b.bin'), Buffer.from([0xff, 0x01]))
     await mkdir(join(directory, 'empty'))
-    try {
-      await symlink('a.txt', join(directory, 'link'))
-    } catch (error) {
-      // This case pins symlink DETECTION, so only a real symlink proves it. On a
-      // non-elevated Windows session (no SeCreateSymbolicLinkPrivilege, Developer
-      // Mode off) the kernel refuses creation with EPERM; skip loudly rather than
-      // report a machine-privilege gap as a regression.
-      if ((error as NodeJS.ErrnoException).code !== 'EPERM') throw error
-      ctx.skip('symlink creation requires elevation or Developer Mode on this session')
-      return
-    }
+    await symlink('a.txt', join(directory, 'link'))
 
     expect(await captureWorkspaceSnapshot(directory)).toEqual([
       { path: 'a.txt', kind: 'text', content: 'hello\n' },
