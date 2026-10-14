@@ -383,28 +383,41 @@ export function SidebarRoot({
         })}
       </div>
 
-      {/* Footer actions stack above Settings in both sidebar widths. */}
+      {/* FORK dsh-local (sidebar-layout round 3): the wide foot is ONE row —
+          Settings, the ⋯ menu, then the footer actions (user ruling order) —
+          so the dsh-usage glance card (a width:100% DOM injection into this
+          column, not a slot occupant) keeps its own line. The rail keeps its
+          original stack. */}
       <div className={css.footArea}>
-        <div className={css.footerActions}>
-          {renderSlot('sidebar.footer.action', { wide })}
-        </div>
-        {/* FORK dsh-local (sidebar-layout): the ⋯ menu shares the right end of
-            the Settings row instead of owning rows above the browsing region. */}
-        <div className={css.settingsRow}>
-          <div className={css.settingsArea}>
-            {renderSlot('sidebar.settings', { wide })}
-          </div>
-          {wide && (
-            <PanelMore
-              panels={panels}
-              usePanelInfo={usePanelInfo}
-              selectPanel={selectPanel}
-              startSession={startSession}
-              renderSlot={renderSlot}
-              t={t}
-            />
+        {wide
+          ? (
+            <div className={css.footRow}>
+              <div className={css.settingsArea}>
+                {renderSlot('sidebar.settings', { wide })}
+              </div>
+              <PanelMore
+                panels={panels}
+                usePanelInfo={usePanelInfo}
+                selectPanel={selectPanel}
+                startSession={startSession}
+                renderSlot={renderSlot}
+                t={t}
+              />
+              <div className={css.footerActions}>
+                {renderSlot('sidebar.footer.action', { wide })}
+              </div>
+            </div>
+          )
+          : (
+            <>
+              <div className={css.footerActions}>
+                {renderSlot('sidebar.footer.action', { wide })}
+              </div>
+              <div className={css.settingsArea}>
+                {renderSlot('sidebar.settings', { wide })}
+              </div>
+            </>
           )}
-        </div>
       </div>
     </div>
   )

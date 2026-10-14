@@ -588,26 +588,29 @@
   display: flex;
 }
 
-/* Fork dsh-local (sidebar-layout): the ⋯ panel menu shares the Settings row
-   so the wide sidebar reclaims the top rows the panel list used to own. */
-.settingsRow {
+/* FORK dsh-local (sidebar-layout round 3): the wide foot is ONE row —
+   Settings, the ⋯ menu, then the footer actions (user ruling order) — while
+   the width:100% seats above keep the rail's stack. The dsh-usage glance
+   card (a width:100% DOM injection into this column) stays on its own line
+   outside this row. */
+.footRow {
   display: flex;
   align-items: center;
   gap: 4px;
+  width: 100%;
 }
 
-.settingsRow .settingsArea {
-  flex: 1;
+.footRow .settingsArea,
+.footRow .footerActions {
   width: auto;
-  min-width: 0;
+}
+
+.footRow .settingsArea {
+  flex: none;
 }
 
 .panelMore {
   flex: none;
-}
-
-.collapsed .settingsRow {
-  justify-content: center;
 }
 
 .collapsed .footArea {
