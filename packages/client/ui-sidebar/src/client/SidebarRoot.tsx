@@ -136,6 +136,9 @@ function PanelMore({ panels, usePanelInfo, selectPanel, startSession, renderSlot
       align="start"
       portal
       dense
+      // FORK (sidebar-layout round 3c): the flex item is this anchor WRAPPER
+      // span, not the trigger button — the row order must ride it.
+      className={css.panelMoreSlot}
       anchor={(
         <Tooltip label={t('panels.more')} delayMs={500}>
           <button

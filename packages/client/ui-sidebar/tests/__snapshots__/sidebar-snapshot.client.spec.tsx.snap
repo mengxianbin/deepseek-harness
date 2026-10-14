@@ -196,7 +196,7 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
           />
         </div>
         <span
-          class="root"
+          class="root panelMoreSlot"
         >
           <button
             aria-expanded="false"
@@ -336,7 +336,7 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
           />
         </div>
         <span
-          class="root"
+          class="root panelMoreSlot"
         >
           <button
             aria-expanded="false"
@@ -476,7 +476,7 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
           />
         </div>
         <span
-          class="root"
+          class="root panelMoreSlot"
         >
           <button
             aria-expanded="false"
@@ -616,7 +616,7 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
           />
         </div>
         <span
-          class="root"
+          class="root panelMoreSlot"
         >
           <button
             aria-expanded="false"

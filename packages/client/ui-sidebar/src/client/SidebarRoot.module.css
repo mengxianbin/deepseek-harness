@@ -613,7 +613,10 @@
    [class*=settingsArea] (order:3) inside its own foot scheme; pin the row to
    the ruled order — Settings (3, plugin) → ⋯ (4) → footer actions (5).
    Without the plugin every order falls back to 0 = DOM order, same result. */
-.footRow .panelMore {
+/* FORK dsh-local (sidebar-layout round 3c): the ⋯ button sits inside the
+   Menu primitive's anchor SPAN — the span is the flex item, so the ruled row
+   order rides this class (via Menu's className), not the button. */
+.footRow .panelMoreSlot {
   order: 4;
 }
 
