@@ -179,6 +179,15 @@ export const InputBar = memo(function InputBar({
   const workspaceTrigger = inert && !removed && onRequestWorkspace !== undefined
   const editorDisabled = removed || (locked && !workspaceTrigger)
   const editable = live && !locked && !machineBusy
+  // FORK dsh-local (composer-collapse, 2026-10-14 ruling C): a composer that
+  // holds content but lost the keyboard folds its draft scrollport to two
+  // lines, so the transcript reclaims the vertical space a long draft
+  // occupied; focus anywhere in the card (or an empty bar, already one line)
+  // shows it at full height again. The draft is never dropped — the same
+  // scrollport serves the folded state. Hero/no-workspace surfaces, whose
+  // resident div is a picker trigger, stay unfolded.
+  const [draftFocused, setDraftFocused] = useState(false)
+  const foldDraft = !empty && !draftFocused && !workspaceTrigger && variant !== 'hero'
   const steeringAvailable = subagent === null || subagent.address.mode === 'continuable'
   const canSteerQueue = !locked && !machineBusy && !commandMenuOpen && empty && running && steeringAvailable
     && input.queue.length > 0
@@ -397,6 +406,10 @@ export const InputBar = memo(function InputBar({
     return translated !== hintKey ? translated : rawHint
   })()
 
+  // Session switches and lock flips remount the editable without a blur event;
+  // reset the fold bookkeeping so a stale focus flag cannot hold the bar open.
+  useEffect(() => { setDraftFocused(false) }, [sessionId, locked])
+
   const placeholderText = placeholder ?? (parentOffline
     ? t('placeholder.parentOffline')
     : disabled
@@ -431,11 +444,17 @@ export const InputBar = memo(function InputBar({
           click's reopen (close-then-open flickers the chip's open echo). */}
       <div
         ref={cardRef}
-        className={clsx(css.card, workspaceTrigger && css.cardWorkspaceTrigger)}
+        className={clsx(css.card, workspaceTrigger && css.cardWorkspaceTrigger, foldDraft && css.cardFolded)}
         data-composer-card
+        data-composer-folded={foldDraft ? '' : undefined}
         onClick={workspaceTrigger ? onRequestWorkspace : undefined}
         onPointerDown={workspaceTrigger ? (e) => { e.stopPropagation() } : undefined}
         onMouseDown={onCardMouseDown}
+        // Focus/blur bubble in React, so the card is one fold sensor for the
+        // editor and every inner control: any keyboard path unfolds, losing
+        // the keyboard to anywhere outside the card folds a contentful bar.
+        onFocus={() => { setDraftFocused(true) }}
+        onBlur={() => { setDraftFocused(false) }}
       >
         {sessionId !== undefined && (
           <div className={css.overlayAnchor} data-composer-overlay>{renderSlot('conversation.input.overlay', {})}</div>

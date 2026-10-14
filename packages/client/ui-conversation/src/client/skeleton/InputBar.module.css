@@ -124,13 +124,30 @@
 
 /* The draft's scrollport, and the ONLY scrolling box in the composer. The
    contenteditable grows with its content inside; the 14-line cap lives here
-   because this is the box the cap describes. */
+   because this is the box the cap describes. The transition serves the fork
+   fold below (max-height is the only animated property). */
 .scroll {
   max-height: var(--dsh-composer-text-max-height);
   overflow-y: auto;
   /* Keeps the bar off the card's right border; .input's right pad gives the
      4px back so the text column is unchanged. */
   margin-right: 4px;
+  transition: max-height 120ms var(--ds-ease-in-out);
+}
+
+/* FORK dsh-local (composer-collapse, 2026-10-14 ruling C): a contentful card
+   that lost the keyboard folds the scrollport to two lines (24px line box
+   × 2 — one line for the draft, one of headroom so an inline chip or a
+   wrapped tail is not clipped at the seam). Focus inside the card, or an
+   empty bar (already one line), restores the 14-line cap. */
+.cardFolded .scroll {
+  max-height: 48px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scroll {
+    transition: none;
+  }
 }
 
 /* The card's corner arc still overlaps the scrollport's top (8px top

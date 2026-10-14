@@ -1944,3 +1944,58 @@ describe('swallowed-click feedback', () => {
     expect(view.getByRole('alert').textContent ?? '').toContain('两次操作间隔太短，停止已忽略')
   })
 })
+
+describe('composer fold (fork: a contentful bar folds without the keyboard)', () => {
+  /** The card's fold marker: present while folded (empty string), absent while open. */
+  function folded(view: { container: HTMLElement }): boolean {
+    return view.container.querySelector('[data-composer-card]')!.hasAttribute('data-composer-folded')
+  }
+
+  it('folds a resting contentful composer and unfolds it for the keyboard', () => {
+    const { view, textarea } = bench({ draft: 'one\ntwo\nthree' })
+    fireEvent.blur(textarea)
+    expect(folded(view)).toBe(true)
+    fireEvent.focus(textarea)
+    expect(folded(view)).toBe(false)
+    fireEvent.blur(textarea)
+    expect(folded(view)).toBe(true)
+    // The draft survives the fold — the marker is presentation only.
+    expect(view.container.querySelector('[data-composer-input]')?.textContent ?? '').toContain('two')
+  })
+
+  it('keeps an empty composer open (it already occupies one line)', () => {
+    const { view, textarea } = bench()
+    fireEvent.blur(textarea)
+    expect(folded(view)).toBe(false)
+  })
+
+  it('folds a draft that arrives without the keyboard', () => {
+    const { view, shell, textarea } = bench()
+    fireEvent.blur(textarea)
+    expect(folded(view)).toBe(false)
+    writeDraft(shell, 'restored draft')
+    expect(folded(view)).toBe(true)
+  })
+
+  it.each(['hero', 'composer'] as const)('opens again when focus returns to the %s editor', (variant) => {
+    const { view, textarea } = bench({ variant, draft: 'draft text' })
+    fireEvent.blur(textarea)
+    expect(folded(view)).toBe(variant === 'composer')
+    fireEvent.focus(textarea)
+    expect(folded(view)).toBe(false)
+  })
+
+  it('keeps the no-workspace picker surface open', () => {
+    const { view, textarea } = bench({ inert: true, onRequestWorkspace: vi.fn() })
+    fireEvent.blur(textarea)
+    expect(folded(view)).toBe(false)
+  })
+
+  it('keeps an owner-blocked composer with a visible draft foldable', () => {
+    const { view, textarea } = bench({ draft: 'held draft', blocked: { reason: 'adjudicate' } })
+    fireEvent.blur(textarea)
+    expect(folded(view)).toBe(true)
+    fireEvent.focus(textarea)
+    expect(folded(view)).toBe(false)
+  })
+})
