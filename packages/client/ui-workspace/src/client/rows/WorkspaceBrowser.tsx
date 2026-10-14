@@ -53,6 +53,22 @@ const SEARCH_DEBOUNCE_MS = 250
 const SEARCH_QUERY_MAX_CODE_UNITS = 500
 /** Idle Session rows visible per Workspace before the local overflow control. */
 const COLLAPSED_SESSION_LIMIT = 5
+/** Session row height in px (Rows.module.css `.sessionRow`): the unit the fold quota is fitted against. */
+const SESSION_ROW_HEIGHT_PX = 32
+/** Vertical chrome the quota cannot cover (group header + overflow button + breathing room), in rows. */
+const SESSION_FOLD_CHROME_RESERVE_ROWS = 2
+
+/**
+ * FORK dsh-local (session-fold): the default fold quota follows the list
+ * viewport — every idle row that has room is shown, so a group only folds
+ * when the space genuinely runs out. The static default floors viewports
+ * without a measurable layout (rail, jsdom) and stays the minimum quota.
+ */
+export function fittedSessionLimitFor(viewportHeight: number): number {
+  const usable = viewportHeight - SESSION_FOLD_CHROME_RESERVE_ROWS * SESSION_ROW_HEIGHT_PX
+  if (usable <= 0) return COLLAPSED_SESSION_LIMIT
+  return Math.max(COLLAPSED_SESSION_LIMIT, Math.floor(usable / SESSION_ROW_HEIGHT_PX))
+}
 
 /** Keep provisional and running rows outside the idle-session quota, including parents with running children. */
 function collapsedSessionRows(sessions: readonly SessionNode[], limit = COLLAPSED_SESSION_LIMIT): {
@@ -298,6 +314,20 @@ function SessionTree({
     ? undefined
     : owningGroupKey(workspaces, revealSessionId)
   const [sessionLimits, setSessionLimits] = useState<Readonly<Record<string, number>>>({})
+  // FORK dsh-local (session-fold, marker: fittedSessionLimit): the default
+  // quota tracks the list viewport; explicit per-group limits still win.
+  const [fittedSessionLimit, setFittedSessionLimit] = useState(COLLAPSED_SESSION_LIMIT)
+  const listBodyRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const element = listBodyRef.current
+    // No measurable layout (rail, test DOM): keep the static default.
+    if (element === null || typeof ResizeObserver === 'undefined') return
+    const measure = (): void => { setFittedSessionLimit(fittedSessionLimitFor(element.clientHeight)) }
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    measure()
+    return () => { observer.disconnect() }
+  }, [])
   // Transient drag marker state; the selected mode owns the resulting order.
   const [drag, setDrag] = useState<DragState | null>(null)
   const sessionDropCommitted = useRef(false)
@@ -351,7 +381,7 @@ function SessionTree({
     if (revealSessionId === undefined || revealGroup === undefined) return
     const group = groups.find(candidate => candidate.key === revealGroup)
     if (group === undefined || !group.expanded || !group.sessions.some(row => row.id === revealSessionId)) return
-    if (collapsedSessionRows(group.sessions).rows.some(row => row.id === revealSessionId)) return
+    if (collapsedSessionRows(group.sessions, fittedSessionLimit).rows.some(row => row.id === revealSessionId)) return
     setSessionLimits(limits => limits[revealGroup] === Infinity ? limits : { ...limits, [revealGroup]: Infinity })
   }, [groups, revealGroup, revealSessionId])
   const now = Date.now()
@@ -416,8 +446,8 @@ function SessionTree({
     const workspaceId = group.workspaceId
     const children = childrenByParent.get(group.key) ?? []
     const compatibleDrag = workspaceDrag !== null && parents.get(workspaceDrag.workspaceId) === parents.get(group.key)
-    const collapsed = collapsedSessionRows(group.sessions)
-    const visible = collapsedSessionRows(group.sessions, sessionLimits[group.key])
+    const collapsed = collapsedSessionRows(group.sessions, fittedSessionLimit)
+    const visible = collapsedSessionRows(group.sessions, sessionLimits[group.key] ?? fittedSessionLimit)
     const sessionsExpanded = visible.hiddenCount === 0
     rowKeys.push(`workspace:${group.key}`)
     const childRows = group.expanded ? children.map(child => renderGroup(child, depth + 1)) : []
@@ -501,7 +531,7 @@ function SessionTree({
           t={t}
           onToggle={() => {
             if (group.expanded) {
-              setSessionLimits(limits => ({ ...limits, [group.key]: COLLAPSED_SESSION_LIMIT }))
+              setSessionLimits(limits => ({ ...limits, [group.key]: fittedSessionLimit }))
             }
             setGroupExpanded(group.key, !group.expanded)
           }}
@@ -588,10 +618,10 @@ function SessionTree({
               setSessionLimits(limits => ({
                 ...limits,
                 [group.key]: sessionsExpanded
-                  ? COLLAPSED_SESSION_LIMIT
+                  ? fittedSessionLimit
                   : visible.hiddenCount <= COLLAPSED_SESSION_LIMIT
                     ? Infinity
-                    : (limits[group.key] ?? COLLAPSED_SESSION_LIMIT) + COLLAPSED_SESSION_LIMIT,
+                    : (limits[group.key] ?? fittedSessionLimit) + COLLAPSED_SESSION_LIMIT,
               }))
             }}
           >
@@ -606,7 +636,7 @@ function SessionTree({
 
   const groupRows = rootGroups.map(group => renderGroup(group, 0))
   return (
-    <div className={clsx(css.treeBody, css.wide)}>
+    <div ref={listBodyRef} className={clsx(css.treeBody, css.wide)}>
       {workspaceDropAtListStart && <span className={css.listTopDropIndicator} aria-hidden="true" />}
       <AnimatedRows
         className={clsx(css.list, workspaceDropAtListStart && css.listTopDropActive)}
