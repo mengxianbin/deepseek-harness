@@ -177,35 +177,6 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
         />
       </button>
     </div>
-    <button
-      aria-label="New session"
-      class="newSession"
-      type="button"
-    >
-      <span
-        class="newSessionLabelMask"
-      >
-        <span
-          class="newSessionContent"
-        >
-          <svg
-            aria-hidden="true"
-            data-content="47b5e433"
-            fill="none"
-            height="14"
-            stroke-width="1.3"
-            viewBox="0 0 16 16"
-            width="14"
-            xmlns="http://www.w3.org/2000/svg"
-          />
-          <span
-            class="newSessionLabel wide"
-          >
-            New Session
-          </span>
-        </span>
-      </span>
-    </button>
     <div
       class="regionArea"
     >
@@ -236,6 +207,28 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
             style="display: contents;"
           />
         </div>
+        <span
+          class="root"
+        >
+          <button
+            aria-expanded="false"
+            aria-haspopup="menu"
+            aria-label="More"
+            class="iconButton panelMore"
+            type="button"
+          >
+            <svg
+              aria-hidden="true"
+              data-content="d1c61540"
+              fill="none"
+              height="16"
+              stroke-width="1"
+              viewBox="0 0 16 16"
+              width="16"
+              xmlns="http://www.w3.org/2000/svg"
+            />
+          </button>
+        </span>
       </div>
     </div>
   </div>
@@ -248,77 +241,82 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
   style="display: contents;"
 >
   <div
-    class="root collapsed railIn quietBars"
-    style=""
+    class="root fading quietBars"
+    style="width: 300px;"
   >
     <div
       class="logoRow"
       data-window-drag="true"
     >
       <button
-        aria-label="Open sidebar"
-        class="iconButton toggle"
+        aria-label="New session"
+        class="brand wide"
         type="button"
       >
         <span
           aria-hidden="true"
-          class="railMark"
+          class="brandIdentity"
         >
-          <div
-            data-slot="sidebar.brand.mark"
-            style="display: contents;"
+          <span
+            class="brandMark"
           >
-            <svg
-              aria-hidden="true"
-              data-content="965fe321"
-              fill="none"
-              height="17.6580310880829"
-              viewBox="0 0 23.16 17.04"
-              width="24"
-            />
-          </div>
+            <div
+              data-slot="sidebar.brand.mark"
+              style="display: contents;"
+            >
+              <svg
+                aria-hidden="true"
+                data-content="965fe321"
+                fill="none"
+                height="17.6580310880829"
+                viewBox="0 0 23.16 17.04"
+                width="24"
+              />
+            </div>
+          </span>
+          <span
+            class="brandName"
+          >
+            <div
+              data-slot="sidebar.brand.name"
+              style="display: contents;"
+            >
+              <span
+                class="localBuildBrand"
+              >
+                <span
+                  class="localBuildTitle"
+                >
+                  DSH Local Build
+                </span>
+                <span
+                  class="buildVersion"
+                >
+                  1.2.3-rc.4-abc1234-dirty
+                </span>
+              </span>
+            </div>
+          </span>
         </span>
+      </button>
+      <button
+        aria-label="Open sidebar"
+        class="iconButton toggle"
+        type="button"
+      >
         <svg
           aria-hidden="true"
           class="panelIcon"
           data-content="88020f34"
           fill="none"
-          height="18"
+          height="16"
           stroke-width="1"
           viewBox="0 0 16 16"
-          width="18"
+          width="16"
           xmlns="http://www.w3.org/2000/svg"
-        />
-        <div
-          data-slot="sidebar.toggle.badge"
-          style="display: contents;"
         />
       </button>
     </div>
-    <button
-      aria-label="New session"
-      class="newSession"
-      type="button"
-    >
-      <span
-        class="newSessionLabelMask"
-      >
-        <span
-          class="newSessionContent"
-        >
-          <svg
-            aria-hidden="true"
-            data-content="47b5e433"
-            fill="none"
-            height="18"
-            stroke-width="1"
-            viewBox="0 0 16 16"
-            width="18"
-            xmlns="http://www.w3.org/2000/svg"
-          />
-        </span>
-      </span>
-    </button>
     <div
       class="regionArea"
     >
@@ -349,6 +347,28 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
             style="display: contents;"
           />
         </div>
+        <span
+          class="root"
+        >
+          <button
+            aria-expanded="false"
+            aria-haspopup="menu"
+            aria-label="More"
+            class="iconButton panelMore"
+            type="button"
+          >
+            <svg
+              aria-hidden="true"
+              data-content="d1c61540"
+              fill="none"
+              height="16"
+              stroke-width="1"
+              viewBox="0 0 16 16"
+              width="16"
+              xmlns="http://www.w3.org/2000/svg"
+            />
+          </button>
+        </span>
       </div>
     </div>
   </div>
@@ -437,35 +457,6 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
         />
       </button>
     </div>
-    <button
-      aria-label="New session"
-      class="newSession"
-      type="button"
-    >
-      <span
-        class="newSessionLabelMask"
-      >
-        <span
-          class="newSessionContent"
-        >
-          <svg
-            aria-hidden="true"
-            data-content="47b5e433"
-            fill="none"
-            height="14"
-            stroke-width="1.3"
-            viewBox="0 0 16 16"
-            width="14"
-            xmlns="http://www.w3.org/2000/svg"
-          />
-          <span
-            class="newSessionLabel wide"
-          >
-            New Session
-          </span>
-        </span>
-      </span>
-    </button>
     <div
       class="regionArea"
     >
@@ -496,6 +487,28 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
             style="display: contents;"
           />
         </div>
+        <span
+          class="root"
+        >
+          <button
+            aria-expanded="false"
+            aria-haspopup="menu"
+            aria-label="More"
+            class="iconButton panelMore"
+            type="button"
+          >
+            <svg
+              aria-hidden="true"
+              data-content="d1c61540"
+              fill="none"
+              height="16"
+              stroke-width="1"
+              viewBox="0 0 16 16"
+              width="16"
+              xmlns="http://www.w3.org/2000/svg"
+            />
+          </button>
+        </span>
       </div>
     </div>
   </div>
@@ -584,35 +597,6 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
         />
       </button>
     </div>
-    <button
-      aria-label="新建会话"
-      class="newSession"
-      type="button"
-    >
-      <span
-        class="newSessionLabelMask"
-      >
-        <span
-          class="newSessionContent"
-        >
-          <svg
-            aria-hidden="true"
-            data-content="47b5e433"
-            fill="none"
-            height="14"
-            stroke-width="1.3"
-            viewBox="0 0 16 16"
-            width="14"
-            xmlns="http://www.w3.org/2000/svg"
-          />
-          <span
-            class="newSessionLabel wide"
-          >
-            新会话
-          </span>
-        </span>
-      </span>
-    </button>
     <div
       class="regionArea"
     >
@@ -643,6 +627,28 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
             style="display: contents;"
           />
         </div>
+        <span
+          class="root"
+        >
+          <button
+            aria-expanded="false"
+            aria-haspopup="menu"
+            aria-label="更多"
+            class="iconButton panelMore"
+            type="button"
+          >
+            <svg
+              aria-hidden="true"
+              data-content="d1c61540"
+              fill="none"
+              height="16"
+              stroke-width="1"
+              viewBox="0 0 16 16"
+              width="16"
+              xmlns="http://www.w3.org/2000/svg"
+            />
+          </button>
+        </span>
       </div>
     </div>
   </div>

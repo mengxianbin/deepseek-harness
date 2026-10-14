@@ -103,14 +103,17 @@ describe('SidebarRoot shell', () => {
     const shortcut: ShortcutCatalogEntry = { id: 'session.new' as ShortcutCommandId, label: 'New', aliases: [],
       binding: null, modified: true, conflicts: [], issue: null, keys: ['Ctrl', 'N'], aria: 'Control+N' }
     mountShell({ shortcuts: [shortcut] })
-    for (const button of screen.getAllByRole('button', { name: 'New session' })) {
+    // FORK dsh-local (sidebar-layout round 2): the wide non-darwin capsule is
+    // folded into the ⋯ menu, so the wordmark is the only top New Session
+    // control — it keeps the effective binding in ARIA.
+    const starters = screen.getAllByRole('button', { name: 'New session' })
+    expect(starters).toHaveLength(1)
+    for (const button of starters) {
       expect(button.getAttribute('aria-keyshortcuts')).toBe('Control+N')
     }
-    const expanded = screen.getAllByRole('button', { name: 'New session' }).find(button => button.querySelector('kbd') !== null)!
-    fireEvent.mouseEnter(expanded)
-    fireEvent.focus(expanded)
-    expect(screen.queryByRole('tooltip')).toBeNull()
-    expect(Array.from(expanded.querySelectorAll('kbd'), key => key.textContent)).toEqual(['Ctrl', 'N'])
+    // The ⋯ menu's head row starts a session through the same action.
+    fireEvent.click(screen.getByRole('button', { name: 'More' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'New Session' }))
     cleanup()
     render(<HeaderLeadingControls toggleSidebar={vi.fn()} startSession={vi.fn()} selectPanel={vi.fn()} t={t}
       usePanelInfo={neverHook} useSessions={neverHook} useSessionStatus={neverHook}
@@ -121,14 +124,18 @@ describe('SidebarRoot shell', () => {
     fireEvent.focus(button)
     expect(Array.from(screen.getByRole('tooltip').querySelectorAll('kbd'), key => key.textContent)).toEqual(['Ctrl', 'N'])
   })
-  it('routes New Session (capsule + wordmark) and the column toggle', () => {
+  it('routes New Session (wordmark + ⋯ menu head) and the column toggle', () => {
     const b = mountShell()
     expect(screen.getByTestId('custom-brand-mark')).toBeTruthy()
     expect(screen.getByTestId('custom-brand-name')).toBeTruthy()
-    // Expanded, both the wordmark and the capsule start a session.
+    // FORK dsh-local (sidebar-layout round 2): expanded, the wordmark starts a
+    // session; the capsule is folded into the ⋯ menu's head row.
     const starters = screen.getAllByRole('button', { name: 'New session' })
-    expect(starters).toHaveLength(2)
-    for (const button of starters) fireEvent.click(button)
+    expect(starters).toHaveLength(1)
+    fireEvent.click(starters[0]!)
+    expect(b.startSession).toHaveBeenCalledExactlyOnceWith()
+    fireEvent.click(screen.getByRole('button', { name: 'More' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'New Session' }))
     expect(b.startSession).toHaveBeenCalledTimes(2)
     fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
     expect(b.toggleSidebar).toHaveBeenCalledOnce()

@@ -84,38 +84,55 @@ function PanelRow({ id, label, wide, usePanelInfo, selectPanel, renderSlot }: Pa
 
 type PanelMoreProps =
   Pick<SidebarRootComponentProps, 'usePanelInfo' | 't'>
-  & Pick<InjectFace<SidebarRootInjected>, 'selectPanel'>
+  & Pick<InjectFace<SidebarRootInjected>, 'selectPanel' | 'startSession'>
   & Pick<PropsRenderSlots<'sidebar.panellist'>, 'renderSlot'>
   & { readonly panels: readonly SidebarPanelMetadata[] }
 
+/** The New Session row's menu id (an action, not a registered main panel). */
+const NEW_SESSION_ITEM = 'new-session'
+
 /**
- * The expanded sidebar's global-panel entries as one footer ⋯ menu.
- * FORK dsh-local (sidebar-layout, 2026-10-14): the top panel rows are
- * reserved for the session list — low-frequency global panels (plugins,
- * schedules, task board) live behind this control instead of owning rows
- * above the browsing region. The collapsed rail keeps its per-panel icon
- * column, so rail reachability is unchanged. Icon glyphs still come from
+ * The expanded sidebar's one footer ⋯ menu.
+ * FORK dsh-local (sidebar-layout, 2026-10-14): the top rows are reserved for
+ * the session list — New Session (round 2: the wide capsule is folded in
+ * here as the head row, sessions are opened from a workspace anyway) and the
+ * low-frequency global panels (plugins, schedules, task board) live behind
+ * this control instead of owning rows above the browsing region. The
+ * collapsed rail keeps both its New Session icon and its per-panel icon
+ * column, so rail reachability is unchanged. Panel glyphs still come from
  * each entry's own `sidebar.panellist` registration.
- * @param props - panel metadata plus the shell's selection/render shares.
- * @returns the ⋯ anchor with its panel menu.
+ * @param props - panel metadata plus the shell's action/render shares.
+ * @returns the ⋯ anchor with its menu.
  */
-function PanelMore({ panels, usePanelInfo, selectPanel, renderSlot, t }: PanelMoreProps) {
+function PanelMore({ panels, usePanelInfo, selectPanel, startSession, renderSlot, t }: PanelMoreProps) {
   const [open, setOpen] = useState(false)
   const activePanelId = usePanelInfo(info => info.activePanelId)
   return (
     <Menu
       open={open}
       onClose={() => { setOpen(false) }}
-      items={panels.map(({ id, label }) => ({
-        id,
-        label,
-        icon: renderSlot('sidebar.panellist', { size: 16, active: id === activePanelId }, { only: id }),
-      }))}
+      items={[
+        { id: NEW_SESSION_ITEM, label: t('session.new'), icon: <IconNewChatOutlineMedium size={16} /> },
+        ...(panels.length > 0
+          ? [
+            { type: 'separator' as const, id: 'panel-separator' },
+            ...panels.map(({ id, label }) => ({
+              id,
+              label,
+              icon: renderSlot('sidebar.panellist', { size: 16, active: id === activePanelId }, { only: id }),
+            })),
+          ]
+          : []),
+      ]}
       selectedIds={activePanelId === null ? [] : [activePanelId]}
       // Icon-labelled rows: the active marker rides the hover fill, a trailing
       // check would crowd the cell beside the glyph.
       selection="fill"
-      onSelect={(id) => { selectPanel(id as MainPanelId); setOpen(false) }}
+      onSelect={(id) => {
+        if (id === NEW_SESSION_ITEM) startSession()
+        else selectPanel(id as MainPanelId)
+        setOpen(false)
+      }}
       align="start"
       portal
       dense
@@ -312,27 +329,32 @@ export function SidebarRoot({
         {!darwinDesktop && toggle}
       </div>
 
-      {/* The label fades before the hover/focus shortcut, including on translucent backgrounds. */}
-      <Tooltip label={t('session.new.label')} shortcutKeys={newShortcut?.keys} delayMs={500} side={captionTooltipSide} disabled={wide}>
-        <button
-          type="button"
-          className={css.newSession}
-          aria-label={t('session.new.label')}
-          aria-keyshortcuts={newShortcut?.aria}
-          onClick={() => { startSession() }}
-        >
-          <span className={css.newSessionLabelMask}><span className={css.newSessionContent}>
-            {wide
-              ? <IconNewChatOutlineMedium size={14} />
-              : <IconNewChatOutlineRegular size={windowsTitlebar ? 16 : 18} />}
-            {wide && <span className={clsx(css.newSessionLabel, css.wide)}>{t('session.new')}</span>}
-          </span></span>
-          {wide && newShortcut !== undefined && newShortcut.keys.length > 0 && <span className={css.newSessionShortcut} aria-hidden="true">
-            <ShortcutKeys keys={newShortcut.keys} />
-          </span>}
-        </button>
-      </Tooltip>
-
+      {/* The label fades before the hover/focus shortcut, including on translucent backgrounds.
+          FORK dsh-local (sidebar-layout round 2): the wide non-darwin capsule is folded into
+          the footer ⋯ menu (head row) — sessions are opened from a workspace anyway; macOS
+          keeps its capsule (its wordmark is window-drag surface, not a button), and the rail
+          keeps its icon. */}
+      {(!wide || darwinDesktop) && (
+        <Tooltip label={t('session.new.label')} shortcutKeys={newShortcut?.keys} delayMs={500} side={captionTooltipSide} disabled={wide}>
+          <button
+            type="button"
+            className={css.newSession}
+            aria-label={t('session.new.label')}
+            aria-keyshortcuts={newShortcut?.aria}
+            onClick={() => { startSession() }}
+          >
+            <span className={css.newSessionLabelMask}><span className={css.newSessionContent}>
+              {wide
+                ? <IconNewChatOutlineMedium size={14} />
+                : <IconNewChatOutlineRegular size={windowsTitlebar ? 16 : 18} />}
+              {wide && <span className={clsx(css.newSessionLabel, css.wide)}>{t('session.new')}</span>}
+            </span></span>
+            {wide && newShortcut !== undefined && newShortcut.keys.length > 0 && <span className={css.newSessionShortcut} aria-hidden="true">
+              <ShortcutKeys keys={newShortcut.keys} />
+            </span>}
+          </button>
+        </Tooltip>
+      )}
       {/* FORK dsh-local (sidebar-layout): wide renders no top panel rows —
           the region below owns the reclaimed height; the rail keeps its
           per-panel icon column, entered at collapse settle as before. */}
@@ -366,21 +388,22 @@ export function SidebarRoot({
         <div className={css.footerActions}>
           {renderSlot('sidebar.footer.action', { wide })}
         </div>
-        {/* FORK dsh-local (sidebar-layout): the ⋯ panel menu shares the
-            Settings row instead of owning rows above the browsing region. */}
+        {/* FORK dsh-local (sidebar-layout): the ⋯ menu shares the right end of
+            the Settings row instead of owning rows above the browsing region. */}
         <div className={css.settingsRow}>
-          {wide && panels.length > 0 && (
+          <div className={css.settingsArea}>
+            {renderSlot('sidebar.settings', { wide })}
+          </div>
+          {wide && (
             <PanelMore
               panels={panels}
               usePanelInfo={usePanelInfo}
               selectPanel={selectPanel}
+              startSession={startSession}
               renderSlot={renderSlot}
               t={t}
             />
           )}
-          <div className={css.settingsArea}>
-            {renderSlot('sidebar.settings', { wide })}
-          </div>
         </div>
       </div>
     </div>
