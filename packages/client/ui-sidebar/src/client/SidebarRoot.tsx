@@ -301,16 +301,14 @@ export function SidebarRoot({
               <span className={css.brandMark}>
                 {renderSlot('sidebar.brand.mark', { size: 24 }, { fallback: <FishLogo size={24} /> })}
               </span>
+              {/* FORK dsh-local (brand row): the local-build label is dropped so the
+                  brand row is the whale mark alone; a complete build still shows its
+                  code badge (inert here — no DSH_CLIENT_VERSION in the web build). */}
               <span className={css.brandName}>
                 {renderSlot('sidebar.brand.name', {}, {
                   fallback: buildVersion === undefined
-                    ? <span className={css.fallbackBrandName}>{t('brand.localBuild')}</span>
-                    : (
-                      <span className={css.localBuildBrand}>
-                        <span className={css.localBuildTitle}>{t('brand.localBuild')}</span>
-                        <span className={css.buildVersion}>{buildVersion}</span>
-                      </span>
-                    ),
+                    ? null
+                    : <span className={css.buildVersion}>{buildVersion}</span>,
                 })}
               </span>
             </span>

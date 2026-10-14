@@ -155,7 +155,9 @@ describe('SidebarRoot shell', () => {
         options?.fallback ?? null) as SidebarRootComponentProps['renderSlot']}
     />)
 
-    expect(screen.getByText('DSH Local Build')).toBeTruthy()
+    // FORK dsh-local (brand row): the local-build label is gone — only the
+    // whale mark (and a complete build's code badge) remain.
+    expect(screen.queryByText('DSH Local Build')).toBeNull()
     expect(screen.getByText('1.2.3-rc.4-0123456-dirty')).toBeTruthy()
     expect(container.querySelector('svg')).not.toBeNull()
   })
@@ -175,12 +177,11 @@ describe('SidebarRoot shell', () => {
         options?.fallback ?? null) as SidebarRootComponentProps['renderSlot']}
     />)
 
-    expect(screen.getByText('DSH Local Build')).toBeTruthy()
     expect(screen.getByText(expected)).toBeTruthy()
   })
 
-  it('retains the local-build fallback without complete build metadata', () => {
-    render(<SidebarRoot
+  it('renders no local-build label without complete build metadata', () => {
+    const { container } = render(<SidebarRoot
       collapsed={false} width={300}
       useSessions={neverHook} useSessionStatus={useSessionStatus} useSessionRetainInfo={neverHook}
       usePanelInfo={usePanelInfo} selectPanel={() => {}} usePanels={selector => selector([])} useShortcuts={selector => selector([])}
@@ -190,7 +191,10 @@ describe('SidebarRoot shell', () => {
         options?.fallback ?? null) as SidebarRootComponentProps['renderSlot']}
     />)
 
-    expect(screen.getByText('DSH Local Build')).toBeTruthy()
+    // FORK dsh-local (brand row): no version metadata means the brand row is
+    // the whale mark alone.
+    expect(screen.queryByText('DSH Local Build')).toBeNull()
+    expect(container.querySelector('svg')).not.toBeNull()
   })
 
   it('hands the region its wide flag and clamps expandSidebar to the collapsed state', () => {
