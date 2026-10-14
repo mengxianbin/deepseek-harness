@@ -19,9 +19,11 @@
 import { useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
-  FishLogo, IconNewChatOutlineMedium, IconNewChatOutlineRegular, IconPanelLeftOutlineRegular, isDarwinDesktop, ShortcutKeys, Tooltip,
+  FishLogo, IconEllipsisOutlineRegular, IconNewChatOutlineMedium, IconNewChatOutlineRegular,
+  IconPanelLeftOutlineRegular, isDarwinDesktop, Menu, ShortcutKeys, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {
   SidebarPanelMetadata, SidebarRootComponentProps, SidebarRootInjected, SidebarSectionOwnerProps,
 } from './contract/slots.ts'
@@ -77,6 +79,61 @@ function PanelRow({ id, label, wide, usePanelInfo, selectPanel, renderSlot }: Pa
         )}
       </button>
     </Tooltip>
+  )
+}
+
+type PanelMoreProps =
+  Pick<SidebarRootComponentProps, 'usePanelInfo' | 't'>
+  & Pick<InjectFace<SidebarRootInjected>, 'selectPanel'>
+  & Pick<PropsRenderSlots<'sidebar.panellist'>, 'renderSlot'>
+  & { readonly panels: readonly SidebarPanelMetadata[] }
+
+/**
+ * The expanded sidebar's global-panel entries as one footer ⋯ menu.
+ * FORK dsh-local (sidebar-layout, 2026-10-14): the top panel rows are
+ * reserved for the session list — low-frequency global panels (plugins,
+ * schedules, task board) live behind this control instead of owning rows
+ * above the browsing region. The collapsed rail keeps its per-panel icon
+ * column, so rail reachability is unchanged. Icon glyphs still come from
+ * each entry's own `sidebar.panellist` registration.
+ * @param props - panel metadata plus the shell's selection/render shares.
+ * @returns the ⋯ anchor with its panel menu.
+ */
+function PanelMore({ panels, usePanelInfo, selectPanel, renderSlot, t }: PanelMoreProps) {
+  const [open, setOpen] = useState(false)
+  const activePanelId = usePanelInfo(info => info.activePanelId)
+  return (
+    <Menu
+      open={open}
+      onClose={() => { setOpen(false) }}
+      items={panels.map(({ id, label }) => ({
+        id,
+        label,
+        icon: renderSlot('sidebar.panellist', { size: 16, active: id === activePanelId }, { only: id }),
+      }))}
+      selectedIds={activePanelId === null ? [] : [activePanelId]}
+      // Icon-labelled rows: the active marker rides the hover fill, a trailing
+      // check would crowd the cell beside the glyph.
+      selection="fill"
+      onSelect={(id) => { selectPanel(id as MainPanelId); setOpen(false) }}
+      align="start"
+      portal
+      dense
+      anchor={(
+        <Tooltip label={t('panels.more')} delayMs={500}>
+          <button
+            type="button"
+            className={clsx(css.iconButton, css.panelMore)}
+            aria-label={t('panels.more')}
+            aria-haspopup="menu"
+            aria-expanded={open}
+            onClick={() => { setOpen(v => !v) }}
+          >
+            <IconEllipsisOutlineRegular />
+          </button>
+        </Tooltip>
+      )}
+    />
   )
 }
 
@@ -276,7 +333,10 @@ export function SidebarRoot({
         </button>
       </Tooltip>
 
-      {panels.length > 0 && (
+      {/* FORK dsh-local (sidebar-layout): wide renders no top panel rows —
+          the region below owns the reclaimed height; the rail keeps its
+          per-panel icon column, entered at collapse settle as before. */}
+      {!wide && panels.length > 0 && (
         <nav className={css.panelList} aria-label={t('panels.label')}>
           {panels.map(({ id, label }) => (
             <PanelRow
@@ -306,8 +366,21 @@ export function SidebarRoot({
         <div className={css.footerActions}>
           {renderSlot('sidebar.footer.action', { wide })}
         </div>
-        <div className={css.settingsArea}>
-          {renderSlot('sidebar.settings', { wide })}
+        {/* FORK dsh-local (sidebar-layout): the ⋯ panel menu shares the
+            Settings row instead of owning rows above the browsing region. */}
+        <div className={css.settingsRow}>
+          {wide && panels.length > 0 && (
+            <PanelMore
+              panels={panels}
+              usePanelInfo={usePanelInfo}
+              selectPanel={selectPanel}
+              renderSlot={renderSlot}
+              t={t}
+            />
+          )}
+          <div className={css.settingsArea}>
+            {renderSlot('sidebar.settings', { wide })}
+          </div>
         </div>
       </div>
     </div>

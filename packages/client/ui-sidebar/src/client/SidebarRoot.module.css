@@ -588,6 +588,28 @@
   display: flex;
 }
 
+/* Fork dsh-local (sidebar-layout): the ⋯ panel menu shares the Settings row
+   so the wide sidebar reclaims the top rows the panel list used to own. */
+.settingsRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.settingsRow .settingsArea {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+
+.panelMore {
+  flex: none;
+}
+
+.collapsed .settingsRow {
+  justify-content: center;
+}
+
 .collapsed .footArea {
   align-items: center;
 }
