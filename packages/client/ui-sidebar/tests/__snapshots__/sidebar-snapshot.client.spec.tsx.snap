@@ -106,7 +106,8 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
     >
       <button
         aria-label="New session"
-        class="brand wide"
+        class="brand wide brandCompact"
+        title="1.2.3-rc.4-abc1234-dirty"
         type="button"
       >
         <span
@@ -130,22 +131,64 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
               />
             </div>
           </span>
-          <span
-            class="brandName"
-          >
-            <div
-              data-slot="sidebar.brand.name"
-              style="display: contents;"
-            >
-              <span
-                class="buildVersion"
-              >
-                1.2.3-rc.4-abc1234-dirty
-              </span>
-            </div>
-          </span>
         </span>
       </button>
+      <span
+        aria-hidden="true"
+        class="brandName"
+      >
+        <div
+          data-slot="sidebar.brand.name"
+          style="display: contents;"
+        />
+      </span>
+      <span
+        class="usageGlance"
+      >
+        <button
+          aria-label="Open usage statistics"
+          class="glanceButton"
+          title="Open usage statistics"
+          type="button"
+        >
+          <span
+            class="glanceRow"
+            title="Plan cycle usage: used / total (%)"
+          >
+            <span
+              class="glanceTrack"
+            >
+              <span
+                class="glanceFill"
+                style="width: 0%;"
+              />
+            </span>
+            <span
+              class="glanceValue"
+            >
+              — / 100
+            </span>
+          </span>
+          <span
+            class="glanceRow"
+            title="Plan cycle days: elapsed / total"
+          >
+            <span
+              class="glanceTrack"
+            >
+              <span
+                class="glanceFill"
+                style="width: 0%;"
+              />
+            </span>
+            <span
+              class="glanceValue"
+            >
+              — / —
+            </span>
+          </span>
+        </button>
+      </span>
       <button
         aria-label="Collapse sidebar"
         class="iconButton toggle"
@@ -237,7 +280,8 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
     >
       <button
         aria-label="New session"
-        class="brand wide"
+        class="brand wide brandCompact"
+        title="1.2.3-rc.4-abc1234-dirty"
         type="button"
       >
         <span
@@ -261,22 +305,64 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
               />
             </div>
           </span>
-          <span
-            class="brandName"
-          >
-            <div
-              data-slot="sidebar.brand.name"
-              style="display: contents;"
-            >
-              <span
-                class="buildVersion"
-              >
-                1.2.3-rc.4-abc1234-dirty
-              </span>
-            </div>
-          </span>
         </span>
       </button>
+      <span
+        aria-hidden="true"
+        class="brandName"
+      >
+        <div
+          data-slot="sidebar.brand.name"
+          style="display: contents;"
+        />
+      </span>
+      <span
+        class="usageGlance"
+      >
+        <button
+          aria-label="Open usage statistics"
+          class="glanceButton"
+          title="Open usage statistics"
+          type="button"
+        >
+          <span
+            class="glanceRow"
+            title="Plan cycle usage: used / total (%)"
+          >
+            <span
+              class="glanceTrack"
+            >
+              <span
+                class="glanceFill"
+                style="width: 0%;"
+              />
+            </span>
+            <span
+              class="glanceValue"
+            >
+              — / 100
+            </span>
+          </span>
+          <span
+            class="glanceRow"
+            title="Plan cycle days: elapsed / total"
+          >
+            <span
+              class="glanceTrack"
+            >
+              <span
+                class="glanceFill"
+                style="width: 0%;"
+              />
+            </span>
+            <span
+              class="glanceValue"
+            >
+              — / —
+            </span>
+          </span>
+        </button>
+      </span>
       <button
         aria-label="Open sidebar"
         class="iconButton toggle"
@@ -368,7 +454,8 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
     >
       <button
         aria-label="New session"
-        class="brand wide"
+        class="brand wide brandCompact"
+        title="1.2.3-rc.4-abc1234-dirty"
         type="button"
       >
         <span
@@ -392,22 +479,64 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
               />
             </div>
           </span>
-          <span
-            class="brandName"
-          >
-            <div
-              data-slot="sidebar.brand.name"
-              style="display: contents;"
-            >
-              <span
-                class="buildVersion"
-              >
-                1.2.3-rc.4-abc1234-dirty
-              </span>
-            </div>
-          </span>
         </span>
       </button>
+      <span
+        aria-hidden="true"
+        class="brandName"
+      >
+        <div
+          data-slot="sidebar.brand.name"
+          style="display: contents;"
+        />
+      </span>
+      <span
+        class="usageGlance"
+      >
+        <button
+          aria-label="Open usage statistics"
+          class="glanceButton"
+          title="Open usage statistics"
+          type="button"
+        >
+          <span
+            class="glanceRow"
+            title="Plan cycle usage: used / total (%)"
+          >
+            <span
+              class="glanceTrack"
+            >
+              <span
+                class="glanceFill"
+                style="width: 0%;"
+              />
+            </span>
+            <span
+              class="glanceValue"
+            >
+              — / 100
+            </span>
+          </span>
+          <span
+            class="glanceRow"
+            title="Plan cycle days: elapsed / total"
+          >
+            <span
+              class="glanceTrack"
+            >
+              <span
+                class="glanceFill"
+                style="width: 0%;"
+              />
+            </span>
+            <span
+              class="glanceValue"
+            >
+              — / —
+            </span>
+          </span>
+        </button>
+      </span>
       <button
         aria-label="Collapse sidebar"
         class="iconButton toggle"
@@ -499,7 +628,8 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
     >
       <button
         aria-label="新建会话"
-        class="brand wide"
+        class="brand wide brandCompact"
+        title="1.2.3-rc.4-abc1234-dirty"
         type="button"
       >
         <span
@@ -523,22 +653,64 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
               />
             </div>
           </span>
-          <span
-            class="brandName"
-          >
-            <div
-              data-slot="sidebar.brand.name"
-              style="display: contents;"
-            >
-              <span
-                class="buildVersion"
-              >
-                1.2.3-rc.4-abc1234-dirty
-              </span>
-            </div>
-          </span>
         </span>
       </button>
+      <span
+        aria-hidden="true"
+        class="brandName"
+      >
+        <div
+          data-slot="sidebar.brand.name"
+          style="display: contents;"
+        />
+      </span>
+      <span
+        class="usageGlance"
+      >
+        <button
+          aria-label="打开使用统计"
+          class="glanceButton"
+          title="打开使用统计"
+          type="button"
+        >
+          <span
+            class="glanceRow"
+            title="套餐周期用量：已用 / 总量（%）"
+          >
+            <span
+              class="glanceTrack"
+            >
+              <span
+                class="glanceFill"
+                style="width: 0%;"
+              />
+            </span>
+            <span
+              class="glanceValue"
+            >
+              — / 100
+            </span>
+          </span>
+          <span
+            class="glanceRow"
+            title="套餐周期天数：已过 / 总计"
+          >
+            <span
+              class="glanceTrack"
+            >
+              <span
+                class="glanceFill"
+                style="width: 0%;"
+              />
+            </span>
+            <span
+              class="glanceValue"
+            >
+              — / —
+            </span>
+          </span>
+        </button>
+      </span>
       <button
         aria-label="收起侧边栏"
         class="iconButton toggle"

@@ -27,6 +27,7 @@ import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {
   SidebarPanelMetadata, SidebarRootComponentProps, SidebarRootInjected, SidebarSectionOwnerProps,
 } from './contract/slots.ts'
+import { UsageGlance } from './UsageGlance.tsx'
 import css from './SidebarRoot.module.css'
 
 /** Wide-content unmount delay; matches the 150ms wide-content fade-out. */
@@ -296,36 +297,42 @@ export function SidebarRoot({
             (a button would subtract itself through the global no-drag rule);
             the collapsed rail's logo is the expand toggle below instead. */}
         {wide && (() => {
+          // FORK dsh-local (usage glance): the brand button hugs the whale mark so
+          // the plan-glance control can ride the same logo row beside it. The
+          // local-build badge leaves the row (brand-row ruling, 2026-10-15: the
+          // row is the whale mark plus the glance) and surfaces as the brand
+          // button's hover title instead; a real `sidebar.brand.name` occupant
+          // still renders beside the button.
           const identity = (
             <span className={css.brandIdentity} aria-hidden="true">
               <span className={css.brandMark}>
                 {renderSlot('sidebar.brand.mark', { size: 24 }, { fallback: <FishLogo size={24} /> })}
               </span>
-              {/* FORK dsh-local (brand row): the local-build label is dropped so the
-                  brand row is the whale mark alone; a complete build still shows its
-                  code badge (inert here — no DSH_CLIENT_VERSION in the web build). */}
-              <span className={css.brandName}>
-                {renderSlot('sidebar.brand.name', {}, {
-                  fallback: buildVersion === undefined
-                    ? null
-                    : <span className={css.buildVersion}>{buildVersion}</span>,
-                })}
-              </span>
             </span>
           )
-          return darwinDesktop
-            ? <span className={clsx(css.brand, css.wide)}>{identity}</span>
-            : (
-              <button
-                type="button"
-                className={clsx(css.brand, css.wide)}
-                aria-label={t('session.new.label')}
-                aria-keyshortcuts={newShortcut?.aria}
-                onClick={() => { startSession() }}
-              >
-                {identity}
-              </button>
-            )
+          const brandName = renderSlot('sidebar.brand.name', {}, { fallback: null })
+          return (
+            <>
+              {darwinDesktop
+                ? <span className={clsx(css.brand, css.wide, css.brandCompact)}>{identity}</span>
+                : (
+                  <button
+                    type="button"
+                    className={clsx(css.brand, css.wide, css.brandCompact)}
+                    aria-label={t('session.new.label')}
+                    aria-keyshortcuts={newShortcut?.aria}
+                    {...(buildVersion === undefined ? {} : { title: buildVersion })}
+                    onClick={() => { startSession() }}
+                  >
+                    {identity}
+                  </button>
+                )}
+              {brandName === null || brandName === undefined
+                ? null
+                : <span className={css.brandName} aria-hidden="true">{brandName}</span>}
+              <UsageGlance t={t} />
+            </>
+          )
         })()}
         {!darwinDesktop && toggle}
       </div>
@@ -385,10 +392,11 @@ export function SidebarRoot({
       </div>
 
       {/* FORK dsh-local (sidebar-layout round 3): the wide foot is ONE row —
-          Settings, the ⋯ menu, then the footer actions (user ruling order) —
-          so the dsh-usage glance card (a width:100% DOM injection into this
-          column, not a slot occupant) keeps its own line. The rail keeps its
-          original stack. */}
+          Settings, the ⋯ menu, then the footer actions (user ruling order).
+          The dsh-usage glance card is removed (usage-glance ruling,
+          2026-10-15): the plan cycle pair now lives in the logo row beside
+          the whale mark (UsageGlance), so nothing injects above this row.
+          The rail keeps its original stack. */}
       <div className={css.footArea}>
         {wide
           ? (

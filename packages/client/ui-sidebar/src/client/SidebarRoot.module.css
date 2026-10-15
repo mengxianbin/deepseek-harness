@@ -590,9 +590,9 @@
 
 /* FORK dsh-local (sidebar-layout round 3): the wide foot is ONE row —
    Settings, the ⋯ menu, then the footer actions (user ruling order) — while
-   the width:100% seats above keep the rail's stack. The dsh-usage glance
-   card (a width:100% DOM injection into this column) stays on its own line
-   outside this row. */
+   the width:100% seats above keep the rail's stack. The dsh-usage glance card
+   is REMOVED (usage-glance ruling, 2026-10-15): its content moved to the
+   logo-row plan glance beside the whale mark, so nothing rides above this row. */
 .footRow {
   display: flex;
   align-items: center;
@@ -639,6 +639,80 @@
   width: auto;
 }
 
+/* FORK dsh-local (usage glance, 2026-10-15): the wide brand button hugs the
+   whale mark so the plan-glance control can ride the same logo row beside it;
+   the row's free space rides the glance wrapper, so the toggle keeps the right
+   edge. Both tracks carry the same fixed width and sit left-aligned, each with
+   its own numerator/denominator read-out immediately to the right. */
+.brandCompact {
+  flex: none;
+}
+
+.usageGlance {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.glanceButton {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 4px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.glanceButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.glanceRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.glanceTrack {
+  position: relative;
+  flex: 0 1 88px;
+  width: 88px;
+  min-width: 44px;
+  height: 6px;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-border-l2);
+  overflow: hidden;
+}
+
+.glanceFill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  height: 100%;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-state-business-primary);
+  transition: width 300ms ease;
+}
+
+.glanceValue {
+  flex: none;
+  min-width: 52px;
+  font-size: 10px;
+  line-height: 12px;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--dsw-alias-label-secondary);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .wide,
   .fading > *,
@@ -646,7 +720,8 @@
   .railIn .newSession,
   .railIn .panelList,
   .railIn .footArea,
-  .railIn .regionArea {
+  .railIn .regionArea,
+  .glanceFill {
     transition: none;
     animation: none;
   }

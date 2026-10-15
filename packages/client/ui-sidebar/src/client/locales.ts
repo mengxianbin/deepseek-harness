@@ -8,6 +8,9 @@ export const zh = {
   'toggle.collapse': '收起侧边栏',
   'panels.label': '全局面板',
   'panels.more': '更多',
+  'glance.open': '打开使用统计',
+  'glance.usage': '套餐周期用量：已用 / 总量（%）',
+  'glance.days': '套餐周期天数：已过 / 总计',
 } satisfies Record<string, string>
 
 /** The sidebar namespace key union. */
@@ -21,4 +24,7 @@ export const en = {
   'toggle.collapse': 'Collapse sidebar',
   'panels.label': 'Global panels',
   'panels.more': 'More',
+  'glance.open': 'Open usage statistics',
+  'glance.usage': 'Plan cycle usage: used / total (%)',
+  'glance.days': 'Plan cycle days: elapsed / total',
 } satisfies Record<SidebarKey, string>

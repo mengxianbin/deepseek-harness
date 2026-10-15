@@ -155,10 +155,12 @@ describe('SidebarRoot shell', () => {
         options?.fallback ?? null) as SidebarRootComponentProps['renderSlot']}
     />)
 
-    // FORK dsh-local (brand row): the local-build label is gone — only the
-    // whale mark (and a complete build's code badge) remain.
+    // FORK dsh-local (usage glance): the local-build label and code badge are
+    // gone from the row — only the whale mark remains, and the build version
+    // rides the brand button's hover title so the row's width stays free.
     expect(screen.queryByText('DSH Local Build')).toBeNull()
-    expect(screen.getByText('1.2.3-rc.4-0123456-dirty')).toBeTruthy()
+    expect(screen.queryByText('1.2.3-rc.4-0123456-dirty')).toBeNull()
+    expect(screen.getByRole('button', { name: 'New session' }).getAttribute('title')).toBe('1.2.3-rc.4-0123456-dirty')
     expect(container.querySelector('svg')).not.toBeNull()
   })
 
@@ -177,7 +179,9 @@ describe('SidebarRoot shell', () => {
         options?.fallback ?? null) as SidebarRootComponentProps['renderSlot']}
     />)
 
-    expect(screen.getByText(expected)).toBeTruthy()
+    // FORK dsh-local (usage glance): the version suffixes surface on the brand
+    // button's title instead of a visible badge in the logo row.
+    expect(screen.getByRole('button', { name: 'New session' }).getAttribute('title')).toBe(expected)
   })
 
   it('renders no local-build label without complete build metadata', () => {
