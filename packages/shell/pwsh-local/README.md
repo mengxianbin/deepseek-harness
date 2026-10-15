@@ -106,7 +106,7 @@ The foreground deadline starts before argv preparation and retains the same sign
 
 - The `graceMs` budget must be positive, finite, and no greater than `MAX_TIMER_DELAY_MS` so Node can represent it with one timer; invalid values are refused where they are written.
 - Environment layering is fixed: terminal overrides first, then the caller's `env`, then the trusted `dshEnv` snapshot last; the subprocess service scrubs ambient credentials and inherited `DSH_*` names independently.
-- Executable resolution is a pure function of `(configured, env, platform)` and re-probes the filesystem only when the stored `pwshPath` differs from the one the current executable was resolved from.
+- Executable resolution is a pure function of `(configured, env, platform)`. The stored `pwshPath` re-probes the filesystem when it differs from the one the current executable was resolved from, and — for an auto-resolved absolute path — whenever that file has since vanished, so an executable deleted after caching (a Store update replacing a versioned install directory) heals on the next command instead of failing for the host process's whole lifetime. An explicit `pwshPath` resolves to itself regardless of liveness.
 - A background process belongs to the subprocess service: it survives an executor-only reload and is killed and joined when the service disposes.
 
 </details>

@@ -41,9 +41,14 @@ export function candidatePwshPaths(env: NodeJS.ProcessEnv = process.env): string
  * following reparse points, so it sees the Store app execution alias where
  * stat hits the target's ACL (EACCES); Node reports that alias as a symlink
  * on current releases and as a plain file on older ones, and CreateProcess
- * resolves either shape. A real directory never matches.
+ * resolves either shape. A real directory never matches. Besides resolution's
+ * candidate walk, the executor calls this on its cached path before each
+ * command so an executable deleted after caching (a Store update replacing a
+ * versioned install directory) triggers a re-resolve instead of a dead spawn.
+ * @param candidate - absolute path probed for liveness.
+ * @returns whether the entry exists as a file (or link shape).
  */
-function candidateExists(candidate: string): boolean {
+export function candidateExists(candidate: string): boolean {
   try {
     const stat = lstatSync(candidate)
     return stat.isFile() || stat.isSymbolicLink()

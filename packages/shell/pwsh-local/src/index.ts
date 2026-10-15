@@ -25,7 +25,8 @@ import type { CollectedOutput, ShellExecRequest, ShellExecSpec, ShellExecution, 
 import type { SubprocessCollect, SubprocessHandle, SubprocessOutputReader, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import { clampTimeout, deadline, MAX_TIMER_DELAY_MS, timeoutOf } from '@deepseek-ai/dsh-timeout'
 /* jscpd:ignore-end */
-import { resolvePwshPath } from './resolve.ts'
+import { isAbsolute } from 'node:path'
+import { candidateExists, resolvePwshPath } from './resolve.ts'
 
 /* jscpd:ignore-start -- deliberate call-for-call mirror of dsh-bash-local (Agent Note: pwsh-tool-and-executor). */
 /**
@@ -158,12 +159,24 @@ export class PwshLocalExecutor extends ShellExecutor {
   /** The pwsh executable resolved from the current config. */
   private resolvedPwshPath: string
 
-  /** The pwsh executable every command runs through; a changed declared path is probed again on the next read. */
+  /**
+   * The pwsh executable every command runs through. A changed declared path is
+   * probed again on the next read; an auto-resolved path whose file has since
+   * been deleted (a Microsoft Store update replacing a versioned install
+   * directory) is re-resolved too, so the death heals on the next command
+   * instead of failing for the whole host-process lifetime. An explicit
+   * `pwshPath` still resolves to itself — liveness is the only new question.
+   */
   get pwshPath(): string {
     const declared = this.config.pwshPath.get()
     if (declared !== this.declaredPwshPath) {
       this.resolvedPwshPath = resolvePwshPath(declared)
       this.declaredPwshPath = declared
+    } else if (isAbsolute(this.resolvedPwshPath) && !candidateExists(this.resolvedPwshPath)) {
+      // The cached executable is gone (Store update / uninstall deleted the
+      // directory behind a PATH entry): re-probe, and resolvePwshPath skips
+      // every dead candidate on the way to a live one (or the bare fallback).
+      this.resolvedPwshPath = resolvePwshPath(declared)
     }
     return this.resolvedPwshPath
   }

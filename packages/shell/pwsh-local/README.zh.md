@@ -106,7 +106,7 @@ if (result.timedOut) console.log('timed out after', result.timeoutMs)
 
 - `graceMs` 预算必须为正有限值且不大于 `MAX_TIMER_DELAY_MS`，这样 Node 就能用一个定时器表示它；无效值在写入处被拒绝。
 - 环境分层固定：先是终端覆盖值，然后是调用方的 `env`，最后才是受信任的 `dshEnv` 快照；subprocess 服务独立清除环境中的凭据与继承的 `DSH_*` 名称。
-- 可执行文件解析是 `(configured, env, platform)` 的纯函数，仅当存储的 `pwshPath` 与当前可执行文件所依据的值不同时才重新探测文件系统。
+- 可执行文件解析是 `(configured, env, platform)` 的纯函数。存储的 `pwshPath` 在与当前可执行文件所依据的值不同时重新探测文件系统；对自动解析出的绝对路径，其文件此后消失（Store 更新替换版本化安装目录）时也会重新探测——缓存后被删的可执行文件在下一条命令即自愈，不再拖垮宿主进程的整个存活期。显式 `pwshPath` 无论是否存活都解析为它自身。
 - 后台进程属于 subprocess 服务：它能在仅重载执行器后存活，并在服务 dispose 时被终止并 join。
 
 </details>
