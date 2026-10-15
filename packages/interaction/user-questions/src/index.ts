@@ -58,6 +58,19 @@ function abortedQuestion(cause?: unknown): UserQuestionError {
   )
 }
 
+/** Pause between re-offers of a durable ask whose answerer disappeared. */
+const ANSWERER_REOFFER_MS = 1_500
+
+function reofferDelay(signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ANSWERER_REOFFER_MS)
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timer)
+      resolve()
+    }, { once: true })
+  })
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -277,6 +290,11 @@ export class UserQuestionService extends TypertRemoteService {
    * block forever, while a lineage-bearing session resumed as a new runtime
    * root may ask normally.
    *
+   * A request that carries its call id outlives an answerer that disappears
+   * mid-wait: when no answerer accepts, the waterfall is re-offered until one
+   * takes it again or the signal aborts, so a page reload or client rebuild
+   * no longer settles the call as `NO_PROVIDER`.
+   *
    * @param request Questions, owner agent, and abort signal.
    * @returns The answer chosen or typed by the human.
    * @throws {UserQuestionError} code `ASK_ABORTED` when the supplied signal
@@ -319,15 +337,34 @@ export class UserQuestionService extends TypertRemoteService {
       'no user-questions answerer accepted the request',
       'NO_PROVIDER',
     ))
+    const dispatch = () => (agent === undefined
+      ? this.ctx.waterfall('user-questions/request', request, noAnswerer)
+      : this.ctx.waterfall(
+        scopeTarget(agent, agent),
+        'user-questions/request',
+        { ...request, agent },
+        noAnswerer,
+      ))
     try {
-      return await (agent === undefined
-        ? this.ctx.waterfall('user-questions/request', request, noAnswerer)
-        : this.ctx.waterfall(
-          scopeTarget(agent, agent),
-          'user-questions/request',
-          { ...request, agent },
-          noAnswerer,
-        ))
+      // A durable ask — one carrying its call id — must outlive an answerer
+      // that disappears while the question is in flight: a page reload, tab
+      // close, or client HMR rebuild delegates every live waterfall, and the
+      // fallback would otherwise settle the call as NO_PROVIDER before the
+      // answerer could return. Re-dispatch until one takes the request again;
+      // the abort signal still ends the wait.
+      while (true) {
+        try {
+          return await dispatch()
+        } catch (error) {
+          if (request.wait?.callId === undefined
+            || !(error instanceof UserQuestionError && error.code === 'NO_PROVIDER')) {
+            throw error
+          }
+          if (request.signal?.aborted) throw abortedQuestion(error)
+          await reofferDelay(request.signal)
+          if (request.signal?.aborted) throw abortedQuestion(error)
+        }
+      }
     } catch (error) {
       const restored = restoreUserQuestionError(error)
       if (restored instanceof UserQuestionError) throw restored

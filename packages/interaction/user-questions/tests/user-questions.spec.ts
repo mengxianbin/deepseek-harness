@@ -75,6 +75,46 @@ describe('UserQuestionService', () => {
       .rejects.toMatchObject({ code: 'NO_PROVIDER' })
   })
 
+  it('re-offers a durable ask after its answerer delegates mid-wait', async () => {
+    vi.useFakeTimers()
+    onTestFinished(() => { vi.useRealTimers() })
+    const ctx = new Context()
+    await ctx.plugin(UserQuestionService)
+    // An answerer that hands every request onward — the delegate-to-nowhere
+    // shape of a page reload or client rebuild once it unregisters.
+    ctx.on('user-questions/request', (_request, next) => next())
+    const questions = [{ id: 'confirm', question: 'Proceed?' }]
+
+    const answer = ctx.userQuestions.ask({ questions, wait: { callId: 'call_durable' as ToolCallId } })
+    await vi.advanceTimersByTimeAsync(1_500)
+    registerAnswerer(ctx, provider('back'))
+    await vi.advanceTimersByTimeAsync(1_500)
+
+    await expect(answer).resolves.toEqual({ answers: [{ id: 'confirm', selected: ['back'] }] })
+  })
+
+  it('aborts a durable re-offering ask when its signal cancels', async () => {
+    vi.useFakeTimers()
+    onTestFinished(() => { vi.useRealTimers() })
+    const ctx = new Context()
+    await ctx.plugin(UserQuestionService)
+    const controller = new AbortController()
+
+    const answer = ctx.userQuestions.ask({
+      questions: [{ id: 'confirm', question: 'Proceed?' }],
+      wait: { callId: 'call_abort' as ToolCallId },
+      signal: controller.signal,
+    })
+    // Attach the rejection expectation before any timer tick so the async
+    // rejection inside the re-offer delay is never handler-less.
+    const settled = expect(answer).rejects.toMatchObject({ code: 'ASK_ABORTED' })
+    await vi.advanceTimersByTimeAsync(0)
+    controller.abort()
+    await vi.advanceTimersByTimeAsync(1_500)
+
+    await settled
+  })
+
   it('delegates through composed answerers', async () => {
     const ctx = new Context()
     await ctx.plugin(UserQuestionService)
