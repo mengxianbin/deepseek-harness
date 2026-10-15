@@ -27,6 +27,11 @@ import type {
 import type { QueueAction } from '@deepseek-ai/dsh-api-session-controller/types'
 import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
 import type { ComposerBlocks } from './contract/composer-blocks.ts'
+import {
+  deleteDraftAttachment, fileOfStoredDraftAttachment, loadDraftAttachments,
+  moveDraftAttachments, persistDraftAttachments, sweepDraftAttachments,
+} from './draft-attachment-store.ts'
+import type { StoredDraftAttachment } from './draft-attachment-store.ts'
 import type {
   DraftAttachmentId, DraftAttachmentSerializationResult, SessionInputResolver, SubmitAttachment, SubmitOutcome,
 } from './contract/input.ts'
@@ -186,17 +191,23 @@ export class ConversationController extends Service implements IConversation {
     this.input = config.input
     this.blocks = config.blocks
     this.maxConcurrentFileUploads = config.maxConcurrentFileUploads
-    ctx.effect(() => async () => {
-      const operations = [...this.fileUploadOperations.values()]
-      for (const operation of operations) operation.controller.abort()
-      await Promise.allSettled([...this.pendingFileUploads])
-      this.fileUploadOperations.clear()
-      this.fileUploadQueue.length = 0
-      for (const attachment of this.draftAttachments.values()) {
-        if (attachment.kind === 'image') revokePreview(attachment.previewUrl)
+    ctx.effect(() => {
+      // Retention runs once per fiber: a removed Session's unsent drafts and a
+      // write interrupted before its release reached storage are the only
+      // records that can outlive the draft that owned them.
+      void sweepDraftAttachments().catch((error: unknown) => { ctx.logger.warn(error) })
+      return async () => {
+        const operations = [...this.fileUploadOperations.values()]
+        for (const operation of operations) operation.controller.abort()
+        await Promise.allSettled([...this.pendingFileUploads])
+        this.fileUploadOperations.clear()
+        this.fileUploadQueue.length = 0
+        for (const attachment of this.draftAttachments.values()) {
+          if (attachment.kind === 'image') revokePreview(attachment.previewUrl)
+        }
+        this.draftAttachments.clear()
+        this.fileUploads.set({})
       }
-      this.draftAttachments.clear()
-      this.fileUploads.set({})
     }, 'conversation draft attachments')
   }
 
@@ -307,7 +318,7 @@ export class ConversationController extends Service implements IConversation {
    * @returns ordered draft descriptors.
    */
   createDrafts(sessionId: SessionId, files: readonly File[]): readonly ComposerAttachment[] {
-    return files.map((file) => {
+    const attachments = files.map((file) => {
       if (isImageMediaType(file.type)) {
         const attachment = browserDraftAttachment(file)
         this.draftAttachments.set(attachment.id, attachment)
@@ -323,6 +334,50 @@ export class ConversationController extends Service implements IConversation {
       this.beginFileUpload(sessionId, attachment)
       return attachment
     })
+    // Intake is the only moment the browser still holds the bytes and the
+    // draft has not been persisted anywhere else: the write starts here so a
+    // reload, a Host restart, or a rebuilt client-plugin fiber can rehydrate
+    // the rail from storage instead of losing the attachments.
+    this.retainDraftAttachments(sessionId, attachments)
+    return attachments
+  }
+
+  /**
+   * Rebuild one Session's persisted draft attachments after a reload, a Host
+   * restart, or a rebuilt client-plugin fiber. Records re-enter the registry
+   * under their original ids — images regain an object-URL preview, files
+   * restart their background upload for this Session.
+   * @param sessionId - Session whose unsent draft is being restored.
+   * @returns the restored ids in intake order, ready for the input state.
+   */
+  async restoreDraftAttachments(sessionId: SessionId): Promise<readonly DraftAttachmentId[]> {
+    let records: readonly StoredDraftAttachment[]
+    try {
+      records = await loadDraftAttachments(sessionId)
+    } catch (error: unknown) {
+      this.ctx.logger.warn(error)
+      return []
+    }
+    const restored: DraftAttachmentId[] = []
+    for (const record of records) {
+      const known = this.draftAttachments.get(record.id)
+      if (known === undefined) {
+        const file = fileOfStoredDraftAttachment(record)
+        if (record.kind === 'image') {
+          const image: ComposerImageAttachment = {
+            kind: 'image', id: record.id, file, previewUrl: URL.createObjectURL(file),
+          }
+          this.draftAttachments.set(record.id, image)
+          probeDimensions(image)
+        } else {
+          const stored: ComposerFileAttachment = { kind: 'file', id: record.id, file }
+          this.draftAttachments.set(record.id, stored)
+          this.beginFileUpload(sessionId, stored)
+        }
+      }
+      restored.push(record.id)
+    }
+    return restored
   }
 
   /**
@@ -347,6 +402,18 @@ export class ConversationController extends Service implements IConversation {
       const attachment = this.draftAttachments.get(id)
       if (attachment?.kind === 'file') this.beginFileUpload(sessionId, attachment)
     }
+    // The carried attachments now belong to the destination draft: their
+    // stored records re-key with them, so restoring the Session they left
+    // cannot resurrect a rail the carry already emptied.
+    void moveDraftAttachments(sessionId, ids).catch((error: unknown) => { this.ctx.logger.warn(error) })
+  }
+
+  /** Persist newly created draft attachments so a later restore can find them. */
+  private retainDraftAttachments(sessionId: SessionId, attachments: readonly ComposerAttachment[]): void {
+    if (attachments.length === 0) return
+    void persistDraftAttachments(sessionId, attachments.map(attachment => ({
+      id: attachment.id, kind: attachment.kind, file: attachment.file,
+    }))).catch((error: unknown) => { this.ctx.logger.warn(error) })
   }
 
   private beginFileUpload(sessionId: SessionId, attachment: ComposerFileAttachment): void {
@@ -463,24 +530,47 @@ export class ConversationController extends Service implements IConversation {
   }
 
   /**
-   * Release one browser-owned draft attachment, aborting its active upload.
+   * Release one browser-owned draft attachment, aborting its active upload
+   * and dropping its persisted bytes: the attachment left its draft for good
+   * (an explicit removal, a successful submit, or a refused intake).
    * @param id - draft attachment id.
    */
   releaseDraftAttachment(id: DraftAttachmentId): void {
+    if (this.detachDraftAttachment(id) === undefined) return
+    void deleteDraftAttachment(id).catch((error: unknown) => { this.ctx.logger.warn(error) })
+  }
+
+  /**
+   * Drop one attachment from page memory while keeping its persisted bytes:
+   * the scope teardown a reload, a Host restart, or a rebuilt client-plugin
+   * fiber performs must stay recoverable, unlike an explicit release.
+   * @param id - draft attachment id.
+   */
+  forgetDraftAttachment(id: DraftAttachmentId): void {
+    this.detachDraftAttachment(id)
+  }
+
+  /**
+   * Detach one attachment from this fiber's registry.
+   * @param id - draft attachment id.
+   * @returns the detached descriptor, or undefined when the id was unknown.
+   */
+  private detachDraftAttachment(id: DraftAttachmentId): ComposerAttachment | undefined {
     const attachment = this.draftAttachments.get(id)
-    if (attachment === undefined) return
+    if (attachment === undefined) return undefined
     const operation = this.fileUploadOperations.get(id)
     this.fileUploadOperations.delete(id)
     operation?.controller.abort()
     this.draftAttachments.delete(id)
     if (attachment.kind === 'image') {
       revokePreview(attachment.previewUrl)
-      return
+      return attachment
     }
     // The stored Host object stays durable; only the draft's upload state ends.
     this.fileUploads.set(Object.fromEntries(
       Object.entries(this.fileUploads.getSnapshot()).filter(([key]) => key !== id),
     ))
+    return attachment
   }
 
   /**
@@ -566,6 +656,9 @@ export class ConversationController extends Service implements IConversation {
         continue
       }
       this.draftAttachments.delete(attachment.id)
+      // Submitted attachments are durable Host content now; their draft bytes
+      // must not survive a later restore as a duplicate rail row.
+      void deleteDraftAttachment(attachment.id).catch((error: unknown) => { this.ctx.logger.warn(error) })
       if (ref !== undefined && 'mediaType' in ref
         && uiConversation?.seedImageUrl(sessionId, ref, attachment.previewUrl) === true) continue
       revokePreview(attachment.previewUrl)

@@ -311,6 +311,19 @@ export function mountAssembledApp(options: AssembledBootOptions = {}): Assembled
 }
 
 /**
+ * Tear the mounted application down inside the test: the same disposal the
+ * teardown performs, so a case can remount and prove what a reload rebuilds
+ * from persisted state instead of in-memory pages.
+ */
+export async function unmountAssembledApp(): Promise<void> {
+  await act(async () => { await unmount?.() })
+  unmount = undefined
+  cleanup()
+  document.body.innerHTML = ''
+  document.head.querySelectorAll('style[data-plugin]').forEach((style) => { style.remove() })
+}
+
+/**
  * Create a fixture Session through the sidebar and wait for its own composer to mount.
  * @param remote - fixture transport returned by mountAssembledApp.
  * @returns composer inside the Session named by this creation's reply.

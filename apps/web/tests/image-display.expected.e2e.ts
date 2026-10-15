@@ -7,8 +7,11 @@
 // sessions.attachment route, the single-click ImageLightbox, and the composer
 // intake chain (paste → ordered thumbnail rail → image-only send enablement → remove).
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { expect, it } from 'vitest'
-import { createAssembledSessionComposer, installAssembledBootEnv, mountAssembledApp } from './assembled-boot.ts'
+import { expect, it, vi } from 'vitest'
+import { FakeIndexedDB } from '../../../packages/client/ui-conversation/tests/support/fake-indexeddb.ts'
+import {
+  createAssembledSessionComposer, installAssembledBootEnv, mountAssembledApp, unmountAssembledApp,
+} from './assembled-boot.ts'
 
 installAssembledBootEnv()
 
@@ -211,4 +214,43 @@ it('renders a host dimension rejection with the projected 2000px limit', async (
     }
   `)
   expect(document.querySelector('[role="group"][aria-label="Pending attachments"]')).not.toBeNull()
+})
+
+it('restores pasted composer attachments after the app reloads', async () => {
+  // The composer's draft text already survives a reload through localStorage;
+  // this pins the other half: the attachment bytes persist at intake and the
+  // rebuilt shell puts the same thumbnail back on the rail (the reload a
+  // client-plugin rebuild also performs through its fiber teardown).
+  const fake = new FakeIndexedDB()
+  vi.stubGlobal('indexedDB', fake)
+  try {
+    const first = mountAssembledApp()
+    const textarea = await createAssembledSessionComposer(first)
+    const image = new File([new Uint8Array([137, 80, 78, 71])], 'kept.png', { type: 'image/png' })
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        items: [{ kind: 'file', type: 'image/png', getAsFile: () => image }],
+        getData: () => '',
+      },
+    })
+    await waitFor(() => {
+      const rail = document.querySelector('[role="group"][aria-label="Pending attachments"]')
+      if (rail === null) throw new Error('attachment rail missing after paste')
+      expect([...rail.querySelectorAll('img')].map(img => img.getAttribute('alt'))).toEqual(['kept.png'])
+    }, { timeout: 5_000 })
+    // Intake writes the bytes before the reload can race them.
+    await waitFor(() => { expect(fake.rows('attachments')).toHaveLength(1) })
+
+    await unmountAssembledApp()
+
+    const second = mountAssembledApp()
+    await createAssembledSessionComposer(second)
+    await waitFor(() => {
+      const rail = document.querySelector('[role="group"][aria-label="Pending attachments"]')
+      if (rail === null) throw new Error('attachment rail missing after reload')
+      expect([...rail.querySelectorAll('img')].map(img => img.getAttribute('alt'))).toEqual(['kept.png'])
+    }, { timeout: 10_000 })
+  } finally {
+    vi.unstubAllGlobals()
+  }
 })

@@ -49,6 +49,10 @@ interface ConversationAttachmentFace {
   ): Promise<SubmitOutcome>
   serializeDraftAttachments(attachmentIds: readonly DraftAttachmentId[]): Promise<DraftAttachmentSerializationResult>
   releaseDraftAttachment(id: DraftAttachmentId): void
+  /** Scope teardown: drop the attachment from page memory, keeping its persisted bytes. */
+  forgetDraftAttachment(id: DraftAttachmentId): void
+  /** Rebuild one Session's persisted draft attachments; resolves empty without storage. */
+  restoreDraftAttachments(sessionId: SessionId): Promise<readonly DraftAttachmentId[]>
 }
 
 /** Session-addressed input facade registry (SessionInputResolver face + composer-layer extras). */
@@ -158,7 +162,10 @@ export class InputHub implements SessionInputResolver {
         const drafts = shell.dispose()
         this.shells.delete(binding)
         const conversation = this.rootCtx.get('conversation') as ConversationAttachmentFace | undefined
-        for (const attachmentId of drafts) conversation?.releaseDraftAttachment(attachmentId)
+        // Scope teardown is not an explicit release: a reload, a Host restart,
+        // or a rebuilt client-plugin fiber runs this same path, so the
+        // persisted bytes stay behind for the next shell to restore.
+        for (const attachmentId of drafts) conversation?.forgetDraftAttachment(attachmentId)
       }
     }, 'conversation.input: session shell')
     actx.inject(['inputTriggers'], (scope) => {
@@ -168,7 +175,30 @@ export class InputHub implements SessionInputResolver {
       }, 'conversation.input: reference catalogs')
     })
     shell.setDraft(readConversationDraft(binding.sessionId))
+    void this.restoreDraftAttachments(binding, shell)
     return shell
+  }
+
+  /**
+   * Rehydrate this Session's persisted draft attachments into the shell that
+   * just adopted its saved text. The read starts before any view can write
+   * state, and ids only enter the input state once their bytes are back in the
+   * registry, so the composer's prune pass never races the restore.
+   * @param binding - Session binding owning the shell.
+   * @param shell - shell that adopted the persisted draft.
+   */
+  private async restoreDraftAttachments(binding: SessionBinding, shell: SessionInputShell): Promise<void> {
+    const conversation = this.rootCtx.get('conversation') as ConversationAttachmentFace | undefined
+    if (conversation === undefined || typeof conversation.restoreDraftAttachments !== 'function') return
+    let ids: readonly DraftAttachmentId[]
+    try {
+      ids = await conversation.restoreDraftAttachments(binding.sessionId)
+    } catch (error: unknown) {
+      this.rootCtx.logger.warn(error)
+      return
+    }
+    if (ids.length === 0 || this.shells.get(binding) !== shell) return
+    shell.addAttachments(ids)
   }
 
   /**

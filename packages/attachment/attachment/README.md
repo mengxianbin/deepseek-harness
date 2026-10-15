@@ -117,7 +117,7 @@ These limits describe what attachments can and cannot do; they are current packa
 
 - **Raster image limits apply to images only** — PNG, JPEG, WebP, and GIF are accepted as images under deployment limits; every other file is stored verbatim with no type or size limit, and audio and video have no dedicated handling yet.
 - **Attachments are never deleted** — stored images and files are retained indefinitely; nothing removes them automatically.
-- **Unsent drafts are not saved** — a composer draft stays in the browser until you submit the message.
+- **Unsent drafts stay in this browser** — the composer's draft text is saved per Session and its attachment bytes are saved in this origin's IndexedDB, both only until you submit or remove them; nothing syncs across devices.
 
 <a id="dev-note"></a>
 ### Dev Note
