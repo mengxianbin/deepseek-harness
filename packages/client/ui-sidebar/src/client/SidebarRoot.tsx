@@ -283,17 +283,18 @@ export function SidebarRoot({
         {/* FORK dsh-local (usage glance v2, 2026-10-15): the wide logo row no
             longer carries a brand / New Session button — New Session lives in
             the ⋯ menu head row (and the rail icon), and the row belongs to the
-            usage glance plus the panel toggle. A real `sidebar.brand.name`
-            occupant still renders ahead of the glance; the collapsed rail keeps
-            its whale-mark toggle. */}
+            usage glance plus the panel toggle. v2.1: the glance LEADS the row —
+            an occupant that renders an empty `sidebar.brand.name` div must not
+            push it right of that dead seat; a real occupant renders after it.
+            The collapsed rail keeps its whale-mark toggle. */}
         {wide && (() => {
           const brandName = renderSlot('sidebar.brand.name', {}, { fallback: null })
           return (
             <>
+              <UsageGlance t={t} />
               {brandName === null || brandName === undefined
                 ? null
                 : <span className={css.brandName} aria-hidden="true">{brandName}</span>}
-              <UsageGlance t={t} />
             </>
           )
         })()}

@@ -105,15 +105,6 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
       data-window-drag="true"
     >
       <span
-        aria-hidden="true"
-        class="brandName"
-      >
-        <div
-          data-slot="sidebar.brand.name"
-          style="display: contents;"
-        />
-      </span>
-      <span
         class="usageGlance"
       >
         <button
@@ -173,6 +164,15 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
             </span>
           </span>
         </button>
+      </span>
+      <span
+        aria-hidden="true"
+        class="brandName"
+      >
+        <div
+          data-slot="sidebar.brand.name"
+          style="display: contents;"
+        />
       </span>
       <button
         aria-label="Collapse sidebar"
@@ -373,15 +373,6 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
       data-window-drag="true"
     >
       <span
-        aria-hidden="true"
-        class="brandName"
-      >
-        <div
-          data-slot="sidebar.brand.name"
-          style="display: contents;"
-        />
-      </span>
-      <span
         class="usageGlance"
       >
         <button
@@ -441,6 +432,15 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
             </span>
           </span>
         </button>
+      </span>
+      <span
+        aria-hidden="true"
+        class="brandName"
+      >
+        <div
+          data-slot="sidebar.brand.name"
+          style="display: contents;"
+        />
       </span>
       <button
         aria-label="Collapse sidebar"
@@ -532,15 +532,6 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
       data-window-drag="true"
     >
       <span
-        aria-hidden="true"
-        class="brandName"
-      >
-        <div
-          data-slot="sidebar.brand.name"
-          style="display: contents;"
-        />
-      </span>
-      <span
         class="usageGlance"
       >
         <button
@@ -600,6 +591,15 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
             </span>
           </span>
         </button>
+      </span>
+      <span
+        aria-hidden="true"
+        class="brandName"
+      >
+        <div
+          data-slot="sidebar.brand.name"
+          style="display: contents;"
+        />
       </span>
       <button
         aria-label="收起侧边栏"

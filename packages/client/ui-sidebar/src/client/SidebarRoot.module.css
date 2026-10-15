@@ -657,7 +657,9 @@
   align-items: center;
   min-width: 0;
   max-width: 100%;
-  padding: 2px 4px;
+  /* FORK (usage glance v2.1): no left inset — the bars start flush with the
+     row's content edge, the slot the whale mark used to hold. */
+  padding: 2px 4px 2px 0;
   border: none;
   border-radius: var(--dsw-radius-sm);
   background: transparent;
