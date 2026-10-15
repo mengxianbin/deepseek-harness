@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
-import { deriveGlance, openUsageSection, UsageGlance, type UsageOverviewView } from '../src/client/UsageGlance.tsx'
+import { deriveGlance, formatCompactTokens, openUsageSection, UsageGlance, type UsageOverviewView } from '../src/client/UsageGlance.tsx'
 import { en } from '../src/client/locales.ts'
 
 const t = makeTranslate({ ...commonEn, ...en })
@@ -11,7 +11,7 @@ const t = makeTranslate({ ...commonEn, ...en })
 /** Fixed evaluation instant: 2026-10-15T10:30Z inside the monthly cycle. */
 const NOW = Date.parse('2026-10-15T10:30:00Z')
 
-/** The host overview shape the glance consumes (rolling + weekly + monthly). */
+/** The host overview shape the glance consumes (plan windows + today's ledger). */
 const OVERVIEW: UsageOverviewView = {
   current: { provider: 'opencode-go' },
   providers: [
@@ -26,6 +26,12 @@ const OVERVIEW: UsageOverviewView = {
       },
     },
   ],
+  usage: {
+    today: {
+      // 120M + 40M + 40M + 0 = 200M disjoint tokens.
+      totals: { inputTokens: 120_000_000, outputTokens: 40_000_000, cacheReadTokens: 40_000_000, cacheWriteTokens: 0 },
+    },
+  },
 }
 
 /** Flush pending microtasks and timers inside act(). */
@@ -43,10 +49,12 @@ afterEach(() => {
 })
 
 describe('deriveGlance', () => {
-  it('prefers the monthly cycle window and derives its day pair', () => {
+  it('prefers the monthly cycle window and derives its day pair plus today total', () => {
     // Monthly window: reset 2026-10-17T10:25:48Z → start 2026-09-17T10:25:48Z
-    // (30-day span), 28 elapsed days at NOW.
-    expect(deriveGlance(OVERVIEW, NOW)).toEqual({ percent: 85, elapsedDays: 28, totalDays: 30 })
+    // (30-day span), 28 elapsed days at NOW; today = the four buckets summed.
+    expect(deriveGlance(OVERVIEW, NOW)).toEqual({
+      percent: 85, elapsedDays: 28, totalDays: 30, todayTokens: 200_000_000,
+    })
   })
 
   it('falls back when the current provider reports no plan', () => {
@@ -62,8 +70,10 @@ describe('deriveGlance', () => {
     expect(deriveGlance(overview, NOW)).toEqual({ percent: 31, elapsedDays: 3, totalDays: 7 })
   })
 
-  it('returns null while no provider reports a cycle window', () => {
-    expect(deriveGlance({ providers: [{ provider: 'custom' }] }, NOW)).toBeNull()
+  it('returns no bar fields while no provider reports a cycle window', () => {
+    // Each fact degrades on its own — a ledger day without a plan still reads.
+    expect(deriveGlance({ providers: [{ provider: 'custom' }] }, NOW)).toEqual({})
+    expect(deriveGlance(OVERVIEW, NOW).todayTokens).toBe(200_000_000)
   })
 
   it('drops the day pair when the reset instant is missing', () => {
@@ -79,17 +89,34 @@ describe('deriveGlance', () => {
   })
 })
 
+describe('formatCompactTokens', () => {
+  it.each([
+    [0, '0'],
+    [999, '999'],
+    [1_500, '1.5K'],
+    [2_000, '2K'],
+    [1_000_000, '1M'],
+    [200_000_000, '200M'],
+    [1_050_000_000, '1.1B'],
+    [Number.NaN, '—'],
+  ])('formats %d as %s', (tokens, expected) => {
+    expect(formatCompactTokens(tokens)).toBe(expected)
+  })
+})
+
 describe('UsageGlance', () => {
-  it('renders both bars with their numerator/denominator read-outs', async () => {
+  it('renders both bars with their numerator/denominator read-outs and today total', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => OVERVIEW })))
     render(<UsageGlance t={t} />)
     // The component derives against the wall clock; assert the read-outs match
     // the same derivation so the expectation cannot drift across a day boundary.
-    const expected = deriveGlance(OVERVIEW)
-    expect(expected).not.toBeNull()
-    const { percent, elapsedDays, totalDays } = expected!
+    const { percent, elapsedDays, totalDays, todayTokens } = deriveGlance(OVERVIEW)
+    expect(percent).toBeDefined()
     expect(await screen.findByText(`${String(percent)} / 100`)).toBeTruthy()
     expect(screen.getByText(`${String(elapsedDays)} / ${String(totalDays)}`)).toBeTruthy()
+    // Today's column carries the compact total with its localized title.
+    expect(screen.getByText(formatCompactTokens(todayTokens!))).toBeTruthy()
+    expect(screen.getByTitle(t('glance.today')).textContent).toBe('200M')
     expect(screen.getByTitle(t('glance.usage'))).toBeTruthy()
     expect(screen.getByTitle(t('glance.days'))).toBeTruthy()
     expect(screen.getByRole('button', { name: t('glance.open') })).toBeTruthy()
@@ -115,11 +142,13 @@ describe('UsageGlance', () => {
     render(<UsageGlance t={t} />)
     expect(screen.getByText('— / 100')).toBeTruthy()
     expect(screen.getByText('— / —')).toBeTruthy()
+    expect(screen.getByTitle(t('glance.today')).textContent).toBe('—')
     await act(async () => {
       release?.({ status: 200, ok: true, json: async () => OVERVIEW })
       await Promise.resolve()
     })
     expect(await screen.findByText('85 / 100')).toBeTruthy()
+    expect(screen.getByTitle(t('glance.today')).textContent).toBe('200M')
   })
 
   it('refreshes on the poll cadence and on visibility changes', async () => {

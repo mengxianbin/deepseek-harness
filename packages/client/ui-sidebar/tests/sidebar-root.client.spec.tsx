@@ -103,14 +103,10 @@ describe('SidebarRoot shell', () => {
     const shortcut: ShortcutCatalogEntry = { id: 'session.new' as ShortcutCommandId, label: 'New', aliases: [],
       binding: null, modified: true, conflicts: [], issue: null, keys: ['Ctrl', 'N'], aria: 'Control+N' }
     mountShell({ shortcuts: [shortcut] })
-    // FORK dsh-local (sidebar-layout round 2): the wide non-darwin capsule is
-    // folded into the ⋯ menu, so the wordmark is the only top New Session
-    // control — it keeps the effective binding in ARIA.
-    const starters = screen.getAllByRole('button', { name: 'New session' })
-    expect(starters).toHaveLength(1)
-    for (const button of starters) {
-      expect(button.getAttribute('aria-keyshortcuts')).toBe('Control+N')
-    }
+    // FORK dsh-local (usage glance v2): the wide logo row carries no New
+    // Session button — the ⋯ menu head row owns the action, and the resident
+    // leading controls (rail / macOS header) keep the ARIA binding.
+    expect(screen.queryByRole('button', { name: 'New session' })).toBeNull()
     // The ⋯ menu's head row starts a session through the same action.
     fireEvent.click(screen.getByRole('button', { name: 'More' }))
     fireEvent.click(screen.getByRole('menuitem', { name: 'New Session' }))
@@ -124,24 +120,22 @@ describe('SidebarRoot shell', () => {
     fireEvent.focus(button)
     expect(Array.from(screen.getByRole('tooltip').querySelectorAll('kbd'), key => key.textContent)).toEqual(['Ctrl', 'N'])
   })
-  it('routes New Session (wordmark + ⋯ menu head) and the column toggle', () => {
+  it('routes New Session through the ⋯ menu and keeps the column toggle', () => {
     const b = mountShell()
-    expect(screen.getByTestId('custom-brand-mark')).toBeTruthy()
+    // FORK dsh-local (usage glance v2): the wordmark seat is gone from the
+    // logo row (no mark slot, no New Session button); a brand NAME occupant
+    // still renders ahead of the glance.
+    expect(screen.queryByTestId('custom-brand-mark')).toBeNull()
     expect(screen.getByTestId('custom-brand-name')).toBeTruthy()
-    // FORK dsh-local (sidebar-layout round 2): expanded, the wordmark starts a
-    // session; the capsule is folded into the ⋯ menu's head row.
-    const starters = screen.getAllByRole('button', { name: 'New session' })
-    expect(starters).toHaveLength(1)
-    fireEvent.click(starters[0]!)
-    expect(b.startSession).toHaveBeenCalledExactlyOnceWith()
+    expect(screen.queryByRole('button', { name: 'New session' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'More' }))
     fireEvent.click(screen.getByRole('menuitem', { name: 'New Session' }))
-    expect(b.startSession).toHaveBeenCalledTimes(2)
+    expect(b.startSession).toHaveBeenCalledExactlyOnceWith()
     fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
     expect(b.toggleSidebar).toHaveBeenCalledOnce()
   })
 
-  it('renders generic brand fallbacks when no package fills the slots', () => {
+  it('renders no brand surfaces when no package fills the slots', () => {
     vi.stubEnv('DSH_CLIENT_COMMIT_HASH', '0123456')
     vi.stubEnv('DSH_CLIENT_GIT_DIRTY', 'true')
     vi.stubEnv('DSH_CLIENT_VERSION', '1.2.3-rc.4')
@@ -155,19 +149,20 @@ describe('SidebarRoot shell', () => {
         options?.fallback ?? null) as SidebarRootComponentProps['renderSlot']}
     />)
 
-    // FORK dsh-local (usage glance): the local-build label and code badge are
-    // gone from the row — only the whale mark remains, and the build version
-    // rides the brand button's hover title so the row's width stays free.
+    // FORK dsh-local (usage glance v2): the wide logo row carries no brand
+    // button, label, badge, or version title — the row is the usage glance
+    // plus the panel toggle.
     expect(screen.queryByText('DSH Local Build')).toBeNull()
     expect(screen.queryByText('1.2.3-rc.4-0123456-dirty')).toBeNull()
-    expect(screen.getByRole('button', { name: 'New session' }).getAttribute('title')).toBe('1.2.3-rc.4-0123456-dirty')
-    expect(container.querySelector('svg')).not.toBeNull()
+    expect(container.querySelector('[title="1.2.3-rc.4-0123456-dirty"]')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'New session' })).toBeNull()
+    expect(screen.getByRole('button', { name: t('glance.open') })).toBeTruthy()
   })
 
   it.each([
     [{ DSH_CLIENT_VERSION: '1.2.3' }, '1.2.3'],
     [{ DSH_CLIENT_COMMIT_HASH: 'abcdef0', DSH_CLIENT_VERSION: '1.2.3' }, '1.2.3-abcdef0'],
-  ])('omits unavailable build-version suffixes from %j', (environment, expected) => {
+  ])('keeps build-version metadata out of the logo row from %j', (environment, expected) => {
     for (const [name, value] of Object.entries(environment)) vi.stubEnv(name, value)
     render(<SidebarRoot
       collapsed={false} width={300}
@@ -179,9 +174,10 @@ describe('SidebarRoot shell', () => {
         options?.fallback ?? null) as SidebarRootComponentProps['renderSlot']}
     />)
 
-    // FORK dsh-local (usage glance): the version suffixes surface on the brand
-    // button's title instead of a visible badge in the logo row.
-    expect(screen.getByRole('button', { name: 'New session' }).getAttribute('title')).toBe(expected)
+    // FORK dsh-local (usage glance v2): build metadata never surfaces in the
+    // logo row — the version-reading code path is gone with the brand button.
+    expect(document.querySelector(`[title="${expected}"]`)).toBeNull()
+    expect(screen.queryByText(expected)).toBeNull()
   })
 
   it('renders no local-build label without complete build metadata', () => {
@@ -195,10 +191,11 @@ describe('SidebarRoot shell', () => {
         options?.fallback ?? null) as SidebarRootComponentProps['renderSlot']}
     />)
 
-    // FORK dsh-local (brand row): no version metadata means the brand row is
-    // the whale mark alone.
+    // FORK dsh-local (usage glance v2): no version metadata and no brand
+    // surfaces at all — the row is the usage glance plus the toggle.
     expect(screen.queryByText('DSH Local Build')).toBeNull()
-    expect(container.querySelector('svg')).not.toBeNull()
+    expect(container.querySelector('[class*="logoRow"]')).not.toBeNull()
+    expect(screen.getByRole('button', { name: t('glance.open') })).toBeTruthy()
   })
 
   it('hands the region its wide flag and clamps expandSidebar to the collapsed state', () => {
@@ -266,11 +263,10 @@ it('keeps the macOS sidebar toggle in its top strip', () => {
   const shell = mountShell()
   fireEvent.click(screen.getByRole('button', { name: en['toggle.collapse'] }))
   expect(shell.toggleSidebar).toHaveBeenCalledOnce()
-  // The brand stays part of the logo row's window-drag surface: no button
-  // role (the global no-drag rule would subtract it); only the dedicated
-  // New Session capsule starts a session.
+  // FORK (usage glance v2): the brand surface is gone from the logo row; the
+  // dedicated macOS New Session capsule is the only top starter.
   expect(screen.getAllByRole('button', { name: 'New session' })).toHaveLength(1)
-  expect(screen.getByTestId('custom-brand-mark')).toBeTruthy()
+  expect(screen.queryByTestId('custom-brand-mark')).toBeNull()
 })
 
 it('wires the shell.leading controls to the shared sidebar actions', () => {

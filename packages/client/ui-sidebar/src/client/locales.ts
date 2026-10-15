@@ -11,6 +11,7 @@ export const zh = {
   'glance.open': '打开使用统计',
   'glance.usage': '套餐周期用量：已用 / 总量（%）',
   'glance.days': '套餐周期天数：已过 / 总计',
+  'glance.today': '今日 token 用量',
 } satisfies Record<string, string>
 
 /** The sidebar namespace key union. */
@@ -27,4 +28,5 @@ export const en = {
   'glance.open': 'Open usage statistics',
   'glance.usage': 'Plan cycle usage: used / total (%)',
   'glance.days': 'Plan cycle days: elapsed / total',
+  'glance.today': 'Tokens today',
 } satisfies Record<SidebarKey, string>

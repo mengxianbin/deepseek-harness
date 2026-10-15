@@ -104,35 +104,6 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
       class="logoRow"
       data-window-drag="true"
     >
-      <button
-        aria-label="New session"
-        class="brand wide brandCompact"
-        title="1.2.3-rc.4-abc1234-dirty"
-        type="button"
-      >
-        <span
-          aria-hidden="true"
-          class="brandIdentity"
-        >
-          <span
-            class="brandMark"
-          >
-            <div
-              data-slot="sidebar.brand.mark"
-              style="display: contents;"
-            >
-              <svg
-                aria-hidden="true"
-                data-content="965fe321"
-                fill="none"
-                height="17.6580310880829"
-                viewBox="0 0 23.16 17.04"
-                width="24"
-              />
-            </div>
-          </span>
-        </span>
-      </button>
       <span
         aria-hidden="true"
         class="brandName"
@@ -152,39 +123,53 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
           type="button"
         >
           <span
-            class="glanceRow"
-            title="Plan cycle usage: used / total (%)"
+            class="glanceBody"
           >
             <span
-              class="glanceTrack"
+              class="glanceRows"
             >
               <span
-                class="glanceFill"
-                style="width: 0%;"
-              />
-            </span>
-            <span
-              class="glanceValue"
-            >
-              — / 100
-            </span>
-          </span>
-          <span
-            class="glanceRow"
-            title="Plan cycle days: elapsed / total"
-          >
-            <span
-              class="glanceTrack"
-            >
+                class="glanceRow"
+                title="Plan cycle usage: used / total (%)"
+              >
+                <span
+                  class="glanceTrack"
+                >
+                  <span
+                    class="glanceFill"
+                    style="width: 0%;"
+                  />
+                </span>
+                <span
+                  class="glanceValue"
+                >
+                  — / 100
+                </span>
+              </span>
               <span
-                class="glanceFill"
-                style="width: 0%;"
-              />
+                class="glanceRow"
+                title="Plan cycle days: elapsed / total"
+              >
+                <span
+                  class="glanceTrack"
+                >
+                  <span
+                    class="glanceFill"
+                    style="width: 0%;"
+                  />
+                </span>
+                <span
+                  class="glanceValue"
+                >
+                  — / —
+                </span>
+              </span>
             </span>
             <span
-              class="glanceValue"
+              class="glanceToday"
+              title="Tokens today"
             >
-              — / —
+              —
             </span>
           </span>
         </button>
@@ -271,116 +256,77 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
   style="display: contents;"
 >
   <div
-    class="root fading quietBars"
-    style="width: 300px;"
+    class="root collapsed railIn quietBars"
+    style=""
   >
     <div
       class="logoRow"
       data-window-drag="true"
     >
       <button
-        aria-label="New session"
-        class="brand wide brandCompact"
-        title="1.2.3-rc.4-abc1234-dirty"
-        type="button"
-      >
-        <span
-          aria-hidden="true"
-          class="brandIdentity"
-        >
-          <span
-            class="brandMark"
-          >
-            <div
-              data-slot="sidebar.brand.mark"
-              style="display: contents;"
-            >
-              <svg
-                aria-hidden="true"
-                data-content="965fe321"
-                fill="none"
-                height="17.6580310880829"
-                viewBox="0 0 23.16 17.04"
-                width="24"
-              />
-            </div>
-          </span>
-        </span>
-      </button>
-      <span
-        aria-hidden="true"
-        class="brandName"
-      >
-        <div
-          data-slot="sidebar.brand.name"
-          style="display: contents;"
-        />
-      </span>
-      <span
-        class="usageGlance"
-      >
-        <button
-          aria-label="Open usage statistics"
-          class="glanceButton"
-          title="Open usage statistics"
-          type="button"
-        >
-          <span
-            class="glanceRow"
-            title="Plan cycle usage: used / total (%)"
-          >
-            <span
-              class="glanceTrack"
-            >
-              <span
-                class="glanceFill"
-                style="width: 0%;"
-              />
-            </span>
-            <span
-              class="glanceValue"
-            >
-              — / 100
-            </span>
-          </span>
-          <span
-            class="glanceRow"
-            title="Plan cycle days: elapsed / total"
-          >
-            <span
-              class="glanceTrack"
-            >
-              <span
-                class="glanceFill"
-                style="width: 0%;"
-              />
-            </span>
-            <span
-              class="glanceValue"
-            >
-              — / —
-            </span>
-          </span>
-        </button>
-      </span>
-      <button
         aria-label="Open sidebar"
         class="iconButton toggle"
         type="button"
       >
+        <span
+          aria-hidden="true"
+          class="railMark"
+        >
+          <div
+            data-slot="sidebar.brand.mark"
+            style="display: contents;"
+          >
+            <svg
+              aria-hidden="true"
+              data-content="965fe321"
+              fill="none"
+              height="17.6580310880829"
+              viewBox="0 0 23.16 17.04"
+              width="24"
+            />
+          </div>
+        </span>
         <svg
           aria-hidden="true"
           class="panelIcon"
           data-content="88020f34"
           fill="none"
-          height="16"
+          height="18"
           stroke-width="1"
           viewBox="0 0 16 16"
-          width="16"
+          width="18"
           xmlns="http://www.w3.org/2000/svg"
+        />
+        <div
+          data-slot="sidebar.toggle.badge"
+          style="display: contents;"
         />
       </button>
     </div>
+    <button
+      aria-label="New session"
+      class="newSession"
+      type="button"
+    >
+      <span
+        class="newSessionLabelMask"
+      >
+        <span
+          class="newSessionContent"
+        >
+          <svg
+            aria-hidden="true"
+            data-content="47b5e433"
+            fill="none"
+            height="18"
+            stroke-width="1"
+            viewBox="0 0 16 16"
+            width="18"
+            xmlns="http://www.w3.org/2000/svg"
+          />
+        </span>
+      </span>
+    </button>
     <div
       class="regionArea"
     >
@@ -393,46 +339,20 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
       class="footArea"
     >
       <div
-        class="footRow"
+        class="footerActions"
       >
         <div
-          class="settingsArea"
-        >
-          <div
-            data-slot="sidebar.settings"
-            style="display: contents;"
-          />
-        </div>
-        <span
-          class="root panelMoreSlot"
-        >
-          <button
-            aria-expanded="false"
-            aria-haspopup="menu"
-            aria-label="More"
-            class="iconButton panelMore"
-            type="button"
-          >
-            <svg
-              aria-hidden="true"
-              data-content="d1c61540"
-              fill="none"
-              height="16"
-              stroke-width="1"
-              viewBox="0 0 16 16"
-              width="16"
-              xmlns="http://www.w3.org/2000/svg"
-            />
-          </button>
-        </span>
+          data-slot="sidebar.footer.action"
+          style="display: contents;"
+        />
+      </div>
+      <div
+        class="settingsArea"
+      >
         <div
-          class="footerActions"
-        >
-          <div
-            data-slot="sidebar.footer.action"
-            style="display: contents;"
-          />
-        </div>
+          data-slot="sidebar.settings"
+          style="display: contents;"
+        />
       </div>
     </div>
   </div>
@@ -452,35 +372,6 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
       class="logoRow"
       data-window-drag="true"
     >
-      <button
-        aria-label="New session"
-        class="brand wide brandCompact"
-        title="1.2.3-rc.4-abc1234-dirty"
-        type="button"
-      >
-        <span
-          aria-hidden="true"
-          class="brandIdentity"
-        >
-          <span
-            class="brandMark"
-          >
-            <div
-              data-slot="sidebar.brand.mark"
-              style="display: contents;"
-            >
-              <svg
-                aria-hidden="true"
-                data-content="965fe321"
-                fill="none"
-                height="17.6580310880829"
-                viewBox="0 0 23.16 17.04"
-                width="24"
-              />
-            </div>
-          </span>
-        </span>
-      </button>
       <span
         aria-hidden="true"
         class="brandName"
@@ -500,39 +391,53 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
           type="button"
         >
           <span
-            class="glanceRow"
-            title="Plan cycle usage: used / total (%)"
+            class="glanceBody"
           >
             <span
-              class="glanceTrack"
+              class="glanceRows"
             >
               <span
-                class="glanceFill"
-                style="width: 0%;"
-              />
-            </span>
-            <span
-              class="glanceValue"
-            >
-              — / 100
-            </span>
-          </span>
-          <span
-            class="glanceRow"
-            title="Plan cycle days: elapsed / total"
-          >
-            <span
-              class="glanceTrack"
-            >
+                class="glanceRow"
+                title="Plan cycle usage: used / total (%)"
+              >
+                <span
+                  class="glanceTrack"
+                >
+                  <span
+                    class="glanceFill"
+                    style="width: 0%;"
+                  />
+                </span>
+                <span
+                  class="glanceValue"
+                >
+                  — / 100
+                </span>
+              </span>
               <span
-                class="glanceFill"
-                style="width: 0%;"
-              />
+                class="glanceRow"
+                title="Plan cycle days: elapsed / total"
+              >
+                <span
+                  class="glanceTrack"
+                >
+                  <span
+                    class="glanceFill"
+                    style="width: 0%;"
+                  />
+                </span>
+                <span
+                  class="glanceValue"
+                >
+                  — / —
+                </span>
+              </span>
             </span>
             <span
-              class="glanceValue"
+              class="glanceToday"
+              title="Tokens today"
             >
-              — / —
+              —
             </span>
           </span>
         </button>
@@ -626,35 +531,6 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
       class="logoRow"
       data-window-drag="true"
     >
-      <button
-        aria-label="新建会话"
-        class="brand wide brandCompact"
-        title="1.2.3-rc.4-abc1234-dirty"
-        type="button"
-      >
-        <span
-          aria-hidden="true"
-          class="brandIdentity"
-        >
-          <span
-            class="brandMark"
-          >
-            <div
-              data-slot="sidebar.brand.mark"
-              style="display: contents;"
-            >
-              <svg
-                aria-hidden="true"
-                data-content="965fe321"
-                fill="none"
-                height="17.6580310880829"
-                viewBox="0 0 23.16 17.04"
-                width="24"
-              />
-            </div>
-          </span>
-        </span>
-      </button>
       <span
         aria-hidden="true"
         class="brandName"
@@ -674,39 +550,53 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
           type="button"
         >
           <span
-            class="glanceRow"
-            title="套餐周期用量：已用 / 总量（%）"
+            class="glanceBody"
           >
             <span
-              class="glanceTrack"
+              class="glanceRows"
             >
               <span
-                class="glanceFill"
-                style="width: 0%;"
-              />
-            </span>
-            <span
-              class="glanceValue"
-            >
-              — / 100
-            </span>
-          </span>
-          <span
-            class="glanceRow"
-            title="套餐周期天数：已过 / 总计"
-          >
-            <span
-              class="glanceTrack"
-            >
+                class="glanceRow"
+                title="套餐周期用量：已用 / 总量（%）"
+              >
+                <span
+                  class="glanceTrack"
+                >
+                  <span
+                    class="glanceFill"
+                    style="width: 0%;"
+                  />
+                </span>
+                <span
+                  class="glanceValue"
+                >
+                  — / 100
+                </span>
+              </span>
               <span
-                class="glanceFill"
-                style="width: 0%;"
-              />
+                class="glanceRow"
+                title="套餐周期天数：已过 / 总计"
+              >
+                <span
+                  class="glanceTrack"
+                >
+                  <span
+                    class="glanceFill"
+                    style="width: 0%;"
+                  />
+                </span>
+                <span
+                  class="glanceValue"
+                >
+                  — / —
+                </span>
+              </span>
             </span>
             <span
-              class="glanceValue"
+              class="glanceToday"
+              title="今日 token 用量"
             >
-              — / —
+              —
             </span>
           </span>
         </button>

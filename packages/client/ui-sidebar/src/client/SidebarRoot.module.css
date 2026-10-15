@@ -639,15 +639,12 @@
   width: auto;
 }
 
-/* FORK dsh-local (usage glance, 2026-10-15): the wide brand button hugs the
-   whale mark so the plan-glance control can ride the same logo row beside it;
-   the row's free space rides the glance wrapper, so the toggle keeps the right
-   edge. Both tracks carry the same fixed width and sit left-aligned, each with
-   its own numerator/denominator read-out immediately to the right. */
-.brandCompact {
-  flex: none;
-}
-
+/* FORK dsh-local (usage glance v2, 2026-10-15): the wide logo row carries only
+   the usage glance and the panel toggle — no brand / New Session button. The
+   glance body is the two bars' column plus today's compact token total in its
+   own column to the right; both tracks keep the same fixed width and sit
+   left-aligned, each with its numerator/denominator read-out immediately to
+   the right of the track. */
 .usageGlance {
   flex: 1;
   min-width: 0;
@@ -657,8 +654,7 @@
 
 .glanceButton {
   display: inline-flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
   min-width: 0;
   max-width: 100%;
   padding: 2px 4px;
@@ -671,6 +667,21 @@
 
 .glanceButton:hover {
   background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.glanceBody {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.glanceRows {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
 }
 
 .glanceRow {
@@ -711,6 +722,16 @@
   letter-spacing: 0;
   font-variant-numeric: tabular-nums;
   color: var(--dsw-alias-label-secondary);
+}
+
+.glanceToday {
+  flex: none;
+  font-size: 12px;
+  line-height: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--dsw-alias-label-primary);
 }
 
 @media (prefers-reduced-motion: reduce) {

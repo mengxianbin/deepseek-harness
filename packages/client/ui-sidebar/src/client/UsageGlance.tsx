@@ -1,11 +1,12 @@
 /**
  * Plan-cycle usage glance for the logo row (FORK dsh-local, 2026-10-15).
  *
- * The two stacked progress bars sit beside the whale mark in the sidebar's
- * logo row: the upper bar is the current plan cycle's consumed share against
- * its total, the lower bar the cycle's elapsed days against its length. Both
- * tracks are the same fixed width and left-aligned; each carries its own
- * `numerator / denominator` read-out to the right of the track.
+ * The wide logo row belongs to this control (v2 removed the brand/New Session
+ * button): two stacked progress bars — the upper is the current plan cycle's
+ * consumed share against its total, the lower the cycle's elapsed days against
+ * its length — both tracks the same fixed width and left-aligned, each with
+ * its own `numerator / denominator` read-out, and today's compact token total
+ * in its own column to the right (`200M`).
  *
  * Data is the dsh-usage host half's same-origin overview — the plugin this
  * fork's settings section belongs to — read once on mount and refreshed on a
@@ -70,16 +71,27 @@ interface ProviderSnapshotView {
 export interface UsageOverviewView {
   current?: { provider?: string }
   providers?: ProviderSnapshotView[]
+  usage?: { today?: { totals?: UsageTokenTotalsView } }
 }
 
-/** What the two bars render once an overview has been derived. */
+/** Today's ledger totals; only the four disjoint token buckets count. */
+interface UsageTokenTotalsView {
+  inputTokens?: number
+  outputTokens?: number
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
+}
+
+/** What the glance renders once an overview has been derived. */
 export interface GlanceState {
   /** Consumed share of the cycle, 0-100 (rounded to whole percent). */
-  percent: number
+  percent?: number
   /** Whole days since the cycle started, when a cycle length is derivable. */
   elapsedDays?: number
   /** Cycle length in days, when derivable from the reset instant. */
   totalDays?: number
+  /** Today's token total across providers (the four disjoint buckets). */
+  todayTokens?: number
 }
 
 /**
@@ -131,19 +143,60 @@ function cycleDays(window: PlanWindowView, now: number): { elapsed?: number; tot
 }
 
 /**
- * Reduce an overview document to the two bars' read-outs.
+ * Today's token total across providers: the sum of the four disjoint buckets
+ * (reasoning rides inside output; calls and cost are not tokens).
+ * @param overview - the host overview document.
+ * @returns the total, or undefined when the host reports no ledger day.
+ */
+function todayTokenTotal(overview: UsageOverviewView): number | undefined {
+  const totals = overview.usage?.today?.totals
+  if (totals === undefined) return undefined
+  return (totals.inputTokens ?? 0) + (totals.outputTokens ?? 0)
+    + (totals.cacheReadTokens ?? 0) + (totals.cacheWriteTokens ?? 0)
+}
+
+/**
+ * Compact token total for the glance's today column (`200M`, `1.5K`, `1.1B`).
+ * Values below a thousand print verbatim; each scale drops a trailing `.0`.
+ * @param tokens - the total to format.
+ * @returns the compact string, or an em dash for unusable values.
+ */
+export function formatCompactTokens(tokens: number): string {
+  if (!Number.isFinite(tokens) || tokens < 0) return '—'
+  for (const [scale, suffix] of [[1e9, 'B'], [1e6, 'M'], [1e3, 'K']] as const) {
+    if (tokens >= scale) {
+      const scaled = (tokens / scale).toFixed(1)
+      return `${scaled.endsWith('.0') ? scaled.slice(0, -2) : scaled}${suffix}`
+    }
+  }
+  return String(Math.round(tokens))
+}
+
+/**
+ * Reduce an overview document to the glance's read-outs. Each fact degrades on
+ * its own: a host may report a ledger day without a plan window (or the
+ * reverse), and the field that cannot be derived is simply omitted.
  * @param overview - the host overview document.
  * @param now - the evaluation instant (injectable for tests).
- * @returns the glance state, or null while no provider reports a cycle window.
+ * @returns the glance state.
  */
-export function deriveGlance(overview: UsageOverviewView, now: number = Date.now()): GlanceState | null {
-  const window = pickWindow(overview)
-  if (window === undefined || typeof window.percent !== 'number') return null
-  const { elapsed, total } = cycleDays(window, now)
+export function deriveGlance(overview: UsageOverviewView, now: number = Date.now()): GlanceState {
+  let percent: number | undefined
+  let elapsed: number | undefined
+  let total: number | undefined
+  const chosen = pickWindow(overview)
+  if (chosen !== undefined && typeof chosen.percent === 'number') {
+    percent = Math.max(0, Math.min(100, Math.round(chosen.percent)))
+    const days = cycleDays(chosen, now)
+    elapsed = days.elapsed
+    total = days.total
+  }
+  const todayTokens = todayTokenTotal(overview)
   return {
-    percent: Math.max(0, Math.min(100, Math.round(window.percent))),
+    ...(percent === undefined ? {} : { percent }),
     ...(elapsed === undefined ? {} : { elapsedDays: elapsed }),
     ...(total === undefined ? {} : { totalDays: total }),
+    ...(todayTokens === undefined ? {} : { todayTokens }),
   }
 }
 
@@ -183,7 +236,8 @@ export interface UsageGlanceProps {
 }
 
 /**
- * Render the two-bar plan glance (or nothing while the host half is off).
+ * Render the plan glance: two bars with their read-outs plus today's compact
+ * token total (or nothing while the host half is off).
  * @param props - the shell's locale translator.
  * @returns the glance button, or null when the usage host serves no routes.
  */
@@ -234,6 +288,7 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
   const percent = state?.percent
   const elapsed = state?.elapsedDays
   const total = state?.totalDays
+  const todayTokens = state?.todayTokens
   return (
     <span className={css.usageGlance}>
       <button
@@ -243,23 +298,30 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
         title={t('glance.open')}
         onClick={() => { openUsageSection() }}
       >
-        <span className={css.glanceRow} title={t('glance.usage')}>
-          <span className={css.glanceTrack}>
-            <span className={css.glanceFill} style={{ width: `${percent ?? 0}%` }} />
+        <span className={css.glanceBody}>
+          <span className={css.glanceRows}>
+            <span className={css.glanceRow} title={t('glance.usage')}>
+              <span className={css.glanceTrack}>
+                <span className={css.glanceFill} style={{ width: `${percent ?? 0}%` }} />
+              </span>
+              <span className={css.glanceValue}>
+                {`${percent === undefined ? '—' : String(percent)} / 100`}
+              </span>
+            </span>
+            <span className={css.glanceRow} title={t('glance.days')}>
+              <span className={css.glanceTrack}>
+                <span
+                  className={css.glanceFill}
+                  style={{ width: `${total === undefined || total === 0 ? 0 : Math.round(((elapsed ?? 0) / total) * 100)}%` }}
+                />
+              </span>
+              <span className={css.glanceValue}>
+                {`${elapsed === undefined ? '—' : String(elapsed)} / ${total === undefined ? '—' : String(total)}`}
+              </span>
+            </span>
           </span>
-          <span className={css.glanceValue}>
-            {`${percent === undefined ? '—' : String(percent)} / 100`}
-          </span>
-        </span>
-        <span className={css.glanceRow} title={t('glance.days')}>
-          <span className={css.glanceTrack}>
-            <span
-              className={css.glanceFill}
-              style={{ width: `${total === undefined || total === 0 ? 0 : Math.round(((elapsed ?? 0) / total) * 100)}%` }}
-            />
-          </span>
-          <span className={css.glanceValue}>
-            {`${elapsed === undefined ? '—' : String(elapsed)} / ${total === undefined ? '—' : String(total)}`}
+          <span className={css.glanceToday} title={t('glance.today')}>
+            {todayTokens === undefined ? '—' : formatCompactTokens(todayTokens)}
           </span>
         </span>
       </button>

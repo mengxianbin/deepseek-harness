@@ -57,9 +57,9 @@ describe('sidebar shell snapshots', () => {
   it('renders the expanded column in the default locale (zh, no setLocale)', async () => {
     const { runtime } = await bench()
     const slot = runtime.renderSlot('sidebar', { collapsed: false, width: 300 })
-    // FORK (sidebar-layout round 2): the wide capsule is folded into the ⋯
-    // menu, so the wordmark is the only top New-session button.
-    expect(slot.view.getAllByRole('button', { name: '新建会话' })).toHaveLength(1)
+    // FORK (usage glance v2): the wide logo row carries no New-session button
+    // — the ⋯ menu head row owns the action.
+    expect(slot.view.queryByRole('button', { name: '新建会话' })).toBeNull()
     expect(slot.container).toMatchSnapshot()
     await runtime.dispose()
   })
@@ -67,9 +67,9 @@ describe('sidebar shell snapshots', () => {
   it('renders the expanded column (wordmark, capsule, empty holes)', async () => {
     const { runtime } = await bench({ locale: 'en' })
     const slot = runtime.renderSlot('sidebar', { collapsed: false, width: 300 })
-    // FORK (sidebar-layout round 2): the wide capsule is folded into the ⋯
-    // menu, so the wordmark is the only top New-session button.
-    expect(slot.view.getAllByRole('button', { name: 'New session' })).toHaveLength(1)
+    // FORK (usage glance v2): the wide logo row carries no New-session button
+    // — the ⋯ menu head row owns the action.
+    expect(slot.view.queryByRole('button', { name: 'New session' })).toBeNull()
     expect(slot.container).toMatchSnapshot()
     await runtime.dispose()
   })
@@ -93,11 +93,12 @@ describe('sidebar shell snapshots', () => {
   it('a locale switch refreshes mounted copy without re-registration', async () => {
     const { runtime, locale } = await bench()
     const slot = runtime.renderSlot('sidebar', { collapsed: false, width: 300 })
-    expect(slot.view.getAllByRole('button', { name: '新建会话' })).toHaveLength(1)
+    // FORK (usage glance v2): the glance control carries the locale-bound copy.
+    expect(slot.view.getAllByRole('button', { name: '打开使用统计' })).toHaveLength(1)
     // Same fiber, same registration: setLocale alone re-renders the outlet.
     act(() => { locale.setLocale('en') })
-    expect(slot.view.getAllByRole('button', { name: 'New session' })).toHaveLength(1)
-    expect(slot.view.queryByRole('button', { name: '新建会话' })).toBeNull()
+    expect(slot.view.getAllByRole('button', { name: 'Open usage statistics' })).toHaveLength(1)
+    expect(slot.view.queryByRole('button', { name: '打开使用统计' })).toBeNull()
     await runtime.dispose()
   })
 

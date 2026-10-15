@@ -41,16 +41,6 @@ const COLLAPSE_SETTLE_MS = 150
  */
 const SCROLLBAR_LINGER_MS = 2000
 
-/** Format complete-build metadata for the local brand badge. */
-function localBuildVersion(): string | undefined {
-  const version = process.env.DSH_CLIENT_VERSION
-  if (version === undefined) return undefined
-  const commit = process.env.DSH_CLIENT_COMMIT_HASH
-  return version
-    + (commit === undefined ? '' : `-${commit}`)
-    + (process.env.DSH_CLIENT_GIT_DIRTY === 'true' ? '-dirty' : '')
-}
-
 type PanelRowProps =
   Pick<SidebarPanelMetadata, 'id' | 'label'>
   & Pick<SidebarSectionOwnerProps, 'wide'>
@@ -247,8 +237,6 @@ export function SidebarRoot({
     }
   }, [pointerInside])
 
-  const buildVersion = localBuildVersion()
-
   const darwinDesktop = isDarwinDesktop()
   // Rail resting state is the whale mark; hovering swaps in the panel icon
   // (the expand affordance, figma sidebar-hover flow). Expanded it is a plain
@@ -292,41 +280,16 @@ export function SidebarRoot({
           traffic lights and keeps the toggle at the sidebar's top-right. */}
       {darwinDesktop && <div className={css.topStrip} data-window-drag>{toggle}</div>}
       <div className={css.logoRow} data-window-drag>
-        {/* Expanded, the brand doubles as a New Session shortcut — except on
-            macOS, where it stays part of the logo row's window-drag surface
-            (a button would subtract itself through the global no-drag rule);
-            the collapsed rail's logo is the expand toggle below instead. */}
+        {/* FORK dsh-local (usage glance v2, 2026-10-15): the wide logo row no
+            longer carries a brand / New Session button — New Session lives in
+            the ⋯ menu head row (and the rail icon), and the row belongs to the
+            usage glance plus the panel toggle. A real `sidebar.brand.name`
+            occupant still renders ahead of the glance; the collapsed rail keeps
+            its whale-mark toggle. */}
         {wide && (() => {
-          // FORK dsh-local (usage glance): the brand button hugs the whale mark so
-          // the plan-glance control can ride the same logo row beside it. The
-          // local-build badge leaves the row (brand-row ruling, 2026-10-15: the
-          // row is the whale mark plus the glance) and surfaces as the brand
-          // button's hover title instead; a real `sidebar.brand.name` occupant
-          // still renders beside the button.
-          const identity = (
-            <span className={css.brandIdentity} aria-hidden="true">
-              <span className={css.brandMark}>
-                {renderSlot('sidebar.brand.mark', { size: 24 }, { fallback: <FishLogo size={24} /> })}
-              </span>
-            </span>
-          )
           const brandName = renderSlot('sidebar.brand.name', {}, { fallback: null })
           return (
             <>
-              {darwinDesktop
-                ? <span className={clsx(css.brand, css.wide, css.brandCompact)}>{identity}</span>
-                : (
-                  <button
-                    type="button"
-                    className={clsx(css.brand, css.wide, css.brandCompact)}
-                    aria-label={t('session.new.label')}
-                    aria-keyshortcuts={newShortcut?.aria}
-                    {...(buildVersion === undefined ? {} : { title: buildVersion })}
-                    onClick={() => { startSession() }}
-                  >
-                    {identity}
-                  </button>
-                )}
               {brandName === null || brandName === undefined
                 ? null
                 : <span className={css.brandName} aria-hidden="true">{brandName}</span>}
