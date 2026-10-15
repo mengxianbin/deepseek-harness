@@ -160,7 +160,11 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
               class="glanceToday"
               title="Tokens today"
             >
-              —
+              <span
+                class="glanceTodayTokens"
+              >
+                —
+              </span>
             </span>
           </span>
         </button>
@@ -428,7 +432,11 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
               class="glanceToday"
               title="Tokens today"
             >
-              —
+              <span
+                class="glanceTodayTokens"
+              >
+                —
+              </span>
             </span>
           </span>
         </button>
@@ -587,7 +595,11 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
               class="glanceToday"
               title="今日 token 用量"
             >
-              —
+              <span
+                class="glanceTodayTokens"
+              >
+                —
+              </span>
             </span>
           </span>
         </button>

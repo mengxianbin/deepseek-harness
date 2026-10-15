@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
-import { deriveGlance, formatCompactTokens, openUsageSection, UsageGlance, type UsageOverviewView } from '../src/client/UsageGlance.tsx'
+import { deriveGlance, formatCompactTokens, formatRefreshStamp, openUsageSection, UsageGlance, type UsageOverviewView } from '../src/client/UsageGlance.tsx'
 import { en } from '../src/client/locales.ts'
 
 const t = makeTranslate({ ...commonEn, ...en })
@@ -104,6 +104,19 @@ describe('formatCompactTokens', () => {
   })
 })
 
+describe('formatRefreshStamp', () => {
+  it('renders a zero-padded two-digit local stamp', () => {
+    // Constructed from local wall-clock parts, so the expectation holds in any TZ.
+    const at = new Date(2026, 9, 15, 21, 30).getTime()
+    expect(formatRefreshStamp(at)).toBe('26.10.15 21:30')
+  })
+
+  it('pads single-digit month, day, hour, and minute', () => {
+    const at = new Date(2026, 0, 5, 7, 4).getTime()
+    expect(formatRefreshStamp(at)).toBe('26.01.05 07:04')
+  })
+})
+
 describe('UsageGlance', () => {
   it('renders both bars with their numerator/denominator read-outs and today total', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => OVERVIEW })))
@@ -114,9 +127,10 @@ describe('UsageGlance', () => {
     expect(percent).toBeDefined()
     expect(await screen.findByText(`${String(percent)} / 100`)).toBeTruthy()
     expect(screen.getByText(`${String(elapsedDays)} / ${String(totalDays)}`)).toBeTruthy()
-    // Today's column carries the compact total with its localized title.
+    // Today's column stacks the compact total over its refresh stamp.
     expect(screen.getByText(formatCompactTokens(todayTokens!))).toBeTruthy()
-    expect(screen.getByTitle(t('glance.today')).textContent).toBe('200M')
+    expect(screen.getByTitle(t('glance.today')).textContent).toContain('200M')
+    expect(screen.getByTitle(t('glance.today')).textContent).toMatch(/\d{2}\.\d{2}\.\d{2} \d{2}:\d{2}/)
     expect(screen.getByTitle(t('glance.usage'))).toBeTruthy()
     expect(screen.getByTitle(t('glance.days'))).toBeTruthy()
     expect(screen.getByRole('button', { name: t('glance.open') })).toBeTruthy()
@@ -142,13 +156,15 @@ describe('UsageGlance', () => {
     render(<UsageGlance t={t} />)
     expect(screen.getByText('— / 100')).toBeTruthy()
     expect(screen.getByText('— / —')).toBeTruthy()
-    expect(screen.getByTitle(t('glance.today')).textContent).toBe('—')
+    expect(screen.getByTitle(t('glance.today')).textContent).toContain('—')
+    expect(screen.getByTitle(t('glance.today')).textContent).not.toMatch(/\d{2}:\d{2}/)
     await act(async () => {
       release?.({ status: 200, ok: true, json: async () => OVERVIEW })
       await Promise.resolve()
     })
     expect(await screen.findByText('85 / 100')).toBeTruthy()
-    expect(screen.getByTitle(t('glance.today')).textContent).toBe('200M')
+    expect(screen.getByTitle(t('glance.today')).textContent).toContain('200M')
+    expect(screen.getByTitle(t('glance.today')).textContent).toMatch(/\d{2}\.\d{2}\.\d{2} \d{2}:\d{2}/)
   })
 
   it('refreshes on the poll cadence and on visibility changes', async () => {

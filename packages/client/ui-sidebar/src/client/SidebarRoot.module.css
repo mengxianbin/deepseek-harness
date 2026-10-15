@@ -726,14 +726,33 @@
   color: var(--dsw-alias-label-secondary);
 }
 
+/* FORK dsh-local (usage glance v2.2, 2026-10-15): the today column stacks — the
+   compact token total sits above a small data-refresh stamp (`26.10.15 21:30`),
+   both left-aligned in their own sub-column to the right of the two bars. */
 .glanceToday {
   flex: none;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
   font-size: 12px;
   line-height: 14px;
   font-weight: 600;
   letter-spacing: 0;
   font-variant-numeric: tabular-nums;
   color: var(--dsw-alias-label-primary);
+}
+
+.glanceTodayTokens {
+  display: block;
+}
+
+.glanceStamp {
+  display: block;
+  font-size: 9px;
+  line-height: 11px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-secondary);
 }
 
 @media (prefers-reduced-motion: reduce) {

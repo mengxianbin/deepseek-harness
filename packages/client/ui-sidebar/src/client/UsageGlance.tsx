@@ -6,7 +6,13 @@
  * consumed share against its total, the lower the cycle's elapsed days against
  * its length — both tracks the same fixed width and left-aligned, each with
  * its own `numerator / denominator` read-out, and today's compact token total
- * in its own column to the right (`200M`).
+ * in its own column to the right (`200M`). FORK dsh-local (v2.2, 2026-10-15):
+ * that column stacks vertically — the token total above, and below it a small
+ * data-refresh stamp (`26.10.15 21:30`) carrying the local wall-clock time the
+ * overview last loaded. FORK dsh-local (v2.2, 2026-10-15):
+ * that column stacks — the compact total on top, a small data-refresh stamp
+ * (`26.10.15 21:30`, local time of the last successful overview load)
+ * underneath.
  *
  * Data is the dsh-usage host half's same-origin overview — the plugin this
  * fork's settings section belongs to — read once on mount and refreshed on a
@@ -173,6 +179,21 @@ export function formatCompactTokens(tokens: number): string {
 }
 
 /**
+ * Local-time data-refresh stamp under the today total (`26.10.15 21:30`).
+ * Two-digit year, zero-padded month/day and a 24-hour clock, read in the
+ * viewer's own time zone — it is when the payload last arrived, so it ticks
+ * with the poll cadence, not with the ledger day.
+ * @param at - epoch-ms instant of the last successful overview load.
+ * @returns the stamp string.
+ */
+export function formatRefreshStamp(at: number): string {
+  const date = new Date(at)
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return `${pad(date.getFullYear() % 100)}.${pad(date.getMonth() + 1)}.${pad(date.getDate())}`
+    + ` ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+/**
  * Reduce an overview document to the glance's read-outs. Each fact degrades on
  * its own: a host may report a ledger day without a plan window (or the
  * reverse), and the field that cannot be derived is simply omitted.
@@ -237,13 +258,15 @@ export interface UsageGlanceProps {
 
 /**
  * Render the plan glance: two bars with their read-outs plus today's compact
- * token total (or nothing while the host half is off).
+ * token total stacked over its data-refresh stamp (or nothing while the host
+ * half is off).
  * @param props - the shell's locale translator.
  * @returns the glance button, or null when the usage host serves no routes.
  */
 export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
   const [state, setState] = useState<GlanceState | null>(null)
   const [hostOff, setHostOff] = useState(false)
+  const [refreshedAt, setRefreshedAt] = useState<number | undefined>(undefined)
 
   useEffect(() => {
     let alive = true
@@ -264,6 +287,7 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
         const overview = await response.json() as UsageOverviewView
         if (!alive || mine !== seq) return
         setState(deriveGlance(overview))
+        setRefreshedAt(Date.now())
         setHostOff(false)
       } catch {
         // Keep the last snapshot; the next tick retries.
@@ -321,7 +345,12 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
             </span>
           </span>
           <span className={css.glanceToday} title={t('glance.today')}>
-            {todayTokens === undefined ? '—' : formatCompactTokens(todayTokens)}
+            <span className={css.glanceTodayTokens}>
+              {todayTokens === undefined ? '—' : formatCompactTokens(todayTokens)}
+            </span>
+            {refreshedAt === undefined
+              ? null
+              : <span className={css.glanceStamp}>{formatRefreshStamp(refreshedAt)}</span>}
           </span>
         </span>
       </button>
