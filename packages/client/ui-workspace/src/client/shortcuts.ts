@@ -13,7 +13,6 @@ export interface WorkspaceShortcutState {
   readonly addRequested: boolean
   readonly directoryBusy: boolean
   readonly renameTarget: { readonly sessionId: SessionId; readonly currentTitle: string } | null
-  readonly forkError: { readonly reason: 'unavailable' | 'failed'; readonly seq: number } | null
 }
 
 interface WorkspaceShortcutControls {
@@ -24,8 +23,6 @@ interface WorkspaceShortcutControls {
   directoryBusy: (busy: boolean) => void
   rename: (sessionId: SessionId, currentTitle: string) => void
   closeRename: () => void
-  forkFailed: (reason: 'unavailable' | 'failed') => void
-  dismissForkError: () => void
 }
 
 /**
@@ -34,9 +31,8 @@ interface WorkspaceShortcutControls {
  */
 export function createWorkspaceShortcutControls(): WorkspaceShortcutControls {
   const state = createSnapshotStore<WorkspaceShortcutState>({
-    searchRequest: 0, addRequested: false, directoryBusy: false, renameTarget: null, forkError: null,
+    searchRequest: 0, addRequested: false, directoryBusy: false, renameTarget: null,
   })
-  let forkErrorSeq = 0
   return {
     state,
     search: () => { state.set({ ...state.getSnapshot(), searchRequest: state.getSnapshot().searchRequest + 1 }) },
@@ -47,28 +43,7 @@ export function createWorkspaceShortcutControls(): WorkspaceShortcutControls {
       state.set({ ...state.getSnapshot(), renameTarget: { sessionId, currentTitle } })
     },
     closeRename: () => { state.set({ ...state.getSnapshot(), renameTarget: null }) },
-    forkFailed: (reason) => {
-      forkErrorSeq += 1
-      state.set({ ...state.getSnapshot(), forkError: { reason, seq: forkErrorSeq } })
-    },
-    dismissForkError: () => { state.set({ ...state.getSnapshot(), forkError: null }) },
   }
-}
-
-/**
- * Classify one fork rejection for the shared browser notice.
- * Client plugin bundles do not share error-class identity, so the
- * `SessionForkError` is recognized by name and its RPC code by value; every
- * other failure (including a source Session the Host cannot read or validate)
- * reports as `failed`.
- * @param error - rejection raised by a fork request.
- * @returns `unavailable` when the source has no completed turn, otherwise `failed`.
- */
-export function forkFailureReason(error: unknown): 'unavailable' | 'failed' {
-  return error instanceof Error && error.name === 'SessionForkError'
-    && (error as SessionForkError).rpcError.code === 'session/fork-unavailable'
-    ? 'unavailable'
-    : 'failed'
 }
 
 /**
@@ -78,12 +53,14 @@ export function forkFailureReason(error: unknown): 'unavailable' | 'failed' {
  * @param navigation - session creation and forking from the pointer controls' navigation service.
  * @param controls - browser-owned opening requests.
  * @param archiveSession - shared archive action, including running-work confirmation and notices.
+ * @param reportForkFailure - publish a classified failure through the frame-wide notice channel.
  */
 export function installWorkspaceShortcuts(
   ctx: Context,
   navigation: Pick<UiWorkspace, 'startSession' | 'forkSession'>,
   controls: ReturnType<typeof createWorkspaceShortcutControls>,
   archiveSession: (sessionId: SessionId) => void,
+  reportForkFailure: (reason: 'unavailable' | 'failed') => void,
 ): void {
   const t = ctx.locale.bind('workspace')
   const current = () => Object.values(ctx.sessions.list.getSnapshot().byId)
@@ -123,9 +100,11 @@ export function installWorkspaceShortcuts(
     return { status: 'handled', run: () => {
       // The main view owns history opening for this target.
       void navigation.forkSession(target.id).catch((error: unknown) => {
-        const reason = forkFailureReason(error)
-        controls.forkFailed(reason)
-        if (reason === 'failed') console.warn('session fork rejected:', error)
+        // Client plugin bundles do not share error-class identity.
+        const unavailable = error instanceof Error && error.name === 'SessionForkError'
+          && (error as SessionForkError).rpcError.code === 'session/fork-unavailable'
+        reportForkFailure(unavailable ? 'unavailable' : 'failed')
+        if (!unavailable) console.warn('session fork rejected:', error)
       })
     } }
   })
