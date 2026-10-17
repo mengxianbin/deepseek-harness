@@ -799,7 +799,7 @@ describe('ui-workspace apply', () => {
     expect(b.selectPanel).not.toHaveBeenCalled()
   })
 
-  it.each(['ordinary', 'other-remote', 'unwrapped-migration'] as const)('keeps a fork failure silent after rejection (%s)', async (kind) => {
+  it.each(['ordinary', 'other-remote', 'unwrapped-migration'] as const)('surfaces a menu fork failure through the latest-notice toast after rejection (%s)', async (kind) => {
     const b = await bench()
     onTestFinished(() => b.ctx.fiber.dispose())
     declare(b.slots, 'sidebar.workspaces', 'shell.overlay')
@@ -824,7 +824,14 @@ describe('ui-workspace apply', () => {
     expect(forkSession).toHaveBeenCalledOnce()
     await expect(forkSession.mock.results[0]!.value).rejects.toBe(error)
 
-    expect(toast.hooks.toast.getSnapshot()).toBeNull()
+    // FORK dsh-local contract: a fork the Host refused never stays silent on
+    // the menu path either — the shortcut's notice carries the reason.
+    await vi.waitFor(() => {
+      expect(toast.hooks.toast.getSnapshot()).toMatchObject({
+        kind: 'shortcutForkFailed',
+        reason: kind === 'other-remote' ? 'unavailable' : 'failed',
+      })
+    })
     expect(b.fork).toHaveBeenCalledOnce()
     expect(b.retain).not.toHaveBeenCalled()
     expect(b.selectPanel).not.toHaveBeenCalled()
