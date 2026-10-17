@@ -8,6 +8,7 @@ import type { ChatConversationViewNode, ChatNode } from '../contract/chat-nodes.
 import type { ProcessActivitySummary, ProcessGroupData } from '../contract/process-groups.ts'
 import { hasAssistantReplyContent } from '../contract/assistant-content.ts'
 import { isVisibleChatNode } from '../contract/chat-visibility.ts'
+import { isQuestionCallNode } from '../contract/turn-process.ts'
 import { processActivity } from './process-activity.ts'
 
 const INDEPENDENT = new Set(['user', 'steering', 'turn-trigger', 'model-retry', 'turn-error', 'turn-max-tokens', 'turn-tail'])
@@ -162,7 +163,10 @@ class TurnGroups {
       const node = readNode(input, key)
       // Both Definitions retain the same message id; only its question presentation renders.
       if (node.kind === 'turn-trigger' && replies.has(node.id)) continue
-      if (INDEPENDENT.has(node.kind)) {
+      // A question row stays an independent root like a human message: the
+      // reader's own record of the question, its options, and the answer must
+      // survive the process fold that hides the agent's reasoning and commands.
+      if (INDEPENDENT.has(node.kind) || isQuestionCallNode(node)) {
         flush(true)
         emit(key, { kind: 'node', key })
       } else if (node.kind === 'turn-process') {

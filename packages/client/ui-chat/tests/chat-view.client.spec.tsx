@@ -2417,6 +2417,32 @@ describe('ChatView', () => {
     expect(members[0]?.getAttribute('hidden')).toBeNull()
   })
 
+  it('keeps the question row visible while the process around it folds', () => {
+    // The question, its options, and the answer are the reader's own record:
+    // the row never joins the foldable membership, so it stays on screen after
+    // the Turn completes even though the reasoning around it folds away.
+    const h = makeHarness({
+      nodes: [
+        user(1, 'question'),
+        reasoningAssistant(3, 'inspect the repository', 1, 1),
+        toolResult(4, 'ask', 'ask_user_question'),
+        assistant(5, 'final answer', 1, 2),
+      ],
+      turnEnds: new Map([[1, 6]]),
+    })
+    const view = render(<h.ChatView {...h.props} />)
+
+    const questionRow = view.container.querySelector<HTMLElement>('[data-chat-flow-kind="tool-call"]')
+    if (questionRow === null) throw new Error('expected the question row to render')
+    // The reader's own record never joins the foldable process membership...
+    expect(questionRow.hasAttribute('data-turn-process-member')).toBe(false)
+    expect(questionRow.getAttribute('hidden')).toBeNull()
+    expect(questionRow.closest('[data-chat-group-key]')).toBeNull()
+    const member = view.container.querySelector<HTMLElement>('[data-turn-process-member]')
+    expect(member?.getAttribute('hidden')).toBe('until-found')
+    expect(view.getByText('final answer')).toBeTruthy()
+  })
+
   it('omits injected Context while folding and revealing the visible Turn process', () => {
     const h = makeHarness({
       nodes: [

@@ -106,6 +106,11 @@ export interface TurnProcessChatData {
   readonly messageCount: number
   readonly toolCallCount: number
   readonly subagentCount: number
+  /**
+   * Whether the Turn recorded a question call; its process then opens by
+   * default. Absent on a legacy payload reads false.
+   */
+  readonly hasQuestion?: boolean
 }
 
 /**

@@ -37,7 +37,13 @@ export function QuestionToolRow({
             <span className={css.summary}><TextShimmer active={state === 'running'}>{summary}</TextShimmer></span>
           </>}
           <button type="button" className={questionCss.panelButton}
-            onClick={(event) => { event.stopPropagation(); if (!openPanel()) toggle() }}
+            onClick={(event) => {
+              event.stopPropagation()
+              // A provider with no panel falls back to the record — but only
+              // when it is not already on screen, so the pill never collapses
+              // the auto-opened transcript it is supposed to reveal.
+              if (!openPanel() && !open) toggle()
+            }}
             onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') event.stopPropagation() }}>
             <IconQuestionOutlineRegular />{panelLabel}
           </button>

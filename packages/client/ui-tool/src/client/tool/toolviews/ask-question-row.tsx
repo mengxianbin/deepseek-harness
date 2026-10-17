@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { IconQuestionOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent/types'
@@ -8,18 +8,21 @@ import type {
   AskUserQuestionAnswerItem, AskUserQuestionItem, AskUserQuestionOption,
 } from '@deepseek-ai/dsh-user-questions/types'
 import type { ToolCallViewProps, UserQuestionRecord } from '../../contract/slots.ts'
-import type { AskQuestionCardModel } from '../models/ask-question-card-model.ts'
+import type {
+  AskQuestionCardModel, QuestionCardOption, UnansweredQuestionCardItem,
+} from '../models/ask-question-card-model.ts'
 import { singleResultText } from '../models/raw-tool-call.ts'
 import { toolRowModel } from '../models/tool-call-model.ts'
 import { ToolRow } from '../components/ToolRow.tsx'
 import { QuestionToolRow } from '../components/QuestionToolRow.tsx'
 import { CONVERSATION_NS as NS } from '../../locale.ts'
 
-/** One paired question and its visible answer lines. */
+/** One paired question, its visible answer lines, and every offered option. */
 interface AnsweredQuestion {
   id: string
   question: string
   answers: string[]
+  options: QuestionCardOption[]
 }
 
 /** Everything a recorded answer batch puts on its row. */
@@ -89,6 +92,34 @@ function optionEntries(value: unknown): AskUserQuestionOption[] | undefined {
 }
 
 /**
+ * One question's options as card data, each marked with whether the recorded
+ * answer chose it, so unchosen choices stay readable after the interaction.
+ * @param question - the validated call question.
+ * @param selected - option labels the answer batch recorded for it.
+ * @returns the offered options in asker order.
+ */
+function cardOptions(question: AskUserQuestionItem, selected: readonly string[] = []): QuestionCardOption[] {
+  return (question.options ?? []).map(option => ({
+    label: option.label,
+    ...(option.description === undefined ? {} : { description: option.description }),
+    selected: selected.includes(option.label),
+  }))
+}
+
+/**
+ * Card items for questions no answer reached yet, carrying their options.
+ * @param questions - the validated call questions.
+ * @returns the unanswered transcript items.
+ */
+function unansweredItems(questions: readonly AskUserQuestionItem[]): UnansweredQuestionCardItem[] {
+  return questions.map(question => ({
+    id: question.id,
+    question: question.question,
+    options: cardOptions(question),
+  }))
+}
+
+/**
  * Questions from call JSON; null when pairing with answers would be ambiguous.
  * The optional presentation fields are carried for the read-only answer panel,
  * which renders the same option lists the user chose from; a malformed one is
@@ -142,6 +173,7 @@ function pairAnswers(
         ...answer.selected,
         ...(answer.custom === undefined || answer.custom === '' ? [] : [answer.custom]),
       ],
+      options: cardOptions(question, answer.selected),
     })
   }
   return paired
@@ -260,17 +292,23 @@ export function AskQuestionRow({
     state = 'ok'
     const questions = questionEntries(argsRaw)
     if (questions !== null) {
-      transcript = { kind: 'unanswered', questions, verdict: t('ask.cancelledDetail') }
+      transcript = { kind: 'unanswered', questions: unansweredItems(questions), verdict: t('ask.cancelledDetail') }
     }
   } else if (code === 'ASK_ABORTED') {
     summary = t('ask.interrupted')
     state = 'stopped'
     const questions = questionEntries(argsRaw)
     if (questions !== null) {
-      transcript = { kind: 'unanswered', questions, verdict: t('ask.interruptedDetail') }
+      transcript = { kind: 'unanswered', questions: unansweredItems(questions), verdict: t('ask.interruptedDetail') }
     }
   } else if (model.state === 'running') {
     summary = t('ask.waiting')
+    // The waiting row reads the questions too: the composer card can be
+    // closed or hidden, and the timeline must still say what is being asked.
+    const questions = questionEntries(argsRaw)
+    if (questions !== null) {
+      transcript = { kind: 'unanswered', questions: unansweredItems(questions), verdict: t('ask.waitingDetail') }
+    }
     if (answerable) rowAction = reopen
   } else if (code === 'TOOL_OUTCOME_UNKNOWN' && (answerable || settled !== undefined)) {
     // Crash repair has no pending result text; the durable question projection
@@ -279,11 +317,15 @@ export function AskQuestionRow({
     const questions = questionEntries(argsRaw)
     if (answerable) {
       summary = t('ask.pending')
-      if (questions !== null) transcript = { kind: 'unanswered', questions, verdict: t('ask.pendingDetail') }
+      if (questions !== null) {
+        transcript = { kind: 'unanswered', questions: unansweredItems(questions), verdict: t('ask.pendingDetail') }
+      }
       rowAction = reopen
     } else if (settled?.answers.length === 0) {
       summary = t('ask.closed')
-      if (questions !== null) transcript = { kind: 'unanswered', questions, verdict: t('ask.closedDetail') }
+      if (questions !== null) {
+        transcript = { kind: 'unanswered', questions: unansweredItems(questions), verdict: t('ask.closedDetail') }
+      }
     } else if (settled !== undefined) {
       const presentation = answeredPresentation(questions, settled.answers, t)
       summary = presentation.summary
@@ -305,13 +347,13 @@ export function AskQuestionRow({
       if (pending && answerable) {
         summary = t('ask.pending')
         if (questions !== null) {
-          transcript = { kind: 'unanswered', questions, verdict: t('ask.pendingDetail') }
+          transcript = { kind: 'unanswered', questions: unansweredItems(questions), verdict: t('ask.pendingDetail') }
         }
         rowAction = reopen
       } else if (pending && (settled === undefined || settled.answers.length === 0)) {
         summary = t('ask.closed')
         if (questions !== null) {
-          transcript = { kind: 'unanswered', questions, verdict: t('ask.closedDetail') }
+          transcript = { kind: 'unanswered', questions: unansweredItems(questions), verdict: t('ask.closedDetail') }
         }
       } else {
         // Answered either way: whether the answer beat the timeout is the
@@ -343,15 +385,32 @@ export function AskQuestionRow({
       rowActionLabel = t('ask.review')
     }
   }
+  // The transcript is the persistent record of the interaction, so the row
+  // opens it by default: the question, its options, and the answer must stay
+  // readable in the timeline without a click. A reader who collapses it keeps
+  // that choice, and the disclosure state stays shared with the row below.
+  const disclosure = useDisclosure()
+  const [autoOpen, setAutoOpen] = useState(true)
+  useEffect(() => {
+    if (autoOpen && transcript !== null && !disclosure.expanded) disclosure.setExpanded(true)
+  }, [autoOpen, transcript, disclosure.expanded, disclosure.setExpanded])
+  const sharedDisclosure = useCallback(() => ({
+    expanded: disclosure.expanded,
+    setExpanded: disclosure.setExpanded,
+    toggle: () => {
+      if (disclosure.expanded) setAutoOpen(false)
+      disclosure.toggle()
+    },
+  }), [disclosure.expanded, disclosure.setExpanded, disclosure.toggle])
   if (rowAction !== undefined) return (
-    <QuestionToolRow useDisclosure={useDisclosure} t={t} summary={summary}
+    <QuestionToolRow useDisclosure={sharedDisclosure} t={t} summary={summary}
       bodyRaw={transcript === null ? model.bodyRaw : null} output={transcript === null ? model.output : null}
       askQuestion={transcript} state={state} inspect={inspect}
       openPanel={rowAction} panelLabel={rowActionLabel} />
   )
   return (
     <ToolRow
-      useDisclosure={useDisclosure}
+      useDisclosure={sharedDisclosure}
       t={t}
       variant={model.variant}
       toolName={toolName}

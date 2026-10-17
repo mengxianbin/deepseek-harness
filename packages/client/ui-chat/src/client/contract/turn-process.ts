@@ -17,6 +17,32 @@ export interface TurnProcessSpec {
   readonly subagentCount: number
 }
 
+/** Durable Tool-call names that ask the user a question. */
+const QUESTION_CALL_TOOLS: ReadonlySet<string> = new Set(['ask_user_question', 'request_user_input'])
+
+/**
+ * Recognize a Tool call that asks the user a question.
+ * @param name - durable Tool-call name.
+ * @returns whether the call is a question call.
+ */
+export function isQuestionCallTool(name: string): boolean {
+  return QUESTION_CALL_TOOLS.has(name)
+}
+
+/**
+ * Recognize the Tool row that carries a user question.
+ *
+ * Such a row is the reader's own record — the question, its options, and the
+ * answer — so it stays outside the Turn-process fold instead of disappearing
+ * with the reasoning and command rows around it.
+ *
+ * @param node - Node under a Turn-process seat.
+ * @returns whether the node is a question Tool call.
+ */
+export function isQuestionCallNode(node: ChatNode | undefined): boolean {
+  return node?.kind === 'tool-call' && isQuestionCallTool(node.data.root.name)
+}
+
 const TURN_PROCESS_INDEPENDENT_KIND_LIST = [
   'system-prompt',
   'user',

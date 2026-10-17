@@ -515,6 +515,21 @@ describe('Definition-owned Chat process groups', () => {
     expect(store.groupSource(groups[2]!.key).getSnapshot()?.members.map(member => member.key)).toEqual(['b'])
   })
 
+  it('keeps a question row as an independent root instead of a group member', () => {
+    // Like a human message, the question record ends the preceding group and
+    // stays a root of its own, so folding the process never hides it.
+    const { store } = harness([assistant('think'), tool('ask', 3, 'ask_user_question'), tool('b', 4)])
+    expect(store.entries.map(entry => entry.kind)).toEqual(['group', 'node', 'group'])
+    expect(store.entries[1]).toEqual({ kind: 'node', key: 'ask' })
+    const groups = store.entries.filter(entry => entry.kind === 'group')
+    expect(store.groupSource(groups[0]!.key).getSnapshot()?.members.map(member => member.key)).toEqual(['assistant'])
+    expect(store.groupSource(groups[1]!.key).getSnapshot()?.members.map(member => member.key)).toEqual(['b'])
+    // The question no longer contributes a category to the group titles.
+    expect(store.groupSource(groups[1]!.key).getSnapshot()?.data.summary.counts.map(count => count.kind))
+      .toEqual(['commands'])
+    expect(store.groupSource(groups[0]!.key).getSnapshot()?.data.summary.counts).toEqual([])
+  })
+
   it('updates live detail without replacing roots or members and closes on the first reply', () => {
     const h = harness([assistant('first thought')])
     const first = h.store.entries[0]!

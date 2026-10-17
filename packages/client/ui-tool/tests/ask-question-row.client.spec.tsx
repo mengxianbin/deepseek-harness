@@ -157,7 +157,7 @@ describe('AskQuestionRow', () => {
 
     expect(view.container.querySelector('[data-disclosure-row]')?.getAttribute('role')).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { expanded: false }))
+    // The record opens by default: the questions stay readable without a click.
     expect(screen.getByRole('button', { expanded: true })).toBeTruthy()
     expect(revealPanel).not.toHaveBeenCalled()
 
@@ -223,16 +223,21 @@ describe('AskQuestionRow', () => {
     expect(screen.queryByRole('button', { name: PILL.review })).toBeNull()
   })
 
-  it('keyboard activation of the pill leaves the row disclosure closed', () => {
+  it('keyboard activation of the pill leaves the row disclosure alone', () => {
     // The pill is a button inside the row's own button: without the keydown
-    // guard, one Enter would both reopen the panel and expand the record.
+    // guard, one Enter would both reopen the panel and toggle the record.
     const revealPanel = vi.fn(() => true)
     render(<AskQuestionRow {...rowProps(
       resultNode(READABLE_ARGS, PENDING_RESULT),
       { answerable: ['c1'], revealPanel },
     )} />)
+    // Collapse the auto-opened record first, so a leaking toggle is visible.
+    fireEvent.click(screen.getByRole('button', { expanded: true }))
+    expect(screen.getByRole('button', { expanded: false })).toBeTruthy()
+
     fireEvent.keyDown(screen.getByRole('button', { name: PILL.reopen }), { key: 'Enter' })
     expect(screen.getByRole('button', { expanded: false })).toBeTruthy()
+    expect(revealPanel).not.toHaveBeenCalled()
   })
 
   it('a reopen that finds no panel left expands the record instead of doing nothing', () => {
@@ -258,7 +263,6 @@ describe('AskQuestionRow', () => {
     expect(screen.getByText('已结束')).toBeTruthy()
     expect(screen.queryByRole('button', { name: PILL.reopen })).toBeNull()
     expect(screen.queryByRole('button', { name: PILL.review })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { expanded: false }))
     expect(screen.getByText('该问题已结束，结果见下方对话')).toBeTruthy()
     expect(screen.getByText('What do you want to accomplish?')).toBeTruthy()
     expect(screen.queryByText(/"pending"/)).toBeNull()
@@ -324,7 +328,7 @@ describe('AskQuestionRow', () => {
     expect(screen.queryByText('已结束')).toBeNull()
     expect(screen.queryByRole('button', { name: PILL.reopen })).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { expanded: false }))
+    // The record is on screen by default: no disclosure click to reach it.
     expect(screen.getByText('What do you want to accomplish?')).toBeTruthy()
     expect(screen.getByText('the web app')).toBeTruthy()
     expect(screen.getByText('未回答')).toBeTruthy()
@@ -378,21 +382,18 @@ describe('AskQuestionRow', () => {
     )} />)
 
     expect(screen.getByText('已继续工作，仍可回答')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { expanded: false }))
     expect(screen.getByText('等待中的问题仍可在输入框中回答')).toBeTruthy()
     expect(screen.getByText('What do you want to accomplish?')).toBeTruthy()
     expect(view.container.querySelector('[class*="ioCard"]')).toBeNull()
     expect(screen.queryByText(/"pending"/)).toBeNull()
   })
 
-  it('expands a successful result as paired questions and readable answer lines', () => {
+  it('renders paired questions, offered options, and readable answer lines by default', () => {
     render(<AskQuestionRow {...rowProps(resultNode(READABLE_ARGS, answers([
       { id: 'scope', selected: ['deepseek-harness'] },
       { id: 'goal', selected: ['Develop a feature'], custom: 'Keep the API small' },
       { id: 'notes', selected: [] },
     ])))} />)
-
-    fireEvent.click(screen.getByRole('button', { expanded: false }))
 
     expect(screen.getByText('What do you want to accomplish?')).toBeTruthy()
     expect(screen.getByText('Develop a feature')).toBeTruthy()
@@ -403,6 +404,64 @@ describe('AskQuestionRow', () => {
     expect(screen.getByText('未回答')).toBeTruthy()
     expect(screen.queryByText(/"questions"/)).toBeNull()
     expect(screen.queryByText(/"answers"/)).toBeNull()
+  })
+
+  it('keeps every offered option on screen, marking the chosen one', () => {
+    // The options are the reader's record of what was on offer: an unchosen
+    // choice must survive the settlement just like the chosen one.
+    const args = JSON.stringify({ questions: [{
+      id: 'goal',
+      question: 'What do you want to accomplish?',
+      options: [{ label: 'Develop a feature', description: 'New behavior' }, { label: 'Fix a bug' }],
+    }] })
+    const view = render(<AskQuestionRow {...rowProps(resultNode(args, answers([
+      { id: 'goal', selected: ['Fix a bug'] },
+    ])))} />)
+
+    const options = [...view.container.querySelectorAll('li')]
+    expect(options).toHaveLength(2)
+    expect(options.map(option => option.textContent)).toEqual([
+      '·Develop a featureNew behavior',
+      '✓Fix a bug',
+    ])
+    expect(options[0]?.hasAttribute('data-selected')).toBe(false)
+    expect(options[1]?.hasAttribute('data-selected')).toBe(true)
+    // The record is open without a click, and the raw JSON stays out of it.
+    expect(screen.getByRole('button', { expanded: true })).toBeTruthy()
+    expect(screen.queryByText(/"questions"/)).toBeNull()
+  })
+
+  it('a running row renders the questions and their options while the composer waits', () => {
+    // The composer card can be closed from the timeline: the waiting row still
+    // has to say what is being asked.
+    const args = JSON.stringify({ questions: [{
+      id: 'color',
+      question: 'Which color do you prefer?',
+      options: [{ label: 'Blue' }, { label: 'Green' }],
+    }] })
+    render(<AskQuestionRow {...rowProps(runningCall(args))} />)
+
+    expect(screen.getByText('等待回答')).toBeTruthy()
+    expect(screen.getByText('问题已提交，等待你的回答')).toBeTruthy()
+    expect(screen.getByText('Which color do you prefer?')).toBeTruthy()
+    expect(screen.getByText('Blue')).toBeTruthy()
+    expect(screen.getByText('Green')).toBeTruthy()
+    expect(screen.getByRole('button', { expanded: true })).toBeTruthy()
+  })
+
+  it('a reader who collapses the record keeps it collapsed', () => {
+    // The default-open record must never fight a reader who folded it away.
+    const view = render(<AskQuestionRow {...rowProps(resultNode(READABLE_ARGS, answers([
+      { id: 'goal', selected: ['Develop a feature'] },
+      { id: 'scope', selected: [] },
+      { id: 'notes', selected: [] },
+    ])))} />)
+    expect(screen.getByRole('button', { expanded: true })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { expanded: true }))
+    expect(screen.getByRole('button', { expanded: false })).toBeTruthy()
+    expect(screen.queryByText('What do you want to accomplish?')).toBeNull()
+    expect(view.container.querySelector('[class*="ioCard"]')).toBeNull()
   })
 
   it('a timed call the projection settled in time offers its record as a read-only panel, options included', () => {
@@ -448,7 +507,6 @@ describe('AskQuestionRow', () => {
     expect(screen.queryByRole('button', { name: PILL.review })).toBeNull()
     expect(screen.queryByRole('button', { name: PILL.reopen })).toBeNull()
     expect(view.container.querySelector('[class*="rowAction"]')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { expanded: false }))
     expect(screen.getByText('the web app')).toBeTruthy()
     expect(screen.getByText('未回答')).toBeTruthy()
   })
@@ -579,7 +637,6 @@ describe('AskQuestionRow', () => {
       { isError: true, error: { name: 'UserQuestionError', code: 'ASK_CANCELLED' } }))} />)
     expect(screen.getByText('已取消')).toBeTruthy()
     expect(view.container.querySelector('[data-state="ok"]')).not.toBeNull()
-    fireEvent.click(screen.getByRole('button', { expanded: false }))
     expect(screen.getByText('本轮已取消，未提交回答')).toBeTruthy()
     expect(screen.getByText('What do you want to accomplish?')).toBeTruthy()
     expect(screen.getByText('Which project should this apply to?')).toBeTruthy()
@@ -595,7 +652,6 @@ describe('AskQuestionRow', () => {
       { isError: true, error: { name: 'UserQuestionError', code: 'ASK_ABORTED' } }))} />)
     expect(screen.getByText('已中断')).toBeTruthy()
     expect(view.container.querySelector('[data-state="stopped"]')).not.toBeNull()
-    fireEvent.click(screen.getByRole('button', { expanded: false }))
     expect(screen.getByText('本轮已中断，未提交回答')).toBeTruthy()
     expect(screen.getByText('What do you want to accomplish?')).toBeTruthy()
     expect(view.container.querySelector('[class*="ioCard"]')).toBeNull()

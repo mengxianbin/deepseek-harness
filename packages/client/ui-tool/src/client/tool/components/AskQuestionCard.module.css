@@ -65,3 +65,69 @@
   font-size: var(--dsh-content-font-size, 14px);
   line-height: calc(24px + var(--dsh-content-font-delta, 0px));
 }
+
+.unansweredText {
+  white-space: inherit;
+  overflow-wrap: inherit;
+}
+
+/* Every option the asker offered stays readable, chosen ones marked, so a
+   settled question never loses the choices the answer picked from. */
+.options {
+  margin: 6px 0 4px;
+}
+
+.optionList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  white-space: normal;
+}
+
+.unansweredQuestion .optionList {
+  margin-top: 6px;
+}
+
+.option {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 3px 8px;
+  border: 0.5px solid transparent;
+  border-radius: var(--dsw-radius-md);
+  color: var(--dsw-alias-label-tertiary);
+  white-space: normal;
+}
+
+.option[data-selected] {
+  border-color: var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-l1);
+  color: var(--dsw-alias-label-primary);
+}
+
+.optionMark {
+  flex: none;
+  width: 1em;
+  font-size: var(--dsh-content-font-size, 14px);
+  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
+}
+
+.optionText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.optionLabel {
+  overflow-wrap: anywhere;
+}
+
+.optionDescription {
+  color: var(--dsw-alias-label-quaternary);
+  font-size: calc(var(--dsh-content-font-size, 14px) - 1px);
+  line-height: calc(20px + var(--dsh-content-font-delta, 0px));
+  overflow-wrap: anywhere;
+}
