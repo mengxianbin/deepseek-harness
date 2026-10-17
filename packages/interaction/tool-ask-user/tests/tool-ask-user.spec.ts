@@ -602,7 +602,10 @@ describe('ask_user_question tool', () => {
   })
 
   it('returns structured user-questions errors through tool execution', async () => {
-    const ctx = await setup()
+    // NO_PROVIDER as a terminal error now belongs to the blocking (legacy)
+    // path alone: a timed durable call re-offers its ask until an answerer
+    // returns instead of failing fast (see the user-questions re-offer tests).
+    const ctx = await setup({ mode: 'legacy' })
 
     const result = await ctx.tools.execute({
       signal: testToolSignal,
