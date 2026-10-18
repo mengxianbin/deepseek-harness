@@ -1319,7 +1319,7 @@ describe('WorkspaceBrowser', () => {
     expect(screen.queryByText('b')).toBeNull()
   })
 
-  it('shows only the current blank session as the localized New Session, excluded from search', () => {
+  it('shows every blank session as the localized New Session, excluded from search', () => {
     const currentBlank = summary('alpha-blank', 9, { blank: true })
     const staleBlank = summary('beta-blank', 8, { blank: true })
     const sessions = sessionState(
@@ -1332,15 +1332,18 @@ describe('WorkspaceBrowser', () => {
         workspace('alpha', ['alpha-blank']), workspace('beta', ['beta-blank']),
       ])),
     })
-    expect(screen.getByText('新会话')).toBeTruthy()
+    // Only the current blank's group is expanded on mount; the stale blank's
+    // group stays folded until it becomes current.
+    expect(screen.getAllByText('新会话')).toHaveLength(1)
     expect(screen.queryByText('alpha-blank')).toBeNull()
     expect(screen.queryByText('beta-blank')).toBeNull()
 
-    rerender(b, { useSessions: hook({ ...sessions, main: staleBlank.id }) })
-    expect(screen.getAllByText('新会话')).toHaveLength(1)
+    rerender(b, { useSessions: hook(sessionState([currentBlank, staleBlank], { main: staleBlank.id })) })
+    // Both groups are expanded now and neither blank row is hidden.
+    expect(screen.getAllByText('新会话')).toHaveLength(2)
     b.store.actions.setGroupBy('flat')
     rerender(b, {})
-    expect(screen.getAllByText('新会话')).toHaveLength(1)
+    expect(screen.getAllByText('新会话')).toHaveLength(2)
     // Search excludes blank rows entirely — neither the canonical stored
     // title nor the localized display label participates in matching.
     fireEvent.change(screen.getByPlaceholderText('搜索会话名称'), { target: { value: 'new session' } })
