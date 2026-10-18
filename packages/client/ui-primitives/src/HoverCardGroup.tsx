@@ -1,4 +1,4 @@
-import { createContext, useState, type ReactNode } from 'react'
+import { createContext, useState, type ReactNode, type Ref } from 'react'
 
 interface GroupState {
   isWarm: () => boolean
@@ -16,9 +16,13 @@ export const HoverCardGroupContext = createContext<GroupState | null>(null)
  * Share first-display dwell across a list and its active portal, including the card's existing pointer grace.
  * @param props.children - list contents, including opted-in HoverCards.
  * @param props.className - classes for the physical list container.
+ * @param props.containerRef - FORK dsh-local (session-watermark-fit, marker: fittedSessionWatermark): exposes the
+ * physical list container for viewport measurement; upstream callers do not pass it.
  * @returns the list container and its private hover coordinator.
  */
-export function HoverCardGroup({ children, className }: { children: ReactNode; className?: string }) {
+export function HoverCardGroup(
+  { children, className, containerRef }: { children: ReactNode; className?: string; containerRef?: Ref<HTMLDivElement> },
+) {
   const [group] = useState<GroupState>(() => {
     let pointer: 'outside' | 'list' | 'card' = 'outside'
     let warm = false
@@ -54,6 +58,7 @@ export function HoverCardGroup({ children, className }: { children: ReactNode; c
     <HoverCardGroupContext.Provider value={group}>
       <div
         className={className}
+        ref={containerRef}
         onPointerOverCapture={(event) => {
           const overCard = group.containsCard(event.target)
           if (event.currentTarget.contains(event.target as Node) || overCard) group.enter(overCard)

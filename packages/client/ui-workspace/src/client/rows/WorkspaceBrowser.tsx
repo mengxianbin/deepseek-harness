@@ -55,6 +55,10 @@ const SEARCH_QUERY_MAX_CODE_UNITS = 500
 const SESSION_WATERMARK_BASE = 5
 /** Highest watermark that attention-bearing Sessions raise automatically; Show more and search reveals may exceed it. */
 const SESSION_WATERMARK_AUTO_MAX = 50
+/** Session row height in px (Rows.module.css `.sessionRow`): the unit the fitted watermark is measured against. */
+const SESSION_ROW_HEIGHT_PX = 32
+/** Vertical chrome the fitted watermark cannot cover (group header + overflow button + breathing room), in rows. */
+const SESSION_FIT_CHROME_RESERVE_ROWS = 2
 
 /** Show the blank row plus the first `watermark` non-blank rows, in list order. */
 function watermarkRows(sessions: readonly SessionNode[], watermark: number): {
@@ -93,16 +97,29 @@ function requiredWatermark(
   return required
 }
 
-/** Raise each listed group's watermark to its requirement; returns `marks` itself when nothing rises. */
+/** Raise each listed group's watermark to its requirement above `base`; returns `marks` itself when nothing rises. */
 function raiseWatermarks(
   marks: Readonly<Record<string, number>>,
   required: ReadonlyMap<string, number>,
+  base: number,
 ): Readonly<Record<string, number>> {
   let raised = marks
   for (const [key, watermark] of required) {
-    if (watermark > (raised[key] ?? SESSION_WATERMARK_BASE)) raised = { ...raised, [key]: watermark }
+    if (watermark > (raised[key] ?? base)) raised = { ...raised, [key]: watermark }
   }
   return raised
+}
+
+/**
+ * FORK dsh-local (session-watermark-fit, marker: fittedSessionWatermark): the default
+ * watermark follows the list viewport — every non-blank row with room is shown, so a
+ * group only folds when the space genuinely runs out. The static default floors
+ * viewports without a measurable layout (rail, jsdom) and stays the minimum watermark.
+ */
+export function fittedSessionWatermarkFor(viewportHeight: number): number {
+  const usable = viewportHeight - SESSION_FIT_CHROME_RESERVE_ROWS * SESSION_ROW_HEIGHT_PX
+  if (usable <= 0) return SESSION_WATERMARK_BASE
+  return Math.max(SESSION_WATERMARK_BASE, Math.floor(usable / SESSION_ROW_HEIGHT_PX))
 }
 
 /** Keep controlled input and RPC payload inside the session.search wire contract. */
@@ -337,6 +354,21 @@ function SessionTree({
   const [storedWatermarks, setStoredWatermarks] = useState<Readonly<Record<string, number>>>({})
   // Advances on user-driven watermark changes so AnimatedRows settles them; automatic raises animate.
   const [watermarkMotionKey, setWatermarkMotionKey] = useState(0)
+  // FORK dsh-local (session-watermark-fit, marker: fittedSessionWatermark): the base
+  // watermark tracks the list viewport; attention raises and explicit user expansion
+  // keep their monotonic semantics.
+  const [fittedSessionWatermark, setFittedSessionWatermark] = useState(SESSION_WATERMARK_BASE)
+  const treeBodyRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const element = treeBodyRef.current
+    // No measurable layout (rail, test DOM): keep the static default.
+    if (element === null || typeof ResizeObserver === 'undefined') return
+    const measure = (): void => { setFittedSessionWatermark(fittedSessionWatermarkFor(element.clientHeight)) }
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    measure()
+    return () => { observer.disconnect() }
+  }, [])
   // Transient drag marker state; the selected mode owns the resulting order.
   const [drag, setDrag] = useState<DragState | null>(null)
   const sessionDropCommitted = useRef(false)
@@ -386,7 +418,7 @@ function SessionTree({
       }
     }
   }, [groupExpansion, parents, revealGroup, setGroupExpanded])
-  const baselines = new Map(groups.map(group => [group.key, Math.max(SESSION_WATERMARK_BASE, requiredWatermark(
+  const baselines = new Map(groups.map(group => [group.key, Math.max(fittedSessionWatermark, requiredWatermark(
     group.sessions,
     current,
     group.key === revealGroup ? revealSessionId : undefined,
@@ -400,9 +432,11 @@ function SessionTree({
   }
   // A group hidden by a folded ancestor keeps its own expansion and rows but must not raise its watermark.
   const requiredWatermarks = new Map([...baselines].filter(([key]) => !underFoldedAncestor(key)))
-  const sessionWatermarks = raiseWatermarks(storedWatermarks, requiredWatermarks)
+  const sessionWatermarks = raiseWatermarks(storedWatermarks, requiredWatermarks, fittedSessionWatermark)
   // Raising during render keeps the watermark monotonic without committing a lower frame first.
-  if (sessionWatermarks !== storedWatermarks) setStoredWatermarks(marks => raiseWatermarks(marks, requiredWatermarks))
+  if (sessionWatermarks !== storedWatermarks) {
+    setStoredWatermarks(marks => raiseWatermarks(marks, requiredWatermarks, fittedSessionWatermark))
+  }
   const dropWatermarks = (drop: (key: string) => boolean): void => {
     if (!Object.keys(storedWatermarks).some(drop)) return
     setStoredWatermarks(marks => Object.fromEntries(Object.entries(marks).filter(([key]) => !drop(key))))
@@ -426,7 +460,8 @@ function SessionTree({
       ? ungroupedSessionIds
       : workspaces.find(workspace => workspace.workspaceId === activeDrag.accountKey)?.sessionIds
     if (accountSessionIds === undefined) return
-    const renderedSessions = watermarkRows(group.sessions, sessionWatermarks[group.key] ?? SESSION_WATERMARK_BASE).rows
+    const dragWatermark = sessionWatermarks[group.key] ?? fittedSessionWatermark
+    const renderedSessions = watermarkRows(group.sessions, dragWatermark).rows
     const nextOrder = sessionDragOrder(accountSessionIds, renderedSessions, activeDrag, over)
     if (nextOrder !== undefined) setSessionOrder(activeDrag.accountKey, nextOrder)
   }
@@ -476,8 +511,8 @@ function SessionTree({
     const workspaceId = group.workspaceId
     const children = childrenByParent.get(group.key) ?? []
     const compatibleDrag = workspaceDrag !== null && parents.get(workspaceDrag.workspaceId) === parents.get(group.key)
-    const watermark = sessionWatermarks[group.key] ?? SESSION_WATERMARK_BASE
-    const collapsed = watermarkRows(group.sessions, baselines.get(group.key) ?? SESSION_WATERMARK_BASE)
+    const watermark = sessionWatermarks[group.key] ?? fittedSessionWatermark
+    const collapsed = watermarkRows(group.sessions, baselines.get(group.key) ?? fittedSessionWatermark)
     const visible = watermarkRows(group.sessions, watermark)
     const sessionsExpanded = visible.hiddenCount === 0
     rowKeys.push(`workspace:${group.key}`)
@@ -666,7 +701,7 @@ function SessionTree({
 
   const groupRows = rootGroups.map(group => renderGroup(group, 0))
   return (
-    <HoverCardGroup className={clsx(css.treeBody, css.wide)}>
+    <HoverCardGroup className={clsx(css.treeBody, css.wide)} containerRef={treeBodyRef}>
       {workspaceDropAtListStart && <span className={css.listTopDropIndicator} aria-hidden="true" />}
       <AnimatedRows
         className={clsx(css.list, workspaceDropAtListStart && css.listTopDropActive)}

@@ -17,7 +17,7 @@ import type { DirectoryFlowOwnerProps, WorkspaceBrowserProps } from '../src/clie
 import { createWorkspaceShortcutControls } from '../src/client/shortcuts.ts'
 import { createWorkspaceViewStore, FLAT_SESSION_ORDER_KEY } from '../src/client/stores.ts'
 import { UNGROUPED_KEY } from '../src/client/tree.ts'
-import { WorkspaceBrowser } from '../src/client/rows/WorkspaceBrowser.tsx'
+import { fittedSessionWatermarkFor, WorkspaceBrowser } from '../src/client/rows/WorkspaceBrowser.tsx'
 import { zh } from '../src/client/locales.ts'
 
 // Every fixture carries the resource hook the resources plugin merges into GlobalStandardProps.
@@ -771,6 +771,63 @@ describe('WorkspaceBrowser', () => {
     expect(b.store.getSnapshot().groupExpansion).toEqual({ alpha: true })
     expect(screen.queryByText('session-6')).toBeNull()
     expect(screen.getByRole('button', { name: '展开其余 2 个会话' })).toBeTruthy()
+  })
+
+  describe('viewport-fitted session watermark (session-watermark-fit)', () => {
+    let clientHeightDescriptor: PropertyDescriptor | undefined
+    beforeEach(() => {
+      clientHeightDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'clientHeight')
+      vi.stubGlobal('ResizeObserver', class {
+        constructor(private readonly callback: () => void) {}
+        observe(): void { this.callback() }
+        unobserve(): void {}
+        disconnect(): void {}
+      })
+    })
+    afterEach(() => {
+      vi.unstubAllGlobals()
+      if (clientHeightDescriptor !== undefined) {
+        Object.defineProperty(Element.prototype, 'clientHeight', clientHeightDescriptor)
+      }
+    })
+    const setListHeight = (height: number): void => {
+      Object.defineProperty(Element.prototype, 'clientHeight', { configurable: true, get: () => height })
+    }
+
+    it('floors the watermark at the static default for no/small layouts', () => {
+      expect(fittedSessionWatermarkFor(0)).toBe(5)
+      expect(fittedSessionWatermarkFor(192)).toBe(5)
+      // 700px - 2 rows chrome = 636 / 32 = 19.875 → 19 rows of room.
+      expect(fittedSessionWatermarkFor(700)).toBe(19)
+    })
+
+    it('shows every session that has viewport room instead of folding at five', () => {
+      setListHeight(700)
+      const items = Array.from({ length: 17 }, (_, index) => summary(`session-${index + 1}`, 17 - index))
+      mount({
+        useSessions: hook(sessionState(items)),
+        useWorkspaces: hook(workspaceState([workspace('alpha', items.map(item => item.id))])),
+      })
+      fireEvent.click(screen.getByText('alpha'))
+      // 700px fits 19 rows: all 17 idle sessions render, no overflow control.
+      for (const item of items) expect(screen.getByText(item.displayTitle)).toBeTruthy()
+      expect(screen.queryByRole('button', { name: /展开|收起/ })).toBeNull()
+    })
+
+    it('keeps folding at the fitted watermark when the viewport genuinely runs out', () => {
+      setListHeight(320)
+      const items = Array.from({ length: 12 }, (_, index) => summary(`session-${index + 1}`, 12 - index))
+      mount({
+        useSessions: hook(sessionState(items)),
+        useWorkspaces: hook(workspaceState([workspace('alpha', items.map(item => item.id))])),
+      })
+      fireEvent.click(screen.getByText('alpha'))
+      // 320px - 2 rows chrome = 256 / 32 = 8 rows of room.
+      for (const item of items.slice(0, 8)) expect(screen.getByText(item.displayTitle)).toBeTruthy()
+      expect(screen.queryByText('session-9')).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: '展开其余 4 个会话' }))
+      for (const item of items) expect(screen.getByText(item.displayTitle)).toBeTruthy()
+    })
   })
 
   it('raises the watermark to the last attention row and keeps it after the attention ends', () => {
