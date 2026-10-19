@@ -9,12 +9,16 @@
 - button "Copy"
 - status: Completed
 - button "Completed in {{duration}}" [expanded]
-- button "Asked questions" [expanded]
+- button "Analysis completed" [expanded]
 - button "Think The user wants me to use the ask_user_question tool with specific parameters. Let me do exactly that."
 - button "Ask question cancelled" [expanded]
 - paragraph: This question set was cancelled before answers were submitted.
 - list:
-  - listitem: Which color do you prefer?
+  - listitem:
+    - text: Which color do you prefer?
+    - list:
+      - listitem: Blue A cool recessive hue that reads as calm and trustworthy in long reading sessions and dense dashboards.
+      - listitem: Green A restful mid-spectrum hue with the highest perceived brightness, easiest on the eye over long sessions.
 - button "Inspect"
 - textbox "Message or run a task, / commands, @ files or sessions"
 - button "Add files or run commands"

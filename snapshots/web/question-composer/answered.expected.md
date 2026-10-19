@@ -10,6 +10,14 @@
 - button "Copy"
 - status: Completed
 - button "Completed in {{duration}}"
+- button "Ask question 1/1 answered" [expanded]
+- term: Which color do you prefer?
+- definition:
+  - list:
+    - listitem: Blue A cool recessive hue that reads as calm and trustworthy in long reading sessions and dense dashboards.
+    - listitem: Green A restful mid-spectrum hue with the highest perceived brightness, easiest on the eye over long sessions.
+- definition: Blue Include accessibility notes
+- button "Inspect"
 - paragraph: DONE
 - button "Copy"
 - button "Good response"

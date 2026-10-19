@@ -435,10 +435,14 @@ describe('web e2e: resident question composer round trip', () => {
       // Session-scoped store to restore both option and free-text drafts.
       const originalRow = page.locator('[role="treeitem"]')
         .filter({ hasText: 'Use the ask_user_question tool' }).first()
-      await page.getByRole('button', { name: 'New session', exact: true }).last().click()
-      // Scope to the tree: the wide sidebar's New Session button carries the
-      // same visible label, and an unscoped match would either settle on the
-      // button before the row exists or trip strict mode once it does.
+      // FORK (askq-presentation persistence): the wide sidebar's footer ⋯ menu
+      // owns New Session since the brand-row capsule retired (fork
+      // dddb378b76/1e4ea68e04): open the menu, pick it.
+      await page.getByRole('button', { name: 'More', exact: true }).click()
+      await page.getByRole('menuitem', { name: 'New Session', exact: true }).click()
+      // Scope to the tree: the menu carries the same visible label, and an
+      // unscoped match would either settle on the menu item before the row
+      // exists or trip strict mode once it does.
       await page.getByRole('tree', { name: 'Sessions' })
         .getByText('New Session', { exact: true }).waitFor({ timeout: 15_000 })
       await expect.poll(() => composer.count(), { timeout: 10_000 }).toBe(0)
@@ -481,9 +485,8 @@ describe('web e2e: resident question composer round trip', () => {
     // even though Compact mode hides the process by default.
     await expandTurnProcesses(page)
     // A legacy call's answered row carries no pill and no read-only panel; its
-    // accessible name is the bare summary, as before timed questions existed.
-    const answeredRow = page.getByRole('button', { name: 'Ask question 1/1 answered', exact: true })
-    await answeredRow.click()
+    // record auto-opens — the transcript is the persistent record of the
+    // interaction, so the readable answer is on screen without a click.
     await page.getByText('Which color do you prefer?', { exact: true }).waitFor({ timeout: 10_000 })
     expect(await page.getByText('Blue', { exact: true }).count()).toBeGreaterThanOrEqual(1)
     expect(await page.getByText('Include accessibility notes', { exact: true }).count()).toBe(1)
@@ -559,7 +562,8 @@ describe.skipIf(MODE === 'record')('web e2e: cancelled question transcript', () 
     await expandTurnProcesses(cancelledPage)
     const row = cancelledPage.getByRole('button', { name: 'Ask question cancelled', exact: true })
     await row.waitFor({ timeout: 15_000 })
-    await row.click()
+    // The record auto-opens; the verdict is readable without toggling the row
+    // (a click would collapse the transcript this scenario reads).
 
     await cancelledPage
       .getByText('This question set was cancelled before answers were submitted.', { exact: true })
@@ -653,7 +657,8 @@ describe.skipIf(MODE === 'record')('web e2e: late-answered question transcript',
     await reply.waitFor({ state: 'visible', timeout: 15_000 })
     const row = latePage.locator('[data-tool="ask_user_question"]')
     await row.waitFor({ timeout: 15_000 })
-    await row.getByRole('button', { name: 'Ask question', exact: true }).click()
+    // The answered record auto-opens; the leading disclosure toggle would
+    // collapse it, so the question is read straight off the open transcript.
     await latePage.getByText('Which color do you prefer?', { exact: true }).waitFor({ timeout: 10_000 })
     expect(await latePage.getByText('Green', { exact: true }).count()).toBeGreaterThanOrEqual(1)
     expect(await latePage.getByText('Answered after the timeout', { exact: true }).count()).toBeGreaterThanOrEqual(1)
