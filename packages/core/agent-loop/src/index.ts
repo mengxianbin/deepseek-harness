@@ -34,7 +34,7 @@ import type { SessionHandle, SessionPersistence } from '@deepseek-ai/dsh-session
 import { ReactLoopAgent } from './agent.ts'
 import { deferredClaimProjectionDefinition } from './deferred-claim.ts'
 import { inboxProjectionDefinition } from './inbox.ts'
-import { DEFAULT_MAX_PARALLEL_TOOL_CALLS } from './constants.ts'
+import { DEFAULT_MAX_PARALLEL_TOOL_CALLS, DEFAULT_STARTUP_BARRIER_TIMEOUT_MS } from './constants.ts'
 import type {} from './runtime-context.ts'
 
 /** Fiber states that cannot own or serve a new lifecycle. */
@@ -251,7 +251,7 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-export { DEFAULT_MAX_PARALLEL_TOOL_CALLS }
+export { DEFAULT_MAX_PARALLEL_TOOL_CALLS, DEFAULT_STARTUP_BARRIER_TIMEOUT_MS }
 
 /**
  * One launcher-selected session identity for a configured agent. `resume`
@@ -307,6 +307,16 @@ export interface Config {
    * omission defaults to {@link DEFAULT_MAX_PARALLEL_TOOL_CALLS}.
    */
   maxParallelToolCalls: Volatile<number>
+  /**
+   * Upper bound (ms) the first turn waits for the agent's parked creation
+   * dispatch (registry `startupBarrier` mode) before prompt assembly. Same
+   * semantic as the `timeout` field of a `hooks.json` command hook: on expiry
+   * the turn proceeds with a warn, so a hung SessionStart hook cannot block
+   * the first turn forever — at the cost that a listener still in flight may
+   * miss this request. Ignored when the registry's startup-barrier mode is
+   * off: the barrier is already settled when creation returns.
+   */
+  startupBarrierTimeoutMs: number
   /** Agents created or resumed at plugin startup. */
   agents: (AgentOptions & {
     /** Stable config label used in logs and as the fresh combined-id prefix. */
@@ -343,8 +353,9 @@ export class AgentLoop extends Service implements AgentFactory {
   static inject = ['agents', 'sessions', 'llm', 'tools', 'systemPrompt', 'sessionProjections']
 
   /** Runtime schema for declarative agents. */
-  static Config: z<{ agents?: Config['agents']; maxParallelToolCalls?: number }, Config> = z.object({
+  static Config: z<{ agents?: Config['agents']; maxParallelToolCalls?: number; startupBarrierTimeoutMs?: number }, Config> = z.object({
     maxParallelToolCalls: z.number().step(1).min(1).default(DEFAULT_MAX_PARALLEL_TOOL_CALLS).volatile(),
+    startupBarrierTimeoutMs: z.number().step(1).min(1).default(DEFAULT_STARTUP_BARRIER_TIMEOUT_MS),
     agents: z.array(z.object({
       id: z.string().required(),
       sessionId: z.string().min(1),
@@ -355,7 +366,7 @@ export class AgentLoop extends Service implements AgentFactory {
       cwd: z.string(),
       resumeSessionId: z.string(),
     })).default([]),
-  }) as z<{ agents?: Config['agents']; maxParallelToolCalls?: number }, Config>
+  }) as z<{ agents?: Config['agents']; maxParallelToolCalls?: number; startupBarrierTimeoutMs?: number }, Config>
 
   /** Validated configuration owned by the agent-loop service. */
   readonly config: Config
@@ -369,6 +380,7 @@ export class AgentLoop extends Service implements AgentFactory {
     this.config = {
       agents: applyLauncherIdentities(config.agents, ctx.get(CONFIGURED_AGENT_IDENTITIES_KEY)),
       maxParallelToolCalls: config.maxParallelToolCalls,
+      startupBarrierTimeoutMs: config.startupBarrierTimeoutMs,
     }
     validateConfiguredAgents(this.config.agents)
     // Register only after every config validation above has passed, so a
@@ -558,6 +570,14 @@ export class AgentLoop extends Service implements AgentFactory {
       try {
         // Creation listeners retain the session and scope through their awaits.
         if (publication !== undefined) await publication.promise
+        // Startup-barrier mode parks that same dispatch off the create path;
+        // teardown still joins it so the scope and session stay retained until
+        // the creation dispatch settles (the agent/created contract). Absent a
+        // parked barrier (mode off) the synchronous dispose prologue is
+        // preserved — an unconditional await here would defer the disposed
+        // cancel below past the caller's synchronous continuation.
+        const startupBarrier = loopCtx.agents.startupBarrier(id)
+        if (startupBarrier !== undefined) await startupBarrier
         // Disposal IS a disposed-cause cancel followed by quiescence. New work
         // sent after this point is the sender's bug — the registries are about
         // to drop the agent, so nothing should still hold it.
@@ -663,6 +683,11 @@ export class AgentLoop extends Service implements AgentFactory {
             assertLive()
             await loopCtx.agents.announce(agent, source, abort.signal)
             assertLive()
+            // In the registry's startup-barrier mode the announce above parked
+            // the agent/created dispatch instead of awaiting it; register it so
+            // the first turn joins it (bounded) before prompt assembly, while
+            // teardown (above) retains the session and scope until it settles.
+            agent.setStartupBarrier(loopCtx.agents.startupBarrier(id))
             return { agent, dispose }
           } finally {
             publication.resolve()

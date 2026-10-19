@@ -208,6 +208,33 @@ const NO_FACTORY_MESSAGE = 'no agent factory registered (load an agent-loop plug
 const NO_INITIATOR_MESSAGE = 'no initiating agent is active'
 const DISPOSED_INITIATOR_MESSAGE = 'agent initiator scope is disposed'
 
+/**
+ * Agent registry configuration (2026-10-20 fork patch, S1 session-create
+ * latency). Deliberately hand-validated instead of a `static Config` schema:
+ * the single boolean does not justify a `@deepseek-ai/schemastery` dependency
+ * edge in this core package, and Cordis passes raw plugin config through when
+ * no schema is declared.
+ */
+export interface Config {
+  /**
+   * Park the `agent/created` serial dispatch off the creation path (startup
+   * barrier). With the flag on, {@link AgentRegistry.announce} starts the
+   * serial listener dispatch, registers its settlement as the agent's
+   * per-agent startup barrier ({@link AgentRegistry.startupBarrier}), and
+   * returns without awaiting it — so a slow SessionStart-class listener (a
+   * hook bridge running `hooks.json` commands) no longer blocks
+   * `session.create`. The agent's first turn awaits the barrier (bounded by
+   * the driver's `startupBarrierTimeoutMs`) before prompt assembly, keeping
+   * late SessionStart context injection ahead of the first LLM request. A
+   * listener failure after publication can no longer fail the already-returned
+   * create; it is logged as a warning and the barrier resolves.
+   *
+   * Default off: `announce` awaits the dispatch exactly as before, and the
+   * barrier is already settled when creation returns.
+   */
+  startupBarrier?: boolean
+}
+
 /** All mutable lifecycle state for one exact registry entry. */
 interface AgentEntry {
   readonly id: SessionId
@@ -218,6 +245,12 @@ interface AgentEntry {
   announced: boolean
   announcing: boolean
   detachRequested: boolean
+  /**
+   * The parked `agent/created` serial dispatch in startup-barrier mode; absent
+   * until {@link announce} runs (and always absent when the flag is off, where
+   * the dispatch is awaited inline instead).
+   */
+  startupBarrier?: Promise<void>
 }
 
 /** One tracked boundary plus its inherited nesting chain. */
@@ -252,9 +285,15 @@ export class AgentRegistry extends Service {
   private activeInitiatorRuns = 0
   private initiatorDrain: PromiseWithResolvers<void> | undefined
   private initiatorDisposal: Promise<void> | undefined
+  /** Validated configuration; see {@link Config} for the startup-barrier mode. */
+  readonly config: Config
 
-  constructor(ctx: Context) {
+  constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'agents')
+    if (config.startupBarrier !== undefined && typeof config.startupBarrier !== 'boolean') {
+      throw new TypeError('agents config startupBarrier must be a boolean')
+    }
+    this.config = { startupBarrier: config.startupBarrier ?? false }
     ctx.inject(['typert'], (typeCtx) => {
       typeCtx.typert.lookups.register('agent', {
         parameter: 'agent',
@@ -533,6 +572,10 @@ export class AgentRegistry extends Service {
    * @param source - fresh creation, resume, clear, or compaction source.
    * @param signal - optional factory initialization cancellation signal passed to listeners.
    * @returns completion of the serial creation listeners; a listener failure rejects.
+   *   In startup-barrier mode ({@link Config.startupBarrier}) the returned promise
+   *   resolves once the dispatch is registered instead: settlement parks as the
+   *   agent's {@link startupBarrier}, and a listener failure warns instead of
+   *   rejecting.
    * @throws if `agent` is not the exact live registry entry for its id, or its
    *   creation announcement already began (including a reentrant call from a
    *   creation listener).
@@ -549,16 +592,51 @@ export class AgentRegistry extends Service {
     // lifecycle edge; detach still pairs a partially delivered first edge.
     entry.announcing = true
     entry.announced = true
-    try {
-      await this.ctx.serial(entry.carrier, 'agent/created', {
-        agent: entry.agent,
-        source,
-        ...signal === undefined ? {} : { signal },
-      })
-    } finally {
+    // Every callback reached by this dispatch must observe the same live
+    // entry, and disposal must follow creation; both settle exactly when the
+    // dispatch does, inline (awaited mode) or parked (barrier mode).
+    const settleAnnouncing = (): void => {
       entry.announcing = false
       if (entry.detachRequested) this.detachEntered(entry)
     }
+    const dispatch = this.ctx.serial(entry.carrier, 'agent/created', {
+      agent: entry.agent,
+      source,
+      ...signal === undefined ? {} : { signal },
+    })
+    if (this.config.startupBarrier !== true) {
+      try {
+        await dispatch
+      } finally {
+        settleAnnouncing()
+      }
+      return
+    }
+    // Startup-barrier mode (S1): the create path must not wait out
+    // SessionStart-class listeners. Park the dispatch as this agent's
+    // per-agent startup barrier — the first turn awaits it (bounded) before
+    // prompt assembly — and contain a listener failure here: the create has
+    // already returned, so it can no longer be reported through its rejection.
+    entry.startupBarrier = dispatch.then(settleAnnouncing, (error: unknown) => {
+      settleAnnouncing()
+      this.ctx.logger.warn(`agent "${entry.id}": agent/created listener failed after publication: ${String(error)}`)
+    })
+  }
+
+  /**
+   * The parked creation dispatch for one live agent (startup-barrier mode).
+   * The driver's first turn awaits this before prompt assembly so
+   * SessionStart-class context injection still lands ahead of the first LLM
+   * request; teardown joins it so disposal still retains the session and scope
+   * until the creation dispatch settles.
+   * @param id - the shared agent/session id to look up.
+   * @returns the barrier promise, or undefined when the agent has no parked
+   *   dispatch (unknown id, or barrier mode off — where the dispatch is
+   *   awaited inline by announce instead). A settled barrier stays readable
+   *   until the entry detaches; joining it again is a no-op.
+   */
+  startupBarrier(id: SessionId): Promise<void> | undefined {
+    return this.store.get(id)?.startupBarrier
   }
 
   /**

@@ -37,6 +37,20 @@
     # once the web UI owns the choice per session.
     mode: !!js process.env.DSH_TOOLS_MODE
 
+# S1 session-create latency (2026-10-20 fork patch): park SessionStart-class
+# `agent/created` listeners off the create path. The web create RPC returns in
+# ~70ms instead of waiting out hook chains (~4.5s measured with SessionStart x3
+# on the m-note profile); the first turn joins the parked dispatch — bounded by
+# the agent-loop `startupBarrierTimeoutMs` default of 60s, warn + proceed on
+# expiry — before prompt assembly, so late SessionStart context injection still
+# lands ahead of the first LLM request. Diagnosis and measurements:
+# m-note content/tech/ai/dsh/dsh-web-session-create-latency.md. Trade-off: the
+# dispatch-REST "create then prompt immediately" path moves hook cost onto the
+# first token (m-note-side hook slimming, S3, absorbs the remainder).
+- id: agent
+  config:
+    startupBarrier: true
+
 # ── web-only host rows, the transport layer, and the browser roster ─────────
 
 # `dsh.client` rows are the browser roster the modules node half scans into

@@ -120,6 +120,15 @@ export class ReactLoopAgent implements Agent {
   /** Identities fully frozen by this loop; weak references do not retain replaced history. */
   private readonly frozenMessages = new WeakSet<Message>()
   /**
+   * The parked `agent/created` dispatch (registry startup-barrier mode),
+   * registered by publication instead of being awaited there. The first turn
+   * joins it — bounded — before claiming input, so SessionStart-class context
+   * injection stays ahead of the first LLM request (S1 fork patch).
+   */
+  private startupBarrier: Promise<void> | undefined
+  /** Whether the first turn already joined (or released from) the startup barrier. */
+  private startupBarrierJoined = false
+  /**
    * Input this turn claimed out of the durable inbox but has not yet recorded
    * as `user/message`. The claim removes it from the projection immediately,
    * while materialization waits behind several abortable awaits (prompt
@@ -201,6 +210,58 @@ export class ReactLoopAgent implements Agent {
 
   inject(input: UserMessage): void {
     this.send(input, 'next-step', false)
+  }
+
+  /**
+   * Register the parked creation dispatch this driver must join before its
+   * first turn (registry startup-barrier mode). Publication calls this
+   * instead of awaiting the `agent/created` listeners on the create path, so
+   * a slow SessionStart hook no longer delays session creation. Undefined
+   * (barrier mode off): the first turn keeps its synchronous start.
+   * @param barrier - settlement of this agent's serial creation dispatch.
+   */
+  setStartupBarrier(barrier: Promise<void> | undefined): void {
+    this.startupBarrier = barrier
+  }
+
+  /**
+   * Join the startup barrier once, ahead of the first turn's claim and prompt
+   * assembly, so `agent.inject` context from a SessionStart-class listener is
+   * still claimed into the first LLM request. Bounded by the loop's
+   * `startupBarrierTimeoutMs` (hooks.json `timeout` semantic): on expiry the
+   * turn proceeds with a warn — a hung hook must not block the first turn
+   * forever, at the cost that a listener still in flight may miss this
+   * request. Cancellation aborts the wait immediately and propagates the
+   * turn's abort reason.
+   */
+  private async awaitStartupBarrier(signal: AbortSignal): Promise<void> {
+    const barrier = this.startupBarrier
+    if (barrier === undefined) return
+    const timeoutMs = this.loopCtx.agentLoop.config.startupBarrierTimeoutMs
+    let releaseTimer!: () => void
+    const timeout = new Promise<'timeout'>((resolve) => {
+      const timer = setTimeout(() => { resolve('timeout') }, timeoutMs)
+      releaseTimer = () => { clearTimeout(timer) }
+    })
+    const canceled = Promise.withResolvers<never>()
+    const onAbort = (): void => { canceled.reject(signal.reason) }
+    signal.addEventListener('abort', onAbort, { once: true })
+    try {
+      const outcome = await Promise.race([
+        barrier.then(() => 'settled' as const),
+        timeout,
+        canceled.promise,
+      ])
+      if (outcome === 'timeout') {
+        this.loopCtx.logger.warn(
+          `agent "${this.id}": startup barrier still pending after ${timeoutMs}ms; `
+          + 'first turn proceeds without it (a listener still in flight may miss this request)',
+        )
+      }
+    } finally {
+      releaseTimer()
+      signal.removeEventListener('abort', onAbort)
+    }
   }
 
   cancel(cause: AgentCancelCause, options: CancelOptions = {}): void {
@@ -342,6 +403,20 @@ export class ReactLoopAgent implements Agent {
     const phase = this.phase
     const { signal } = phase.abort
     signal.throwIfAborted()
+    // Startup-barrier join (S1 fork patch): the parked creation dispatch must
+    // settle — or hit its timeout bound — before this turn claims input, so a
+    // late SessionStart-class injection is still claimed into the first step.
+    // Only the first turn of this instance joins; a timeout-abandoned barrier
+    // is not re-armed for later turns.
+    if (!this.startupBarrierJoined) {
+      this.startupBarrierJoined = true
+      // No parked barrier (registry barrier mode off): skip the await so the
+      // first turn keeps its synchronous start.
+      if (this.startupBarrier !== undefined) {
+        await this.awaitStartupBarrier(signal)
+        signal.throwIfAborted()
+      }
+    }
     const turn = phase.turn + 1
     try {
       this.session.append('turn/start', { turn })

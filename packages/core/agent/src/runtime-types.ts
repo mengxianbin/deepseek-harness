@@ -247,11 +247,15 @@ declare module '@deepseek-ai/cordis' {
     // ---- lifecycle ----
     /**
      * An entered agent is ready for per-agent initialization after factory setup.
-     * Listeners run in order and are awaited before creation resolves. AgentLoop
-     * holds queued input until all listeners finish. A throw or rejection fails
-     * creation and skips later listeners. Disposal retains the scope and session
-     * until dispatch settles; listeners must not await agent.whenIdle() or their
-     * own owner's disposal.
+     * Listeners run in order and are awaited before creation resolves — unless
+     * the registry runs in startup-barrier mode (`Config.startupBarrier`), where
+     * creation publishes immediately and the settlement parks as the agent's
+     * startup barrier, which the driver awaits (bounded) before the first
+     * turn's prompt assembly. AgentLoop holds queued input until the relevant
+     * wait completes. A throw or rejection fails creation (barrier mode: warns
+     * after publication instead) and skips later listeners. Disposal retains
+     * the scope and session until dispatch settles; listeners must not await
+     * agent.whenIdle() or their own owner's disposal.
      * @param payload.agent - the newly registered agent with its live session and completed setup.
      * @param payload.source - fresh creation, resume, clear, or compaction source.
      * @param payload.signal - factory initialization cancellation signal, when provided.
