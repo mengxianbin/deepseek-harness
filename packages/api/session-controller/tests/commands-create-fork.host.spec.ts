@@ -35,11 +35,15 @@ function controllerAgents(
   return agents
 }
 
-/** A creation outcome that publishes `sessionId` in `cwd` as a stand-in Agent. */
+/**
+ * A creation outcome that publishes `sessionId` in `cwd` as a stand-in Agent,
+ * honoring the pre-publication attach hook like the real controller.
+ */
 function publishedSession(ctx: Context, sessionId: SessionId) {
-  return (request: ApiSessionCreateRequest): Promise<ApiSessionCreated> => {
+  return async (request: ApiSessionCreateRequest): Promise<ApiSessionCreated> => {
     const session = ctx.sessions.create(sessionId, { meta: { cwd: request.cwd } })
-    return Promise.resolve({ agent: { id: session.id, session, status: 'idle', ctx } as Agent, agentPreset: undefined })
+    await request.attach?.(session)
+    return { agent: { id: session.id, session, status: 'idle', ctx } as Agent, agentPreset: undefined }
   }
 }
 
@@ -262,7 +266,12 @@ describe('Session fork failures', () => {
     } as unknown as Workspace
     ctx.provide('workspaceRegistry', { list: () => [workspace] } as never)
     const create = vi.spyOn(ctx.agents, 'create').mockImplementation(
-      (options: CreateAgentOptions) => Promise.resolve(resolvedHandle(ctx, options.sessionId)),
+      async (options: CreateAgentOptions) => {
+        const handle = resolvedHandle(ctx, options.sessionId)
+        // The factory contract runs setup before publication; the attach hook rides it.
+        await options.setup?.(ctx, handle.agent)
+        return handle
+      },
     )
     const controller = new SessionCommandController(ctx, controllerAgents(ctx), '/default')
 

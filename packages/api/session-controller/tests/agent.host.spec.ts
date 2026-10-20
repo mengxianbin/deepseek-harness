@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent, AgentFactory } from '@deepseek-ai/dsh-agent'
 import { agentPresetProjectionDefinition } from '@deepseek-ai/dsh-agent-preset-registry'
 import SessionStore, { SESSION_FORMAT_VERSION, SessionLogOffset, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionHeader } from '@deepseek-ai/dsh-session'
@@ -72,6 +72,31 @@ function unpublishedAgent(ctx: Context, meta: SessionHeader): Agent {
     status: 'idle',
     ctx,
   } as unknown as Agent
+}
+
+/**
+ * A minimal factory honoring the real loop's publication contract: setup runs
+ * unpublished, and only afterward does enter+announce publish the Session.
+ */
+function publicationContractFactory(ctx: Context): AgentFactory {
+  return {
+    createAgent: async (ownerCtx, options) => {
+      const session = ctx.sessions.prepare(options.sessionId, { meta: options.meta ?? {} })
+      const agent = { id: session.id, session, status: 'idle', ctx: ownerCtx } as unknown as Agent
+      const commit = await options.setup?.(ownerCtx, agent)
+      commit?.commit()
+      const detach = ctx.sessions.enter(session)
+      ctx.sessions.announce(session)
+      return {
+        agent,
+        dispose: () => {
+          detach()
+          return Promise.resolve()
+        },
+      }
+    },
+    resume: () => Promise.reject(new Error('publication-contract factory does not resume')),
+  }
 }
 
 describe('ApiSession identity failures', () => {
@@ -358,5 +383,44 @@ describe('ApiSession creation', () => {
     writeFileSync(file, 'not a directory')
     await expect(agents.createSession({ cwd: join(file, 'child'), reusable: () => true }))
       .rejects.toThrow('failed to ensure project directory')
+  })
+
+  it('attaches before publication so membership holds at first visibility', async () => {
+    const { agents, ctx } = await harness()
+    ctx.agents.setFactory(publicationContractFactory(ctx))
+    const parent = mkdtempSync(join(tmpdir(), 'dsh-session-controller-attach-'))
+    tempDirs.push(parent)
+    const published: SessionId[] = []
+    ctx.on('session/created', session => published.push(session.id))
+    let observed: { readonly published: boolean; readonly entered: boolean } | undefined
+    const created = await agents.createSession({
+      cwd: join(parent, 'project'),
+      reusable: () => true,
+      attach: async (session) => {
+        observed = {
+          // No session/created may have fired yet: the row must not exist before its membership.
+          published: published.includes(session.id),
+          // The Session is not entered either: attach runs strictly inside the setup window.
+          entered: ctx.sessions.get(session.id) !== undefined,
+        }
+      },
+    })
+    expect(observed).toEqual({ published: false, entered: false })
+    expect(published).toEqual([created.agent.id])
+  })
+
+  it('aborts creation without publishing when the pre-publication attach hook fails', async () => {
+    const { agents, ctx } = await harness()
+    ctx.agents.setFactory(publicationContractFactory(ctx))
+    const parent = mkdtempSync(join(tmpdir(), 'dsh-session-controller-attach-fail-'))
+    tempDirs.push(parent)
+    const published: SessionId[] = []
+    ctx.on('session/created', session => published.push(session.id))
+    await expect(agents.createSession({
+      cwd: join(parent, 'project'),
+      reusable: () => true,
+      attach: () => Promise.reject(new Error('read-only workspace')),
+    })).rejects.toThrow('read-only workspace')
+    expect(published).toEqual([])
   })
 })

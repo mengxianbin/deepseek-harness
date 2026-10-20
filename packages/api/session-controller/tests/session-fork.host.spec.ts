@@ -373,7 +373,11 @@ describe('sessions.fork', () => {
 
     expect(response.ok ? undefined : response.error).toBeUndefined()
     if (!response.ok) return
-    expect(attachSession).toHaveBeenCalledWith(response.value.sessionId)
+    // The in-memory header rides the call: attach validates without re-reading storage.
+    expect(attachSession).toHaveBeenCalledWith(
+      response.value.sessionId,
+      expect.objectContaining({ id: response.value.sessionId, cwd: '/proj' }),
+    )
     expect(ctx.sessions.get(response.value.sessionId)?.header).toMatchObject({
       parentSession: grandchild.id,
       cwd: '/proj',

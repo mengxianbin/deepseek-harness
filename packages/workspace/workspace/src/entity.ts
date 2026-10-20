@@ -107,14 +107,16 @@ export class WorkspaceEntity implements Workspace {
     await this.mutate(record => ({ ...record, title }))
   }
 
-  async attachSession(sessionId: SessionId): Promise<void> {
+  async attachSession(sessionId: SessionId, header?: SessionHeader): Promise<void> {
     // Validation is skipped when the settled snapshot already accounts the
     // id: the cwd fact was checked when it first attached and both inputs
     // (stored header cwd, workspace path) are immutable. Membership itself is
     // decided on the write chain inside `mutate`, never on this snapshot.
     if (!this.record.sessionIds.includes(sessionId)) {
-      const header = await this.host.readSessionHeader(sessionId)
-      if (header.cwd === undefined) {
+      // A caller-supplied header — the in-memory one of a Session stored
+      // moments ago — spares the round-trip that would re-read it from disk.
+      const stored = header ?? await this.host.readSessionHeader(sessionId)
+      if (stored.cwd === undefined) {
         throw new Error(
           `cannot attach session '${sessionId}' to workspace '${this.record.path}': `
           + 'its stored header carries no cwd to validate against',
@@ -122,18 +124,18 @@ export class WorkspaceEntity implements Workspace {
       }
       let cwd: string
       try {
-        cwd = await realpathNormalize(header.cwd)
+        cwd = await realpathNormalize(stored.cwd)
       } catch (error) {
         throw new Error(
           `cannot attach session '${sessionId}' to workspace '${this.record.path}': `
-          + `its cwd '${header.cwd}' does not resolve, so it cannot be validated`,
+          + `its cwd '${stored.cwd}' does not resolve, so it cannot be validated`,
           { cause: error },
         )
       }
       if (!(await stat(cwd)).isDirectory()) {
         throw new Error(
           `cannot attach session '${sessionId}' to workspace '${this.record.path}': `
-          + `its cwd '${header.cwd}' is not a directory`,
+          + `its cwd '${stored.cwd}' is not a directory`,
         )
       }
       if (cwd !== this.record.path) {

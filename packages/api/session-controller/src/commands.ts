@@ -122,12 +122,27 @@ export class SessionCommandController {
       }
     }
     const cwd = workspace?.path ?? request.cwd ?? this.defaultCwd
+    // Attachment runs inside the pre-publication setup window (S2): the
+    // workspace record is written before the Session publishes, so the row's
+    // first visible frame already carries its group. A failed attach is
+    // remembered, not thrown — creation publishes anyway and the contract
+    // below reports it exactly as the old attach-after-create order did.
+    let attachError: string | undefined
     let created: ApiSessionCreated
     try {
       created = await this.agents.createSession({
         ...(request.sessionId === undefined ? {} : { sessionId: request.sessionId }),
         cwd,
         ...(request.agentPreset === undefined ? {} : { agentPreset: request.agentPreset }),
+        ...(workspace === undefined ? {} : {
+          attach: async (session) => {
+            try {
+              await workspace.attachSession(session.id, session.header)
+            } catch (error) {
+              attachError = String(error)
+            }
+          },
+        }),
         reusable: sessionId => !this.ctx.workspaceRegistry.archivedSessionIds.includes(sessionId)
           && (workspace === undefined || workspace.sessionIds.includes(sessionId)),
       })
@@ -135,16 +150,12 @@ export class SessionCommandController {
       this.rejectCreation(error)
     }
     const sessionId = created.agent.id
-    if (workspace !== undefined) {
-      try {
-        await workspace.attachSession(sessionId)
-      } catch (error) {
-        throw new RemoteError(
-          'session/workspace-attach-failed',
-          `session "${sessionId}" was created but could not attach to workspace "${workspace.id}": ${String(error)}`,
-          { sessionId, workspaceId: workspace.id },
-        )
-      }
+    if (attachError !== undefined && workspace !== undefined) {
+      throw new RemoteError(
+        'session/workspace-attach-failed',
+        `session "${sessionId}" was created but could not attach to workspace "${workspace.id}": ${attachError}`,
+        { sessionId, workspaceId: workspace.id },
+      )
     }
     return { sessionId, ...(created.agentPreset === undefined ? {} : { agentPreset: created.agentPreset }) }
   }
@@ -271,6 +282,10 @@ export class SessionCommandController {
     }
     const childId = brandString<SessionId>(`session-${randomUUID()}`)
     const composition = await this.agents.composeAgent(this.agents.presetForObservation(source))
+    // Same pre-publication attachment order as create (S2): the child's
+    // workspace membership is durable before it publishes; a failed attach
+    // is remembered and reported after creation under the same contract.
+    let attachError: string | undefined
     try {
       const { provider, model } = this.ctx.agentDefaultModel.currentSelection()
       await this.ctx.agents.create({
@@ -286,7 +301,17 @@ export class SessionCommandController {
             : { agentPreset: composition.agentPreset }),
         },
         agentOptions: { provider, model },
-        setup: composition.setup,
+        setup: workspace === undefined
+          ? composition.setup
+          : async (agentCtx, agent) => {
+            const commit = await composition.setup(agentCtx, agent)
+            try {
+              await workspace.attachSession(agent.id, agent.session.header)
+            } catch (error) {
+              attachError = String(error)
+            }
+            return commit
+          },
       })
     } catch (error) {
       throw new RemoteError(
@@ -295,16 +320,12 @@ export class SessionCommandController {
         {},
       )
     }
-    if (workspace !== undefined) {
-      try {
-        await workspace.attachSession(childId)
-      } catch (error) {
-        throw new RemoteError(
-          'session/workspace-attach-failed',
-          `session "${childId}" was forked but could not attach to workspace "${workspace.id}": ${String(error)}`,
-          { sessionId: childId, workspaceId: workspace.id },
-        )
-      }
+    if (attachError !== undefined && workspace !== undefined) {
+      throw new RemoteError(
+        'session/workspace-attach-failed',
+        `session "${childId}" was forked but could not attach to workspace "${workspace.id}": ${attachError}`,
+        { sessionId: childId, workspaceId: workspace.id },
+      )
     }
     return { sessionId: childId }
   }

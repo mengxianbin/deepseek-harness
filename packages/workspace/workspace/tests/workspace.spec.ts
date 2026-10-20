@@ -762,6 +762,27 @@ describe('Workspace session ordering', () => {
     expect(workspace.sessionIds).toEqual(['s1'])
   })
 
+  it('validates a caller-supplied header without reading persistence', async () => {
+    const dir = await makeDir('supplied-header')
+    const elsewhere = await makeDir('supplied-elsewhere')
+    const result = await harness()
+    const workspace = await result.registry.create(dir)
+    const listed = result.list.mock.calls.length
+
+    // The fresh Session is unknown to persistence's listing — only the
+    // caller holds its header, exactly like a just-stored create.
+    await workspace.attachSession(SessionId('fresh'), header('fresh', dir))
+    expect(workspace.sessionIds).toEqual(['fresh'])
+    expect(result.list.mock.calls.length).toBe(listed)
+
+    // The supplied header is validated exactly like a stored one.
+    await expect(workspace.attachSession(SessionId('fresh-mismatch'), header('fresh-mismatch', elsewhere)))
+      .rejects.toThrow(/resolves to/)
+    await expect(workspace.attachSession(SessionId('fresh-no-cwd'), header('fresh-no-cwd')))
+      .rejects.toThrow(/no cwd/)
+    expect(workspace.sessionIds).toEqual(['fresh'])
+  })
+
 })
 
 describe('header-validated membership projection', () => {

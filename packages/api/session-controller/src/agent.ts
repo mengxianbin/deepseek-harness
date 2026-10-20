@@ -66,6 +66,17 @@ export interface ApiSessionCreateRequest {
   /** Preset the Session runs; the configured default when omitted. */
   readonly agentPreset?: string
   /**
+   * Pre-publication hook run inside the Agent setup window — after the
+   * Session's header is durable, before it is published — so the caller can
+   * establish facts (such as Workspace membership) that must hold at the
+   * exact moment the Session first becomes visible. A hook failure aborts
+   * the creation; the Session never publishes. Not invoked when the request
+   * reuses a live or stored blank Session, whose membership already holds.
+   * @param session - the unpublished Session; its header is the stored one.
+   * @returns resolution after the fact is established.
+   */
+  readonly attach?: (session: Session) => Promise<void>
+  /**
    * Placement rule the caller owns, such as Workspace membership and archive state.
    * @param sessionId - existing Session named by the request.
    * @returns whether that Session may be reused.
@@ -277,7 +288,13 @@ export class ApiSessionAgentController {
    */
   async createSession(request: ApiSessionCreateRequest): Promise<ApiSessionCreated> {
     const named = request.sessionId
-    if (named === undefined) return this.created(await this.createMinted(request.cwd, await this.composeAgent(request.agentPreset)))
+    if (named === undefined) {
+      return this.created(await this.createMinted(
+        request.cwd,
+        await this.composeAgent(request.agentPreset),
+        request.attach,
+      ))
+    }
     return this.inOrder(named, async () => this.created(await this.claim(named, request)))
   }
 
@@ -467,14 +484,15 @@ export class ApiSessionAgentController {
         throw new ApiSessionCwdConflict(live.id, request.cwd, live.session.header.cwd)
       }
       const composition = await this.composeAgent(request.agentPreset)
-      return await this.reuseLive(live, request, composition) ?? this.createMinted(request.cwd, composition)
+      return await this.reuseLive(live, request, composition)
+        ?? this.createMinted(request.cwd, composition, request.attach)
     }
     let observation: SessionObservation
     try {
       observation = await this.ctx.sessionQuery.observeSession(sessionId)
     } catch (error: unknown) {
       if (!(error instanceof SessionQueryError) || error.code !== 'SESSION_QUERY_SESSION_NOT_FOUND') throw error
-      return this.createAgent(sessionId, request.cwd, await this.composeAgent(request.agentPreset))
+      return this.createAgent(sessionId, request.cwd, await this.composeAgent(request.agentPreset), request.attach)
     }
     let reusable: boolean
     {
@@ -488,7 +506,7 @@ export class ApiSessionAgentController {
       reusable = request.reusable(sessionId) && !observed.events.some(event => event.type === 'turn/start')
     }
     const composition = await this.composeAgent(request.agentPreset)
-    if (!reusable) return this.createMinted(request.cwd, composition)
+    if (!reusable) return this.createMinted(request.cwd, composition, request.attach)
     this.assertPresetApplicable(sessionId, request.agentPreset)
     try {
       return (await this.ctx.agents.resume({
@@ -497,11 +515,13 @@ export class ApiSessionAgentController {
         setup: this.reuseSetup(composition),
       })).agent
     } catch (error: unknown) {
-      if (error instanceof ApiSessionStartedSinceObserved) return this.createMinted(request.cwd, composition)
+      if (error instanceof ApiSessionStartedSinceObserved) {
+        return this.createMinted(request.cwd, composition, request.attach)
+      }
       if (!(error instanceof Error) || error.name !== 'SessionAlreadyOwnedError') throw error
       // Another resume in this process may hold the writer for the Agent it published.
       return this.ctx.agents.get(sessionId) === undefined
-        ? this.createMinted(request.cwd, composition)
+        ? this.createMinted(request.cwd, composition, request.attach)
         : this.claim(sessionId, request)
     }
   }
@@ -556,11 +576,20 @@ export class ApiSessionAgentController {
     return { agent, agentPreset: this.presetForSession(agent.session) }
   }
 
-  private createMinted(cwd: string, composition: ApiSessionComposition): Promise<Agent> {
-    return this.createAgent(brandString<SessionId>(`session-${randomUUID()}`), cwd, composition)
+  private createMinted(
+    cwd: string,
+    composition: ApiSessionComposition,
+    attach?: (session: Session) => Promise<void>,
+  ): Promise<Agent> {
+    return this.createAgent(brandString<SessionId>(`session-${randomUUID()}`), cwd, composition, attach)
   }
 
-  private async createAgent(sessionId: SessionId, cwd: string, composition: ApiSessionComposition): Promise<Agent> {
+  private async createAgent(
+    sessionId: SessionId,
+    cwd: string,
+    composition: ApiSessionComposition,
+    attach?: (session: Session) => Promise<void>,
+  ): Promise<Agent> {
     try {
       await mkdir(cwd, { recursive: true })
     } catch (error: unknown) {
@@ -573,7 +602,16 @@ export class ApiSessionAgentController {
         cwd,
         ...(composition.agentPreset === undefined ? {} : { agentPreset: composition.agentPreset }),
       },
-      setup: composition.setup,
+      setup: attach === undefined
+        ? composition.setup
+        : async (agentCtx, agent) => {
+          // The pre-publication hook runs inside the setup window: the
+          // header is durable, nothing has published yet, and a hook
+          // failure rolls the unpublished Agent back.
+          const commit = await composition.setup(agentCtx, agent)
+          await attach(agent.session)
+          return commit
+        },
     })).agent
   }
 
