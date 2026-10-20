@@ -66,9 +66,11 @@
 }
 
 /* One shared highlight: pointer motion parks it here through the hover event,
-   so there is no separate :hover tint competing with the keyboard's. */
+   so there is no separate :hover tint competing with the keyboard's. The
+   accent fill — twice the plain hover tint's opacity — keeps the keyboard
+   cursor readable against the menu's translucent surface. */
 .item.active {
-  background: var(--dsw-alias-interactive-bg-hover);
+  background: var(--dsw-alias-interactive-bg-hover-accent);
 }
 
 .sectionTitle {
