@@ -95,6 +95,16 @@ export interface Config {
    * PowerShell 5.1), falling back to a bare `pwsh` resolved through PATH.
    */
   pwshPath: Volatile<string | undefined>
+  /**
+   * Whether resolution may fall back to Windows PowerShell 5.1 when no
+   * PowerShell 7 install is reachable. Defaults to `true` (historical
+   * behavior); deployments that must never run 5.1 set it to `false` — the
+   * 5.1 candidate is then skipped, so a host without PowerShell 7 falls
+   * through to the bare `pwsh` PATH fallback and fails loudly at spawn
+   * instead of silently running 5.1. Ignored while an explicit `pwshPath`
+   * short-circuits resolution.
+   */
+  allowLegacyPowerShell: Volatile<boolean>
 }
 
 // Resolution lives in its own dependency-free module so the repository's
@@ -151,32 +161,39 @@ export class PwshLocalExecutor extends ShellExecutor {
     maxSpillBytes: z.number().default(DEFAULT_MAX_SPILL_BYTES).volatile(),
     graceMs: z.number().default(DEFAULT_GRACE_MS).volatile(),
     pwshPath: z.string().volatile(),
+    allowLegacyPowerShell: z.boolean().default(true).volatile(),
   })
 
   /** The declared executable the current {@link pwshPath} was resolved from. */
   private declaredPwshPath: string | undefined
 
+  /** The `allowLegacyPowerShell` value the current path was resolved under. */
+  private declaredLegacyFallback: boolean
+
   /** The pwsh executable resolved from the current config. */
   private resolvedPwshPath: string
 
   /**
-   * The pwsh executable every command runs through. A changed declared path is
-   * probed again on the next read; an auto-resolved path whose file has since
-   * been deleted (a Microsoft Store update replacing a versioned install
-   * directory) is re-resolved too, so the death heals on the next command
-   * instead of failing for the whole host-process lifetime. An explicit
-   * `pwshPath` still resolves to itself — liveness is the only new question.
+   * The pwsh executable every command runs through. A changed declared path
+   * or legacy-fallback flag is probed again on the next read; an auto-resolved
+   * path whose file has since been deleted (a Microsoft Store update replacing
+   * a versioned install directory) is re-resolved too, so the death heals on
+   * the next command instead of failing for the whole host-process lifetime.
+   * An explicit `pwshPath` still resolves to itself — liveness is the only
+   * new question.
    */
   get pwshPath(): string {
     const declared = this.config.pwshPath.get()
-    if (declared !== this.declaredPwshPath) {
-      this.resolvedPwshPath = resolvePwshPath(declared)
+    const allowLegacyPowerShell = this.config.allowLegacyPowerShell.get()
+    if (declared !== this.declaredPwshPath || allowLegacyPowerShell !== this.declaredLegacyFallback) {
+      this.resolvedPwshPath = resolvePwshPath(declared, process.env, process.platform, allowLegacyPowerShell)
       this.declaredPwshPath = declared
+      this.declaredLegacyFallback = allowLegacyPowerShell
     } else if (isAbsolute(this.resolvedPwshPath) && !candidateExists(this.resolvedPwshPath)) {
       // The cached executable is gone (Store update / uninstall deleted the
       // directory behind a PATH entry): re-probe, and resolvePwshPath skips
       // every dead candidate on the way to a live one (or the bare fallback).
-      this.resolvedPwshPath = resolvePwshPath(declared)
+      this.resolvedPwshPath = resolvePwshPath(declared, process.env, process.platform, allowLegacyPowerShell)
     }
     return this.resolvedPwshPath
   }
@@ -184,7 +201,10 @@ export class PwshLocalExecutor extends ShellExecutor {
   constructor(ctx: Context, readonly config: Config) {
     super(ctx)
     this.declaredPwshPath = config.pwshPath.get()
-    this.resolvedPwshPath = resolvePwshPath(this.declaredPwshPath)
+    this.declaredLegacyFallback = config.allowLegacyPowerShell.get()
+    this.resolvedPwshPath = resolvePwshPath(
+      this.declaredPwshPath, process.env, process.platform, this.declaredLegacyFallback,
+    )
   }
 
   /**
