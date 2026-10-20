@@ -38,6 +38,8 @@ export class WorkspaceChangeFeed {
    */
   async *follow(workspaceRoot: string, path: string, signal: AbortSignal): AsyncIterable<WorkspaceFileWatchFrame> {
     signal.throwIfAborted()
+    // WATCHPROBE-20261020: 诊断面包屑——changes 监视挂起定位（m-note dsh 三件套条目，用户批准路 B）。
+    console.log(`[watch-probe] changes.follow enter ws=${workspaceRoot} path=${path}`) // WATCHPROBE-20261020
     // Instrumented observations remain queued while the target resolves.
     const follower = new ChangeFollower(() => {
       signal.removeEventListener('abort', cancel)
@@ -89,6 +91,7 @@ export class WorkspaceChangeFeed {
       }
       follower.initialized.resolve(unwatch)
       if (aborted()) return
+      console.log(`[watch-probe] changes.follow ready-frame sent path=${path}`) // WATCHPROBE-20261020
       yield { kind: 'ready' }
       for await (const [observed] of follower.read()) {
         if (observed.targetKey !== target.targetKey) continue
@@ -102,6 +105,9 @@ export class WorkspaceChangeFeed {
             : { absolutePath, absent: true },
         }
       }
+    } catch (error) {
+      console.log(`[watch-probe] changes.follow failed path=${path} err=${String(error)}`) // WATCHPROBE-20261020
+      throw error
     } finally {
       follower.initialized.resolve(unwatch)
       await follower.close()

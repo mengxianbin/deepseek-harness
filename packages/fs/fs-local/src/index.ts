@@ -72,6 +72,9 @@ export class LocalFileSystem extends FileSystem {
     const directory = (await this.stat(target, signal))?.type === 'directory'
     signal.throwIfAborted()
     const root = directory ? path : dirname(path)
+    const probeEnter = Date.now()
+    // WATCHPROBE-20261020: 诊断面包屑——changes 监视挂起定位（m-note dsh 三件套条目，用户批准路 B）。
+    console.log(`[watch-probe] fs.watch enter dir=${String(directory)} root=${root} path=${path}`) // WATCHPROBE-20261020
     const watcher = watch(root, {
       ignoreInitial: true, depth: 0,
       ignored: entry => !directory && resolve(entry) !== root && resolve(entry) !== path,
@@ -80,10 +83,18 @@ export class LocalFileSystem extends FileSystem {
       if (directory || resolve(entry) === path) changed()
     })
     watcher.on('error', (error) => { changed(error instanceof Error ? error : new Error(String(error))) })
+    const probeSlow = setTimeout(() => { // WATCHPROBE-20261020
+      console.log(`[watch-probe] fs.watch SLOW >10000ms still waiting chokidar ready root=${root}`) // WATCHPROBE-20261020
+    }, 10_000)
+    probeSlow.unref()
     try {
       await once(watcher, 'ready', { signal })
+      clearTimeout(probeSlow)
+      console.log(`[watch-probe] fs.watch chokidar ready after ${String(Date.now() - probeEnter)}ms root=${root}`) // WATCHPROBE-20261020
       return () => watcher.close()
     } catch (error) {
+      clearTimeout(probeSlow)
+      console.log(`[watch-probe] fs.watch init failed after ${String(Date.now() - probeEnter)}ms root=${root} err=${String(error)}`) // WATCHPROBE-20261020
       await watcher.close()
       throw error
     }
