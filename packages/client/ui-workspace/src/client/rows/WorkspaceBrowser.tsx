@@ -330,6 +330,55 @@ function EmptySessions({ rowState, onLeaveArchivedOnly, t }: Pick<SessionTreePro
   )
 }
 
+/**
+ * FORK dsh-local (f5-list-states, marker: data-list-state): the loading leg of
+ * the list's three states — skeleton rows while either baseline has not
+ * landed, so the region never renders group headers without rows and never
+ * shows the empty placeholder as a stand-in for "still loading". Row shape
+ * mirrors the search box's skeleton (`SearchResults` pending).
+ */
+function SessionListSkeleton({ t }: { t: SessionTreeProps['t'] }) {
+  return (
+    <div className={clsx(css.treeBody, css.wide)}>
+      <div className={clsx(css.list)} role="status" aria-label={t('list.loading')} data-list-state="loading">
+        {[0, 1, 2, 3, 4, 5].map(i => (
+          <div key={i} className={css.skeletonRow} aria-hidden="true">
+            <span className={css.skeletonDot} />
+            <span className={css.skeletonBars}>
+              <span className={css.skeletonBar} />
+              <span className={clsx(css.skeletonBar, css.skeletonBarWide)} />
+            </span>
+          </div>
+        ))}
+      </div>
+      <span className={css.fade} />
+    </div>
+  )
+}
+
+/**
+ * FORK dsh-local (f5-list-states, marker: data-list-state): the error leg —
+ * a failed `session.list` pull with nothing to show replaces silent
+ * permanence with the failure and a retry (the pull is single-shot per
+ * connection generation; this button starts a new one).
+ */
+function SessionListError({ onRetry, t }: { onRetry: () => void; t: SessionTreeProps['t'] }) {
+  return (
+    <div className={clsx(css.treeBody, css.wide)}>
+      <div className={clsx(css.list)} role="alert" data-list-state="error">
+        <div className={css.emptyState}>
+          <IconQueueOutlineRegular size={24} />
+          <div>{t('list.error.title')}</div>
+          <button type="button" className={css.emptyAction} onClick={onRetry}>
+            {t('list.error.retry')}
+          </button>
+        </div>
+      </div>
+      <span className={css.fade} />
+    </div>
+  )
+}
+
 /** The scrolling session tree; unmounting drops the sessions subscription and the session watermarks. */
 function SessionTree({
   list, useSessionStatus, startSession, open, workspaces, ungroupedSessionIds,
@@ -948,6 +997,7 @@ export function WorkspaceBrowser({
   createWorkspace,
   searchSessions,
   searchResultLimit,
+  refreshSessions,
   useDirectoryFlow,
   useHostInfo,
   useShortcuts,
@@ -1002,6 +1052,14 @@ export function WorkspaceBrowser({
   }
   const leaveArchivedOnly = (): void => { actions.setArchivedFilter('default') }
   const workspaceReady = workspacePhase === 'ready' && workspaceStreamState !== 'loading'
+  // FORK dsh-local (f5-list-states, marker: data-list-state): the list's three
+  // states — content needs both baselines landed; before that the region is
+  // either the pull's failure (error + retry) or still loading (skeleton).
+  // A failed refresh with rows already showing keeps those rows (the pull
+  // merges onto the established baseline; only an empty first arrival is an
+  // error the user must act on).
+  const listContentReady = list.phase === 'ready' && workspacePhase === 'ready'
+  const listFailed = list.state === 'error' && list.phase !== 'ready'
   const mainSessionId = Object.values(list.byId)
     .find(session => (session.retainedBy.mainView ?? 0) > 0)?.id
   const currentBlank = mainSessionId !== undefined && list.byId[mainSessionId]?.blank === true
@@ -1433,8 +1491,9 @@ export function WorkspaceBrowser({
       </div>}
 
       {/* Always-mounted seat keeps the region's flex slot while the list
-          itself is wide-only. */}
-      <div className={css.listArea}>
+          itself is wide-only. data-workspace-phase = the Workspace baseline's
+          arrival axis, surfaced for the two-baseline gate probe. */}
+      <div className={css.listArea} data-workspace-phase={workspacePhase}>
         {wide && (normalizedQuery !== ''
           ? (
             <SearchResults
@@ -1452,65 +1511,72 @@ export function WorkspaceBrowser({
               t={t}
             />
           )
-          : groupBy === 'flat'
-            ? (
-              <FlatList
-                usePanelInfo={usePanelInfo}
-                list={list}
-                sessionIds={orderedFlatSessionIds}
-                rowState={rowState}
-                onLeaveArchivedOnly={leaveArchivedOnly}
-                workspaceReady={workspaceReady}
-                animationResetKey={`${groupBy}/${orderBy}/${archivedFilter}`}
-                useSessionStatus={useSessionStatus}
-                open={guardedOpen}
-                onSessionRenameRequest={requestSessionRename}
-                renderSlot={renderSlot}
-                setSessionOrder={saveSessionOrder}
-                revealSessionId={revealSessionId}
-                onSessionRevealed={acknowledgeSessionReveal}
-                t={t}
-              />
-            )
-            : (
-              <SessionTree
-                usePanelInfo={usePanelInfo}
-                list={list}
-                shortcuts={shortcuts}
-                useSessionStatus={useSessionStatus}
-                onSessionRenameRequest={requestSessionRename}
-                renderSlot={renderSlot}
-                workspaces={orderedWorkspaces}
-                ungroupedSessionIds={orderedUngroupedSessionIds}
-                workspaceReady={workspaceReady}
-                nestWorkspaces={groupBy === 'workspace-tree'}
-                animationResetKey={`${groupBy}/${orderBy}/${archivedFilter}`}
-                groupExpansion={groupExpansion}
-                setGroupExpanded={actions.setGroupExpanded}
-                setSessionOrder={saveSessionOrder}
-                rowState={rowState}
-                onLeaveArchivedOnly={leaveArchivedOnly}
-                startSession={startSession}
-                open={guardedOpen}
-                insertWorkspaceBefore={insertWorkspaceBefore}
-                revealSessionId={revealSessionId}
-                onSessionRevealed={acknowledgeSessionReveal}
-                home={home}
-                t={t}
-                onRenameRequest={(workspaceId, displayTitle) => {
-                  setRenameTarget({
-                    workspaceId,
-                    storedTitle: storedWorkspaces.find(w => w.workspaceId === workspaceId)?.title ?? displayTitle,
-                  })
-                  setRenameDraft(displayTitle)
-                  setRenameError(null)
-                }}
-                onDeleteRequest={(workspaceId, title) => {
-                  setDeleteTarget({ workspaceId, title })
-                  setDeleteError(null)
-                }}
-              />
-            ))}
+          // FORK dsh-local (f5-list-states): three-state gate — the grouped and
+          // flat bodies only mount once both baselines landed, so their empty
+          // placeholder and group headers can no longer front for "loading".
+          : !listContentReady
+            ? (listFailed
+              ? <SessionListError onRetry={refreshSessions} t={t} />
+              : <SessionListSkeleton t={t} />)
+            : groupBy === 'flat'
+              ? (
+                <FlatList
+                  usePanelInfo={usePanelInfo}
+                  list={list}
+                  sessionIds={orderedFlatSessionIds}
+                  rowState={rowState}
+                  onLeaveArchivedOnly={leaveArchivedOnly}
+                  workspaceReady={workspaceReady}
+                  animationResetKey={`${groupBy}/${orderBy}/${archivedFilter}`}
+                  useSessionStatus={useSessionStatus}
+                  open={guardedOpen}
+                  onSessionRenameRequest={requestSessionRename}
+                  renderSlot={renderSlot}
+                  setSessionOrder={saveSessionOrder}
+                  revealSessionId={revealSessionId}
+                  onSessionRevealed={acknowledgeSessionReveal}
+                  t={t}
+                />
+              )
+              : (
+                <SessionTree
+                  usePanelInfo={usePanelInfo}
+                  list={list}
+                  shortcuts={shortcuts}
+                  useSessionStatus={useSessionStatus}
+                  onSessionRenameRequest={requestSessionRename}
+                  renderSlot={renderSlot}
+                  workspaces={orderedWorkspaces}
+                  ungroupedSessionIds={orderedUngroupedSessionIds}
+                  workspaceReady={workspaceReady}
+                  nestWorkspaces={groupBy === 'workspace-tree'}
+                  animationResetKey={`${groupBy}/${orderBy}/${archivedFilter}`}
+                  groupExpansion={groupExpansion}
+                  setGroupExpanded={actions.setGroupExpanded}
+                  setSessionOrder={saveSessionOrder}
+                  rowState={rowState}
+                  onLeaveArchivedOnly={leaveArchivedOnly}
+                  startSession={startSession}
+                  open={guardedOpen}
+                  insertWorkspaceBefore={insertWorkspaceBefore}
+                  revealSessionId={revealSessionId}
+                  onSessionRevealed={acknowledgeSessionReveal}
+                  home={home}
+                  t={t}
+                  onRenameRequest={(workspaceId, displayTitle) => {
+                    setRenameTarget({
+                      workspaceId,
+                      storedTitle: storedWorkspaces.find(w => w.workspaceId === workspaceId)?.title ?? displayTitle,
+                    })
+                    setRenameDraft(displayTitle)
+                    setRenameError(null)
+                  }}
+                  onDeleteRequest={(workspaceId, title) => {
+                    setDeleteTarget({ workspaceId, title })
+                    setDeleteError(null)
+                  }}
+                />
+              ))}
       </div>
 
       <Modal

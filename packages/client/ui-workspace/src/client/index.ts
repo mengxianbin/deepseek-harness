@@ -278,6 +278,12 @@ export function apply(ctx: Context): void {
     open: openSession,
     searchSessions,
     searchResultLimit: sessions.searchResultLimit,
+    // FORK dsh-local (f5-list-states): the sidebar error surface's retry.
+    refreshSessions: () => {
+      void sessions.refresh().catch((reason: unknown) => {
+        console.warn('session list refresh rejected:', reason)
+      })
+    },
     requestSessionRename,
     notifyArchivedNotOpenable: () => { notify({ kind: 'archivedNotOpenable' }) },
     renameWorkspace: async (workspaceId, title) => { await workspaces.rename(workspaceId, title) },

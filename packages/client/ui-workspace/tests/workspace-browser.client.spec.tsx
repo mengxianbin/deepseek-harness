@@ -2,7 +2,7 @@
 import type { GlobalStandardProps } from '@deepseek-ai/dsh-client-ui-slots'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { allowAllAccess, bindSnapshotSelector, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
+import { allowAllAccess, bindSnapshotSelector, makeTranslate, RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
 import type {
   WorkspaceId, WorkspaceSnapshot, WorkspaceView,
@@ -129,6 +129,7 @@ function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
     open: vi.fn(),
     searchSessions: vi.fn(async () => ({ items: [], hasMore: false })),
     searchResultLimit: 20,
+    refreshSessions: vi.fn(),
     notifyArchivedNotOpenable: vi.fn(),
     renameWorkspace: vi.fn(async () => {}),
     deleteWorkspace: vi.fn(async () => {}),
@@ -1895,8 +1896,73 @@ describe('WorkspaceBrowser', () => {
     }
   })
 
-  it('rail state renders icon controls that request expansion', () => {
-    vi.useFakeTimers()
+  // FORK dsh-local (f5-list-states, marker: data-list-state): the list's three
+  // states — loading skeleton, true vacuum, and pull failure + retry.
+  it('holds group headers and the empty placeholder back until the list lands, showing skeletons', () => {
+    const b = mount({
+      useSessions: hook(sessionState([], { phase: 'pending' })),
+      useWorkspaces: hook(workspaceState([workspace('alpha', [sid('row')])])),
+    })
+    expect(document.querySelector('[data-list-state="loading"]')).toBeTruthy()
+    expect(screen.getByRole('status', { name: '正在加载会话…' })).toBeTruthy()
+    expect(screen.queryByText('暂无会话')).toBeNull()
+    expect(screen.queryByText('alpha')).toBeNull()
+
+    rerender(b, { useSessions: hook(sessionState([summary('row', 1)])) })
+    act(() => { b.store.actions.setGroupExpanded('alpha', true) })
+    expect(document.querySelector('[data-list-state="loading"]')).toBeNull()
+    expect(screen.queryByText('暂无会话')).toBeNull()
+    expect(screen.getByText('row')).toBeTruthy()
+  })
+
+  it('shows the skeleton while the Workspace baseline has not landed even with list rows', () => {
+    mount({
+      useSessions: hook(sessionState([summary('row', 1)])),
+      useWorkspaces: hook({
+        ...workspaceState([workspace('alpha', [sid('row')])]),
+        phase: 'pending',
+        state: 'loading',
+      }),
+    })
+    expect(document.querySelector('[data-list-state="loading"]')).toBeTruthy()
+    expect(screen.queryByText('row')).toBeNull()
+    expect(screen.queryByText('暂无会话')).toBeNull()
+  })
+
+  it('replaces the empty list with the pull failure and retries through the injected refresh', () => {
+    const b = mount({
+      useSessions: hook(sessionState([], {
+        phase: 'pending',
+        state: 'error',
+        error: new RemoteError('gateway/internal', 'list unavailable', {}),
+      })),
+      useWorkspaces: hook(workspaceState([])),
+    })
+    expect(screen.getByText('会话列表加载失败')).toBeTruthy()
+    expect(screen.queryByText('暂无会话')).toBeNull()
+    expect(document.querySelector('[data-list-state="loading"]')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    expect(b.props.refreshSessions).toHaveBeenCalledOnce()
+
+    rerender(b, { useSessions: hook(sessionState([], { phase: 'pending', state: 'loading' })) })
+    expect(screen.queryByText('会话列表加载失败')).toBeNull()
+    expect(document.querySelector('[data-list-state="loading"]')).toBeTruthy()
+  })
+
+  it('keeps established rows visible when a later refresh fails', () => {
+    mount({
+      useSessions: hook(sessionState([summary('row', 1)], {
+        state: 'error',
+        error: new RemoteError('gateway/internal', 'list unavailable', {}),
+      })),
+      useWorkspaces: hook(workspaceState([workspace('alpha', [sid('row')])])),
+    })
+    expect(document.querySelector('[data-list-state="error"]')).toBeNull()
+    expect(screen.getByText('alpha')).toBeTruthy()
+  })
+
+  it('rail state renders icon controls that request expansion', () => {    vi.useFakeTimers()
     try {
       const expandSidebar = vi.fn()
       const b = mount({ wide: false, expandSidebar })

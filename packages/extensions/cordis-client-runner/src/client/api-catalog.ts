@@ -905,7 +905,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionListState',
-    declaration: 'export interface SessionListState {\n    ids: SessionId[];\n    byId: Record<SessionId, SessionSummary>;\n    phase: SessionListPhase;\n    projectionsBySession: Readonly<Record<SessionId, SessionProjectionSnapshot>>;\n}',
+    declaration: 'export interface SessionListState {\n    ids: SessionId[];\n    byId: Record<SessionId, SessionSummary>;\n    phase: SessionListPhase;\n    state?: \'idle\' | \'loading\' | \'error\';\n    error?: RemoteFailure | null;\n    projectionsBySession: Readonly<Record<SessionId, SessionProjectionSnapshot>>;\n}',
   },
   {
     name: 'SessionMaybeStandardProps',
@@ -941,7 +941,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionRetainOptions',
-    declaration: 'export interface SessionRetainOptions {\n    readonly source: SessionReferenceSource;\n    readonly signal?: AbortSignal | undefined;\n}',
+    declaration: 'export interface SessionRetainOptions {\n    readonly source: SessionReferenceSource;\n    readonly signal?: AbortSignal | undefined;\n    readonly persistedSelection?: boolean | undefined;\n}',
   },
   {
     name: 'SessionSearchResultItem',

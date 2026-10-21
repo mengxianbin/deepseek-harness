@@ -130,12 +130,18 @@ export class SessionManager {
   /**
    * Resolve an acquisition target without materializing a Session.
    * @param target - known identity or durable direct-parent address.
+   * @param persistedSelection - FORK dsh-local (f5-list-states, marker:
+   *   persistedSelection): trust a Client-persisted identity while the catalog
+   *   pull has not delivered its row yet (startup restoration decoupled from
+   *   `session.list`); only meaningful for a plain id, since an address is
+   *   self-vouching. The Host decides existence through the history open.
    * @returns the resolved identity with its explicit or catalog-derived history route installed.
    */
-  resolveTarget(target: SessionTarget): SessionId {
+  resolveTarget(target: SessionTarget, persistedSelection = false): SessionId {
     const id = typeof target === 'string' ? target : target.childSessionId
     const address = typeof target === 'string' ? this.subagentAddress(id) : target
     if (typeof target === 'string'
+      && !persistedSelection
       && !this.sessions.has(id)
       && !this.summaries.some(summary => summary.sessionId === id)
       && address === undefined) {

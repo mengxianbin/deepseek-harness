@@ -38,6 +38,8 @@ afterEach(async () => {
 function persistSelection(selection: {
   readonly sessionId?: SessionId
   readonly subagentAddress?: SubagentAddress
+  /** FORK dsh-local (f5-list-states): mirror of the persisted MainSelection blank knowledge. */
+  readonly blank?: boolean
 }): Map<string, string> {
   const backing = new Map([['dsh.sessions.current', JSON.stringify(selection)]])
   vi.stubGlobal('localStorage', {
@@ -1042,6 +1044,89 @@ describe('UiWorkspaceService', () => {
     })
     expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('saved'), { source: 'mainView' })
     expect(b.sessions.create).not.toHaveBeenCalled()
+  })
+
+  // FORK dsh-local (f5-list-states): restoration before the session.list pull lands.
+  describe('restores before the session list arrives', () => {
+    it('opens a persisted non-blank selection directly while the list pull is in flight', () => {
+      persistSelection({ sessionId: sid('saved'), blank: false })
+      const b = bench({
+        workspaces: workspaceState([workspace('a', [sid('saved')])]),
+        sessions: sessionState([], 'pending'),
+      })
+      expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(
+        sid('saved'), { source: 'mainView', persistedSelection: true },
+      )
+      expect(b.sessions.create).not.toHaveBeenCalled()
+    })
+
+    it('waits for the Workspace baseline before opening the persisted selection', () => {
+      persistSelection({ sessionId: sid('saved'), blank: false })
+      const b = bench({
+        workspaces: workspaceState([workspace('a', [sid('saved')])], [], 'pending'),
+        sessions: sessionState([], 'pending'),
+      })
+      expect(b.sessions.retain).not.toHaveBeenCalled()
+
+      b.workspaces.list.set(workspaceState([workspace('a', [sid('saved')])]))
+      expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(
+        sid('saved'), { source: 'mainView', persistedSelection: true },
+      )
+    })
+
+    it('keeps a persisted blank on the catalog path until its row lands', async () => {
+      persistSelection({ sessionId: sid('saved'), blank: true })
+      const b = bench({
+        workspaces: workspaceState([workspace('a', [sid('saved')])]),
+        sessions: sessionState([], 'pending'),
+      })
+      expect(b.sessions.retain).not.toHaveBeenCalled()
+
+      b.sessions.list.set(sessionState([summary('saved', { blank: true, cwd: '/w/a' })]))
+      await vi.waitFor(() => {
+        expect(b.sessions.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: wid('a'), sessionId: sid('saved') })
+      })
+      expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('saved'), { source: 'mainView' })
+    })
+
+    it('keeps a selection persisted before blank knowledge on the catalog path', async () => {
+      // Pre-fork persisted selections carry no blank field: one catalog-bound
+      // restore rewrites them with the knowledge, the next refresh is early.
+      persistSelection({ sessionId: sid('saved') })
+      const b = bench({
+        workspaces: workspaceState([workspace('a', [sid('saved')])]),
+        sessions: sessionState([], 'pending'),
+      })
+      expect(b.sessions.retain).not.toHaveBeenCalled()
+
+      b.sessions.list.set(sessionState([summary('saved')]))
+      await vi.waitFor(() => {
+        expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('saved'), { source: 'mainView' })
+      })
+    })
+
+    it('keeps an archived persisted selection on the catalog path', () => {
+      persistSelection({ sessionId: sid('saved'), blank: false })
+      const b = bench({
+        workspaces: workspaceState([workspace('a', [sid('saved')])], [sid('saved')]),
+        sessions: sessionState([], 'pending'),
+      })
+      expect(b.sessions.retain).not.toHaveBeenCalled()
+    })
+
+    it('opens a persisted subagent address before the list without a parent catalog', () => {
+      const address: SubagentAddress = {
+        parentSessionId: sid('parent'),
+        childSessionId: sid('child'),
+        mode: 'continuable',
+      }
+      persistSelection({ sessionId: address.childSessionId, subagentAddress: address })
+      const b = bench({
+        workspaces: workspaceState(),
+        sessions: sessionState([], 'pending'),
+      })
+      expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(address, { source: 'mainView' })
+    })
   })
 
   it('reclaims the saved blank before opening history, even when another blank is listed first', async () => {

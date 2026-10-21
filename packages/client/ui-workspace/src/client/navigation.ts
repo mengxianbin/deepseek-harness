@@ -27,6 +27,15 @@ import type { WorkspaceViewStoreActions } from './stores.ts'
 interface MainSelection {
   readonly sessionId?: SessionId
   readonly subagentAddress?: SubagentAddress
+  /**
+   * FORK dsh-local (f5-list-states): whether the persisted Session read as
+   * blank when its selection was written. Blankness never re-raises, so this
+   * is durable knowledge: `false` lets a refresh restore the Session's history
+   * before the `session.list` pull lands, while `true`/absent keeps blank
+   * reclamation (recorded Agent preset, Workspace reuse) on the full catalog —
+   * and keeps pre-fork persisted selections on the old path until rewritten.
+   */
+  readonly blank?: boolean
 }
 
 /** Content preparation and Agent preset for the Session a Workspace flow opens. */
@@ -413,11 +422,16 @@ class UiWorkspaceService extends Service implements UiWorkspace {
       if (initial !== 'waiting') return
       const workspace = this.workspaces.list.getSnapshot()
       const sessions = this.sessions.list.getSnapshot()
-      if (workspace.phase !== 'ready' || sessions.phase !== 'ready') return
+      // FORK dsh-local (f5-list-states): only the Workspace baseline gates
+      // restoration now — a persisted non-blank selection opens its history
+      // before the session.list pull lands (the pull still gates everything
+      // that needs catalog rows; see canRestore).
+      if (workspace.phase !== 'ready') return
       if (this.mainReference !== undefined) {
         initial = 'done'
         return
       }
+      if (!this.canRestore(workspace, sessions)) return
       initial = 'connecting'
       void this.restoreSelection(workspace, sessions).then(
         () => { initial = 'done' },
@@ -439,10 +453,40 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     }
   }
 
+  /**
+   * FORK dsh-local (f5-list-states): whether startup restoration may commit
+   * against the current snapshots. A persisted non-blank selection is
+   * list-independent (direct history open); everything else keeps the
+   * full-catalog prerequisites: blank reclamation reads listed metadata, a
+   * selectionless start needs the list to pick a recent Workspace or reuse a
+   * blank, and a saved-but-unlisted identity waits for the catalog to decide
+   * between the stale-selection fallthrough and the early open.
+   */
+  private canRestore(workspaces: WorkspaceSnapshot, sessions: SessionListState): boolean {
+    const saved = this.selection.getSnapshot()
+    if (saved.subagentAddress !== undefined) return true
+    if (saved.sessionId === undefined) return sessions.phase === 'ready'
+    if (sessions.phase === 'ready') return true
+    return sessions.byId[saved.sessionId] === undefined
+      && saved.blank === false
+      && !workspaces.archivedSessionIds.includes(saved.sessionId)
+  }
+
   private async restoreSelection(workspaces: WorkspaceSnapshot, sessions: SessionListState): Promise<void> {
     const saved = this.selection.getSnapshot()
     if (saved.subagentAddress !== undefined) {
       this.replaceMain(saved.subagentAddress, this.lifetime.signal, 'preserve')
+      return
+    }
+    // FORK dsh-local (f5-list-states): the persisted non-blank selection opens
+    // its history directly while the session.list pull is still in flight —
+    // refresh no longer waits out the full list before returning to the
+    // conversation (canRestore established the trust: blank === false, not
+    // archived, and no listed row to gate on).
+    if (saved.sessionId !== undefined
+      && sessions.phase === 'pending'
+      && sessions.byId[saved.sessionId] === undefined) {
+      this.replaceMain(saved.sessionId, this.lifetime.signal, 'preserve', undefined, true)
       return
     }
     const summary = saved.sessionId === undefined ? undefined : sessions.byId[saved.sessionId]
@@ -501,9 +545,14 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     signal: AbortSignal,
     panel: 'reveal' | 'preserve',
     beforeOpen?: (sessionId: SessionId) => void,
+    /** FORK dsh-local (f5-list-states): vouch for a persisted id before the catalog pull delivers its row. */
+    persistedSelection = false,
   ): void {
     signal.throwIfAborted()
-    const reference = this.sessions.retain(target, { source: 'mainView' })
+    const reference = this.sessions.retain(target, {
+      source: 'mainView',
+      ...(persistedSelection ? { persistedSelection: true } : {}),
+    })
     try {
       signal.throwIfAborted()
       beforeOpen?.(reference.sessionId)
@@ -514,17 +563,28 @@ class UiWorkspaceService extends Service implements UiWorkspace {
       const subagentAddress = typeof target === 'string'
         ? this.sessions.subagentAddress(reference.sessionId)
         : target
+      // FORK dsh-local (f5-list-states): persist blankness knowledge beside the
+      // selection — a listed row is authoritative; the pre-list open keeps the
+      // last known value only while it names the same identity (blankness
+      // never re-raises, so `false` stays valid across refreshes).
+      const persisted = this.selection.getSnapshot()
+      const summary = typeof target === 'string'
+        ? this.sessions.list.getSnapshot().byId[reference.sessionId]
+        : undefined
+      const blank = summary?.blank
+        ?? (persisted.sessionId === reference.sessionId ? persisted.blank : undefined)
       this.selection.set({
         sessionId: reference.sessionId,
         ...(subagentAddress === undefined ? {} : { subagentAddress }),
+        ...(blank === undefined ? {} : { blank }),
       })
     } catch (error: unknown) {
       reference.release()
       throw error
     }
-    const previous = this.mainReference
+    const prior = this.mainReference
     this.mainReference = reference
-    previous?.release()
+    prior?.release()
     if (panel === 'reveal') this.ctx.layout.selectPanel(null)
   }
 
