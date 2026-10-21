@@ -1,0 +1,15 @@
+# FORK(testweb-fixture-pollution): the recorded turn-tail scenario calls the
+# POSIX `bash` tool by name, but the shipped standard preset disables that
+# plugin row on win32 (`disabled: !!js process.platform === 'win32'`,
+# packages/bundle/web-app/presets/standard.patch.yml), so every replayed call
+# died as `unknown tool "bash"` on Windows — the golden Bash tool rows, the
+# `job/registered`/`job/settled` records, and the jsonl tool result all
+# drifted (the F4 platform class; family 2 of dsh-web-e2e-red-triage-1021).
+# The recorded command needs only a dialect-neutral `echo alpha`, which the
+# shipped pwsh `ctx.shell` provider on win32 executes to the same `alpha\n`.
+# This scenario-owned overlay re-enables the row by id; on POSIX the preset
+# row is already enabled and the entry is a no-op, and the shipped tree keeps
+# its own platform gate (no product row changes).
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: false

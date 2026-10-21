@@ -45,6 +45,9 @@ const MODE = webSnapshotMode()
 
 const PROMPT = 'Reply with the single word LIGHTHOUSE and stop.'
 const REPLAY_PACE_MS = 100
+// FORK(testweb-fixture-pollution): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 guard).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 describe('web e2e: lifecycle & chrome (workspace flow / reload / dark mode)', () => {
   let scaffold: WebScaffold
@@ -55,8 +58,8 @@ describe('web e2e: lifecycle & chrome (workspace flow / reload / dark mode)', ()
 
   beforeAll(async () => {
     scaffold = await launchWebScaffold(MODE === 'record'
-      ? {}
-      : { replayFixture: FIXTURE, replayOverride: REPLAY_OVERRIDE, paceMs: REPLAY_PACE_MS })
+      ? { extraOverlayPath: CATALOG_OVERLAY }
+      : { replayFixture: FIXTURE, replayOverride: REPLAY_OVERRIDE, extraOverlayPath: CATALOG_OVERLAY, paceMs: REPLAY_PACE_MS })
     scaffold.ctx.on('session/event', (_session, event: SessionEvent) => { sessionEvents.push(event) })
     browser = await chromium.launch()
     page = await newEnglishPage(browser)

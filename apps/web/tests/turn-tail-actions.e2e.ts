@@ -24,6 +24,15 @@ import { openSettings, connectFreshWorkspace, expandOwningTurnProcess, newEnglis
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('../../../snapshots/web/turn-tail-actions', import.meta.url))
 const FIXTURE = join(SNAPSHOT_DIR, 'session.v3.jsonl')
+// FORK(testweb-fixture-pollution): re-enable the platform-gated `tool-bash`
+// preset row for this scenario's fixture world — the recorded session calls
+// `bash` by name, and on win32 the shipped preset gate turns every replayed
+// call into `unknown tool "bash"` (F4 platform class). See the overlay's
+// header comment; on POSIX the overlay entry is a no-op.
+const OVERLAY = fileURLToPath(new URL('./turn-tail-bash.overlay.yml', import.meta.url))
+// FORK(testweb-fixture-pollution): 族2 guard — also disable `tool-skill` so
+// the win32 runtime skill-catalog frame is never injected (overlay header).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 // Three goldens for the same message: parked mid-turn, aborted, and completed.
 const RUNNING_EXPECTED = join(SNAPSHOT_DIR, 'running.expected.md')
 const SETTLED_EXPECTED = join(SNAPSHOT_DIR, 'settled.expected.md')
@@ -102,11 +111,12 @@ describe('web e2e: assistant IconActions wait for the turn to end', () => {
     }
     scaffold = await launchWebScaffold(
       MODE === 'record'
-        ? {}
+        ? { extraOverlayPath: [OVERLAY, CATALOG_OVERLAY] }
         : {
           replayFixture: FIXTURE,
           ...(overridePath === undefined ? {} : { replayOverride: overridePath }),
           compareReplaySession: overridePath === undefined,
+          extraOverlayPath: [OVERLAY, CATALOG_OVERLAY],
           paceMs,
         },
     )

@@ -1137,6 +1137,12 @@ function replaceWebCwd(value: string, cwd: string): string {
 
 /**
  * Normalize Web-only volatile strings while preserving JSON structure and row framing.
+ * Payload line endings are folded to LF on both comparison sides: a Windows
+ * shell captures `alpha\r\n` where the POSIX-recorded fixture carries
+ * `alpha\n`, and JSON preserves that CR inside the string value. Folding is
+ * symmetric (both sides pass through here, including the refresh write-back),
+ * so it only hides a difference that is pure EOL style — and keeps a refresh
+ * from baking a platform EOL into a shared fixture.
  * @param log - raw Session JSONL.
  * @param workspaceCwd - optional scaffold parent used before a live Session selects its cwd.
  * @returns compact JSONL with run-local strings tokenized.
@@ -1160,6 +1166,9 @@ export function normalizeWebSessionVolatiles(log: string, workspaceCwd?: string)
         // The checkout path and listener port differ per machine and run.
         .replace(/Current DeepSeek Harness implementation checkout: "(?:[^"\\]|\\.)*"\./g, 'Current DeepSeek Harness implementation checkout: "{{sourceRoot}}".')
         .replace(/Current DeepSeek Harness Web GUI URL: "(?:[^"\\]|\\.)*"\./g, 'Current DeepSeek Harness Web GUI URL: "{{webUrl}}".')
+        // Payload EOL: Windows captures CRLF inside tool results where the
+        // recorded POSIX fixture carries LF — fold both sides to LF.
+        .replace(/\r\n?/g, '\n')
       for (const cwd of cwdSpellings) normalized = replaceWebCwd(normalized, cwd)
       return normalized
     })) as { type?: unknown; data?: { endpoint?: unknown } }
@@ -1173,14 +1182,46 @@ export function normalizeWebSessionVolatiles(log: string, workspaceCwd?: string)
   }).join('\n')
 }
 
+/**
+ * Stabilize one harvested Session into committed fixture text.
+ *
+ * Skill-catalog frames must never reach this write-back: the scenario
+ * overlays disable `tool-skill` so the runtime catalog is never injected,
+ * which is what keeps a record/refresh from baking this machine's skill list
+ * into shared fixtures (the 2026-10-21 refresh rejection). On hosts whose
+ * composition still carries a catalog, the harvest refuses loudly instead of
+ * writing machine state into the fixture.
+ * @param session - captured live Session.
+ * @param existing - the current committed fixture text for the same role.
+ * @param workspaceCwd - normalization input.
+ * @param harnessHome - harness home for token substitution.
+ * @returns the stabilized fixture text.
+ * @throws {Error} when the harvested session carries a runtime skill catalog.
+ */
 function stableSessionFixture(
   session: Session,
   existing: string,
   workspaceCwd: string,
   harnessHome: string,
 ): string {
+  const raw = rawSessionLog(session)
+  const bakedCatalog = raw.split('\n').some((line) => {
+    if (line.trim().length === 0) return false
+    try {
+      const record = JSON.parse(line) as { type?: unknown; data?: { source?: { kind?: unknown } } | null }
+      const source = record.data?.source
+      return record.type === 'user/message'
+        && source !== null && typeof source === 'object'
+        && source.kind === 'skill-catalog'
+    } catch {
+      return false
+    }
+  })
+  if (bakedCatalog) {
+    throw new Error('session harvest carries a runtime skill-catalog frame — record with the scenario overlay that disables tool-skill so machine skill lists never bake into shared fixtures')
+  }
   const prepared = prepareSessionSnapshotFixtureForComparison(
-    normalizeWebSessionVolatiles(rawSessionLog(session), workspaceCwd),
+    normalizeWebSessionVolatiles(raw, workspaceCwd),
   )
   const stabilized = existing === ''
     ? prepared
