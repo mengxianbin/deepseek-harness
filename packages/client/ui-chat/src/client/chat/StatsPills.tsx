@@ -4,7 +4,7 @@
 // token totals, and click-open dialogs. Settled-node identity prevents
 // stream-delta updates from rerendering the pills.
 
-import { memo, useMemo, type ReactNode } from 'react'
+import { Fragment, memo, useMemo, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { IconDatabaseOutlineRegular, IconGaugeOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { UseProjection } from '@deepseek-ai/dsh-api-session-controller/client'
@@ -36,11 +36,16 @@ interface WindowStats {
   decodeMs: number
   /** Summed output tokens over the same decode-timed steps. */
   decodeTokens: number
+  /** Model-request retries in view (window count; whole-log rides the projection). */
+  retries: number
+  /** The same retries bucketed by provider route. */
+  retriesByProvider: Record<string, number>
 }
 
 /**
- * Fold assistant and tool-result nodes into window-scoped display totals —
- * the FALLBACK for assemblies without the `sessionStats` projection.
+ * Fold assistant, tool-result, and model-retry nodes into window-scoped
+ * display totals — the FALLBACK for assemblies without the `sessionStats`
+ * projection.
  *
  * Every displayed figure rides that durable whole-log projection (and token
  * accounting rides `tokenUsage`) because the window is paged and compaction
@@ -59,9 +64,20 @@ export function deriveStats(nodes: ChatSnapshot['legacy']['nodes']): WindowStats
   let ttftSteps = 0
   let decodeMs = 0
   let decodeTokens = 0
+  let retries = 0
+  const retriesByProvider: Record<string, number> = {}
   for (const node of nodes) {
     if (node.kind === 'tool-result') {
       if (node.callTime !== null) toolMs += Math.max(0, node.time - node.callTime)
+      continue
+    }
+    if (node.kind === 'model-retry') {
+      // Fallback mirror of the projection's R5 retry distribution; the
+      // typeof read keeps a prototype-name provider counting as itself.
+      const provider = node.provider
+      const found = retriesByProvider[provider]
+      retries += 1
+      retriesByProvider[provider] = (typeof found === 'number' ? found : 0) + 1
       continue
     }
     if (node.kind !== 'assistant') continue
@@ -80,7 +96,7 @@ export function deriveStats(nodes: ChatSnapshot['legacy']['nodes']): WindowStats
       decodeTokens += reading.outputTokens
     }
   }
-  return { turns: turns.size, steps, llmMs, toolMs, ttftMs, ttftSteps, decodeMs, decodeTokens }
+  return { turns: turns.size, steps, llmMs, toolMs, ttftMs, ttftSteps, decodeMs, decodeTokens, retries, retriesByProvider }
 }
 
 /**
@@ -245,7 +261,9 @@ export const ActivityPill = memo(function ActivityPill({ useChat, useProjection,
   const content: PillContent = { stat: 'activity', icon, label: joined(counts, speed) }
   // A window without one timed figure has no dialog rows to show, so the pill
   // stays a plain reading instead of a button opening an empty dialog.
-  if (stats.llmMs <= 0 && stats.toolMs <= 0 && stats.ttftSteps <= 0 && speed === null) return <PlainPill {...content} />
+  const noDialogRows = stats.llmMs <= 0 && stats.toolMs <= 0 && stats.ttftSteps <= 0
+    && stats.retries === 0 && speed === null
+  if (noDialogRows) return <PlainPill {...content} />
   return (
     <DialogPill {...content} ariaLabel={speed === null ? counts : `${counts} · ${speed}`} title={t('stats.dialog.title')}>
       <dl className={dialogCss.details} data-session-stats-details>
@@ -265,6 +283,20 @@ export const ActivityPill = memo(function ActivityPill({ useChat, useProjection,
           <>
             <dt>{t('stats.dialog.ttft')}</dt>
             <dd>{formatDuration(stats.ttftMs / stats.ttftSteps, t)}</dd>
+          </>
+        )}
+        {/* R5 transport-jitter dashboard: whole-log retry total plus its
+            per-provider distribution; absent while the log held no retry. */}
+        {stats.retries > 0 && (
+          <>
+            <dt>{t('stats.dialog.retries')}</dt>
+            <dd>{stats.retries}</dd>
+            {Object.entries(stats.retriesByProvider).sort(([a], [b]) => a.localeCompare(b)).map(([provider, count]) => (
+              <Fragment key={provider}>
+                <dt>{provider}</dt>
+                <dd>{count}</dd>
+              </Fragment>
+            ))}
           </>
         )}
         {speed !== null && (

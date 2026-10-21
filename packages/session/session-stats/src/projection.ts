@@ -25,6 +25,9 @@
 
 import { z } from 'zod'
 import { assistantStreamFirstTokenTime } from '@deepseek-ai/dsh-llm'
+// Type-only: merges the `llm/retry` payload into SessionEventMap so this fold
+// sees the typed `provider` on the retry events it buckets (token-meter precedent).
+import type {} from '@deepseek-ai/dsh-llm-retry/types'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 
 
@@ -46,6 +49,10 @@ interface SessionStatsTotals {
   decodeMs: number
   /** Summed provider output tokens over the same steps. */
   decodeTokens: number
+  /** Model-request retries (`llm/retry`) recorded so far. */
+  retries: number
+  /** The same retries bucketed by provider route (R5 transport-jitter dashboard source). */
+  retriesByProvider: Record<string, number>
 }
 
 /**
@@ -78,6 +85,8 @@ const sessionStatsSchema = z.object({
   ttftSteps: z.number().int().nonnegative(),
   decodeMs: z.number().nonnegative(),
   decodeTokens: z.number().nonnegative(),
+  retries: z.number().int().nonnegative(),
+  retriesByProvider: z.record(z.string(), z.number().int().nonnegative()),
 }).strict()
 
 /**
@@ -112,7 +121,10 @@ function usageOutputTokens(usage: unknown): number | null {
 /** The `sessionStats` unit registered on `ctx.sessionProjections` (exported for the unit spec). */
 export const sessionStatsProjectionDefinition = {
   key: 'sessionStats',
-  stateVersion: 1,
+  // v2: the retry fields joined the strict state schema; persisted v1 rows
+  // miss them (and would fail validation), so the ver gate discards them and
+  // the unit refolds from the log instead.
+  stateVersion: 2,
   stateSchema: sessionStatsStateSchema,
   init: () => ({
     turns: 0,
@@ -123,6 +135,8 @@ export const sessionStatsProjectionDefinition = {
     ttftSteps: 0,
     decodeMs: 0,
     decodeTokens: 0,
+    retries: 0,
+    retriesByProvider: {},
     lastTurn: null,
     openStep: null,
     pendingCalls: {},
@@ -187,6 +201,20 @@ export const sessionStatsProjectionDefinition = {
           lastTurn: event.data.turn,
           openStep: null,
         }
+      case 'llm/retry': {
+        // Whole-log retry distribution by provider (R5): each scheduled retry
+        // lands once here; `llm/retry-started` transitions do not re-count.
+        // The typeof read keeps a prototype-name provider ('constructor')
+        // counting as itself, never an inherited function.
+        const provider = event.data.provider
+        const found = state.retriesByProvider[provider]
+        const known = typeof found === 'number' ? found : 0
+        return {
+          ...state,
+          retries: state.retries + 1,
+          retriesByProvider: { ...state.retriesByProvider, [provider]: known + 1 },
+        }
+      }
       case 'turn/end':
         // A call whose result never landed belongs to a cancelled or failed
         // turn; results always land within their turn, so drop the leftovers
@@ -207,6 +235,8 @@ export const sessionStatsProjectionDefinition = {
       ttftSteps: state.ttftSteps,
       decodeMs: state.decodeMs,
       decodeTokens: state.decodeTokens,
+      retries: state.retries,
+      retriesByProvider: state.retriesByProvider,
     }),
   },
 } satisfies ProjectionDefinition<'sessionStats', SessionStatsState>
