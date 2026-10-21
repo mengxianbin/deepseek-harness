@@ -84,6 +84,9 @@ function abortedCancelCause(signal: AbortSignal): AgentCancelCause | undefined {
   const cause = signal.reason as AgentCancelCause
   switch (cause.kind) {
     case 'user':
+      // R2: `entry` is the durable stop-entry provenance; absence keeps the
+      // pre-entry record shape so old sessions replay unchanged.
+      return cause.entry === undefined ? { kind: 'user' } : { kind: 'user', entry: cause.entry }
     case 'parent':
     case 'disposed':
       return { kind: cause.kind }

@@ -7,7 +7,7 @@ import type { AttachmentIdType, FileAttachmentRef, ImageAttachmentRef } from '@d
 import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
 import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
 import type { UserMessage } from '@deepseek-ai/dsh-llm/types'
-import { SessionLogOffset, SessionSeq, type SessionId } from '@deepseek-ai/dsh-session/types'
+import { SessionLogOffset, SessionSeq, type AgentCancelEntry, type SessionId } from '@deepseek-ai/dsh-session/types'
 import { SessionEventStream } from '../transport.ts'
 import type { SessionJournalChange } from '../transport.ts'
 import type {
@@ -341,10 +341,13 @@ export class Session implements SessionFace {
    * Stop the active turn while the Host preserves pending inbox work; failures
    * land in promptError (same error-strip display slot). A subagent address
    * routes through `subagents.interruptByParent`, whose durable parent-address
-   * authority works without a live parent Agent.
+   * authority works without a live parent Agent (that parent-kind path carries
+   * no entry provenance).
+   * @param entry - UI entry that requested the stop (R2); omitted keeps the
+   * pre-entry request shape byte-identical.
    * @returns the cancel result.
    */
-  async cancel(): Promise<RemoteResult<{ accepted: true }>> {
+  async cancel(entry?: AgentCancelEntry): Promise<RemoteResult<{ accepted: true }>> {
     const address = this.address
     const result = address !== undefined
       ? await this.remote.subagents.interruptByParent(
@@ -352,7 +355,11 @@ export class Session implements SessionFace {
         address.parentSessionId,
         'continuable',
       )
-      : await this.remote.session.cancel({ sessionId: this.sessionId })
+      : await this.remote.session.cancel(
+        entry === undefined
+          ? { sessionId: this.sessionId }
+          : { sessionId: this.sessionId, entry },
+      )
     if (!result.ok) {
       this.promptError = { op: 'stop', error: result.error }
       this.notifier.markDirty()

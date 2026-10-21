@@ -6,7 +6,7 @@ import type { ISessions, SessionBinding } from '@deepseek-ai/dsh-api-session-con
 import { IconPaperclipOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import { createSnapshotStore, type BoundActions } from '@deepseek-ai/dsh-client-store'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { AgentCancelEntry, SessionId } from '@deepseek-ai/dsh-session/types'
 // Type-only service and declaration merges used by this assembly.
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
@@ -274,12 +274,13 @@ export function apply(ctx: Context, config: Config = Config({})): void {
     }
     return gate
   }
-  const stop = (sessionId: SessionId): void => {
+  const stop = (sessionId: SessionId, entry: AgentCancelEntry): void => {
     // All three stop entries funnel here — the primary button's flipped
     // branch, the standalone stop button, and the Esc-Esc chord — so one gate
-    // covers every entry the double-click accident could reach.
+    // covers every entry the double-click accident could reach; each still
+    // names itself so the durable cause records which entry fired (R2).
     if (!gateFor(sessionId).allowStop()) return
-    scopedConversation(sessions, sessionId).cancel().catch((_error: unknown) => {
+    scopedConversation(sessions, sessionId).cancel(entry).catch((_error: unknown) => {
       // Stop failure is published through Session promptError.
     })
   }
@@ -304,7 +305,8 @@ export function apply(ctx: Context, config: Config = Config({})): void {
       scope.effect(() => scope.shortcuts.registerFixed(command), `ui-conversation: ${command.id}`)
     }
     scope.effect(() => installStopShortcut(
-      scope.shortcuts, sessions, binding => uiConversation.binding(binding).openTurn, ctx.uiSession, stop,
+      scope.shortcuts, sessions, binding => uiConversation.binding(binding).openTurn, ctx.uiSession,
+      (sessionId) => { stop(sessionId, 'esc-esc') },
     ), 'ui-conversation: fixed stop input')
     scope.effect(() => {
       const command: ShortcutFixedCommand = {
@@ -568,7 +570,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
               span: { ...selection, draftRev: snapshot.draftRev },
             })
           },
-        stop: () => { stop(sessionId) },
+        stop: (entry: AgentCancelEntry) => { stop(sessionId, entry) },
         stopGate: gateFor(sessionId),
         hooks: {
           stopShortcut,

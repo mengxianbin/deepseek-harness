@@ -933,6 +933,19 @@ describe('remaining branches', () => {
     expect(session.getSnapshot().promptError).toBeNull()
   })
 
+  it('carries the stop entry on session/cancel and omits it for a plain cancel (R2)', async ({ mock, start }) => {
+    const session = await sessionBench(mock, start, SID)
+    await session.open()
+    await session.cancel('esc-esc')
+    await session.cancel()
+    // Entry rides only when named; the entry-less request stays byte-identical
+    // to the pre-entry shape old hosts and old records expect.
+    expect(mock.log.calls('session/cancel').map(call => call.args)).toEqual([
+      [{ sessionId: SID, entry: 'esc-esc' }],
+      [{ sessionId: SID }],
+    ])
+  })
+
   it('carries raw history and follow events through the event feed', async ({ mock, start }) => {
     const session = await sessionBench(mock, start, SID)
     const historyCall = ev.toolCall(SessionSeq(6), 1, 'h1', 'bash', '{"cmd":"pwd"}')

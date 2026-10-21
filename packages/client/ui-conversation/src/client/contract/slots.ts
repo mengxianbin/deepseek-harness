@@ -14,7 +14,7 @@ import type {
 } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionPendingInteraction } from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { AgentCancelEntry, SessionId } from '@deepseek-ai/dsh-session/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import type { ComposerBlock } from './composer-blocks.ts'
 import type { DraftAttachmentId, InputActions, InputNotice, InputState } from './input.ts'
@@ -466,7 +466,8 @@ export interface ComposerBarInjected {
   /** Restart one failed file upload; absent without a session. */
   retryFileUpload: ((id: DraftAttachmentId) => void) | undefined
   toggleCommandMenu: ((selection: EditSelection) => void) | undefined
-  stop: (() => void) | undefined
+  /** Stop the live turn, naming the UI entry that asked (R2 provenance). */
+  stop: ((entry: AgentCancelEntry) => void) | undefined
   /**
    * Per-session send/stop debounce: it timestamps an accepted send and the
    * Send→Stop flip so a stop landing inside either window is swallowed — the

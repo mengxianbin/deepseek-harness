@@ -2886,6 +2886,12 @@ it('surfaces a strong failure row for a user cancellation and keeps forked endin
     code: 'USER_STOPPED',
     message: 'Stopped by you before this turn completed.',
   })
+  // R2: an entry-bearing record (new writes) reads the same row — old and new
+  // turn/end reasons both replay without a protocol error.
+  const withEntry = assembler([
+    at(7, 'turn/end', { turn: 1, reason: { kind: 'aborted', reason: { kind: 'user', entry: 'archive' } } }),
+  ], true)
+  expect(node(snapshot(withEntry), 'turn-error')?.data).toMatchObject({ code: 'USER_STOPPED' })
   const forked = assembler([at(7, 'turn/end', { turn: 1, reason: { kind: 'forked' } })], true)
   expect(node(snapshot(forked), 'turn-error')).toBeUndefined()
 })

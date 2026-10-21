@@ -17,7 +17,7 @@ import type {
   ISessions, PendingSubmissionRetirement, SessionFace,
 } from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-client-file-upload/client'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { AgentCancelEntry, SessionId } from '@deepseek-ai/dsh-session/types'
 import type { ImageMediaType } from '@deepseek-ai/dsh-attachment'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
@@ -65,9 +65,10 @@ export interface IConversation {
   updateQueue(itemId: MessageId, action: QueueAction): Promise<void>
   /**
    * Cancel the scoped session's in-flight turn while preserving its pending Queue.
+   * @param entry - UI entry that requested the stop (R2 provenance); optional.
    * @returns completion; failures reject as in send.
    */
-  cancel(): Promise<void>
+  cancel(entry?: AgentCancelEntry): Promise<void>
   /**
    * Pull one older history page for the scoped session.
    * @returns completion of the page pull.
@@ -588,9 +589,9 @@ export class ConversationController extends Service implements IConversation {
   }
 
   /** Cancel the scoped session's in-flight turn while preserving Queue (failures land in promptError and reject, as in send). */
-  async cancel(): Promise<void> {
+  async cancel(entry?: AgentCancelEntry): Promise<void> {
     const session = this.scopedSession('cancel')
-    const result = await session.cancel()
+    const result = await session.cancel(entry)
     if (!result.ok) throw new Error(`conversation.cancel failed: ${result.error.code}: ${result.error.message}`)
   }
 

@@ -379,7 +379,7 @@ export const InputBar = memo(function InputBar({
       : t('input.send')
   const onPrimary = (): void => {
     if (primaryStops) {
-      stop?.()
+      stop?.('primary')
       return
     }
     if (keyboard === undefined) return // absent machine: the button is disabled
@@ -542,7 +542,7 @@ export const InputBar = memo(function InputBar({
                   aria-label={t('input.stop')}
                   disabled={stop === undefined}
                   onMouseDown={keepFocus}
-                  onClick={stop}
+                  onClick={() => { stop?.('stop-button') }}
                 >
                   <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
                     <rect x="3" y="3" width="10" height="10" rx="3" fill="currentColor" />

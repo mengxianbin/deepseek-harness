@@ -137,8 +137,9 @@ describe('Subagent archive admission: stopping', () => {
     expect(childAgent.cancels).toEqual([[{ kind: 'parent' }, undefined]])
     expect(idleChildAgent.cancels).toEqual([])
     expect(forkAgent.cancels).toEqual([])
-    // The parent's own turn is the composed Agent registry's family, cancelled with the user cause.
-    expect(parentAgent.cancels).toEqual([[{ kind: 'user' }, undefined]])
+    // The parent's own turn is the composed Agent registry's family, cancelled
+    // with the user cause marked entry=archive (R2 provenance).
+    expect(parentAgent.cancels).toEqual([[{ kind: 'user', entry: 'archive' }, undefined]])
   })
 
   it('keeps asking the remaining descendants to stop when one cancel throws', async () => {

@@ -186,9 +186,18 @@ export type PrepareSessionOptions =
   | (CreateSessionOptions & { readonly eventState?: undefined })
   | RestoredSessionOptions
 
+/**
+ * Which UI entry requested a user cancellation (R2 stop-entry provenance).
+ * `primary` = the composer's primary button flipped to Stop, `stop-button` =
+ * the standalone Stop button, `esc-esc` = the double-Escape chord, `archive` =
+ * archive admission stopping the turn with the Session. Optional so records
+ * written before the field existed keep reading unchanged.
+ */
+export type AgentCancelEntry = 'primary' | 'stop-button' | 'esc-esc' | 'archive'
+
 /** Why an active agent driver was cancelled. */
 export type AgentCancelCause =
-  | { readonly kind: 'user' }
+  | { readonly kind: 'user'; readonly entry?: AgentCancelEntry }
   | { readonly kind: 'parent' }
   | { readonly kind: 'hook'; readonly reason: string }
   | { readonly kind: 'disposed' }

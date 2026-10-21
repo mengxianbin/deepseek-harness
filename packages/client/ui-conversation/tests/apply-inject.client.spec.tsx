@@ -374,8 +374,10 @@ describe('Conversation inject API', () => {
     b.sessionFake.cancel.mockResolvedValueOnce({
       ok: false, error: new RemoteError('gateway/internal', 'stop failed', {}),
     })
-    b.composerApi(ROOT).stop!()
+    // R2: the composer bar names its UI entry; the session face receives it.
+    b.composerApi(ROOT).stop!('primary')
     await vi.waitFor(() => { expect(b.sessionFake.cancel).toHaveBeenCalledOnce() })
+    expect(b.sessionFake.cancel).toHaveBeenCalledWith('primary')
     await b.runtime.dispose()
   })
 
@@ -495,7 +497,7 @@ describe('Conversation inject API', () => {
     const injectBar = entry.inject as unknown as (
       sessionId: SessionId | undefined,
     ) => ComposerBarInjected
-    expect(() => { injectBar('ghost' as SessionId).stop!() }).toThrow(/resolved no binding/)
+    expect(() => { injectBar('ghost' as SessionId).stop!('esc-esc') }).toThrow(/resolved no binding/)
 
     const absent = injectBar(undefined)
     expect(absent.keyboard).toBeUndefined()
@@ -507,7 +509,7 @@ describe('Conversation inject API', () => {
 
     const stop = injectBar(ROOT).stop!
     await b.feature.dispose()
-    expect(() => { stop() }).toThrow(/unavailable through the session scope/)
+    expect(() => { stop('esc-esc') }).toThrow(/unavailable through the session scope/)
     await b.runtime.dispose()
   })
 

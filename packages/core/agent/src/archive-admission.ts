@@ -16,7 +16,8 @@ import type { Agent } from './types.ts'
  * Answer `workspace/session-activity` with the `turn` family while the
  * Session's Agent is running (a turn waiting for an approval or an answer
  * included), and `workspace/session-stop` by cancelling that turn the way
- * the user's own stop does — `agent.cancel({ kind: 'user' })`, but without
+ * the user's own stop does — `agent.cancel({ kind: 'user', entry: 'archive' })`,
+ * but without
  * the stop button's `keepInbox`, so queued input is discarded with a logged
  * inbox splice instead of waking the archived Session later. Nothing is
  * awaited to settlement. Both listeners live as long as `ctx`'s fiber.
@@ -33,6 +34,8 @@ export function installTurnArchiveAdmission(ctx: Context, lookup: (sessionId: Se
   })
   ctx.on('workspace/session-stop', ({ sessionId }) => {
     const agent = lookup(sessionId)
-    if (agent?.status === 'running') agent.cancel({ kind: 'user' })
+    // R2: `entry: 'archive'` marks this user-kind cancel as archive admission,
+    // the one non-button producer of aborted/user.
+    if (agent?.status === 'running') agent.cancel({ kind: 'user', entry: 'archive' })
   })
 }
