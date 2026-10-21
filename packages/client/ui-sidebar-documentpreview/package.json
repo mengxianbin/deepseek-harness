@@ -28,6 +28,9 @@
   },
   "dsh": {
     "client": {
+      "external": [
+        "@deepseek-ai/dsh-api-workspace-files/client"
+      ],
       "inject": [
         "@deepseek-ai/dsh-api-gateway",
         "@deepseek-ai/dsh-api-workspace-files",
