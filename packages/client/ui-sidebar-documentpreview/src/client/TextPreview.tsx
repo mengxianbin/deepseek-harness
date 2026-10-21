@@ -14,6 +14,7 @@ import type { ReactNode } from 'react'
 import clsx from 'clsx'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { InjectFace, PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
+import { subscribeWatchDegraded } from '@deepseek-ai/dsh-api-workspace-files/client'
 import {
   FileTypeIcon, IconNowrapFillRegular, IconPauseOutlineRegular, IconPlayOutlineRegular,
   IconRefreshOutlineRegular, IconWrapFillRegular, Menu, PathLabel, Tooltip, classifyFileType,
@@ -61,6 +62,10 @@ export function TextPreview({
   const { tab } = useTabInfo()
   const { navigation, signal } = tab
   const meta = useResource<'file'>(tab.contentId)
+  // The provider degrades to one stat when the Host's watch never acknowledges:
+  // content still loads, but nothing will announce a change — say so.
+  const [watchDegraded, setWatchDegraded] = useState(false)
+  useEffect(() => subscribeWatchDegraded(tab.contentId, setWatchDegraded), [tab.contentId])
   const canRead = meta.status !== 'none'
   const file = useMemo(() => hostFileOf(tab.contentId), [tab.contentId])
   const state = useStore(s => s.byTab[tab.id])
@@ -262,6 +267,21 @@ export function TextPreview({
             </button>
           </p>
         )}
+      {!(meta.failure !== undefined && hasContent) && !changed && watchDegraded && (
+        // The watch is gone, so this bar is the only way the reader learns
+        // the content may be stale: the changed bar above it never fires.
+        <p className={css.changed} data-textpreview-watch-degraded>
+          <span>{t('watchDegraded')}</span>
+          <button
+            type="button"
+            className={css.action}
+            data-textpreview-reload-now
+            onClick={reload}
+          >
+            {t('reloadNow')}
+          </button>
+        </p>
+      )}
       <div className={css.header}>
         <PathLabel path={displayPath} className={css.path} data-textpreview-path />
         {candidates.length > 1

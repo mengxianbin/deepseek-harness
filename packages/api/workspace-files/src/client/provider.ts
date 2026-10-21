@@ -29,6 +29,22 @@ import { parseFileAddress } from '@deepseek-ai/dsh-util-workspace-path'
 import type { WorkspaceFileStat } from '../types.ts'
 import type { ChangeFeed } from './change-feed.ts'
 import type { WorkspaceFilesRemote } from './remote.ts'
+import { clearWatchDegraded, markWatchDegraded } from './watch-status.ts'
+
+/**
+ * How long `open` waits for the Host's watch acknowledgement before falling
+ * back to a single `stat`. The wait is bounded because it is not: a watch that
+ * hangs silently (neither acking nor failing) would otherwise pin the
+ * resource in `loading` forever — metadata, and with it every UI affordance
+ * derived from it, never arrives.
+ */
+const DEFAULT_READY_TIMEOUT_MS = 2000
+
+/** Per-provider knobs; production leaves them out, tests shrink the wait. */
+export interface FileProviderOptions {
+  /** Override the watch-ready wait in milliseconds; `<= 0` waits without a bound. */
+  readonly readyTimeoutMs?: number
+}
 
 /** The Session and unmodified path submitted to the Host. */
 interface HostFile {
@@ -46,7 +62,9 @@ interface HostFile {
 export function createFileResourceProvider(
   remote: WorkspaceFilesRemote,
   changes: ChangeFeed,
+  options: FileProviderOptions = {},
 ): ResourceProvider<'file'> {
+  const readyTimeoutMs = options.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS
   return {
     protocol: 'file',
     async *open(address, { signal }): AsyncIterable<RemoteResult<WorkspaceFileStat>> {
@@ -66,8 +84,17 @@ export function createFileResourceProvider(
       // on the file, so a write can still bring the file live.
       let current: WorkspaceFileStat | undefined
       try {
-        if (!await notices.ready) {
+        // A fresh evaluation of this address: whatever degraded state a
+        // previous attempt left behind, this one settles it again.
+        clearWatchDegraded(address)
+        const ready = await readyWithin(notices.ready, readyTimeoutMs)
+        if (ready !== true) {
           if (aborted()) return
+          // A timeout — not a clean `false` — is the degradation: the stream
+          // hangs without acknowledging or failing, so the fallback below is
+          // the only stat this resource will ever get. A late acknowledgement
+          // finds the follower already disposed and changes nothing.
+          if (ready === 'timeout') markWatchDegraded(address)
           const result = await stat()
           if (!aborted()) yield result
           return
@@ -108,6 +135,25 @@ export function createFileResourceProvider(
         notices.dispose()
       }
     },
+  }
+}
+
+/**
+ * Await the follow's acknowledgement, bounded.
+ * @param ready - the follow's readiness promise.
+ * @param timeoutMs - the wait bound in milliseconds; `<= 0` waits unbounded.
+ * @returns the acknowledgement, or `timeout` when the bound elapsed first.
+ */
+async function readyWithin(ready: Promise<boolean>, timeoutMs: number): Promise<boolean | 'timeout'> {
+  if (timeoutMs <= 0) return await ready
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      ready,
+      new Promise<'timeout'>((resolve) => { timer = setTimeout(() => { resolve('timeout') }, timeoutMs) }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
   }
 }
 

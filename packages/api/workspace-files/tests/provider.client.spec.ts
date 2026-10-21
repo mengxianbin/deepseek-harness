@@ -7,6 +7,8 @@ import type { WorkspaceFileStat } from '../src/types.ts'
 import { describe, expect, it, onTestFinished } from 'vitest'
 import { ChangeFeed } from '../src/client/change-feed.ts'
 import { createFileResourceProvider } from '../src/client/provider.ts'
+import type { FileProviderOptions } from '../src/client/provider.ts'
+import { subscribeWatchDegraded } from '../src/client/watch-status.ts'
 import { FakeRemote } from './fake-remote.client.ts'
 
 const S1 = 's1' as SessionId
@@ -20,11 +22,11 @@ const ABS_ADDRESS = sessionFileAddress(S1, ABS_PATH)
 const stat = (version: string, bytes: number): WorkspaceFileStat => ({ absolutePath: HOST_PATH, version, bytes })
 const notFound = (): RemoteFailure => new RemoteError('workspace-file/not-found', 'no such file', { path: REL_PATH })
 
-function harness() {
+function harness(options?: FileProviderOptions) {
   const remote = new FakeRemote()
   remote.autoReady = false
   const changes = new ChangeFeed(remote)
-  const provider = createFileResourceProvider(remote, changes)
+  const provider = createFileResourceProvider(remote, changes, options)
   const resources: Array<{ controller: AbortController; it: AsyncIterator<RemoteResult<WorkspaceFileStat>> }> = []
   onTestFinished(async () => {
     for (const resource of resources) resource.controller.abort()
@@ -43,8 +45,8 @@ function harness() {
   return { remote, changes, open }
 }
 
-function opened(address = ADDRESS) {
-  const bench = harness()
+function opened(address = ADDRESS, options?: FileProviderOptions) {
+  const bench = harness(options)
   return { ...bench, ...bench.open(address) }
 }
 
@@ -433,5 +435,40 @@ describe('file provider — the end', () => {
     await expect(it.next()).resolves.toEqual({ done: true, value: undefined })
     await changes.settle()
     expect(remote.disposed).toEqual(['workspace file changes of s1'])
+  })
+})
+
+describe('file provider — the watch-ready timeout', () => {
+  it('falls back to one stat and reports the address degraded when the watch never acknowledges', async () => {
+    const seen: boolean[] = []
+    const release = subscribeWatchDegraded(ADDRESS, (value) => { seen.push(value) })
+    onTestFinished(release)
+    const { remote, it, changes } = opened(ADDRESS, { readyTimeoutMs: 10 })
+    const first = it.next()
+    const request = await remote.waitForStat(0)
+    request.resolve({ ok: true, value: stat('v0', 3) })
+    await expect(first).resolves.toEqual({ done: false, value: { ok: true, value: stat('v0', 3) } })
+    // The fallback stat is the resource's last frame: nothing follows it.
+    await expect(it.next()).resolves.toEqual({ done: true, value: undefined })
+    await changes.settle()
+    expect(remote.stats).toHaveLength(1)
+    expect(remote.disposed).toEqual(['workspace file changes of s1'])
+    expect(seen).toEqual([false, true])
+    // A late acknowledgement finds the follower already disposed and stays quiet.
+    await remote.ready(0)
+    expect(seen).toEqual([false, true])
+  })
+
+  it('reports no degradation when the watch acknowledges within the wait', async () => {
+    const seen: boolean[] = []
+    const release = subscribeWatchDegraded(ADDRESS, (value) => { seen.push(value) })
+    onTestFinished(release)
+    const { remote, it } = opened(ADDRESS, { readyTimeoutMs: 500 })
+    const first = it.next()
+    await remote.ready(0)
+    const request = await remote.waitForStat(0)
+    request.resolve({ ok: true, value: stat('v0', 3) })
+    await expect(first).resolves.toEqual({ done: false, value: { ok: true, value: stat('v0', 3) } })
+    expect(seen).toEqual([false])
   })
 })

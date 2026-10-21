@@ -12,6 +12,7 @@ import { ChangeFeed } from './change-feed.ts'
 import { createFileResourceProvider } from './provider.ts'
 
 export type { WorkspaceFileParams } from './types.ts'
+export { subscribeWatchDegraded } from './watch-status.ts'
 
 /** Required browser services: the resource model, the Remote carrier and its namespace. */
 export const inject = ['resources', 'remote', 'remote.workspaceFiles']
