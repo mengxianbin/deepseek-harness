@@ -2874,9 +2874,18 @@ it('reports an interrupted ending on a turn observed from its start', () => {
   expect(node(snapshot(value), 'turn-error')?.data).toMatchObject({ seq: 2, turn: 1, code: 'INTERRUPTED' })
 })
 
-it('keeps user cancellations and forked endings free of a failure row', () => {
-  for (const reason of [{ kind: 'aborted', reason: { kind: 'user' } }, { kind: 'forked' }] as const) {
-    const value = assembler([at(7, 'turn/end', { turn: 1, reason })], true)
-    expect(node(snapshot(value), 'turn-error')).toBeUndefined()
-  }
+it('surfaces a strong failure row for a user cancellation and keeps forked endings clean', () => {
+  // R1: aborted/user must project a failure row (the silent stopped-turn
+  // label alone read as a complete answer); the plain pre-entry record is
+  // also the old-data read path, so it doubles as the optional-field
+  // compatibility case.
+  const stopped = assembler([
+    at(7, 'turn/end', { turn: 1, reason: { kind: 'aborted', reason: { kind: 'user' } } }),
+  ], true)
+  expect(node(snapshot(stopped), 'turn-error')?.data).toMatchObject({
+    code: 'USER_STOPPED',
+    message: 'Stopped by you before this turn completed.',
+  })
+  const forked = assembler([at(7, 'turn/end', { turn: 1, reason: { kind: 'forked' } })], true)
+  expect(node(snapshot(forked), 'turn-error')).toBeUndefined()
 })

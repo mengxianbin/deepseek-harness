@@ -2376,6 +2376,17 @@ describe('ChatView', () => {
     expect(view.queryByRole('button', { name: '去充值' })).toBeNull()
   })
 
+  it('renders a user cancellation as a strong stopped notice instead of a silent label', () => {
+    // R1 acceptance: the aborted/user row must state the stop and the missing
+    // complete reply, not just the quiet "已停止" chip.
+    const h = makeHarness({ nodes: [user(1, 'try'), turnError(2, 'USER_STOPPED')] })
+    const view = render(<h.ChatView {...h.props} />)
+    const statuses = view.getAllByRole('status')
+    expect(statuses.map(status => status.textContent)).toEqual([
+      '任务已停止本轮已停止——由你中断，模型未产出完整回复。USER_STOPPED',
+    ])
+  })
+
   it('renders the max-tokens notice with localized guidance, distinct from turn errors', () => {
     const h = makeHarness({ nodes: [user(1, 'try'), assistant(2, 'truncated'), turnMaxTokens(3)] })
     const view = render(<h.ChatView {...h.props} />)
