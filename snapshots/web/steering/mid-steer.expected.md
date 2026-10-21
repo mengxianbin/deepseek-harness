@@ -9,7 +9,15 @@
 - text: Use the ask_user_question tool to ask me exactly one question with id "checkpoint", question "Ready to continue?", header "Checkpoint", and options labeled "Yes" and "No". After I answer, reply with one short sentence acknowledging my answer and stop. {{clock}}
 - button "Copy"
 - text: Running
-- button "Ask question waiting"
+- button "Ask question waiting" [expanded]
+- paragraph: Question asked; waiting for your answer.
+- list:
+  - listitem:
+    - text: Ready to continue?
+    - list:
+      - listitem: "Yes"
+      - listitem: "No"
+- button "Inspect"
 - text: "Interjection: include the word BANANA in your final reply."
 - button "Copy"
 - status: Deep diving
