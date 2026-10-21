@@ -12,7 +12,7 @@
 - tree "会话":
   - treeitem "workspace" [expanded]
   - treeitem "新会话" [selected]
-- button "账号菜单": 更多
+- button "设置"
 - banner:
   - button "打开右侧边栏"
 - text: 探索未至之境 预览版
