@@ -19,9 +19,18 @@ const FIXTURE = fileURLToPath(new URL('../../../snapshots/web/fresh-round-trip/s
 const EXPECTED_DIR = fileURLToPath(new URL('./expected/jobs-menu-layering', import.meta.url))
 const MODE = webSnapshotMode()
 const SEED_ID = SessionId('jobs-menu-layering-web-e2e')
-// The private scaffold cwd owns the barrier; the loop bounds an orphan's lifetime.
+// FORK(testweb-fixture-pollution) · F4(dsh-web-e2e-red-triage-1021): the win32
+// shipped preset gates `bash` off — the catalog overlay flips `tool-bash` on
+// (job ids keep their `bash-…` shape) and pins the runtime skill-catalog frame
+// off; it stacks with the Browser-dock opt-in below.
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
+// The private scaffold cwd owns the barrier; the 600s deadline bounds an
+// orphan's lifetime. F4 dialect-neutral rewrite: the original `printf '…';
+// for _ in $(seq 1 3000); do [ -e … ] && break; sleep 0.2; done` parses only
+// under bash — the `node -e` form prints the same fixed line first, then polls
+// the release file every 200ms until `afterAll` drops the barrier.
 const RELEASE = '.jobs-menu-layering.release'
-const COMMAND = `printf 'jobs-menu-%s\\n' output; for _ in $(seq 1 3000); do [ -e ${RELEASE} ] && break; sleep 0.2; done`
+const COMMAND = `node -e "console.log('jobs-menu-output'); const fs=require('node:fs'); const deadline=Date.now()+600000; (function tick(){ if (fs.existsSync('${RELEASE}')) return; if (Date.now()>deadline) return; setTimeout(tick, 200) })()"`
 
 /** Measure actual overlap and hit testing; ARIA alone cannot expose clipping or stacking. */
 function placement(page: Page) {
@@ -71,7 +80,10 @@ describe.skipIf(MODE === 'record')('web e2e: jobs menu layering', () => {
 
   beforeAll(async () => {
     scaffold = await launchWebScaffold({
-      extraOverlayPath: fileURLToPath(new URL('./sidebar-browser.overlay.yml', import.meta.url)),
+      extraOverlayPath: [
+        fileURLToPath(new URL('./sidebar-browser.overlay.yml', import.meta.url)),
+        CATALOG_OVERLAY,
+      ],
     })
     await seedSession(scaffold, await readFile(FIXTURE, 'utf8'), SEED_ID)
     browser = await chromium.launch()

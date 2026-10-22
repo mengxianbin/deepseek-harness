@@ -18,6 +18,13 @@ const expected = fileURLToPath(new URL('../../../snapshots/web/voice-input/ui.ex
 const interruptedExpected = fileURLToPath(new URL('../../../snapshots/web/voice-input/interrupted.expected.md', import.meta.url))
 const recordingExpected = fileURLToPath(new URL('../../../snapshots/web/voice-input/recording.expected.md', import.meta.url))
 const bundle = fileURLToPath(new URL('../../../packages/experimental/voice-input-bundle', import.meta.url))
+// FORK(testweb-fixture-pollution) · F4(dsh-web-e2e-red-triage-1021): the win32
+// shipped preset gates `bash` off while the pinned fresh-round-trip fixture's
+// prompt drives a bash call (dialect-neutral `echo`), and the runtime
+// skill-catalog frame would drift this read-only replay compare — the overlay
+// flips `tool-bash` on and pins the catalog off (族2 guard; header comment in
+// the yml). It stacks with the voice patch below for record and replay alike.
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 it.skipIf(webSnapshotMode() === 'record')('guides voice setup, records from standby and submits only the reviewed transcript through Session replay', async () => {
   const scratch = await mkdtemp(join(tmpdir(), 'dsh-voice-browser-'))
@@ -32,7 +39,7 @@ it.skipIf(webSnapshotMode() === 'record')('guides voice setup, records from stan
   const prompt = fixtureUserPrompts(await readFile(fixture, 'utf8'))[0]!
   const prefix = 'Use the bash tool to '
   const scaffold = await launchWebScaffold({ profile: { packages: [{ dir: bundle, enabled: true }] },
-    extraOverlayPath: overlay, replayFixture: fixture, compareReplaySession: 'read-only',
+    extraOverlayPath: [overlay, CATALOG_OVERLAY], replayFixture: fixture, compareReplaySession: 'read-only',
   })
   resources.scaffold = scaffold
   const recognize = vi.fn(async (input: SpeechInput) => {
@@ -202,14 +209,20 @@ it.skipIf(webSnapshotMode() === 'record')('guides voice setup, records from stan
   expect(levelBounds.x).toBeGreaterThan(pickerBounds.x + pickerBounds.width / 2)
   expect(levelBounds.x + levelBounds.width).toBeLessThan(pickerBounds.x + pickerBounds.width)
   await page.setViewportSize({ width: 1280, height: 900 })
-  await page.getByRole('button', { name: 'New session', exact: true }).filter({ hasText: 'New Session' }).click()
+  // FORK (askq-presentation persistence): the wide sidebar's footer ⋯ menu owns
+  // New Session since the brand-row capsule retired (fork dddb378b76/1e4ea68e04)
+  // — the old `New session` capsule button no longer exists. Same gesture as
+  // question-composer.e2e.ts: open the menu, pick the item.
+  await page.getByRole('button', { name: 'More', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'New Session', exact: true }).click()
   await mic.waitFor()
   await expect.poll(() => page.evaluate(() => (window as Window & { voiceTestStreams?: MediaStream[] }).voiceTestStreams!
     .every(stream => stream.getTracks().every(track => track.readyState === 'ended')))).toBe(true)
   await page.getByRole('button', { name: 'Plugins', exact: true }).click()
   await page.locator('[data-plugin-package="@deepseek-ai/dsh-experimental-voice-input-bundle"]').waitFor()
   expect(await page.locator('[data-plugin-detail]').count()).toBe(0)
-  await page.getByRole('button', { name: 'New session', exact: true }).filter({ hasText: 'New Session' }).click()
+  await page.getByRole('button', { name: 'More', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'New Session', exact: true }).click()
   await mic.waitFor()
   const micBox = await mic.boundingBox(), modelBox = await page.getByRole('button', { name: /^Select model, current/ }).boundingBox()
   const sendBox = await page.getByRole('button', { name: 'Send message', exact: true }).boundingBox()

@@ -843,7 +843,17 @@ describe('web e2e: workspace management (create / rename / grouping / hover affo
     await expect.poll(() => sessionRow.count(), { timeout: 10_000 }).toBe(1)
     await expect.poll(() => sessionRow.getAttribute('aria-selected'), { timeout: 10_000 }).toBe('true')
     const ungroupedSection = page.getByText('Ungrouped', { exact: true }).locator('..').locator('..').locator('..')
-    await expect.poll(() => ungroupedSection.locator('[role="treeitem"]').count(), { timeout: 10_000 }).toBe(2)
+    // Derived from row structure, not a pinned DOM total: the section's raw
+    // `[role="treeitem"]` count carries the bucket header (a workspace-row
+    // treeitem) plus hidden blank strays this shared describe leaves behind —
+    // the old hard pin of 2 observed 5 on 2026-10-22. The archive claim only
+    // needs the seed to be the LAST VISIBLE session row (selecting it hides
+    // every stray), so count the way `seededSessionRow()` does: on-screen rows
+    // owning the session-actions affordance (CSS keeps that button matched
+    // while hidden until hover).
+    const visibleSessions = ungroupedSection.locator('[role="treeitem"]:visible')
+      .filter({ has: page.locator('button[aria-label^="Session actions for "]') })
+    await expect.poll(() => visibleSessions.count(), { timeout: 10_000 }).toBe(1)
     // Row menu: hover reveals the actions button; Archive session commits
     // without a confirmation dialog (non-destructive: log + accounting stay).
     await clickHoverAction(sessionRow, `Session actions for ${title}`)
@@ -1041,7 +1051,13 @@ describe('web e2e: New Session after an outdated blank cache', () => {
       const previous = (await selected.innerText()).split('\n')[0]!
       const before = await captureStableAria(page, '[role="tree"]', scaffold.workspaceCwd)
 
-      await page.getByRole('button', { name: 'New session', exact: true }).last().click()
+      // FORK (askq-presentation persistence): the wide sidebar's footer ⋯ menu
+      // owns New Session since the brand-row capsule retired (fork
+      // dddb378b76/1e4ea68e04) — the old `New session` capsule button no longer
+      // exists. Open the menu, pick the item (same gesture as
+      // question-composer.e2e.ts).
+      await page.getByRole('button', { name: 'More', exact: true }).click()
+      await page.getByRole('menuitem', { name: 'New Session', exact: true }).click()
       await expect.poll(() => selected.innerText()).toBe('New Session')
       await page.getByRole('tab', { name: 'Chat', exact: true }).waitFor({ state: 'hidden' })
       // New Session creates a fresh Session; the blank startup created stays a member.

@@ -34,6 +34,14 @@ const WAIT_MS = 60_000
 const HEARTBEAT_MS = 200
 /** The child the Bash call runs: announce, heartbeat, and only finish long after the archive. */
 const WAIT_COMMAND = `node -e "const fs=require('node:fs'); fs.writeFileSync('started.txt', 'started'); setInterval(() => { fs.appendFileSync('heartbeat.txt', '.') }, ${HEARTBEAT_MS}); setTimeout(() => { fs.writeFileSync('finished.txt', 'finished') }, ${WAIT_MS})"`
+// FORK(testweb-fixture-pollution) · F4(dsh-web-e2e-red-triage-1021): the win32
+// shipped preset gates `bash` off, so the scripted `name:'bash'` replay call
+// failed as unknown tool and the 3-test chain went red — the overlay flips
+// `tool-bash` on (and pins the runtime skill-catalog frame off). The
+// WAIT_COMMAND above is dialect-neutral as written: `node -e` with a
+// double-quoted script that carries no `$`/backtick/backslash, so it parses
+// identically under POSIX `bash -c` and the win32 pwsh `-Command` provider.
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 /**
  * First stream: one Bash call whose child announces itself, then beats on a
@@ -120,6 +128,7 @@ describe.skipIf(MODE === 'record')('web e2e: archiving a running Session stops i
     scaffold = await launchWebScaffold({
       replayFixture: join(replayDir, 'override-only.jsonl'),
       replayOverride,
+      extraOverlayPath: CATALOG_OVERLAY,
     })
     browser = await chromium.launch()
     page = await newEnglishPage(browser)
