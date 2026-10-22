@@ -640,11 +640,15 @@
 }
 
 /* FORK dsh-local (usage glance v2, 2026-10-15): the wide logo row carries only
-   the usage glance and the panel toggle — no brand / New Session button. The
-   glance body is the two bars' column plus today's compact token total in its
-   own column to the right; both tracks keep the same fixed width and sit
-   left-aligned, each with its numerator/denominator read-out immediately to
-   the right of the track. */
+   the usage glance and the panel toggle — no brand / New Session button.
+   FORK dsh-local (usage glance v2.4, 2026-10-22): the glance body is the
+   quota-window rows' column (one row per on-screen window — short label,
+   track with the usage fill and time tick, merged read-out) plus the
+   今日/周期 token rows in their own column to the right; every track keeps
+   the same fixed width and sits left-aligned. Rows stack GAPLESS — each
+   12px line box carries its 6px track with 3px lead, so three rows plus the
+   button's 4px padding total exactly 40px, the height the Windows titlebar
+   logo row allows (60px web / 40px titlebar, see .logoRow). */
 .usageGlance {
   flex: 1;
   min-width: 0;
@@ -679,10 +683,13 @@
   max-width: 100%;
 }
 
+/* FORK (usage glance v2.4): gapless stacking — the 12px line boxes already
+   space the 6px tracks 6px apart, and the third row would blow the 40px
+   titlebar cap with any real gap. */
 .glanceRows {
   display: inline-flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 0;
   min-width: 0;
 }
 
@@ -692,6 +699,18 @@
   gap: 6px;
   min-width: 0;
   max-width: 100%;
+}
+
+/* FORK (usage glance v2.4): the per-row window short label (月 / 周 / 5h),
+   pinned to a 14px column so all tracks start at the same x in a locale. */
+.glanceLabel {
+  flex: none;
+  min-width: 14px;
+  font-size: 10px;
+  line-height: 12px;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--dsw-alias-label-secondary);
 }
 
 .glanceTrack {
@@ -716,6 +735,29 @@
   transition: width 300ms ease;
 }
 
+/* FORK (usage glance v2.4): an over-pace fill splits at the tick —
+   `--glance-split` is the tick's elapsed share; the primary color covers the
+   on-pace part and the warn color takes the overrun (usage past the clock). */
+.glanceFillOver {
+  background: linear-gradient(
+    to right,
+    var(--dsw-alias-state-business-primary) var(--glance-split, 0%),
+    var(--dsw-alias-state-warn-primary) var(--glance-split, 0%)
+  );
+}
+
+/* FORK (usage glance v2.4): the time-progress tick — a 1px rule at the
+   window's continuous elapsed share, painted over the fill; on an over-pace
+   row it is also the boundary where the fill's gradient flips from the
+   primary color to the warn color (the overrun segment). */
+.glanceTick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--dsw-alias-label-primary);
+}
+
 .glanceValue {
   flex: none;
   min-width: 52px;
@@ -726,33 +768,42 @@
   color: var(--dsw-alias-label-secondary);
 }
 
-/* FORK dsh-local (usage glance v2.2, 2026-10-15): the today column stacks — the
-   compact token total sits above a small data-refresh stamp (`26.10.15 21:30`),
-   both left-aligned in their own sub-column to the right of the two bars. */
-.glanceToday {
+/* FORK dsh-local (usage glance v2.3, 2026-10-22): the stats column stacks two
+   labeled rows — a muted 10px locale label (今日 / 周期) beside a 12px compact
+   total — in their own sub-column to the right of the window rows; the cycle
+   row rides pickWindow's main window (month preferred — the window row it
+   aliases; re-affirmed when v2.4 split the bars per window). The v2.2
+   refresh-stamp line moved into this column's tooltip, so no third line exists
+   and the column stays inside the rows' height. */
+.glanceStats {
   flex: none;
   display: inline-flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 1px;
+}
+
+.glanceStat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.glanceStatLabel {
+  flex: none;
+  font-size: 10px;
+  line-height: 13px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.glanceStatValue {
   font-size: 12px;
   line-height: 14px;
   font-weight: 600;
   letter-spacing: 0;
   font-variant-numeric: tabular-nums;
   color: var(--dsw-alias-label-primary);
-}
-
-.glanceTodayTokens {
-  display: block;
-}
-
-.glanceStamp {
-  display: block;
-  font-size: 9px;
-  line-height: 11px;
-  font-weight: 400;
-  color: var(--dsw-alias-label-secondary);
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -41,6 +41,12 @@ async function flush(): Promise<void> {
   })
 }
 
+/** Local `YYYY-MM-DD` key for a date (mirrors the host ledger's date keys). */
+function dayKey(at: Date): string {
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return `${String(at.getFullYear()).padStart(4, '0')}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`
+}
+
 afterEach(() => {
   cleanup()
   document.body.replaceChildren()
@@ -87,6 +93,88 @@ describe('deriveGlance', () => {
     }
     expect(deriveGlance(overview, NOW)).toEqual({ percent: 7 })
   })
+
+  it('sums the plan-cycle window, not the calendar month (start day inclusive)', () => {
+    // Window: reset 2026-10-17T10:29:32Z → month start 2026-09-17 (day keys are
+    // local; every realistic test offset lands the start day on Sep 16/17, and
+    // every row below sits strictly before or after both candidates except the
+    // Sep 17 row, which pins the inclusive rule whenever the start day is Sep 17).
+    const overview: UsageOverviewView = {
+      providers: [{ provider: 'p', plan: { windows: [{ key: 'month', percent: 31, resetsAt: '2026-10-17T10:29:32Z' }] } }],
+      usage: {
+        days: [
+          { date: '2026-09-01', totals: { inputTokens: 900_000_000 } }, // before the cycle: out
+          { date: '2026-09-17', totals: { inputTokens: 7_000_000 } },   // cycle start day: in (ruling)
+          { date: '2026-09-30', totals: { inputTokens: 5_000_000 } },   // before October, inside cycle: in
+          { date: '2026-10-14', totals: { inputTokens: 3_000_000 } },
+        ],
+        availableDays: ['2026-09-01', '2026-09-17', '2026-09-30', '2026-10-14'],
+      },
+    }
+    // The Sep 30 row proves the sum is cycle-driven: a calendar-month sum
+    // would exclude it, a cycle sum starting Sep 17 must include it.
+    expect(deriveGlance(overview, NOW)).toEqual({
+      percent: 31, elapsedDays: 28, totalDays: 30, cycleTokens: 15_000_000,
+    })
+  })
+
+  it('marks the cycle total a floor when the trend window cuts in-cycle days', () => {
+    // Late-cycle instant; the 30-entry series starts 2026-10-02 while the
+    // cycle began a month earlier and availableDays still lists Sep days.
+    const NOW_LATE = Date.parse('2026-10-31T00:00:00Z')
+    const overview: UsageOverviewView = {
+      providers: [{ provider: 'p', plan: { windows: [{ key: 'month', percent: 90, resetsAt: '2026-10-16T00:00:00Z' }] } }],
+      usage: {
+        days: [
+          { date: '2026-10-02', totals: { inputTokens: 1_000_000 } },
+          { date: '2026-10-29', totals: { inputTokens: 2_000_000 } },
+        ],
+        availableDays: ['2026-09-25', '2026-10-02', '2026-10-29'],
+      },
+    }
+    expect(deriveGlance(overview, NOW_LATE)).toMatchObject({
+      cycleTokens: 3_000_000,
+      cycleTruncated: true,
+    })
+  })
+
+  it('derives the cycle sum from a weekly window too', () => {
+    // Reset 2026-10-19T00:00Z → week start 2026-10-12; three elapsed days.
+    const overview: UsageOverviewView = {
+      providers: [{ provider: 'p', plan: { windows: [{ key: 'week', percent: 50, resetsAt: '2026-10-19T00:00:00Z' }] } }],
+      usage: {
+        days: [
+          { date: '2026-10-10', totals: { inputTokens: 900_000_000 } }, // before the week: out
+          { date: '2026-10-12', totals: { inputTokens: 4_000_000 } },
+          { date: '2026-10-14', totals: { inputTokens: 6_000_000 } },
+        ],
+        availableDays: ['2026-10-10', '2026-10-12', '2026-10-14'],
+      },
+    }
+    expect(deriveGlance(overview, NOW)).toEqual({
+      percent: 50, elapsedDays: 3, totalDays: 7, cycleTokens: 10_000_000,
+    })
+  })
+
+  it('withholds the cycle total for rolling windows even when days arrive', () => {
+    // Rolling windows have no day span, so a series must not leak into a
+    // cycle reading the bars never showed.
+    const overview: UsageOverviewView = {
+      providers: [{ provider: 'p', plan: { windows: [{ key: 'rolling', percent: 7, resetsAt: '2026-10-15T07:27:12Z' }] } }],
+      usage: {
+        days: [{ date: '2026-10-15', totals: { inputTokens: 1_000_000 } }],
+        availableDays: ['2026-10-15'],
+      },
+    }
+    expect(deriveGlance(overview, NOW)).toEqual({ percent: 7 })
+  })
+
+  it('omits the cycle total when the host serves no trend series', () => {
+    // A today-only overview (no days) degrades the cycle read-out alone.
+    expect(deriveGlance(OVERVIEW, NOW)).toEqual({
+      percent: 85, elapsedDays: 28, totalDays: 30, todayTokens: 200_000_000,
+    })
+  })
 })
 
 describe('formatCompactTokens', () => {
@@ -127,13 +215,42 @@ describe('UsageGlance', () => {
     expect(percent).toBeDefined()
     expect(await screen.findByText(`${String(percent)} / 100`)).toBeTruthy()
     expect(screen.getByText(`${String(elapsedDays)} / ${String(totalDays)}`)).toBeTruthy()
-    // Today's column stacks the compact total over its refresh stamp.
+    // The stats column stacks the 今日/周期 labeled rows over no stamp line —
+    // the stamp rides the column tooltip with both readings.
     expect(screen.getByText(formatCompactTokens(todayTokens!))).toBeTruthy()
-    expect(screen.getByTitle(t('glance.today')).textContent).toContain('200M')
-    expect(screen.getByTitle(t('glance.today')).textContent).toMatch(/\d{2}\.\d{2}\.\d{2} \d{2}:\d{2}/)
+    const column = screen.getByTitle(
+      new RegExp(`^${t('glance.today')} · ${t('glance.cycle')} · ${t('glance.refreshed')} \\d{2}\\.\\d{2}\\.\\d{2} \\d{2}:\\d{2}$`),
+    )
+    expect(column.textContent).toContain('200M')
+    expect(screen.getByText(t('glance.today.label'))).toBeTruthy()
+    expect(screen.getByText(t('glance.cycle.label'))).toBeTruthy()
     expect(screen.getByTitle(t('glance.usage'))).toBeTruthy()
     expect(screen.getByTitle(t('glance.days'))).toBeTruthy()
     expect(screen.getByRole('button', { name: t('glance.open') })).toBeTruthy()
+  })
+
+  it('labels both stat rows with their compact totals', async () => {
+    // The fixture cycle starts 2026-09-17 (window resets on the 17th); today's
+    // local day key always falls inside it, so the rows read today's buckets
+    // versus the sum since the cycle start day whenever the suite runs.
+    const todayKey = dayKey(new Date())
+    const overview: UsageOverviewView = {
+      providers: [{ provider: 'p', plan: { windows: [{ key: 'month', percent: 31, resetsAt: '2026-10-17T10:29:32Z' }] } }],
+      usage: {
+        today: { totals: { inputTokens: 10_000_000, outputTokens: 2_000_000 } },
+        days: [
+          { date: '2026-09-17', totals: { inputTokens: 3_000_000 } },
+          { date: todayKey, totals: { inputTokens: 10_000_000, outputTokens: 2_000_000 } },
+        ],
+        availableDays: ['2026-09-17', '2026-09-18'],
+      },
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => overview })))
+    render(<UsageGlance t={t} />)
+    expect((await screen.findByText(t('glance.today.label'))).parentElement?.textContent)
+      .toBe(`${t('glance.today.label')}12M`)
+    expect(screen.getByText(t('glance.cycle.label')).parentElement?.textContent)
+      .toBe(`${t('glance.cycle.label')}15M`)
   })
 
   it('renders nothing while the host half serves no routes', async () => {
@@ -156,15 +273,18 @@ describe('UsageGlance', () => {
     render(<UsageGlance t={t} />)
     expect(screen.getByText('— / 100')).toBeTruthy()
     expect(screen.getByText('— / —')).toBeTruthy()
-    expect(screen.getByTitle(t('glance.today')).textContent).toContain('—')
-    expect(screen.getByTitle(t('glance.today')).textContent).not.toMatch(/\d{2}:\d{2}/)
+    const pending = screen.getByTitle(`${t('glance.today')} · ${t('glance.cycle')}`)
+    expect(pending.textContent).toContain('—')
+    expect(pending.textContent).not.toMatch(/\d{2}:\d{2}/)
     await act(async () => {
       release?.({ status: 200, ok: true, json: async () => OVERVIEW })
       await Promise.resolve()
     })
     expect(await screen.findByText('85 / 100')).toBeTruthy()
-    expect(screen.getByTitle(t('glance.today')).textContent).toContain('200M')
-    expect(screen.getByTitle(t('glance.today')).textContent).toMatch(/\d{2}\.\d{2}\.\d{2} \d{2}:\d{2}/)
+    const loaded = screen.getByTitle(
+      new RegExp(`^${t('glance.today')} · ${t('glance.cycle')} · ${t('glance.refreshed')} \\d{2}\\.\\d{2}\\.\\d{2} \\d{2}:\\d{2}$`),
+    )
+    expect(loaded.textContent).toContain('200M')
   })
 
   it('refreshes on the poll cadence and on visibility changes', async () => {
