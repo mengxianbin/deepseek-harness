@@ -336,3 +336,45 @@ export function conversationContextKey(kind: string, id: string): string {
 export async function openSettings(page: Page, locale: 'en' | 'zh'): Promise<void> {
   await page.getByRole('button', { name: locale === 'zh' ? '设置' : 'Settings', exact: true }).click()
 }
+
+/**
+ * Open one global panel from the sidebar, following the state the sidebar is in.
+ *
+ * FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+ *
+ * Fork 7ee61be915 folded the WIDE sidebar's panel rows into the footer ⋯ menu,
+ * so `navigation[全局面板/Global panels]` no longer renders in the wide state
+ * and the old nav-row click waits out its 30 s timeout. The route that stays
+ * green in menu-material.e2e.ts applies: click the footer More anchor, then
+ * pick the panel's `menuitem`. Both names resolve from the same `sidebar`
+ * locale dictionary the old nav labels used, and the More anchor is scoped to
+ * the sidebar foot (`[class*="footArea"]`; the built class pattern is
+ * `[hash]_[local]`) so the panel-scoped 更多/More expand control — which only
+ * exists once the panel is open — can never be the match.
+ *
+ * The narrow rail keeps its per-panel icon column (the fork only folded the
+ * wide rows), so a viewport below the auto-collapse breakpoint — e.g. the
+ * loading probe that loops 1680 then 1000 — still resolves through the nav
+ * row; the arm is picked by what the mounted shell actually offers, not by a
+ * breakpoint the Host-side specs cannot import.
+ * @param page - browser page with the mounted sidebar.
+ * @param label - the panel's entry label in the page's current UI language
+ * ('插件' | 'Plugins' | '自动化任务' | 'Automation tasks').
+ * @param locale - language of the More anchor's aria-label; inferred from `label` when omitted.
+ */
+export async function selectGlobalPanel(page: Page, label: string, locale?: 'en' | 'zh'): Promise<void> {
+  const lang = locale ?? (/\p{Script=Han}/u.test(label) ? 'zh' : 'en')
+  // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+  const foot = page.locator('[class*="footArea"]')
+  await foot.waitFor({ state: 'attached' })
+  const more = foot.getByRole('button', { name: lang === 'zh' ? '更多' : 'More', exact: true })
+  if (await more.count() > 0) {
+    await more.click()
+    await page.getByRole('menuitem', { name: label, exact: true }).click()
+    return
+  }
+  // Rail arm: the ⋯ anchor never mounts here, and the icon column still labels
+  // its rows — the pre-fork click, kept only for the collapsed state.
+  await page.getByRole('navigation', { name: lang === 'zh' ? '全局面板' : 'Global panels' })
+    .getByRole('button', { name: label, exact: true }).click()
+}

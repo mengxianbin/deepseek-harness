@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
 import { compareOrRefreshGolden, launchWebScaffold, watchConsole, webSnapshotMode } from './scaffold.ts'
+import { selectGlobalPanel } from './support.ts'
 
 it('keeps the automation title intact before moving New to another line', async () => {
   const scaffold = await launchWebScaffold()
@@ -21,7 +22,8 @@ it('keeps the automation title intact before moving New to another line', async 
           const consoleWatch = watchConsole(page)
           await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
           const title = language === 'en' ? 'Automation tasks' : '自动化任务'
-          await page.getByRole('button', { name: title, exact: true }).click()
+          // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+          await selectGlobalPanel(page, title)
           const panel = page.getByTestId('task-manager-page')
           const heading = panel.getByRole('heading', { name: title, exact: true })
           await heading.waitFor()

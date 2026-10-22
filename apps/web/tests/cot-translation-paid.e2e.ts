@@ -16,7 +16,8 @@ import {
   launchWebScaffold, readPersistedEvents, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
 import {
-  connectFreshWorkspaceZh, expandOwningTurnProcess, PLUGIN_TOGGLE_SETTLE_MS, saveFailureShot, ZH_BROWSER_LOCALE,
+  connectFreshWorkspaceZh, expandOwningTurnProcess, PLUGIN_TOGGLE_SETTLE_MS, saveFailureShot, selectGlobalPanel,
+  ZH_BROWSER_LOCALE,
 } from './support.ts'
 
 const BUNDLE_NAME = '@deepseek-ai/dsh-experimental-cot-translation-bundle'
@@ -174,7 +175,8 @@ it.skipIf(MODE === 'record')('reuses saved native Account Flash translations acr
   await reasoning.waitFor({ state: 'attached' }); await expandOwningTurnProcess(page, reasoning)
 
   await settings.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
-  await settings.getByRole('button', { name: '插件', exact: true }).click()
+  // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+  await selectGlobalPanel(settings, '插件')
   const panel = settings.locator('[data-plugin-panel]'), card = panel.locator(`[data-plugin-package="${BUNDLE_NAME}"]`)
   await panel.getByRole('button', { name: '更多', exact: true }).click()
   const toggle = card.getByRole('switch'); await toggle.waitFor()

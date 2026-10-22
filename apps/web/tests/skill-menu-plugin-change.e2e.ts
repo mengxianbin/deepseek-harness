@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { chromium, type Browser, type Locator, type Page } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import { launchWebScaffold, watchConsole, type WebScaffold } from './scaffold.ts'
-import { connectFreshWorkspace, newEnglishPage, PLUGIN_TOGGLE_SETTLE_MS, saveFailureShot, writeComposerDraft } from './support.ts'
+import { connectFreshWorkspace, newEnglishPage, PLUGIN_TOGGLE_SETTLE_MS, saveFailureShot, selectGlobalPanel, writeComposerDraft } from './support.ts'
 
 const BUNDLE_DIR = fileURLToPath(new URL('../../../packages/experimental/badge-skill-bundle', import.meta.url))
 const BUNDLE = '@deepseek-ai/dsh-experimental-badge-skill-bundle'
@@ -45,7 +45,8 @@ describe('web e2e: the slash menu follows plugin switches', () => {
     await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
     await connectFreshWorkspace(page, scaffold.workspaceCwd)
     await plugins.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
-    await plugins.getByRole('navigation', { name: 'Global panels' }).getByRole('button', { name: 'Plugins', exact: true }).click()
+    // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+    await selectGlobalPanel(plugins, 'Plugins')
     const panel = plugins.locator('[data-plugin-panel]')
     await panel.getByRole('button', { name: 'More', exact: true }).click()
     toggle = panel.locator(`[data-plugin-package="${BUNDLE}"]`).getByRole('switch')

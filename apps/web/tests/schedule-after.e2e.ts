@@ -38,6 +38,7 @@ import {
   connectFreshWorkspace,
   conversationContextKey,
   saveFailureShot,
+  selectGlobalPanel,
 } from './support.ts'
 
 declare module '@deepseek-ai/dsh-llm' {
@@ -525,7 +526,8 @@ describe.skipIf(MODE === 'record')('web e2e: conversational reminders', () => {
     // workspace-selection view and unmounts the Tasks page with it, so the
     // linked-Session assertions run with another Session in the main pane.
     await page.getByRole('treeitem', { name: /Explicit local-time reminder/ }).click()
-    await page.getByRole('button', { name: 'Automation tasks', exact: true }).click()
+    // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+    await selectGlobalPanel(page, 'Automation tasks')
     const manager = page.getByTestId('task-manager-page')
     await manager.getByRole('button', { name: 'Inactive', exact: true }).click()
     await manager.getByRole('list', { name: 'Task catalog' })
@@ -615,7 +617,8 @@ describe.skipIf(MODE === 'record')('web e2e: conversational reminders', () => {
     const original = everyRecords[0]
     const first = await scaffold.ctx.schedule.history({ sessionId: everyHandle.agent.id, id: original.id, limit: 20 })
     if ('code' in first || first.records.length !== 1) throw new Error('expected one actual recurring receipt')
-    await page.getByRole('button', { name: 'Automation tasks', exact: true }).click()
+    // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+    await selectGlobalPanel(page, 'Automation tasks')
     const manager = page.getByTestId('task-manager-page')
     await manager.getByRole('list', { name: 'Task catalog' }).getByRole('button', { name: original.title, exact: true }).click()
     const detail = manager.getByRole('complementary', { name: 'Task details' })
@@ -817,7 +820,8 @@ describe.skipIf(MODE === 'record')('web e2e: active Schedule catalog', () => {
     const other = await scaffold.ctx.schedule.create(otherSessionId, {
       prompt: 'Inspect the second workspace deployment', title: 'Second workspace deployment', at: '2099-08-25T12:08:00.000Z',
     })
-    await page.getByRole('button', { name: 'Automation tasks', exact: true }).click()
+    // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+    await selectGlobalPanel(page, 'Automation tasks')
     const manager = page.getByTestId('task-manager-page')
     await manager.getByRole('heading', { name: 'Automation tasks', exact: true }).waitFor()
     const tasks = manager.getByRole('list', { name: 'Task catalog' })
@@ -929,7 +933,8 @@ describe.skipIf(MODE === 'record')('web e2e: active Schedule catalog', () => {
     expect(presetPlugins('preset-minimal').some(row => row.name === '@deepseek-ai/dsh-time-context'
       || row.name === '@deepseek-ai/dsh-tool-schedule')).toBe(false)
 
-    await page.getByRole('button', { name: 'Automation tasks', exact: true }).click()
+    // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+    await selectGlobalPanel(page, 'Automation tasks')
     const manager = page.getByTestId('task-manager-page')
     await manager.getByRole('button', { name: 'Check exact cadence', exact: true }).click()
     await manager.getByRole('button', { name: `Linked session ${CATALOG_TITLE}: open original session`, exact: true }).click()
@@ -1101,7 +1106,8 @@ describe.skipIf(MODE === 'record')('web e2e: active Schedule catalog', () => {
       prompt: 'Review retained records', title: 'History retention review', at: '2099-09-01T12:00:00.000Z',
     })
     try {
-      await page.getByRole('button', { name: 'Automation tasks', exact: true }).click()
+      // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+      await selectGlobalPanel(page, 'Automation tasks')
       const manager = page.getByTestId('task-manager-page')
       await manager.getByRole('button', { name: 'All', exact: true }).click()
       await manager.getByRole('searchbox', { name: 'Search tasks' }).fill(record.title)
@@ -1195,7 +1201,8 @@ describe.skipIf(MODE === 'record')('web e2e: active Schedule catalog', () => {
       expect(created).toMatchObject({ kind: 'daily', time: `${time}.000`, timeZone, status: 'active' })
       expect(clock.format(new Date(created.scheduledAt))).toBe(time)
       await page.clock.setFixedTime(new Date())
-      await page.getByRole('button', { name: 'Automation tasks', exact: true }).click()
+      // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+      await selectGlobalPanel(page, 'Automation tasks')
       const manager = page.getByTestId('task-manager-page')
       await manager.getByRole('button', { name: 'All', exact: true }).click()
       await manager.getByRole('searchbox', { name: 'Search tasks' }).fill(prompt)

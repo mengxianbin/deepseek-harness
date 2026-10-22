@@ -24,7 +24,7 @@ import {
   INTERACTIVE_SELECTOR, RECALL_MARK, isDraggableAt, type RegionRect,
 } from '@deepseek-ai/dsh-client-web/src/window-drag/regions.ts'
 import { launchWebScaffold, watchConsole, type WebScaffold } from './scaffold.ts'
-import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
+import { connectFreshWorkspace, newEnglishPage, saveFailureShot, selectGlobalPanel } from './support.ts'
 
 /** One collected box: its app-region value, whether it is interactive, and where it is. */
 interface CollectedRegion extends RegionRect {
@@ -371,7 +371,8 @@ describe('web e2e: macOS window drag coverage', () => {
   it('keeps an entry page’s chrome row draggable', async () => {
     const { page, tripwire } = await darwinPage()
     try {
-      await page.getByRole('button', { name: 'Plugins', exact: true }).click()
+      // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+      await selectGlobalPanel(page, 'Plugins')
       const head = page.locator('[class*="pageHead"]').first()
       await head.waitFor({ timeout: 15_000 })
       await settled(page)
@@ -408,7 +409,8 @@ describe('web e2e: macOS window drag coverage', () => {
   it('keeps a detail page’s head row draggable and its body out of the drag surface', async () => {
     const { page, tripwire } = await darwinPage()
     try {
-      await page.getByRole('button', { name: 'Plugins', exact: true }).click()
+      // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+      await selectGlobalPanel(page, 'Plugins')
       const cards = page.locator('[data-plugin-package], [data-plugin-item]')
       await cards.first().waitFor({ timeout: 30_000 })
       await settled(page)

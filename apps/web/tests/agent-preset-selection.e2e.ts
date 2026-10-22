@@ -25,7 +25,7 @@ import {
   webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
 import { openSettings,
-  connectFreshWorkspace, newEnglishPage, saveFailureShot, writeComposerDraft,
+  connectFreshWorkspace, newEnglishPage, saveFailureShot, selectGlobalPanel, writeComposerDraft,
 } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('./expected/agent-preset-selection', import.meta.url))
@@ -382,7 +382,9 @@ describe('web e2e: agent-preset selection', () => {
     await expect.poll(async () => (await scaffold.ctx.agentPresets.remoteExportList()).presets.find(preset => preset.isDefault)?.id).toBe('standard')
 
     const creation = page.waitForResponse('**/api/session/create')
-    await page.getByRole('button', { name: 'New session', exact: true }).last().click()
+    // FORK(replay-residual-1022): New session 按钮已随 dddb378b76 退役入页脚 ⋯ 菜单（question-composer 10-19 先例）
+    await page.locator('[class*="footArea"]').getByRole('button', { name: 'More', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'New Session', exact: true }).click()
     const created = await creation
     expect(created.request().postDataJSON()).not.toHaveProperty('payload.args.request.sessionId')
     const createdBody = await created.json() as { result: { value: { sessionId: SessionId; agentPreset: string } } }
@@ -453,7 +455,8 @@ it.each([false, true])('starts Creator from Plugins with Coding Tools=%s without
     const draft = 'Keep this unsent plugin idea.'
     await writeComposerDraft(page, composer, draft)
 
-    await page.getByRole('navigation', { name: 'Global panels' }).getByRole('button', { name: 'Plugins', exact: true }).click()
+    // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+    await selectGlobalPanel(page, 'Plugins')
     await page.getByRole('button', { name: 'Choose how to add a plugin', exact: true }).click()
     // The Creator entry reuses the draft's blank Session and names its preset in the creation request.
     await Promise.all([
@@ -486,7 +489,9 @@ it.each([false, true])('starts Creator from Plugins with Coding Tools=%s without
     creator.session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
     await scaffold.ctx.sessions.flush(creator.session)
     await page.getByText('Creator fixture completed without a model call.', { exact: true }).waitFor()
-    const newSession = page.getByRole('button', { name: 'New session', exact: true }).filter({ hasText: 'New Session' })
+    // FORK(replay-residual-1022): New session 按钮已随 dddb378b76 退役入页脚 ⋯ 菜单（question-composer 10-19 先例）
+    await page.locator('[class*="footArea"]').getByRole('button', { name: 'More', exact: true }).click()
+    const newSession = page.getByRole('menuitem', { name: 'New Session', exact: true })
     await Promise.all([page.waitForResponse('**/api/session/create'), newSession.click()])
     expect(scaffold.ctx.agents.list().find(agent => agent.id !== creator.id)).toBeDefined()
     const next = scaffold.ctx.agents.list().find(agent => agent.id !== creator.id)!
