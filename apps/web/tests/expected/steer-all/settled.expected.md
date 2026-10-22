@@ -10,7 +10,15 @@
 - button "Copy"
 - status: Completed
 - button "Completed in {{duration}}" [disabled]
-- button "Asked questions"
+- button "Analysis completed"
+- button "Ask question 1/1 answered" [expanded]
+- term: Ready to continue?
+- definition:
+  - list:
+    - listitem: "Yes"
+    - listitem: "No"
+- definition: "Yes"
+- button "Inspect"
 - text: "Interjection: include the word BANANA in your final reply. {{clock}}"
 - button "Copy"
 - text: "Interjection: include the word ORANGE in your final reply. {{clock}}"
