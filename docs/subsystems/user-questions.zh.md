@@ -266,6 +266,11 @@ async askTimed( request: AskUserQuestionRequest & { agent: Agent }, callId: Tool
  * block forever, while a lineage-bearing session resumed as a new runtime
  * root may ask normally.
  *
+ * A request that carries its call id outlives an answerer that disappears
+ * mid-wait: when no answerer accepts, the waterfall is re-offered until one
+ * takes it again or the signal aborts, so a page reload or client rebuild
+ * no longer settles the call as `NO_PROVIDER`.
+ *
  * @param request Questions, owner agent, and abort signal.
  * @returns The answer chosen or typed by the human.
  * @throws {UserQuestionError} code `ASK_ABORTED` when the supplied signal
