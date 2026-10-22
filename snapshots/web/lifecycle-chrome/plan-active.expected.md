@@ -1,9 +1,4 @@
-- button "New session"
 - button "Collapse sidebar"
-- button "New session": New Session
-- navigation "Global panels":
-  - button "Plugins"
-  - button "Automation tasks"
 - text: Workspaces
 - button "Search sessions"
 - textbox "Search session names"
@@ -13,6 +8,7 @@
   - treeitem "workspace" [expanded]
   - treeitem "New Session" [selected]
 - button "Settings"
+- button "More"
 - banner:
   - button "Open right sidebar"
 - text: Into the Unknown Preview
