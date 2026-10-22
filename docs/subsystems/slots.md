@@ -155,7 +155,8 @@ Factory: conversation.content [ConversationContent]
 │        └─ conversation.trajectory.images [MessageImages]
 ├─ conversation.composer
 │  ├─ conversation.approval.detail
-│  └─ conversation.plan-review.actions
+│  ├─ conversation.plan-review.actions
+│  └─ conversation.composer.overlay
 ├─ conversation.composer.bar [InputBar]
 │  ├─ conversation.input.attachments
 │  ├─ conversation.input.permission

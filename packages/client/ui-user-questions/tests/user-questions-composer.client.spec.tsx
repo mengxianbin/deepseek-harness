@@ -8,6 +8,8 @@ import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { AskUserQuestionAnswerItem } from '@deepseek-ai/dsh-user-questions/types'
 import { createWaterfallRequest, PendingQuestion, type QuestionCardSnapshot, type QuestionComposerProps } from '../src/client/contract/slots.ts'
+import type { ArbitrateKey, ArbitrateOutcome } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { AnswerSurfaceInsert } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import { createQuestionDraftStore } from '../src/client/draft-store.ts'
 import { QuestionComposer as Composer, parseRecommendedLabel } from '../src/client/QuestionComposer.tsx'
 import { en, zh } from '../src/client/locales.ts'
@@ -113,6 +115,14 @@ const inputState: InputState = {
  *  plain stubs per the client testing discipline). */
 const kitBase: Omit<QuestionComposerProps, 'matched' | 'useStore' | 'useQuestionCard' | 'actions'> = {
   renderSlot: () => null,
+  // Inert answer-surface face: this spec drives the flow's own handlers; the
+  // wiring asserts itself through per-test overrides (see the answer-surface
+  // describes) and the pipeline side lives in ui-input-trigger's spec.
+  answerTriggers: {
+    attach: () => () => {},
+    track: () => {},
+    arbitrate: () => 'pass',
+  },
   SessionProvider: ({ children }) => children,
   session: undefined,
   sessionId: SID,
@@ -935,5 +945,140 @@ describe('review card', () => {
     fireEvent.click(screen.getByLabelText(en['nav.next']))
     fireEvent.click(screen.getByLabelText(en['nav.next']))
     expect(screen.getByText(en['review.skipped'])).toBeTruthy()
+  })
+})
+
+/** Controllable answer-surface face: every pipeline verb is observable. */
+function triggerFace() {
+  const track = vi.fn<(draft: string, caret: number, tier: 'plain' | 'frozen', draftRev: number) => void>()
+  const arbitrate = vi.fn<(key: ArbitrateKey, composing: boolean) => ArbitrateOutcome>(() => 'pass')
+  const detach = vi.fn()
+  let target: AnswerSurfaceInsert | null = null
+  const attach = vi.fn<(insert: AnswerSurfaceInsert) => (() => void)>((insert) => {
+    target = insert
+    return () => {
+      target = null
+      detach()
+    }
+  })
+  return {
+    face: { attach, track, arbitrate } satisfies QuestionComposerProps['answerTriggers'],
+    attach, detach, track, arbitrate,
+    /** The mounted field's insert target, or null while detached. */
+    target: (): AnswerSurfaceInsert | null => target,
+    /** Revision of the most recent track call. */
+    rev: (): number => track.mock.calls.at(-1)?.[3] ?? 0,
+  }
+}
+
+const answerField = (): HTMLTextAreaElement =>
+  screen.getByPlaceholderText<HTMLTextAreaElement>('输入你的答案')
+
+describe('QuestionComposer answer-surface wiring', () => {
+  it('attaches while the field is mounted; collapse and unmount detach through the leased surface', () => {
+    const { carrier } = wait()
+    const harness = triggerFace()
+    const view = render(<QuestionComposer matched={carrier} {...kit} answerTriggers={harness.face} />)
+    expect(harness.attach).toHaveBeenCalledTimes(1)
+    expect(harness.target()).not.toBeNull()
+    // The takeover seats the menu anchor outside the clipping card.
+    expect(view.container.querySelector('[class*="triggerAnchor"]')).toBeTruthy()
+
+    // Collapsing unmounts the field: the surface lease releases with it.
+    fireEvent.click(screen.getByLabelText(zh['nav.minimize']))
+    expect(harness.detach).toHaveBeenCalledTimes(1)
+    expect(harness.target()).toBeNull()
+    expect(view.container.querySelector('[class*="triggerAnchor"]')).toBeNull()
+
+    fireEvent.click(screen.getByLabelText(zh['nav.maximize']))
+    expect(harness.attach).toHaveBeenCalledTimes(2)
+
+    view.unmount()
+    expect(harness.detach).toHaveBeenCalledTimes(2)
+    expect(harness.target()).toBeNull()
+  })
+
+  it('feeds edits to the pipeline with a content revision, and focus re-tracks without bumping it', () => {
+    const { carrier } = wait()
+    const harness = triggerFace()
+    render(<QuestionComposer matched={carrier} {...kit} answerTriggers={harness.face} />)
+    // Mount tracks the empty draft once.
+    expect(harness.track.mock.calls.at(-1)).toEqual(['', expect.any(Number), 'plain', 1])
+
+    const custom = answerField()
+    fireEvent.change(custom, { target: { value: '/g' } })
+    expect(harness.track.mock.calls.at(-1)).toEqual(['/g', expect.any(Number), 'plain', 2])
+
+    // Caret/focus motion re-tracks the same content revision (CAS survives it).
+    fireEvent.focus(custom)
+    const afterFocus = harness.track.mock.calls.at(-1)!
+    expect(afterFocus[0]).toBe('/g')
+    expect(afterFocus[2]).toBe('plain')
+    expect(afterFocus[3]).toBe(2)
+  })
+
+  it('arbitrates menu keys first: claimed keys are prevented, passed keys keep the field behavior', () => {
+    const { carrier, answer } = wait()
+    const harness = triggerFace()
+    harness.arbitrate.mockReturnValue('consumed')
+    render(<QuestionComposer matched={carrier} {...kit} answerTriggers={harness.face} />)
+    const custom = answerField()
+
+    expect(fireEvent.keyDown(custom, { key: 'ArrowDown' })).toBe(false)
+    expect(harness.arbitrate).toHaveBeenLastCalledWith('down', false)
+    fireEvent.keyDown(custom, { key: 'Tab', shiftKey: true })
+    expect(harness.arbitrate).toHaveBeenLastCalledWith('tabBack', false)
+
+    // A highlighted Enter settles the pick through the menu and never advances the flow.
+    harness.arbitrate.mockReturnValue('pick-highlighted')
+    fireEvent.change(custom, { target: { value: '/g' } })
+    expect(fireEvent.keyDown(custom, { key: 'Enter' })).toBe(false)
+    expect(harness.arbitrate).toHaveBeenLastCalledWith('enter', false)
+    expect(answer).not.toHaveBeenCalled()
+
+    // A passing Escape reaches the field untouched (no menu open).
+    harness.arbitrate.mockReturnValue('pass')
+    expect(fireEvent.keyDown(custom, { key: 'Escape' })).toBe(true)
+    expect(harness.arbitrate).toHaveBeenLastCalledWith('escape', false)
+  })
+
+  it('applies a picked text over the pick-time span, restores the caret behind it, and refuses a stale revision', () => {
+    const { carrier } = wait()
+    const harness = triggerFace()
+    render(<QuestionComposer matched={carrier} {...kit} answerTriggers={harness.face} />)
+    const custom = answerField()
+    fireEvent.change(custom, { target: { value: '/g' } })
+    const rev = harness.rev()
+    const insert = harness.target()
+    expect(insert).not.toBeNull()
+
+    let applied = false
+    act(() => {
+      applied = insert!('/go-run ', { start: 0, end: 2, draftRev: rev }, false)
+    })
+    expect(applied).toBe(true)
+    const field = answerField()
+    expect(field.value).toBe('/go-run ')
+    expect(field.selectionStart).toBe('/go-run '.length)
+
+    // Content moved on: the pick-time revision is stale and must be refused.
+    act(() => {
+      applied = insert!('/stale ', { start: 0, end: 3, draftRev: rev }, false)
+    })
+    expect(applied).toBe(false)
+    expect(answerField().value).toBe('/go-run ')
+  })
+
+  it('tracks a locked field frozen so a submission in flight cannot leave a menu open', () => {
+    const { carrier, answer } = wait([{
+      id: 'only', question: '最后一题', options: [{ label: 'Alpha' }],
+    }])
+    const harness = triggerFace()
+    render(<QuestionComposer matched={carrier} {...kit} answerTriggers={harness.face} />)
+    fireEvent.click(screen.getByRole('radio', { name: 'Alpha' }))
+    fireEvent.keyDown(answerField(), { key: 'Enter' })
+
+    expect(answer).toHaveBeenCalledOnce()
+    expect(harness.track).toHaveBeenLastCalledWith(expect.any(String), expect.any(Number), 'frozen', expect.any(Number))
   })
 })

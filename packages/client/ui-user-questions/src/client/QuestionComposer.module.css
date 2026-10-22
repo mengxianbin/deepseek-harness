@@ -1,10 +1,28 @@
 /* The takeover seats where the input card sits, centered on the InputBar
    axis at the shared content width (input card - 32): sides = clearance +
-   16px so the relation also holds on narrow viewports. */
+   16px so the relation also holds on narrow viewports. The frame is also the
+   positioning context for the floating slash-menu anchor below. */
 .frame {
+  position: relative;
   display: flex;
   justify-content: center;
   padding: 6px calc(var(--dsh-composer-side-clearance) + 16px) 10px;
+}
+
+/* Floating slash-menu anchor for the answer field (mirrors InputBar's
+   overlayAnchor): a zero-height rail on the frame's top edge, inset by the
+   frame's own horizontal padding and capped at the card's max width so the
+   menu (left/right: 0, ui-input-trigger MenuView) spans exactly the card it
+   floats above. It sits OUTSIDE the card because the card clips its own
+   scroll — an overlay inside it would never show. */
+.triggerAnchor {
+  position: absolute;
+  top: 0;
+  right: calc(var(--dsh-composer-side-clearance) + 16px);
+  left: calc(var(--dsh-composer-side-clearance) + 16px);
+  height: 0;
+  max-width: var(--dsh-chat-content-width);
+  margin-inline: auto;
 }
 
 /* Figma Input 973:36348 body over the 1019:36938 header: no banner strip —

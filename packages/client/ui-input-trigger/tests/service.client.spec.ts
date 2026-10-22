@@ -1336,3 +1336,122 @@ describe('reference activation', () => {
     expect(controller.openReference('skill', { ref: '/review' })).toBe(false)
   })
 })
+
+describe('answer surface (question composer takeover)', () => {
+  /** Answer-opt-in skill source: candidates resolve at once, picks land plain text by default. */
+  function skillSource(onPick?: (pick: InputTriggerPick) => PickOutcome) {
+    const picks: InputTriggerPick[] = []
+    const source: InputTriggerSource = {
+      trigger: '/',
+      name: 'skill',
+      surfaces: ['draft', 'answer'],
+      candidates: () => Promise.resolve([{ name: 'go-run' }, { name: 'git-commit' }]),
+      onPick: (pick) => {
+        picks.push(pick)
+        return onPick?.(pick) ?? { text: `/${pick.candidate.name} ` }
+      },
+    }
+    return { source, picks }
+  }
+
+  it('attach closes the draft menu, drafts go silent, and the answer menu lists only answer-opted sources', async () => {
+    const skill = skillSource()
+    const cmd = readySource('/', 'command', [{ name: 'goal' }])
+    const { controller } = controllerBench([cmd.source, skill.source])
+    controller.track('/g', 2, { tier: 'plain' }, 1)
+    await tick()
+    expect(controller.menu.getSnapshot().open).toBe(true)
+    expect(controller.menu.getSnapshot().groups.map(group => group.source)).toEqual(['command', 'skill'])
+
+    const detach = controller.attachAnswer(vi.fn(() => true))
+    // The switch closes the draft menu: its view lives in the hidden InputBar.
+    expect(controller.menu.getSnapshot().open).toBe(false)
+
+    // A hidden-surface track must not mutate the live menu in either direction.
+    controller.track('/g', 2, { tier: 'plain' }, 2)
+    await tick()
+    expect(controller.menu.getSnapshot().open).toBe(false)
+
+    controller.track('/g', 2, { tier: 'plain' }, 2, 'answer')
+    await tick()
+    expect(controller.menu.getSnapshot().open).toBe(true)
+    expect(controller.menu.getSnapshot().groups.map(group => group.source)).toEqual(['skill'])
+
+    // Detach leases the pipeline back: the draft roster rejoins and answer
+    // tracks (stale callbacks after unmount) fall silent.
+    detach()
+    controller.track('/g', 2, { tier: 'plain' }, 3)
+    await tick()
+    expect(controller.menu.getSnapshot().groups.map(group => group.source)).toEqual(['command', 'skill'])
+    controller.track('/g', 2, { tier: 'plain' }, 3, 'answer')
+    expect(controller.menu.getSnapshot().groups.map(group => group.source)).toEqual(['command', 'skill'])
+  })
+
+  it('routes a text pick to the insert target with the pick-time span, never through the scoped input events', async () => {
+    const skill = skillSource()
+    const { controller, actx } = controllerBench([skill.source])
+    const events: unknown[] = []
+    actx.on('slash/input-insert-text', (req) => {
+      events.push(req)
+      return true
+    })
+    const insert = vi.fn(() => true)
+    controller.attachAnswer(insert)
+    controller.track('/go', 3, { tier: 'plain' }, 7, 'answer')
+    await tick()
+    controller.pick('skill', 0)
+    expect(insert).toHaveBeenCalledWith('/go-run ', { start: 0, end: 3, draftRev: 7 }, false)
+    expect(events).toEqual([])
+    expect(skill.picks[0]).toMatchObject({
+      candidate: { name: 'go-run' },
+      position: 'leading',
+      span: { start: 0, end: 3, draftRev: 7 },
+    })
+    expect(controller.menu.getSnapshot().open).toBe(false)
+  })
+
+  it('declines a non-text outcome on the answer surface: no claim event, no insert', async () => {
+    const claimer: InputTriggerSource = {
+      trigger: '/',
+      name: 'claimer',
+      surfaces: ['draft', 'answer'],
+      candidates: () => Promise.resolve([{ name: 'goal' }]),
+      onPick: () => ({ claim: claimOf('/goal ') }),
+    }
+    const { controller, actx } = controllerBench([claimer])
+    const begins: BeginCommandRequest[] = []
+    actx.on('slash/input-begin-command', (req) => {
+      begins.push(req)
+      return true
+    })
+    const insert = vi.fn(() => true)
+    controller.attachAnswer(insert)
+    controller.track('/g', 2, { tier: 'plain' }, 4, 'answer')
+    await tick()
+    controller.pick('claimer', 0)
+    expect(begins).toEqual([])
+    expect(insert).not.toHaveBeenCalled()
+    expect(controller.menu.getSnapshot().open).toBe(false)
+  })
+
+  it('a frozen track closes the answer menu (the locked field refuses the trigger)', async () => {
+    const skill = skillSource()
+    const { controller } = controllerBench([skill.source])
+    controller.attachAnswer(vi.fn(() => true))
+    controller.track('/g', 2, { tier: 'plain' }, 1, 'answer')
+    await tick()
+    expect(controller.menu.getSnapshot().open).toBe(true)
+    controller.track('/g', 2, { tier: 'frozen' }, 1, 'answer')
+    expect(controller.menu.getSnapshot().open).toBe(false)
+  })
+
+  it('a disposed controller drops its attach and every subsequent track', async () => {
+    const skill = skillSource()
+    const { controller } = controllerBench([skill.source])
+    const detach = controller.attachAnswer(vi.fn(() => true))
+    controller.dispose()
+    detach()
+    controller.track('/g', 2, { tier: 'plain' }, 1, 'answer')
+    expect(controller.menu.getSnapshot().open).toBe(false)
+  })
+})

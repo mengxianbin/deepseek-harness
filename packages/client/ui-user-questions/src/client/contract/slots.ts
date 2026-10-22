@@ -1,6 +1,8 @@
 /** Question composer props and one pending Remote waterfall response. */
 import type { InjectFace, PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 // The client module declares the conversation.composer SlotMap entry required by PropsRuntime.
+import type { ArbitrateKey, ArbitrateOutcome } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { AnswerSurfaceInsert } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import type { ToolCallId } from '@deepseek-ai/dsh-llm/brand'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {
@@ -559,6 +561,43 @@ export class PendingQuestion {
 export type QuestionWait = PendingQuestion
 
 /**
+ * Injected slash-trigger wiring for the question composer's free-text answer
+ * field: the `answer` surface of the shared trigger pipeline (ui-input-trigger),
+ * bound to one session's controller — an inert face (no resolved session)
+ * tracks nothing and passes every key. The pipeline's menus render through
+ * the `conversation.composer.overlay` slot this entry declares; this face is
+ * only the field's keyboard/draft feed and insert target.
+ */
+export interface AnswerTriggerSurface {
+  /**
+   * Attach the mounted answer field as the pipeline's text-insert target.
+   * Attachment IS the surface lease: while attached, draft-surface tracks are
+   * ignored and '/' picks execute against `insert` instead of the resident
+   * InputBar's scoped input events.
+   * @param insert - applies one picked plain text over `[span.start, span.end)`
+   * of the answer draft; answers whether the edit applied (revision CAS included).
+   * @returns idempotent detacher (field unmount / takeover collapse).
+   */
+  attach(insert: AnswerSurfaceInsert): () => void
+  /**
+   * Feed a draft/caret change of the answer field through trigger detection.
+   * @param draft - full answer text.
+   * @param caret - caret offset into `draft`.
+   * @param tier - `plain` while editable, `frozen` while locked (closes any open menu).
+   * @param draftRev - answer-draft content revision (content edits only),
+   * stamped into the hit span for pick-time CAS.
+   */
+  track(draft: string, caret: number, tier: 'plain' | 'frozen', draftRev: number): void
+  /**
+   * Keyboard arbitration while the menu is open.
+   * @param key - intercepted key.
+   * @param composing - whether IME composition is active.
+   * @returns the menu's verdict; `pass` leaves the browser default in charge.
+   */
+  arbitrate(key: ArbitrateKey, composing: boolean): ArbitrateOutcome
+}
+
+/**
  * Full component props: the framework runtime share (chain currency +
  * session/global standard kit) plus the chain `matched` share — the entry's
  * selector result, already narrowed to the question carrier — plus the
@@ -568,7 +607,10 @@ export type QuestionWait = PendingQuestion
 export type QuestionComposerProps =
   PropsRuntime<'conversation.composer'>
   & PropsStore<ReturnType<typeof createQuestionDraftStore>>
-  & PropsRenderSlots<'conversation.plan-review.actions'>
-  & InjectFace<{ keyedHooks: { questionCard: (key: string) => PendingQuestion | undefined } }>
+  & PropsRenderSlots<'conversation.plan-review.actions' | 'conversation.composer.overlay'>
+  & InjectFace<{
+    keyedHooks: { questionCard: (key: string) => PendingQuestion | undefined }
+    answerTriggers: AnswerTriggerSurface
+  }>
   & { matched: QuestionWait }
   & PropsLocale<'question'>

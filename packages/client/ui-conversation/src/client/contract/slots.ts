@@ -271,6 +271,14 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'conversation.input.dock': { kind: 'list'; scope: 'session'; owner: InputZone }
     /** Floating entries rendered inside the resident composer card. */
     'conversation.input.overlay': { kind: 'list'; scope: 'session' }
+    /**
+     * Floating entries rendered inside an elected composer-chain takeover
+     * (the question card's slash menu). The takeover's card clips its own
+     * scroll, so an entry renders through an anchor the takeover seats
+     * outside the card — mirroring `conversation.input.overlay` for the
+     * fallback InputBar.
+     */
+    'conversation.composer.overlay': { kind: 'list'; scope: 'session' }
     /** Ambient entries below the composer card. */
     'conversation.composer.dock': { kind: 'list'; scope: 'session' }
     /** Compact controls at the left of the composer tool row. */

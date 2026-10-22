@@ -1,6 +1,6 @@
 import {
-  useEffect, useMemo, useRef, useState,
-  type ChangeEvent, type FocusEvent, type KeyboardEvent,
+  useEffect, useLayoutEffect, useMemo, useRef, useState,
+  type ChangeEvent, type FocusEvent, type KeyboardEvent, type RefObject,
 } from 'react'
 import clsx from 'clsx'
 import {
@@ -8,6 +8,8 @@ import {
   IconChevronRightOutlineRegular, IconChevronUpOutlineRegular, IconCloseOutlineRegular,
   IconEditOutlineRegular, MarkdownText,
 } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { ArbitrateKey } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { AnswerSurfaceInsert } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import { planReviewOf, type QuestionAnswer, type QuestionCardSnapshot, type QuestionComposerProps } from './contract/slots.ts'
 import type { PendingQuestion } from './contract/slots.ts'
 import type { QuestionDraftAnswer, QuestionDraftProgress } from './draft-store.ts'
@@ -67,6 +69,20 @@ function isComposing(event: KeyboardEvent<HTMLTextAreaElement>): boolean {
   return event.nativeEvent.isComposing || Reflect.get(event.nativeEvent, 'keyCode') === 229
 }
 
+/**
+ * Text-field keys the open trigger menu may claim, keyed by KeyboardEvent.key
+ * and resolved to the pipeline's arbitration vocabulary. Tab resolves to
+ * `tabBack` when Shift rides along; keys absent from the map (Space, plain
+ * characters) are the field's own and never reach arbitration.
+ */
+const ARBITRATE_KEYS: Record<string, ArbitrateKey> = {
+  ArrowUp: 'up',
+  ArrowDown: 'down',
+  Enter: 'enter',
+  Escape: 'escape',
+  Tab: 'tab',
+}
+
 /** The free-text answer field shared by both question variants. */
 interface AnswerFieldProps {
   /** Visual variant: the custom row's inline column or the optionless question's framed block. */
@@ -79,8 +95,12 @@ interface AnswerFieldProps {
   disabled: boolean
   /** Whether this field takes focus on mount. */
   autoFocus?: boolean
+  /** Host hook for trigger-pipeline caret tracking and post-insert caret restore. */
+  textRef?: RefObject<HTMLTextAreaElement>
   /** Called when the field takes focus. */
   onFocus?: () => void
+  /** Called whenever the selection moves (caret motion re-tracks the trigger pipeline). */
+  onSelect?: () => void
   /** Called with each edit of the draft. */
   onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void
   /** Called with each key press, before the browser's own handling. */
@@ -108,6 +128,7 @@ function AnswerField(props: AnswerFieldProps) {
     <div className={clsx(css.field, props.variant === 'inline' ? css.customInline : css.customBlock)}>
       <div aria-hidden className={css.fieldMirror}>{`${props.value}\n`}</div>
       <textarea
+        ref={props.textRef}
         autoFocus={props.autoFocus}
         className={css.fieldInput}
         value={props.value}
@@ -115,6 +136,7 @@ function AnswerField(props: AnswerFieldProps) {
         rows={1}
         placeholder={props.placeholder}
         onFocus={props.onFocus}
+        onSelect={props.onSelect}
         onChange={props.onChange}
         onKeyDown={props.onKeyDown}
       />
@@ -148,15 +170,19 @@ export function QuestionComposer(props: QuestionComposerProps) {
         useStore={props.useStore}
         useQuestionCard={props.useQuestionCard}
         actions={props.actions}
+        renderSlot={props.renderSlot}
+        answerTriggers={props.answerTriggers}
       />
     )
     : <PlanReviewPanel key={question.key} pending={question} review={review} t={props.t} renderSlot={props.renderSlot} />
 }
 
 type QuestionFlowProps =
-  { pending: PendingQuestion } & Pick<QuestionComposerProps, 't' | 'useStore' | 'useQuestionCard' | 'actions'>
+  { pending: PendingQuestion }
+  & Pick<QuestionComposerProps,
+    't' | 'useStore' | 'useQuestionCard' | 'actions' | 'renderSlot' | 'answerTriggers'>
 
-function QuestionFlow({ pending, t, useStore, useQuestionCard, actions }: QuestionFlowProps) {
+function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSlot, answerTriggers }: QuestionFlowProps) {
   const questions = pending.questions
   // A read-only card built from a settled call's transcript: the same panel
   // over the recorded answers, with nothing left to submit.
@@ -235,6 +261,16 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions }: Questi
   // the input, so focus is granted once per question index.
   const focusedQuestions = useRef(new Set<number>())
   const answerSurface = useRef<HTMLDivElement>(null)
+  // Trigger-pipeline wiring for the answer field (the pipeline's `answer`
+  // surface): the field's textarea; its content revision (content edits bump
+  // it, caret motion does not, so pick-time spans stay CAS-valid); the last
+  // text tracked; a pending post-insert caret; and the insert target a menu
+  // pick dispatches from outside React, rebound after every render.
+  const textRef = useRef<HTMLTextAreaElement>(null)
+  const revRef = useRef(0)
+  const lastTrackedRef = useRef<string | null>(null)
+  const pendingCaretRef = useRef<number | null>(null)
+  const insertRef = useRef<AnswerSurfaceInsert>(() => false)
   // Every navigation write stays in bounds and drafts mirrors questions 1:1.
   // oxlint-disable-next-line typescript/no-non-null-assertion
   const question = questions[index]!
@@ -321,6 +357,74 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions }: Questi
     const nextDrafts = drafts.map((item, itemIndex) => itemIndex === index ? update(item) : item)
     replaceProgress(nextIndex, nextDrafts)
     setError(null)
+  }
+
+  // The answer surface's insert target: applies a picked plain text over the
+  // pick-time span, writes the draft through the same path a typed edit takes
+  // (a single-select draft yields its selection to the custom answer, as
+  // `draftCustom` does), and parks the caret behind the insert for the layout
+  // effect below to restore. `keep` (chained completion) has no answer-field
+  // meaning and is ignored.
+  useEffect(() => {
+    insertRef.current = (text, span) => {
+      if (span.draftRev !== revRef.current) return false
+      const el = textRef.current
+      if (el === null || el.disabled) return false
+      const current = el.value
+      if (span.start < 0 || span.start > span.end || span.end > current.length) return false
+      const next = current.slice(0, span.start) + text + current.slice(span.end)
+      if (next === current) return true
+      updateDraft(item => ({
+        ...item,
+        selected: question.multiSelect === true ? item.selected : [],
+        custom: next,
+        skipped: false,
+      }))
+      pendingCaretRef.current = span.start + text.length
+      return true
+    }
+  })
+
+  // Surface lease: while the field is mounted the pipeline runs on the answer
+  // surface, so tracks from the hidden InputBar draft are ignored; collapsing
+  // the takeover detaches, which also closes any open menu.
+  useEffect(() => {
+    if (minimized) return
+    return answerTriggers.attach((text, span, keep) => insertRef.current(text, span, keep))
+  }, [answerTriggers, minimized])
+
+  // One feed per commit: content edits bump the revision, caret-only motion
+  // keeps it, and a locked field tracks frozen — which closes any open menu.
+  // Text and caret read from the live element so a store write that just
+  // landed is tracked with the text the caret actually sits in.
+  useEffect(() => {
+    if (minimized) return
+    const el = textRef.current
+    const value = el === null ? draft.custom : el.value
+    if (lastTrackedRef.current !== value) {
+      revRef.current += 1
+      lastTrackedRef.current = value
+    }
+    const caret = el === null ? value.length : el.selectionStart
+    answerTriggers.track(value, caret, locked ? 'frozen' : 'plain', revRef.current)
+  })
+
+  // A pick writes the store; React then replaces the field value and the
+  // caret would collapse to the end — restore it behind the inserted text.
+  // Layout, so the track pass above reads the restored caret.
+  useLayoutEffect(() => {
+    const caret = pendingCaretRef.current
+    if (caret === null) return
+    pendingCaretRef.current = null
+    textRef.current?.setSelectionRange(caret, caret)
+  })
+
+  // Caret motion and focus re-track the live text without a revision bump.
+  const trackCaret = (): void => {
+    if (minimized) return
+    const el = textRef.current
+    if (el === null) return
+    answerTriggers.track(el.value, el.selectionStart, locked ? 'frozen' : 'plain', revRef.current)
   }
 
   const choose = (label: string): void => {
@@ -416,6 +520,22 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions }: Questi
     continueFlow()
   }
 
+  // Menu arbitration first: a key the open '/' menu claims (arrows, Escape,
+  // Tab, or Enter settling the highlight) never reaches the flow's Enter
+  // continuation — a highlighted pick inserts its text instead of advancing.
+  const answerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    const composing = isComposing(event)
+    const key = ARBITRATE_KEYS[event.key]
+    if (key !== undefined) {
+      const route = event.key === 'Tab' && event.shiftKey ? 'tabBack' : key
+      if (answerTriggers.arbitrate(route, composing) !== 'pass') {
+        event.preventDefault()
+        return
+      }
+    }
+    continueFromCustom(event)
+  }
+
   const skipQuestion = (): void => {
     engage()
     const nextDrafts = drafts.map((item, itemIndex) => itemIndex === index
@@ -430,7 +550,13 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions }: Questi
   }
 
   return (
-    <div className={css.frame} data-question-key={pending.key}>
+    <div className={css.frame} data-question-key={pending.key} data-composer-card="">
+      {/* Floating slash-menu anchor for the answer field: the card clips its
+          own scroll, so the overlay seats outside it, sized to the card's
+          width (mirrors the InputBar's overlay anchor inside its card). */}
+      {!minimized && (
+        <div className={css.triggerAnchor}>{renderSlot('conversation.composer.overlay', {})}</div>
+      )}
       <section
         className={clsx(css.card, minimized && css.cardMinimized)}
         aria-labelledby={`question-${pending.key}-${String(index)}`}
@@ -571,8 +697,11 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions }: Questi
                         value={draft.custom}
                         disabled={locked}
                         placeholder={t('custom.placeholder')}
+                        textRef={textRef}
+                        onFocus={trackCaret}
+                        onSelect={trackCaret}
                         onChange={draftCustom}
-                        onKeyDown={continueFromCustom}
+                        onKeyDown={answerKeyDown}
                       />
                     </div>
                   )
@@ -585,9 +714,11 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions }: Questi
                       value={draft.custom}
                       disabled={locked}
                       placeholder={t('custom.placeholder')}
-                      onFocus={() => { focusedQuestions.current.add(index) }}
+                      textRef={textRef}
+                      onFocus={() => { focusedQuestions.current.add(index); trackCaret() }}
+                      onSelect={trackCaret}
                       onChange={draftCustom}
-                      onKeyDown={continueFromCustom}
+                      onKeyDown={answerKeyDown}
                     />
                   ))}
               </div>

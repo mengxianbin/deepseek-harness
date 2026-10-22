@@ -7,7 +7,7 @@
 // chunks, the composer wait is real, and the answer click is the test's own
 // gesture (the ONE place a drive step legitimately reacts to model content:
 // the turn cannot complete without it, in record and replay alike).
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import type { Browser, Locator, Page } from 'playwright'
@@ -75,6 +75,31 @@ const PROMPT = 'Use the ask_user_question tool to ask me exactly one multi-selec
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Seed one workspace skill so the answer field's slash menu has a catalog
+ * entry to complete against. Workspace skills live under `.agents/skills`,
+ * which the scaffold's per-cwd skill discovery reads for the session.
+ * `disable-model-invocation` keeps it out of the model-side catalog, so the
+ * recorded skill-catalog reminder (and thus the replay-equality gate) stays
+ * byte-identical to the fixture — the menu lists user-only skills regardless.
+ * @param workspaceCwd - scaffold workspace root.
+ * @param name - skill name the menu must offer.
+ */
+async function seedCompletionSkill(workspaceCwd: string, name: string): Promise<void> {
+  const directory = join(workspaceCwd, 'workspace', '.agents', 'skills', name)
+  await mkdir(directory, { recursive: true })
+  await writeFile(join(directory, 'SKILL.md'), [
+    '---',
+    `name: ${name}`,
+    'description: Slash-completion fixture for the answer field',
+    'disable-model-invocation: true',
+    '---',
+    '',
+    `# ${name}`,
+    '',
+  ].join('\n'))
 }
 
 /** The batch the derived late reply submits, distinct from the in-time answer. */
@@ -295,6 +320,10 @@ describe('web e2e: resident question composer round trip', () => {
 
   beforeAll(async () => {
     scaffold = await launchWebScaffold(MODE === 'record' ? {} : { replayFixture: FIXTURE, paceMs: 15, compareReplaySession: true })
+    // The answer field's slash menu completes against the session's skill
+    // catalog, fetched at scope birth — seed the entry before the page opens.
+    // Replay only: record mode keeps the catalog the recording recorded.
+    if (MODE !== 'record') await seedCompletionSkill(scaffold.workspaceCwd, 'e2e-completion')
     scaffold.ctx.on('session/event', (_session, event: SessionEvent) => { sessionEvents.push(event) })
     browser = await chromium.launch()
     page = await newEnglishPage(browser)
@@ -412,6 +441,30 @@ describe('web e2e: resident question composer round trip', () => {
         .toBeGreaterThan(oneLineHeight * 2.5)
 
       expect(await capMetrics(custom)).toEqual({ textLines: CAP_LINES, scrolls: true })
+      await custom.fill('')
+    }
+
+    // The answer field runs the shared '/' trigger pipeline on the ask
+    // surface: a leading slash opens the skill menu above the card, the
+    // keyboard routes through it (Enter picks instead of advancing the flow),
+    // and the pick lands the literal `/name ` text in the field. Replay only
+    // — record mode must reach the recording write below.
+    if (MODE !== 'record') {
+      // Scoped to the card: the hidden InputBar's overlay keeps a second
+      // (display:none) view of the same menu store mounted, and an unscoped
+      // match would hit both.
+      const menu = composer.locator('[data-trigger-menu]')
+      await custom.click()
+      await custom.pressSequentially('/e2e')
+      await menu.waitFor({ timeout: 10_000 })
+      const skillRow = menu.getByRole('option').filter({ hasText: 'e2e-completion' })
+      await skillRow.waitFor({ timeout: 10_000 })
+      await custom.press('ArrowDown')
+      await custom.press('Enter')
+      // The highlighted pick inserts its text and is consumed: no submit,
+      // no advancing the question flow, caret behind the inserted name.
+      expect(await custom.inputValue()).toBe('/e2e-completion ')
+      await menu.waitFor({ state: 'hidden', timeout: 5_000 })
       await custom.fill('')
     }
 

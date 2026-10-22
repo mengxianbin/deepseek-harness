@@ -9,6 +9,13 @@
  * One entry, two presentations: the composer renders a request with a
  * `plan-review` intent as the plan decision card and every other request as
  * the generic question flow. Both use the same carrier and composer seat.
+ *
+ * The generic flow's free-text answer field joins the shared '/' trigger
+ * pipeline on the `answer` surface: this plugin binds each Session's
+ * controller into the injected `answerTriggers` face (track / keyboard
+ * arbitration / insert target) and declares the `conversation.composer.overlay`
+ * slot whose entries render the candidate menu (registered by
+ * ui-input-trigger) above the card.
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { InboxWireState } from '@deepseek-ai/dsh-agent/types'
@@ -22,10 +29,15 @@ import type { TypertClientEventListener } from '@deepseek-ai/dsh-typert-protocol
 import type { AskUserQuestionItem, PendingUserQuestion, UserQuestionProjectionView } from '@deepseek-ai/dsh-user-questions/types'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
+// Type-only: the slash-pipeline service face resolved as `inputTriggers`.
+import type { InputTriggerServiceContract } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import type { UserQuestionPanels, UserQuestionRecord } from '@deepseek-ai/dsh-client-ui-tool/client'
 import type { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { brandString } from '@deepseek-ai/dsh-brand'
-import { createWaterfallRequest, PendingQuestion, type QuestionRpcChannel } from './contract/slots.ts'
+import {
+  createWaterfallRequest, PendingQuestion,
+  type AnswerTriggerSurface, type QuestionRpcChannel,
+} from './contract/slots.ts'
 import { createQuestionDraftStore } from './draft-store.ts'
 import { QuestionComposer } from './QuestionComposer.tsx'
 import { questionReplyDefinition } from './question-reply.ts'
@@ -33,7 +45,7 @@ import { QuestionReplyView } from './QuestionReplyView.tsx'
 import { en, zh, type QuestionKey } from './locales.ts'
 
 export type {
-  PendingQuestion, PlanReview, QuestionAnswer, QuestionComposerProps, QuestionWait,
+  AnswerTriggerSurface, PendingQuestion, PlanReview, QuestionAnswer, QuestionComposerProps, QuestionWait,
 } from './contract/slots.ts'
 export type { QuestionKey } from './locales.ts'
 
@@ -52,8 +64,13 @@ type ClientQuestionRequest = Parameters<QuestionListener>[0]
 type ClientQuestionNext = Parameters<QuestionListener>[1]
 type ClientQuestionAnswer = Awaited<ReturnType<QuestionListener>>
 
-/** Required services: Agent scopes, Remote Events, Session UI, Slot registry, conversation nodes, and copy. */
-export const inject = ['sessions', 'remote', 'remote.userQuestions', 'uiSession', 'slots', 'locale', 'uiConversation']
+/**
+ * Required services: Agent scopes, Remote Events, Session UI, Slot registry,
+ * conversation nodes, copy, and the slash pipeline the answer field joins.
+ */
+export const inject = [
+  'sessions', 'remote', 'remote.userQuestions', 'uiSession', 'slots', 'locale', 'uiConversation', 'inputTriggers',
+]
 
 /** One card and the composer seat it moves in and out of. */
 interface QuestionCard {
@@ -368,6 +385,28 @@ function publishContinuedQuestions(ctx: ClientContext, cards: QuestionCards): ()
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-user-questions: dictionaries')
   const questionDraftStore = createQuestionDraftStore()
+  const inputTriggers = ctx.get('inputTriggers') as InputTriggerServiceContract
+  const sessions = ctx.sessions
+  /**
+   * Bind one Session's answer-surface face to its trigger controller. The
+   * composer entry injects once per Session binding — exactly when the
+   * takeover can render — and resolves eagerly there, mirroring the slot
+   * injects that resolve the same controller; without a resolvable Session
+   * (the no-session path, and direct spec fixtures) the face is inert.
+   * @param sessionId - Session the takeover renders for, or undefined.
+   * @returns the answer field's pipeline face.
+   */
+  const answerSurfaceFor = (sessionId: SessionId | undefined): AnswerTriggerSurface => {
+    const actx = sessionId === undefined ? undefined : sessions.scope(sessionId)
+    const controller = actx === undefined ? undefined : inputTriggers.sessionOf(actx)
+    return {
+      attach: insert => controller?.attachAnswer(insert) ?? (() => undefined),
+      track: (draft, caret, tier, draftRev) => {
+        controller?.track(draft, caret, { tier }, draftRev, 'answer')
+      },
+      arbitrate: (key, composing) => controller?.arbitrate(key, composing) ?? 'pass',
+    }
+  }
   const registerPendingInteraction = ctx.uiSession.registerPendingInteraction<PendingQuestion>(
     pending => pending.kind === 'plan-review' ? 2 : 1,
   )
@@ -386,8 +425,16 @@ export function apply(ctx: ClientContext): void {
         pendingInteraction instanceof PendingQuestion ? pendingInteraction : null,
       locale: NS,
       store: questionDraftStore,
-      inject: () => ({ keyedHooks: { questionCard: (key: string) => cards.source(key) } }),
-      children: { 'conversation.plan-review.actions': { kind: 'list', scope: 'session' } },
+      inject: (sessionId: SessionId | undefined) => ({
+        keyedHooks: { questionCard: (key: string) => cards.source(key) },
+        answerTriggers: answerSurfaceFor(sessionId),
+      }),
+      children: {
+        'conversation.plan-review.actions': { kind: 'list', scope: 'session' },
+        // The card clips its own scroll, so the answer field's slash menu
+        // renders through an anchor the flow seats outside the card.
+        'conversation.composer.overlay': { kind: 'list', scope: 'session' },
+      },
     },
     QuestionComposer,
   ))
