@@ -12,11 +12,14 @@
 - button "Stopped" [disabled]
 - paragraph: partial
 - text: Stopped
+- status:
+  - text: Task stoppedThis turn was stopped by you — the model did not finish a complete reply.
+  - code: USER_STOPPED
 - button "Copy"
 - button "Good response"
 - button "Bad response"
-- button "Branch into a new conversation"
-- text: {{clock}}
+- button "Branch into a new conversation" [disabled]
+- text: Available only on the last message of a completed turn {{clock}}
 - button "2 queued messages" [expanded]
 - list:
   - listitem:

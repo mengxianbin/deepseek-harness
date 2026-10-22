@@ -1,4 +1,4 @@
 - list "Background jobs":
   - listitem:
-    - button "Show live output of for _ in $(seq 1 3000); do [ -e .background-job-list.release ] && break; sleep 0.2; done": for _ in $(seq 1 3000); do [ -e .background-job-list.release ] && break; sleep 0.2; done bash {{duration}}
-    - button "Stop task for _ in $(seq 1 3000); do [ -e .background-job-list.release ] && break; sleep 0.2; done"
+    - 'button "Show live output of node -e \"const fs=require(''node:fs''); const deadline=Date.now()+600000; (function tick(){ if (fs.existsSync(''.background-job-list.release'')) return; if (Date.now()>deadline) return; setTimeout(tick, 200) })()\""': "node -e \"const fs=require('node:fs'); const deadline=Date.now()+600000; (function tick(){ if (fs.existsSync('.background-job-list.release')) return; if (Date.now()>deadline) return; setTimeout(tick, 200) })()\" bash {{duration}}"
+    - 'button "Stop task node -e \"const fs=require(''node:fs''); const deadline=Date.now()+600000; (function tick(){ if (fs.existsSync(''.background-job-list.release'')) return; if (Date.now()>deadline) return; setTimeout(tick, 200) })()\""'

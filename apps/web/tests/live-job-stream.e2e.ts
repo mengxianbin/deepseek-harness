@@ -38,7 +38,7 @@ const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overla
 // caps an orphan's lifetime if the runner dies before `afterAll` releases the
 // barrier.
 const RELEASE = '.live-job-stream.release'
-const COMMAND = `node -e "console.log('streamed-marker-line'); const fs=require('node:fs'); const deadline=Date.now()+600000; (function tick(){ if (fs.existsSync('${RELEASE}')) return; if (Date.now()>deadline) return; setTimeout(tick, 200) })()"`
+const COMMAND = `node -e "console.log('streamed-' + 'marker-line'); const fs=require('node:fs'); const deadline=Date.now()+600000; (function tick(){ if (fs.existsSync('${RELEASE}')) return; if (Date.now()>deadline) return; setTimeout(tick, 200) })()"`
 
 /**
  * Wait for opening a session to publish its live Agent.

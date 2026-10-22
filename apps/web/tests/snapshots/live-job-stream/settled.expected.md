@@ -3,7 +3,7 @@
     - button "Finished 1" [expanded]
     - button "Clear"
   - listitem:
-    - button "Hide live output of printf 'streamed-%s\\n' marker-line; for _ in $(seq 1 3000); do [ -e .live-job-stream.release ] && break; sleep 0.2; done" [expanded]: "bash printf 'streamed-%s\\n' marker-line; for _ in $(seq 1 3000); do [ -e .live-job-stream.release ] && break; sleep 0.2; done signal: SIGTERM; web e2e cancellation {{duration}}"
-    - text: $ printf 'streamed-%s\n' marker-line; for _ in $(seq 1 3000); do [ -e .live-job-stream.release ] && break; sleep 0.2; done
+    - 'button "Hide live output of node -e \"console.log(''streamed-'' + ''marker-line''); const fs=require(''node:fs''); const deadline=Date.now()+600000; (function tick(){ if (fs.existsSync(''.live-job-stream.release'')) return; if (Date.now()>deadline) return; setTimeout(tick, 200) })()\"" [expanded]': "bash node -e \"console.log('streamed-' + 'marker-line'); const fs=require('node:fs'); const deadline=Date.now()+600000; (function tick(){ if (fs.existsSync('.live-job-stream.release')) return; if (Date.now()>deadline) return; setTimeout(tick, 200) })()\" killed before exit; web e2e cancellation {{duration}}"
+    - text: "$ node -e \"console.log('streamed-' + 'marker-line'); const fs=require('node:fs'); const deadline=Date.now()+600000; (function tick(){ if (fs.existsSync('.live-job-stream.release')) return; if (Date.now()>deadline) return; setTimeout(tick, 200) })()\""
     - button "Copy"
     - text: streamed-marker-line

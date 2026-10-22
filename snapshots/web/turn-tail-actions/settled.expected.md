@@ -15,11 +15,14 @@
 - button "Ran commands"
 - paragraph: partial
 - text: Stopped
+- status:
+  - text: Task stoppedThis turn was stopped by you — the model did not finish a complete reply.
+  - code: USER_STOPPED
 - button "Copy"
 - button "Good response"
 - button "Bad response"
-- button "Branch into a new conversation"
-- text: {{clock}}
+- button "Branch into a new conversation" [disabled]
+- text: Available only on the last message of a completed turn {{clock}}
 - textbox "Message or run a task, / commands, @ files or sessions"
 - button "Add files or run commands"
 - 'button "Access mode, current: Workspace Write"': Workspace Write

@@ -30,7 +30,7 @@ const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overla
 // under bash — the `node -e` form prints the same fixed line first, then polls
 // the release file every 200ms until `afterAll` drops the barrier.
 const RELEASE = '.jobs-menu-layering.release'
-const COMMAND = `node -e "console.log('jobs-menu-output'); const fs=require('node:fs'); const deadline=Date.now()+600000; (function tick(){ if (fs.existsSync('${RELEASE}')) return; if (Date.now()>deadline) return; setTimeout(tick, 200) })()"`
+const COMMAND = `node -e "console.log('jobs-menu-' + 'output'); const fs=require('node:fs'); const deadline=Date.now()+600000; (function tick(){ if (fs.existsSync('${RELEASE}')) return; if (Date.now()>deadline) return; setTimeout(tick, 200) })()"`
 
 /** Measure actual overlap and hit testing; ARIA alone cannot expose clipping or stacking. */
 function placement(page: Page) {

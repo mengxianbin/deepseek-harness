@@ -861,7 +861,11 @@ describe('web e2e: workspace management (create / rename / grouping / hover affo
     // The row disappears on the archive-set echo; with no other visible
     // stray, the whole Ungrouped bucket withdraws.
     await expect.poll(() => sessionRow.count(), { timeout: 10_000 }).toBe(0)
-    await expect.poll(() => page.getByText('Ungrouped', { exact: true }).count(), { timeout: 10_000 }).toBe(0)
+    // FORK(replay-residual-1022): d70e823397 常驻空会话后，Ungrouped 桶不再因归档
+    // 最后一个具名会话而撤桶——桶内恒剩常驻空会话行。原「Ungrouped 计数→0」是
+    // 旧隐藏式空会话契约的断言，现改为钉住新契约：桶仍在场（1），归档语义由上方
+    // sessionRow→0 与下方 registry/持久化断言承载。
+    await expect.poll(() => page.getByText('Ungrouped', { exact: true }).count(), { timeout: 10_000 }).toBe(1)
     // Durable on the host: the registry-global set carries the id while the
     // session log itself stays in persistence untouched.
     expect([...scaffold.ctx.workspaceRegistry.archivedSessionIds]).toEqual([SessionId(SEED_ID)])
@@ -963,8 +967,12 @@ describe('web e2e: workspace management (create / rename / grouping / hover affo
     }, { timeout: 10_000 }).toBe(true)
     const lastChild = section.getByRole('treeitem', { name: 'project-one', exact: true })
     const targetBounds = (await lastChild.boundingBox())!
-    const sectionBounds = (await section.boundingBox())!
-    expect(targetBounds.y + targetBounds.height / 2).toBeGreaterThan(sectionBounds.y + sectionBounds.height / 2)
+    // FORK(replay-residual-1022): 原「lastChild 中心低于 section 中线」的布局 sanity
+    // 在常驻空会话行入树后失效（section 变高、中线下移越过 lastChild）。改为相对
+    // 兄弟行的排序 sanity：project-one 渲染在 project-two 之下（拖放目标位序不变）。
+    const firstChild = section.getByRole('treeitem', { name: 'project-two', exact: true })
+    const firstChildBounds = (await firstChild.boundingBox())!
+    expect(targetBounds.y + targetBounds.height / 2).toBeGreaterThan(firstChildBounds.y + firstChildBounds.height / 2)
     await dragSource.dragTo(lastChild)
     await expect.poll(() => {
       const ordered = scaffold.ctx.workspaceRegistry.list()
