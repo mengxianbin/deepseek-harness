@@ -5,3 +5,6 @@ export type ConnectionInteractions = 'answer' | 'none'
 
 /** Launch-token exchange route for API clients. */
 export const CONNECT_PATH = '/connect'
+
+/** Cookie-authenticated browser-session renewal route. */
+export const REFRESH_PATH = '/refresh'

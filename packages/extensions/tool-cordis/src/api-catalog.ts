@@ -811,6 +811,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'true only when the frontend may serve index.html.',
       },
       {
+        signature: 'authorizeRefresh(request: ConnectionIndexRequest, response: ConnectionIndexResponse): void',
+        description: 'Re-issue the browser session cookie for a still-valid session, resetting its absolute window; owns a 204, 405, or structured 401 response.',
+        parameters: [{ name: 'request', description: 'GET request on the refresh route carrying the session cookie.' }, { name: 'response', description: 'response owned to completion.' }],
+      },
+      {
         signature: 'authenticatedUrl(baseUrl: string): string',
         description: 'Add the fresh process token to an ordinary Web application URL.',
         parameters: [{ name: 'baseUrl', description: 'clean application URL whose authority and mount are preserved.' }],

@@ -268,7 +268,7 @@ describe('connection node half', () => {
     }
   })
 
-  it('injects validated browser recovery timing and withdraws it on disposal', async () => {
+  it('injects validated browser recovery timing and the derived refresh cadence, withdrawing both on disposal', async () => {
     const { ctx, dispose } = await mounted({ recovery: { generationReadyTimeoutMs: 25_000 } })
     try {
       const rows: IndexInjection[] = []
@@ -278,11 +278,41 @@ describe('connection node half', () => {
           backoffBaseMs: 500, backoffFactor: 2, backoffMaxMs: 10_000,
           generationReadyWarnMs: 3_000, generationReadyTimeoutMs: 25_000,
         },
+      }, {
+        kind: 'global', name: '__DSH_COOKIE_REFRESH__', value: { intervalMs: 12 * 3_600_000 },
       }])
       await dispose()
       const after: IndexInjection[] = []
       ctx.emit('webserver/index-inject', after)
       expect(after).toEqual([])
+    } finally {
+      await dispose()
+    }
+  })
+
+  it.each([
+    { config: { cookieMaxAgeDays: 1 }, intervalMs: 4 * 3_600_000 },
+    { config: { cookieMaxAgeDays: 7 }, intervalMs: 12 * 3_600_000 },
+    { config: { cookieMaxAgeDays: 90 }, intervalMs: 12 * 3_600_000 },
+    { config: { cookieRefreshIntervalMs: 15 * 60_000 }, intervalMs: 15 * 60_000 },
+  ])('derives or honors the injected refresh cadence for $config', async ({ config, intervalMs }) => {
+    const { ctx, dispose } = await mounted(config)
+    try {
+      const rows: IndexInjection[] = []
+      ctx.emit('webserver/index-inject', rows)
+      expect(rows.find(row => row.kind === 'global' && row.name === '__DSH_COOKIE_REFRESH__'))
+        .toEqual({ kind: 'global', name: '__DSH_COOKIE_REFRESH__', value: { intervalMs } })
+    } finally {
+      await dispose()
+    }
+  })
+
+  it('omits the refresh injection when the cadence is explicitly disabled', async () => {
+    const { ctx, dispose } = await mounted({ cookieRefreshIntervalMs: 0 })
+    try {
+      const rows: IndexInjection[] = []
+      ctx.emit('webserver/index-inject', rows)
+      expect(rows.some(row => row.kind === 'global' && row.name === '__DSH_COOKIE_REFRESH__')).toBe(false)
     } finally {
       await dispose()
     }
@@ -342,10 +372,12 @@ describe('connection node half', () => {
     expect(upgrades).toHaveLength(0)
   })
 
-  it('registers the API and connect HTTP routes and removes them with the fiber', async () => {
+  it('registers the API, connect, and refresh HTTP routes and removes them with the fiber', async () => {
     const { routes, upgrades, dispose } = await mounted()
-    expect(routes).toHaveLength(2)
+    expect(routes).toHaveLength(3)
     expect(routes[0]).toMatchObject({ kind: 'prefix', path: API_PATH })
+    expect(routes.map(route => [route.kind, route.path])).toContainEqual(['exact', '/connect'])
+    expect(routes.map(route => [route.kind, route.path])).toContainEqual(['exact', '/refresh'])
     expect(upgrades).toHaveLength(0)
     await dispose()
     expect(routes).toHaveLength(0)
@@ -440,7 +472,7 @@ describe('connection node half', () => {
     ctx.provide('webServer', fakeHttpServer(routes, []) as WebServer)
     const fiber = ctx.plugin({ inject: [...inject], apply })
     await fiber.await()
-    expect(routes).toHaveLength(2)
+    expect(routes).toHaveLength(3)
     expect(routes[0]).toMatchObject({ kind: 'prefix', path: API_PATH })
 
     const connection = ctx.get('connection') as HostConnectionHandle
@@ -477,7 +509,7 @@ describe('connection node half', () => {
     expect(() => connection.rpc.handle('/rpc', async () => ({ ok: true, value: null })))
       .toThrow(/duplicate route/)
     await remove()
-    expect(routes.map(candidate => candidate.path)).toEqual([API_PATH, '/connect'])
+    expect(routes.map(candidate => candidate.path)).toEqual([API_PATH, '/connect', '/refresh'])
     await fiber.dispose()
     expect(routes).toHaveLength(0)
   })
@@ -880,6 +912,38 @@ describe('operator-scoped connect', () => {
         expect(restarted.connection.admit(fakeRequest({ host: 'localhost', cookie: api.cookie }))).toEqual({ rejection: 401 })
       } finally { await restarted.dispose() }
     } finally { await host.dispose() }
+  })
+})
+
+describe('browser session refresh route', () => {
+  it('re-issues browser cookies over the mounted /refresh route and fences it like /connect', async () => {
+    const host = await mounted()
+    vi.useFakeTimers()
+    try {
+      const route = host.routes.find(candidate => candidate.path === '/refresh')!
+      expect(route.kind).toBe('exact')
+      const cookie = browserCookie(host.connection, 'localhost')
+      vi.advanceTimersByTime(1_000)
+      const renewed = fakeResponse()
+      await route.handler(fakeRequest({ host: 'localhost', cookie }, '/refresh'), renewed.response)
+      expect(renewed.state.status).toBe(204)
+      const setCookie = renewed.state.headers?.['set-cookie']
+      if (setCookie === undefined) throw new Error('refresh did not set a cookie')
+      const next = setCookie.split(';', 1)[0]!
+      expect(next).not.toBe(cookie)
+      expect(host.connection.admit(fakeRequest({ host: 'localhost', cookie: next })))
+        .toEqual({ peer: host.connection.browserPeer })
+
+      const foreign = fakeResponse()
+      await route.handler(fakeRequest({ host: 'evil.example', cookie }, '/refresh'), foreign.response)
+      expect(foreign.state.status).toBe(403)
+      expect(foreign.state.headers?.['set-cookie']).toBeUndefined()
+
+      await host.dispose()
+      const disposedResponse = fakeResponse()
+      await route.handler(fakeRequest({ host: 'localhost', cookie }, '/refresh'), disposedResponse.response)
+      expect(disposedResponse.state).toMatchObject({ status: 401, body: 'unauthorized' })
+    } finally { vi.useRealTimers(); await host.dispose() }
   })
 })
 

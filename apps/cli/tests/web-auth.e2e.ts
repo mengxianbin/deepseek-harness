@@ -189,6 +189,19 @@ describe('dsh web authentication through the real CLI', () => {
         result: { ok: true, value: { namespaces: expect.any(Array) as unknown } },
       })
 
+      const refreshed = await fetch(new URL('/refresh', firstUrl.origin), { headers: { cookie } })
+      expect(refreshed.status).toBe(204)
+      const renewedSetCookie = refreshed.headers.get('set-cookie')
+      if (renewedSetCookie === null) throw new Error('real CLI cookie refresh omitted Set-Cookie')
+      const renewed = renewedSetCookie.split(';', 1)[0]!
+      expect(renewed).not.toBe(cookie)
+      expect((await describeSettings(port, firstUrl.host, renewed)).status).toBe(200)
+      expect((await describeSettings(port, firstUrl.host, cookie)).status).toBe(200)
+      const refused = await fetch(new URL('/refresh', firstUrl.origin))
+      expect(refused.status).toBe(401)
+      expect(refused.headers.get('content-type')).toBe('application/json; charset=utf-8')
+      expect(await refused.text()).toBe('{"code":"dsh/auth-expired"}\n')
+
       await stopWeb(first)
       first = undefined
       second = await startWeb(root, dshHome, port)

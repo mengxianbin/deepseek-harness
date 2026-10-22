@@ -2,7 +2,7 @@
 
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { PeerId } from '@deepseek-ai/dsh-typert-protocol'
-import { CONNECT_PATH, type ConnectionInteractions } from './connect-protocol.ts'
+import { CONNECT_PATH, REFRESH_PATH, type ConnectionInteractions } from './connect-protocol.ts'
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
 import type { CredentialProvider, CredentialRecord } from '@deepseek-ai/dsh-credentials'
 import type {
@@ -16,6 +16,8 @@ const DAY_MILLISECONDS = 24 * 60 * 60 * 1000
 const SECRET_BYTES = 32
 const TOKEN_QUERY = 'token'
 const COOKIE_PREFIX = 'dsh-auth-'
+/** Refusal code carried by the structured 401 body when the session cookie no longer authenticates. */
+const AUTH_EXPIRED_CODE = 'dsh/auth-expired'
 const COOKIE_PAYLOAD_VERSION = 1
 const STORED_SECRET_VERSION = 1
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]*$/
@@ -348,6 +350,53 @@ export class BrowserAuth {
   }
 
   /**
+   * Re-issue the browser cookie for a still-valid session, resetting its
+   * absolute window. Only the page cookie (v1) refreshes; API operator
+   * cookies (v2) are Peer-scoped credentials exchanged through /connect.
+   * The renewed cookie keeps the same name and attributes and overlaps the
+   * previous value until that value's own expiry, so concurrent holders of
+   * the old cookie keep authenticating.
+   * @param req - GET request on the refresh route carrying the session cookie.
+   * @param res - response owned to completion: 204 with a re-signed cookie,
+   * 405 for another method, or 401 with an auth-expired JSON body.
+   * @param secure - whether the listener receiving this request serves TLS;
+   * the re-issued cookie mirrors the minted cookie's `Secure` attribute.
+   */
+  refreshCookie(req: ConnectionIndexRequest, res: ConnectionIndexResponse, secure = false): void {
+    /* v8 ignore next -- node:http always supplies url on server requests. */
+    const url = new URL(req.url ?? '/', 'http://dsh.invalid')
+    if (req.method !== 'GET' || url.pathname !== REFRESH_PATH) {
+      res.writeHead(405, {
+        'cache-control': 'no-store',
+        'content-type': 'text/plain; charset=utf-8',
+        'allow': 'GET',
+      })
+      res.end('refresh accepts GET on the refresh route\n')
+      return
+    }
+    const payload = this.authenticate(req, secure)
+    if (payload?.version !== COOKIE_PAYLOAD_VERSION) {
+      this.writeAuthExpired(res)
+      return
+    }
+    const issuedAt = Date.now()
+    const expiresAt = issuedAt + this.maxAgeMilliseconds
+    const value = encodeCookie({
+      version: COOKIE_PAYLOAD_VERSION,
+      authority: payload.authority,
+      issuedAt,
+      expiresAt,
+    }, this.secret)
+    res.writeHead(204, {
+      'cache-control': 'no-store',
+      'set-cookie': sessionCookie(
+        cookieName(payload.authority), value, expiresAt, Math.floor(this.maxAgeMilliseconds / 1000), secure,
+      ),
+    })
+    res.end()
+  }
+
+  /**
    * Verify the authority-bound browser cookie on a Host request.
    * @param request - request headers carrying Host and Cookie.
    * @param secure - whether the receiving listener uses TLS, including its default port.
@@ -390,5 +439,14 @@ export class BrowserAuth {
     res.end(req.method === 'HEAD'
       ? undefined
       : 'dsh web authentication required; reopen the URL printed by dsh web.\n')
+  }
+
+  /** Structured refusal for heartbeat-style callers that distinguish expiry from other failures. */
+  private writeAuthExpired(res: ConnectionIndexResponse): void {
+    res.writeHead(401, {
+      'cache-control': 'no-store',
+      'content-type': 'application/json; charset=utf-8',
+    })
+    res.end(`${JSON.stringify({ code: AUTH_EXPIRED_CODE })}\n`)
   }
 }

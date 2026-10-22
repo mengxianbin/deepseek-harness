@@ -33,6 +33,43 @@ export interface AcpConfig {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-acp -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-agent -->
+<a id="deepseek-aidsh-agent"></a>
+
+## `@deepseek-ai/dsh-agent`
+
+- `source`: [`packages/core/agent/src/index.ts:218`](../packages/core/agent/src/index.ts)
+
+```ts config-catalog
+/**
+ * Agent registry configuration (2026-10-20 fork patch, S1 session-create
+ * latency). Deliberately hand-validated instead of a `static Config` schema:
+ * the single boolean does not justify a `@deepseek-ai/schemastery` dependency
+ * edge in this core package, and Cordis passes raw plugin config through when
+ * no schema is declared.
+ */
+export interface Config {
+  /**
+   * Park the `agent/created` serial dispatch off the creation path (startup
+   * barrier). With the flag on, {@link AgentRegistry.announce} starts the
+   * serial listener dispatch, registers its settlement as the agent's
+   * per-agent startup barrier ({@link AgentRegistry.startupBarrier}), and
+   * returns without awaiting it — so a slow SessionStart-class listener (a
+   * hook bridge running `hooks.json` commands) no longer blocks
+   * `session.create`. The agent's first turn awaits the barrier (bounded by
+   * the driver's `startupBarrierTimeoutMs`) before prompt assembly, keeping
+   * late SessionStart context injection ahead of the first LLM request. A
+   * listener failure after publication can no longer fail the already-returned
+   * create; it is logged as a warning and the barrier resolves.
+   *
+   * Default off: `announce` awaits the dispatch exactly as before, and the
+   * barrier is already settled when creation returns.
+   */
+  startupBarrier?: boolean
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-agent -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-agent-default-model -->
 <a id="deepseek-aidsh-agent-default-model"></a>
 
@@ -92,7 +129,7 @@ export interface Config {
 
 - `inject`: `agents` · `sessions` · `llm` · `tools` · `systemPrompt` · `sessionProjections`
 - `refs`: [`AgentOptions`](subsystems/core.md) · [`SessionId`](subsystems/core.md) · `Volatile` (`@deepseek-ai/cosmokit`)
-- `source`: [`packages/core/agent-loop/src/index.ts:303`](../packages/core/agent-loop/src/index.ts)
+- `source`: [`packages/core/agent-loop/src/index.ts:304`](../packages/core/agent-loop/src/index.ts)
 
 ```ts config-catalog
 /** Agent-loop plugin configuration. */
@@ -102,6 +139,16 @@ export interface Config {
    * omission defaults to {@link DEFAULT_MAX_PARALLEL_TOOL_CALLS}.
    */
   maxParallelToolCalls: Volatile<number>
+  /**
+   * Upper bound (ms) the first turn waits for the agent's parked creation
+   * dispatch (registry `startupBarrier` mode) before prompt assembly. Same
+   * semantic as the `timeout` field of a `hooks.json` command hook: on expiry
+   * the turn proceeds with a warn, so a hung SessionStart hook cannot block
+   * the first turn forever — at the cost that a listener still in flight may
+   * miss this request. Ignored when the registry's startup-barrier mode is
+   * off: the barrier is already settled when creation returns.
+   */
+  startupBarrierTimeoutMs: number
   /** Agents created or resumed at plugin startup. */
   agents: (AgentOptions & {
     /** Stable config label used in logs and as the fresh combined-id prefix. */
@@ -435,7 +482,7 @@ export type Config = LocalConfig
 ## `@deepseek-ai/dsh-client-connection`
 
 - `inject`: `credentials`
-- `source`: [`packages/client/connection/src/index.ts:96`](../packages/client/connection/src/index.ts)
+- `source`: [`packages/client/connection/src/index.ts:112`](../packages/client/connection/src/index.ts)
 
 ```ts config-catalog
 /** Browser authentication, request limits, and connection recovery configuration. */
@@ -451,6 +498,12 @@ export interface ConnectionConfig {
   trustedHosts?: string[]
   /** Absolute browser and API cookie lifetime in days. Default: 30. */
   cookieMaxAgeDays?: number
+  /**
+   * Page heartbeat interval in ms that re-issues the browser cookie before
+   * its absolute window ends. Default: one sixth of the cookie window,
+   * clamped to 1–12 hours. Explicit 0 disables the heartbeat and its injection.
+   */
+  cookieRefreshIntervalMs?: number
   /** Maximum buffered JSON body for every `/api` request. Default: 300 MiB. */
   maxRequestBodyBytes?: number
 }
@@ -2548,7 +2601,7 @@ export type LaunchConfig = {
 
 - `inject`: `subprocess`
 - `refs`: `Volatile` (`@deepseek-ai/cordis`)
-- `source`: [`packages/shell/pwsh-local/src/index.ts:58`](../packages/shell/pwsh-local/src/index.ts)
+- `source`: [`packages/shell/pwsh-local/src/index.ts:78`](../packages/shell/pwsh-local/src/index.ts)
 
 ```ts config-catalog
 /** Validated plugin configuration with live command budgets. */
@@ -2572,6 +2625,16 @@ export interface Config {
    * PowerShell 5.1), falling back to a bare `pwsh` resolved through PATH.
    */
   pwshPath: Volatile<string | undefined>
+  /**
+   * Whether resolution may fall back to Windows PowerShell 5.1 when no
+   * PowerShell 7 install is reachable. Defaults to `true` (historical
+   * behavior); deployments that must never run 5.1 set it to `false` — the
+   * 5.1 candidate is then skipped, so a host without PowerShell 7 falls
+   * through to the bare `pwsh` PATH fallback and fails loudly at spawn
+   * instead of silently running 5.1. Ignored while an explicit `pwshPath`
+   * short-circuits resolution.
+   */
+  allowLegacyPowerShell: Volatile<boolean>
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-pwsh-local -->
@@ -4591,7 +4654,6 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 | `package` | `inject` | `source` |
 | --- | --- | --- |
 | `@deepseek-ai/dsh-acp-app` | `cmdlineArgs` | [`packages/bundle/acp-app/src/index.ts`](../packages/bundle/acp-app/src/index.ts) |
-| `@deepseek-ai/dsh-agent` | — | [`packages/core/agent/src/index.ts`](../packages/core/agent/src/index.ts) |
 | `@deepseek-ai/dsh-api-account-controller` | `deepseekAccount` · `agents` | [`packages/api/account-controller/src/index.ts`](../packages/api/account-controller/src/index.ts) |
 | `@deepseek-ai/dsh-api-remote-access` | — | [`packages/api/remote-access/src/index.ts`](../packages/api/remote-access/src/index.ts) |
 | `@deepseek-ai/dsh-api-remotes` | `typertGateway` | [`packages/api/remotes/src/index.ts`](../packages/api/remotes/src/index.ts) |

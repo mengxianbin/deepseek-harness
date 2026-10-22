@@ -368,3 +368,130 @@ describe('BrowserAuth', () => {
       .rejects.toThrow(/safe timestamp range/u)
   })
 })
+
+describe('BrowserAuth cookie refresh', () => {
+  function refresh(auth: BrowserAuth, cookie: string, authority = '127.0.0.1:3080', init?: {
+    method?: string
+    url?: string
+    secure?: boolean
+  }): ResponseState {
+    const res = response()
+    auth.refreshCookie(
+      request(init?.url ?? '/refresh', authority, { cookie, method: init?.method ?? 'GET' }),
+      res.value,
+      init?.secure ?? false,
+    )
+    return res.state
+  }
+
+  function renewedCookie(state: ResponseState): string {
+    const setCookie = state.headers?.['set-cookie']
+    if (setCookie === undefined) throw new Error('cookie refresh did not set a cookie')
+    return setCookie.split(';', 1)[0]!
+  }
+
+  it('re-issues the browser cookie with a reset window and overlaps the previous value', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-24T00:00:00.000Z'))
+    const auth = await createAuth(new RecordCredentials())
+    const first = exchange(auth)
+    vi.advanceTimersByTime(10 * 86_400_000)
+
+    const state = refresh(auth, first.cookie)
+
+    expect(state.status).toBe(204)
+    expect(state.headers?.['cache-control']).toBe('no-store')
+    expect(state.headers?.['set-cookie'])
+      .toMatch(/; Max-Age=2592000; Path=\/; Expires=.*; HttpOnly; SameSite=Strict$/u)
+    const renewed = renewedCookie(state)
+    expect(renewed.split('=', 1)[0]).toBe(first.cookie.split('=', 1)[0])
+    expect(renewed).not.toBe(first.cookie)
+    const payload: unknown = JSON.parse(Buffer.from(renewed.split('=')[1]!.split('.')[1]!, 'base64url').toString('utf8'))
+    expect(payload).toEqual({
+      version: 1,
+      authority: '127.0.0.1:3080',
+      issuedAt: Date.now(),
+      expiresAt: Date.now() + 30 * 86_400_000,
+    })
+
+    const requestWith = (cookie: string): ConnectionIndexRequest => request('/', '127.0.0.1:3080', { cookie })
+    expect(auth.isAuthenticated(requestWith(first.cookie))).toBe(true)
+    expect(auth.isAuthenticated(requestWith(renewed))).toBe(true)
+    vi.setSystemTime(new Date('2026-10-01T00:00:00.000Z'))
+    expect(auth.isAuthenticated(requestWith(first.cookie))).toBe(false)
+    expect(auth.isAuthenticated(requestWith(renewed))).toBe(true)
+  })
+
+  it('answers an expired, absent, or tampered session with the structured auth-expired 401', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-24T00:00:00.000Z'))
+    const store = new RecordCredentials()
+    const auth = await createAuth(store)
+    const { cookie } = exchange(auth)
+    const [name, value] = cookie.split('=') as [string, string]
+
+    const beforeWindow = refresh(auth, cookie)
+    vi.setSystemTime(new Date('2026-09-24T00:00:00.000Z'))
+    for (const candidate of [
+      refresh(auth, cookie),
+      refresh(auth, `${name}=broken`),
+      refresh(auth, `${name}=${value.slice(0, -1)}x`),
+      refresh(auth, signedCookie(store, name, { version: 1, authority: '127.0.0.1:3080', issuedAt: 0, expiresAt: 1 })),
+      refresh(auth, ''),
+    ]) {
+      expect(candidate).toEqual({
+        status: 401,
+        headers: { 'cache-control': 'no-store', 'content-type': 'application/json; charset=utf-8' },
+        body: '{"code":"dsh/auth-expired"}\n',
+      })
+    }
+    expect(beforeWindow.headers?.['set-cookie']).toBeDefined()
+  })
+
+  it('refuses API operator cookies and non-GET or off-route refreshes', async () => {
+    const auth = await createAuth(new RecordCredentials())
+    const authority = '127.0.0.1:3080'
+    const connect = response()
+    auth.authorizeConnect(
+      request(auth.authenticatedUrl(`http://${authority}/connect`)),
+      connect.value,
+      false,
+      () => 'api-operator' as PeerId,
+    )
+    const apiCookie = connect.state.headers?.['set-cookie']?.split(';', 1)[0]
+    if (apiCookie === undefined) throw new Error('API connect did not set a cookie')
+
+    expect(refresh(auth, apiCookie)).toEqual({
+      status: 401,
+      headers: { 'cache-control': 'no-store', 'content-type': 'application/json; charset=utf-8' },
+      body: '{"code":"dsh/auth-expired"}\n',
+    })
+    for (const init of [
+      { method: 'POST' },
+      { method: 'HEAD' },
+      { url: '/other' },
+      { url: '/refresh/nested' },
+    ]) {
+      expect(refresh(auth, exchange(auth).cookie, authority, init)).toEqual({
+        status: 405,
+        headers: { 'cache-control': 'no-store', 'content-type': 'text/plain; charset=utf-8', 'allow': 'GET' },
+        body: 'refresh accepts GET on the refresh route\n',
+      })
+    }
+  })
+
+  it('mirrors the listener TLS decision on the re-issued cookie', async () => {
+    const auth = await createAuth(new RecordCredentials())
+    const authority = 'harness.example'
+    const tls = exchange(auth, authority, true)
+
+    const state = refresh(auth, tls.cookie, authority, { secure: true })
+    const renewed = renewedCookie(state)
+    expect(state.headers?.['set-cookie']).toContain('; Secure')
+    expect(auth.isAuthenticated(request('/', authority, { cookie: renewed }), true)).toBe(true)
+    expect(auth.isAuthenticated(request('/', authority, { cookie: renewed }))).toBe(false)
+    expect(refresh(auth, renewed, authority)).toMatchObject({ status: 401 })
+    const plain = exchange(auth, authority)
+    expect(refresh(auth, plain.cookie, authority, { secure: true })).toMatchObject({ status: 401 })
+  })
+})
