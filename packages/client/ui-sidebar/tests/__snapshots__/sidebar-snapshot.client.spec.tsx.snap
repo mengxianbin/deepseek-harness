@@ -118,44 +118,7 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
           >
             <span
               class="glanceRows"
-            >
-              <span
-                class="glanceRow"
-                title="Plan cycle usage: used / total (%)"
-              >
-                <span
-                  class="glanceTrack"
-                >
-                  <span
-                    class="glanceFill"
-                    style="width: 0%;"
-                  />
-                </span>
-                <span
-                  class="glanceValue"
-                >
-                  — / 100
-                </span>
-              </span>
-              <span
-                class="glanceRow"
-                title="Plan cycle days: elapsed / total"
-              >
-                <span
-                  class="glanceTrack"
-                >
-                  <span
-                    class="glanceFill"
-                    style="width: 0%;"
-                  />
-                </span>
-                <span
-                  class="glanceValue"
-                >
-                  — / —
-                </span>
-              </span>
-            </span>
+            />
             <span
               class="glanceStats"
               title="Tokens today · Tokens this plan cycle"
@@ -413,44 +376,7 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
           >
             <span
               class="glanceRows"
-            >
-              <span
-                class="glanceRow"
-                title="Plan cycle usage: used / total (%)"
-              >
-                <span
-                  class="glanceTrack"
-                >
-                  <span
-                    class="glanceFill"
-                    style="width: 0%;"
-                  />
-                </span>
-                <span
-                  class="glanceValue"
-                >
-                  — / 100
-                </span>
-              </span>
-              <span
-                class="glanceRow"
-                title="Plan cycle days: elapsed / total"
-              >
-                <span
-                  class="glanceTrack"
-                >
-                  <span
-                    class="glanceFill"
-                    style="width: 0%;"
-                  />
-                </span>
-                <span
-                  class="glanceValue"
-                >
-                  — / —
-                </span>
-              </span>
-            </span>
+            />
             <span
               class="glanceStats"
               title="Tokens today · Tokens this plan cycle"
@@ -599,44 +525,7 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
           >
             <span
               class="glanceRows"
-            >
-              <span
-                class="glanceRow"
-                title="套餐周期用量：已用 / 总量（%）"
-              >
-                <span
-                  class="glanceTrack"
-                >
-                  <span
-                    class="glanceFill"
-                    style="width: 0%;"
-                  />
-                </span>
-                <span
-                  class="glanceValue"
-                >
-                  — / 100
-                </span>
-              </span>
-              <span
-                class="glanceRow"
-                title="套餐周期天数：已过 / 总计"
-              >
-                <span
-                  class="glanceTrack"
-                >
-                  <span
-                    class="glanceFill"
-                    style="width: 0%;"
-                  />
-                </span>
-                <span
-                  class="glanceValue"
-                >
-                  — / —
-                </span>
-              </span>
-            </span>
+            />
             <span
               class="glanceStats"
               title="今日 token 用量 · 套餐周期 token 用量"

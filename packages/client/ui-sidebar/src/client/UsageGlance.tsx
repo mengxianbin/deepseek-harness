@@ -334,7 +334,7 @@ function cycleTokenTotal(
   let tokens = 0
   let first: string | undefined
   for (const day of days) {
-    if (typeof day?.date !== 'string') continue
+    if (typeof day.date !== 'string') continue
     if (day.date < startKey || day.date > todayKey) continue
     if (day.totals !== undefined) tokens += bucketSum(day.totals)
     first ??= day.date
@@ -397,7 +397,7 @@ export function deriveGlance(overview: UsageOverviewView, now: number = Date.now
     const reported = planRow.plan?.windows ?? []
     for (const key of GLANCE_WINDOW_KEYS) {
       const found = reported.find(window => window.key === key && typeof window.percent === 'number')
-      if (found === undefined) continue
+      if (found === undefined || typeof found.percent !== 'number') continue
       const percent = Math.max(0, Math.min(100, Math.round(found.percent)))
       const time = windowTime(found, now)
       const row: GlanceWindowRow = { key, percent }

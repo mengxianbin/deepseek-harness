@@ -3,13 +3,36 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
-import { deriveGlance, formatCompactTokens, formatRefreshStamp, openUsageSection, UsageGlance, type UsageOverviewView } from '../src/client/UsageGlance.tsx'
+import { deriveGlance, formatCompactTokens, formatRefreshStamp, openUsageSection, UsageGlance, type GlanceWindowRow, type UsageOverviewView } from '../src/client/UsageGlance.tsx'
 import { en } from '../src/client/locales.ts'
 
 const t = makeTranslate({ ...commonEn, ...en })
 
-/** Fixed evaluation instant: 2026-10-15T10:30Z inside the monthly cycle. */
+/** Fixed evaluation instant: 2026-10-15T10:30Z inside every fixture window. */
 const NOW = Date.parse('2026-10-15T10:30:00Z')
+
+/**
+ * Elapsed shares at NOW, mirroring the span derivation (start = reset minus
+ * the window's length): month = 28d 4m12s of 30d, week = 3d10h30m of 7d
+ * (~49.1%), 5-hour = 3.5h of 5h (70%).
+ */
+const MONTH_FRACTION = (NOW - Date.parse('2026-09-17T10:25:48Z'))
+  / (Date.parse('2026-10-17T10:25:48Z') - Date.parse('2026-09-17T10:25:48Z'))
+const WEEK_FRACTION = (NOW - Date.parse('2026-10-12T00:00:00Z'))
+  / (Date.parse('2026-10-19T00:00:00Z') - Date.parse('2026-10-12T00:00:00Z'))
+const FIVE_HOUR_FRACTION = (NOW - Date.parse('2026-10-15T07:00:00Z'))
+  / (Date.parse('2026-10-15T12:00:00Z') - Date.parse('2026-10-15T07:00:00Z'))
+
+/** The on-screen rows at NOW: week's 50% runs ahead of its 49.1% clock. */
+const MONTH_ROW: GlanceWindowRow = {
+  key: 'month', percent: 85, elapsed: 28, total: 30, unit: 'd', timeFraction: MONTH_FRACTION,
+}
+const WEEK_ROW: GlanceWindowRow = {
+  key: 'week', percent: 50, elapsed: 3, total: 7, unit: 'd', timeFraction: WEEK_FRACTION, overPace: true,
+}
+const FIVE_HOUR_ROW: GlanceWindowRow = {
+  key: '5h', percent: 13, elapsed: 3, total: 5, unit: 'h', timeFraction: FIVE_HOUR_FRACTION,
+}
 
 /** The host overview shape the glance consumes (plan windows + today's ledger). */
 const OVERVIEW: UsageOverviewView = {
@@ -20,7 +43,8 @@ const OVERVIEW: UsageOverviewView = {
       plan: {
         windows: [
           { key: 'rolling', percent: 1, resetsAt: '2026-10-15T07:27:12Z' },
-          { key: 'weekly', percent: 31, resetsAt: '2026-10-19T00:00:00Z' },
+          { key: '5h', percent: 13, resetsAt: '2026-10-15T12:00:00Z' },
+          { key: 'week', percent: 50, resetsAt: '2026-10-19T00:00:00Z' },
           { key: 'month', percent: 85, resetsAt: '2026-10-17T10:25:48Z' },
         ],
       },
@@ -32,6 +56,13 @@ const OVERVIEW: UsageOverviewView = {
       totals: { inputTokens: 120_000_000, outputTokens: 40_000_000, cacheReadTokens: 40_000_000, cacheWriteTokens: 0 },
     },
   },
+}
+
+/** The merged read-out one row renders (`85% · 28/30d`). */
+function readout(row: GlanceWindowRow): string {
+  return row.elapsed === undefined || row.total === undefined || row.unit === undefined
+    ? `${String(row.percent)}%`
+    : `${String(row.percent)}% · ${String(row.elapsed)}/${String(row.total)}${row.unit}`
 }
 
 /** Flush pending microtasks and timers inside act(). */
@@ -55,11 +86,12 @@ afterEach(() => {
 })
 
 describe('deriveGlance', () => {
-  it('prefers the monthly cycle window and derives its day pair plus today total', () => {
-    // Monthly window: reset 2026-10-17T10:25:48Z → start 2026-09-17T10:25:48Z
-    // (30-day span), 28 elapsed days at NOW; today = the four buckets summed.
+  it('derives one row per on-screen window with pair, tick and pace flag', () => {
+    // Month/week/5h each render with their pair and tick; the rolling window
+    // is never on screen, and week's 50% at ~49.1% of the clock flags over-pace.
     expect(deriveGlance(OVERVIEW, NOW)).toEqual({
-      percent: 85, elapsedDays: 28, totalDays: 30, todayTokens: 200_000_000,
+      windows: [MONTH_ROW, WEEK_ROW, FIVE_HOUR_ROW],
+      todayTokens: 200_000_000,
     })
   })
 
@@ -71,9 +103,11 @@ describe('deriveGlance', () => {
         { provider: 'opencode-go', plan: { windows: [{ key: 'week', percent: 31, resetsAt: '2026-10-19T00:00:00Z' }] } },
       ],
     }
-    // Weekly window: reset 2026-10-19T00:00Z → start 2026-10-12T00:00Z, three
-    // elapsed days at NOW (3.44 days in).
-    expect(deriveGlance(overview, NOW)).toEqual({ percent: 31, elapsedDays: 3, totalDays: 7 })
+    // The window rows and the cycle token both read the FIRST provider row
+    // that reports a preferred window — here the second one, week only.
+    expect(deriveGlance(overview, NOW)).toEqual({
+      windows: [{ key: 'week', percent: 31, elapsed: 3, total: 7, unit: 'd', timeFraction: WEEK_FRACTION }],
+    })
   })
 
   it('returns no bar fields while no provider reports a cycle window', () => {
@@ -82,16 +116,29 @@ describe('deriveGlance', () => {
     expect(deriveGlance(OVERVIEW, NOW).todayTokens).toBe(200_000_000)
   })
 
-  it('drops the day pair when the reset instant is missing', () => {
+  it('drops the time facts when the reset instant is missing', () => {
     const overview: UsageOverviewView = { providers: [{ provider: 'p', plan: { windows: [{ key: 'month', percent: 42 }] } }] }
-    expect(deriveGlance(overview, NOW)).toEqual({ percent: 42 })
+    expect(deriveGlance(overview, NOW)).toEqual({ windows: [{ key: 'month', percent: 42 }] })
   })
 
-  it('drops the day pair for a sub-day rolling window', () => {
+  it('never renders rolling windows — no span, no row', () => {
     const overview: UsageOverviewView = {
       providers: [{ provider: 'p', plan: { windows: [{ key: 'rolling', percent: 7, resetsAt: '2026-10-15T07:27:12Z' }] } }],
     }
-    expect(deriveGlance(overview, NOW)).toEqual({ percent: 7 })
+    expect(deriveGlance(overview, NOW)).toEqual({})
+  })
+
+  it('renders the 5-hour window with an hours pair and withholds its cycle total', () => {
+    // The ledger is day-keyed: even with a series present, a sub-day window
+    // must not swallow a whole day — the cycle row reads nothing instead.
+    const overview: UsageOverviewView = {
+      providers: [{ provider: 'p', plan: { windows: [{ key: '5h', percent: 13, resetsAt: '2026-10-15T12:00:00Z' }] } }],
+      usage: {
+        days: [{ date: '2026-10-15', totals: { inputTokens: 1_000_000 } }],
+        availableDays: ['2026-10-15'],
+      },
+    }
+    expect(deriveGlance(overview, NOW)).toEqual({ windows: [FIVE_HOUR_ROW] })
   })
 
   it('sums the plan-cycle window, not the calendar month (start day inclusive)', () => {
@@ -114,7 +161,16 @@ describe('deriveGlance', () => {
     // The Sep 30 row proves the sum is cycle-driven: a calendar-month sum
     // would exclude it, a cycle sum starting Sep 17 must include it.
     expect(deriveGlance(overview, NOW)).toEqual({
-      percent: 31, elapsedDays: 28, totalDays: 30, cycleTokens: 15_000_000,
+      windows: [{
+        key: 'month',
+        percent: 31,
+        elapsed: 28,
+        total: 30,
+        unit: 'd',
+        timeFraction: (NOW - Date.parse('2026-09-17T10:29:32Z'))
+          / (Date.parse('2026-10-17T10:29:32Z') - Date.parse('2026-09-17T10:29:32Z')),
+      }],
+      cycleTokens: 15_000_000,
     })
   })
 
@@ -133,6 +189,7 @@ describe('deriveGlance', () => {
       },
     }
     expect(deriveGlance(overview, NOW_LATE)).toMatchObject({
+      windows: [{ key: 'month', percent: 90, elapsed: 30, total: 30, unit: 'd', timeFraction: 1 }],
       cycleTokens: 3_000_000,
       cycleTruncated: true,
     })
@@ -152,13 +209,14 @@ describe('deriveGlance', () => {
       },
     }
     expect(deriveGlance(overview, NOW)).toEqual({
-      percent: 50, elapsedDays: 3, totalDays: 7, cycleTokens: 10_000_000,
+      windows: [WEEK_ROW],
+      cycleTokens: 10_000_000,
     })
   })
 
   it('withholds the cycle total for rolling windows even when days arrive', () => {
     // Rolling windows have no day span, so a series must not leak into a
-    // cycle reading the bars never showed.
+    // cycle reading the rows never showed.
     const overview: UsageOverviewView = {
       providers: [{ provider: 'p', plan: { windows: [{ key: 'rolling', percent: 7, resetsAt: '2026-10-15T07:27:12Z' }] } }],
       usage: {
@@ -166,14 +224,7 @@ describe('deriveGlance', () => {
         availableDays: ['2026-10-15'],
       },
     }
-    expect(deriveGlance(overview, NOW)).toEqual({ percent: 7 })
-  })
-
-  it('omits the cycle total when the host serves no trend series', () => {
-    // A today-only overview (no days) degrades the cycle read-out alone.
-    expect(deriveGlance(OVERVIEW, NOW)).toEqual({
-      percent: 85, elapsedDays: 28, totalDays: 30, todayTokens: 200_000_000,
-    })
+    expect(deriveGlance(overview, NOW)).toEqual({})
   })
 })
 
@@ -206,27 +257,52 @@ describe('formatRefreshStamp', () => {
 })
 
 describe('UsageGlance', () => {
-  it('renders both bars with their numerator/denominator read-outs and today total', async () => {
+  it('renders one row per window (label, tick, merged read-out) over the token column', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => OVERVIEW })))
-    render(<UsageGlance t={t} />)
+    const { container } = render(<UsageGlance t={t} />)
     // The component derives against the wall clock; assert the read-outs match
     // the same derivation so the expectation cannot drift across a day boundary.
-    const { percent, elapsedDays, totalDays, todayTokens } = deriveGlance(OVERVIEW)
-    expect(percent).toBeDefined()
-    expect(await screen.findByText(`${String(percent)} / 100`)).toBeTruthy()
-    expect(screen.getByText(`${String(elapsedDays)} / ${String(totalDays)}`)).toBeTruthy()
+    const rows = deriveGlance(OVERVIEW).windows ?? []
+    expect(rows.map(row => row.key)).toEqual(['month', 'week', '5h'])
+    expect(await screen.findByText(readout(rows[0]!))).toBeTruthy()
+    expect(screen.getByText(readout(rows[1]!))).toBeTruthy()
+    expect(screen.getByText(readout(rows[2]!))).toBeTruthy()
+    // Short labels in display order, one tick per row, per-window tooltips.
+    // Class selectors match the scoped CSS-module names by substring.
+    const labels = [...container.querySelectorAll('[class*="glanceLabel"]')].map((el: Element) => el.textContent)
+    expect(labels).toEqual(['Mo', 'Wk', '5h'])
+    expect(container.querySelectorAll('[class*="glanceTick"]')).toHaveLength(3)
+    expect(screen.getByTitle(t('glance.window.month.title'))).toBeTruthy()
+    expect(screen.getByTitle(t('glance.window.week.title'))).toBeTruthy()
+    expect(screen.getByTitle(t('glance.window.5h.title'))).toBeTruthy()
     // The stats column stacks the 今日/周期 labeled rows over no stamp line —
     // the stamp rides the column tooltip with both readings.
-    expect(screen.getByText(formatCompactTokens(todayTokens!))).toBeTruthy()
+    expect(screen.getByText(formatCompactTokens(rows.length > 0 ? 200_000_000 : 0))).toBeTruthy()
     const column = screen.getByTitle(
       new RegExp(`^${t('glance.today')} · ${t('glance.cycle')} · ${t('glance.refreshed')} \\d{2}\\.\\d{2}\\.\\d{2} \\d{2}:\\d{2}$`),
     )
     expect(column.textContent).toContain('200M')
     expect(screen.getByText(t('glance.today.label'))).toBeTruthy()
     expect(screen.getByText(t('glance.cycle.label'))).toBeTruthy()
-    expect(screen.getByTitle(t('glance.usage'))).toBeTruthy()
-    expect(screen.getByTitle(t('glance.days'))).toBeTruthy()
     expect(screen.getByRole('button', { name: t('glance.open') })).toBeTruthy()
+  })
+
+  it('paints the overrun in warn with the split at the tick on an over-pace row', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => OVERVIEW })))
+    const { container } = render(<UsageGlance t={t} />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    const fills = [...container.querySelectorAll('[class*="glanceFill"]')]
+    expect(fills).toHaveLength(3)
+    // Week: 50% used at ~49.1% of the clock → warn class + split at the tick.
+    expect(fills[1]?.className).toContain('glanceFillOver')
+    expect(fills[1]?.getAttribute('style')).toContain('--glance-split: 49%')
+    // Month (85% at ~93%) and 5h (13% at 70%) are behind the clock: no split.
+    expect(fills[0]?.className).not.toContain('glanceFillOver')
+    expect(fills[2]?.className).not.toContain('glanceFillOver')
+    const ticks = [...container.querySelectorAll('[class*="glanceTick"]')]
+    expect(ticks[1]?.getAttribute('style')).toContain('left: 49%')
   })
 
   it('labels both stat rows with their compact totals', async () => {
@@ -247,9 +323,11 @@ describe('UsageGlance', () => {
     }
     vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => overview })))
     render(<UsageGlance t={t} />)
-    expect((await screen.findByText(t('glance.today.label'))).parentElement?.textContent)
+    // Anchor on the VALUES: the labels render before the first load lands, so
+    // waiting on them alone would race the fetch and read the placeholders.
+    expect((await screen.findByText('12M')).parentElement?.textContent)
       .toBe(`${t('glance.today.label')}12M`)
-    expect(screen.getByText(t('glance.cycle.label')).parentElement?.textContent)
+    expect(screen.getByText('15M').parentElement?.textContent)
       .toBe(`${t('glance.cycle.label')}15M`)
   })
 
@@ -260,19 +338,20 @@ describe('UsageGlance', () => {
     expect(view.container.textContent).toBe('')
   })
 
-  it('keeps the placeholder read-outs when the overview request fails', async () => {
+  it('keeps only the token placeholders when the overview request fails', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ status: 500, ok: false, json: async () => ({}) })))
-    render(<UsageGlance t={t} />)
-    expect(await screen.findByText('— / 100')).toBeTruthy()
-    expect(screen.getByText('— / —')).toBeTruthy()
+    const { container } = render(<UsageGlance t={t} />)
+    await flush()
+    // No window has been seen, so no rows render — only the column dashes.
+    expect(container.querySelectorAll('[class*="glanceRow"]:not([class*="glanceRows"])')).toHaveLength(0)
+    expect(screen.getAllByText('—')).toHaveLength(2)
   })
 
-  it('shows placeholder read-outs while the first overview is in flight', async () => {
+  it('shows no window rows while the first overview is in flight', async () => {
     let release: ((value: unknown) => void) | undefined
     vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { release = resolve })))
-    render(<UsageGlance t={t} />)
-    expect(screen.getByText('— / 100')).toBeTruthy()
-    expect(screen.getByText('— / —')).toBeTruthy()
+    const { container } = render(<UsageGlance t={t} />)
+    expect(container.querySelectorAll('[class*="glanceRow"]:not([class*="glanceRows"])')).toHaveLength(0)
     const pending = screen.getByTitle(`${t('glance.today')} · ${t('glance.cycle')}`)
     expect(pending.textContent).toContain('—')
     expect(pending.textContent).not.toMatch(/\d{2}:\d{2}/)
@@ -280,7 +359,7 @@ describe('UsageGlance', () => {
       release?.({ status: 200, ok: true, json: async () => OVERVIEW })
       await Promise.resolve()
     })
-    expect(await screen.findByText('85 / 100')).toBeTruthy()
+    expect(await screen.findByText(/^85% ·/)).toBeTruthy()
     const loaded = screen.getByTitle(
       new RegExp(`^${t('glance.today')} · ${t('glance.cycle')} · ${t('glance.refreshed')} \\d{2}\\.\\d{2}\\.\\d{2} \\d{2}:\\d{2}$`),
     )
