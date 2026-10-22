@@ -659,6 +659,9 @@
 .glanceButton {
   display: inline-flex;
   align-items: center;
+  /* FORK (usage glance v2.4.3): the button stretches with the sidebar so the
+     elastic chain (button → body → rows → track) can consume the whole width. */
+  flex: 1 1 auto;
   min-width: 0;
   max-width: 100%;
   /* FORK (usage glance v2.1): no left inset — the bars start flush with the
@@ -678,7 +681,12 @@
 .glanceBody {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  /* FORK (usage glance v2.4.3): the stats column stands clear of the readouts
+     — with figure-space padded columns the percent↔pair gutter is a constant
+     ~5px, and this gap must visibly read as the wider one (用户：天数列应与
+     百分比列更紧凑，而不是与今日列更紧凑). */
+  gap: 12px;
+  flex: 1 1 auto;
   min-width: 0;
   max-width: 100%;
 }
@@ -694,8 +702,10 @@
   /* FORK (usage glance v2.4.2, 2026-10-22): overflow safety — a squeezed row
      box clips its fixed-width columns instead of spilling them over the stats
      column (the text-overlap failure the two-column split exposed on narrow
-     sidebars). The track absorbs the whole shortage first (.glanceTrack). */
+     sidebars). v2.4.3: rows also grow (flex 1) so the tracks can fill a wide
+     sidebar — the track absorbs every spare px first (.glanceTrack). */
   overflow: hidden;
+  flex: 1 1 auto;
 }
 
 /* FORK (usage glance v2.4.2): inner gaps 6→4px — every px goes to the
@@ -722,10 +732,11 @@
 
 .glanceTrack {
   position: relative;
-  flex: 0 1 88px;
+  /* FORK (usage glance v2.4.3): the ONLY elastic element BOTH ways — it grows
+     to fill a wide sidebar (max dynamic length, 2026-10-22 用户反馈) and
+     shrinks down to a 24px sliver before any fixed column would clip. */
+  flex: 1 1 88px;
   width: 88px;
-  /* FORK (usage glance v2.4.2): the ONLY elastic element — it absorbs width
-     down to a 24px sliver before any fixed column would have to clip. */
   min-width: 24px;
   height: 6px;
   border-radius: var(--dsw-radius-sm);
@@ -784,12 +795,12 @@
   color: var(--dsw-alias-label-secondary);
 }
 
-/* FORK (usage glance v2.4.1): the time-pair column — the same right-aligned
-   rules, widening only to `31/31d` (42px); a row without a span renders an
-   em dash. */
+/* FORK (usage glance v2.4.1 → v2.4.3): the time-pair column — right-aligned,
+   width fitting the figure-space padded 6-char widest pair (`31/31d`, 36px);
+   a row without a span renders an em dash. */
 .glancePair {
   flex: none;
-  width: 42px;
+  width: 36px;
   font-size: 10px;
   line-height: 12px;
   letter-spacing: 0;

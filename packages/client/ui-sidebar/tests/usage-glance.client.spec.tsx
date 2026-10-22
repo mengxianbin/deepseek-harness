@@ -281,6 +281,13 @@ describe('UsageGlance', () => {
     const labels = [...container.querySelectorAll('[class*="glanceLabel"]')].map((el: Element) => el.textContent)
     expect(labels).toEqual(['Mo', 'Wk', '5h'])
     expect(container.querySelectorAll('[class*="glanceTick"]')).toHaveLength(3)
+    // Both readout columns are figure-space padded to a constant text width
+    // (keeps the percent↔pair↔stats gutters uniform across rows); the
+    // matches above still pass because the normalizer strips U+2007.
+    const pctTexts = [...container.querySelectorAll('[class*="glancePercent"]')].map(el => el.textContent)
+    expect(pctTexts).toEqual(rows.map(row => percentOf(row).padStart(4, ' ')))
+    const pairTexts = [...container.querySelectorAll('[class*="glancePair"]')].map(el => el.textContent)
+    expect(pairTexts).toEqual(rows.map(row => pairOf(row).padStart(6, ' ')))
     expect(screen.getByTitle(t('glance.window.month.title'))).toBeTruthy()
     expect(screen.getByTitle(t('glance.window.week.title'))).toBeTruthy()
     expect(screen.getByTitle(t('glance.window.5h.title'))).toBeTruthy()

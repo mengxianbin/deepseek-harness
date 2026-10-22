@@ -74,6 +74,14 @@ const DAY_MS = 86_400_000
 const HOUR_MS = 3_600_000
 
 /**
+ * Figure space (U+2007): a digit-wide pad CSS white-space processing does NOT
+ * collapse — it fills the right-aligned columns to a constant text width, so
+ * the gutters between percent / time-pair / stats stay uniform across rows
+ * (2026-10-22 用户反馈：天数列与百分比列应比与统计列更紧凑).
+ */
+const COLUMN_PAD = ' '
+
+/**
  * Window keys in cycle-preference order: the billing cycle first, then the
  * week, then whatever else the provider reports.
  */
@@ -570,8 +578,8 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
                       ? null
                       : <span className={css.glanceTick} style={{ left: `${String(tickPercent)}%` }} />}
                   </span>
-                  <span className={css.glancePercent}>{`${String(row.percent)}%`}</span>
-                  <span className={css.glancePair}>{pair}</span>
+                  <span className={css.glancePercent}>{`${String(row.percent)}%`.padStart(4, COLUMN_PAD)}</span>
+                  <span className={css.glancePair}>{pair.padStart(6, COLUMN_PAD)}</span>
                 </span>
               )
             })}
