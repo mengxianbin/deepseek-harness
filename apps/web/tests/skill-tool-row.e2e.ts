@@ -19,6 +19,9 @@ const UI_EXPECTED = fileURLToPath(new URL('../../../snapshots/web/skill-tool-row
 const MODE = webSnapshotMode()
 const SEED_ID = 'skill-tool-row-web-e2e'
 const PROMPT = 'Load the editing-cordis-compositions skill with the skill tool, then reply DONE.'
+// FORK(replay-residual-1022): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 修法).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 describe.skipIf(MODE === 'record')('web e2e: dedicated Skill tool row', () => {
   let scaffold: WebScaffold
@@ -29,7 +32,7 @@ describe.skipIf(MODE === 'record')('web e2e: dedicated Skill tool row', () => {
   beforeAll(async () => {
     const fixture = await readFile(await selectedSessionFixture(FIXTURE), 'utf8')
     expect(fixtureUserPrompts(fixture)).toEqual([PROMPT])
-    scaffold = await launchWebScaffold({})
+    scaffold = await launchWebScaffold({ extraOverlayPath: CATALOG_OVERLAY })
     await seedSession(scaffold, fixture, SEED_ID)
     browser = await chromium.launch()
     page = await newEnglishPage(browser)

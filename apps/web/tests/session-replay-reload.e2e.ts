@@ -11,11 +11,14 @@ import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './suppor
 
 const FIXTURE = fileURLToPath(new URL('../../../snapshots/web/fresh-round-trip/session.v3.jsonl', import.meta.url))
 const UI_EXPECTED = fileURLToPath(new URL('../../../snapshots/web/fresh-round-trip/ui-expanded.expected.md', import.meta.url))
+// FORK(replay-residual-1022): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 修法).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 describe.skipIf(webSnapshotMode() === 'record')('web session replay', () => {
   it.each([{ name: 'Chromium', engine: chromium }, { name: 'WebKit', engine: webkit }])(
     '$name restores an active stream, a completed turn, and a reopened session', async ({ engine }) => {
-      const scaffold = await launchWebScaffold({ replayFixture: FIXTURE, compareReplaySession: 'read-only' })
+      const scaffold = await launchWebScaffold({ replayFixture: FIXTURE, compareReplaySession: 'read-only', extraOverlayPath: CATALOG_OVERLAY })
       onTestFinished(() => scaffold.close())
       const release = Promise.withResolvers<undefined>()
       const reached = Promise.withResolvers<string>()
@@ -66,7 +69,9 @@ describe.skipIf(webSnapshotMode() === 'record')('web session replay', () => {
       await compareOrRefreshGolden(UI_EXPECTED,
         await captureExpandedTurnProcessAria(page, '[class*="centerCol"]', scaffold.workspaceCwd), 'replay')
 
-      await page.getByRole('button', { name: 'New session', exact: true }).last().click()
+      // FORK(replay-residual-1022): New session 按钮已随 dddb378b76 退役入页脚 ⋯ 菜单（question-composer 10-19 先例）
+      await page.locator('[class*="footArea"]').getByRole('button', { name: 'More', exact: true }).click()
+      await page.getByRole('menuitem', { name: 'New Session', exact: true }).click()
       await page.getByText('Into the Unknown', { exact: true }).waitFor()
       await page.getByRole('treeitem').filter({ has: page.getByText('Use the bash tool to', { exact: true }) }).click()
       await page.getByText('DONE', { exact: true }).waitFor({ timeout: 15_000 })

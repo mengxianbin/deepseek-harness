@@ -37,6 +37,9 @@ const ORDER_EXPECTED = join(SNAPSHOT_DIR, 'order.expected.md')
 const MODE = webSnapshotMode()
 const SOURCE_SESSION_ID = 'reference-source-session'
 const TARGET_SESSION_ID = 'reference-order-target-session'
+// FORK(replay-residual-1022): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 修法).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 async function settledSourceOption(menu: Locator): Promise<Locator> {
   await expect.poll(
@@ -144,7 +147,7 @@ describe.skipIf(MODE === 'record')('web e2e: file and session references through
   let tripwire: ReturnType<typeof watchConsole>
 
   beforeAll(async () => {
-    scaffold = await launchWebScaffold({})
+    scaffold = await launchWebScaffold({ extraOverlayPath: CATALOG_OVERLAY })
     const targetCreatedAt = WEB_FIXTURE_TIME - 60_000
     await seedSession(scaffold, sourceSessionFixture(), SOURCE_SESSION_ID, undefined, { createdAt: targetCreatedAt - 1 })
     await seedSession(scaffold, targetSessionFixture(), TARGET_SESSION_ID, undefined, { createdAt: targetCreatedAt })

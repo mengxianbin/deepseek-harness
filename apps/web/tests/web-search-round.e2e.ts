@@ -26,6 +26,9 @@ const QUERIES = ['DeepSeek Harness snapshot search', 'DeepSeek Harness multi-que
 const PROMPT = `Use web_search once with queries ${JSON.stringify(QUERIES)}. Then reply exactly SEARCH_DONE and stop.`
 const SEARCH_CREDENTIAL_REF = credentialRef('DSH_WEB_SEARCH_E2E_KEY')
 const SEARCH_CREDENTIAL = 'snapshot-search-key'
+// FORK(replay-residual-1022): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 修法).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 /**
  * Provider results the double returns per query. The combined result exceeds
@@ -137,7 +140,10 @@ describe('web e2e: opt-in Search API web search', () => {
     const search = await startSearchServer(searchRequests)
     searchServer = search.server
     scaffold = await launchWebScaffold({
-      extraOverlayPath: fileURLToPath(new URL('./pin-browse-picker.overlay.yml', import.meta.url)),
+      extraOverlayPath: [
+        fileURLToPath(new URL('./pin-browse-picker.overlay.yml', import.meta.url)),
+        CATALOG_OVERLAY,
+      ],
       compareReplaySession: true,
       deepSeekWebApi: {
         baseURL: `${search.baseURL}/api/v1/tools`,

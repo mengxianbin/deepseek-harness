@@ -24,6 +24,9 @@ const MODE = webSnapshotMode()
 // Elicits the successful and failed sub-rows this scenario asserts.
 const PROMPT = 'Using ONE run_code program: run bash `echo CODE_ROUND_OK`, then read the file missing.txt '
   + 'catching its error in the program. Return an object with both outcomes. Then reply DONE and stop.'
+// FORK(replay-residual-1022): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 修法).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 describe('web e2e: PTC mode round renders nested sub-calls', () => {
   let scaffold: WebScaffold
@@ -37,6 +40,7 @@ describe('web e2e: PTC mode round renders nested sub-calls', () => {
     scaffold = await launchWebScaffold({
       agentPresets: { default: 'ptc' },
       compareReplaySession: true,
+      extraOverlayPath: CATALOG_OVERLAY,
       ...(MODE === 'record' ? {} : { replayFixture: FIXTURE, paceMs: 15 }),
     })
     scaffold.ctx.on('session/event', (_session, event: SessionEvent) => { sessionEvents.push(event) })

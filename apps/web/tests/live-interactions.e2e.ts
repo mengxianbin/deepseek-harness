@@ -52,6 +52,9 @@ const AUTH_PROVIDER_MESSAGE = 'Authentication Fails, Your api key: sk-preview-se
 const PROMPT = 'Reply with a one-sentence description of event sourcing, then stop.'
 const RUNNING_DRAFT = 'Queue this follow-up while the current turn is running.'
 const RETRY_PARTIAL = 'This partial reply must disappear when the attempt fails.'
+// FORK(replay-residual-1022): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 修法).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 /** turn/end reasons observed, in order. */
 function turnEndReasons(events: SessionEvent[]): string[] {
@@ -103,6 +106,7 @@ describe('web e2e: live-turn interactions (cancel / error / retry)', () => {
       replayFixture: FIXTURE,
       // Throughput snapshots need a nonzero interval between replayed chunks.
       paceMs: 1,
+      extraOverlayPath: CATALOG_OVERLAY,
       ...(overridePath === undefined ? {} : { replayOverride: overridePath }),
       ...(overridePath === undefined ? {} : { compareReplaySession: false }),
       ...(retryPolicy === undefined ? {} : { replayRetryPolicy: retryPolicy }),

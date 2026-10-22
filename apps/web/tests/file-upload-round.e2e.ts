@@ -36,6 +36,9 @@ const FILE_NAME = 'poem.txt'
 const FILE_TEXT = 'UPLOAD_ROUND_OK\n'
 const PROMPT = 'Read the attached file with the read tool, reply with exactly the single word it contains, and stop.'
 const IMAGE_NAMES = Array.from({ length: 10 }, (_unused, index) => `reference-${String(index + 1)}.png`)
+// FORK(replay-residual-1022): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 修法).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 /** Browser-measured relations for the mixed composer attachment rail. */
 interface DraftRailGeometry {
@@ -200,6 +203,7 @@ describe('web e2e: generic file upload through the real assembly', () => {
   beforeAll(async () => {
     scaffold = await launchWebScaffold({
       compareReplaySession: true,
+      extraOverlayPath: CATALOG_OVERLAY,
       // The override rescripts the recorded read arguments with a
       // `{{fromRequest:…}}` placeholder: the saved-copy path differs per run,
       // and the live handle line in the request carries the current one.

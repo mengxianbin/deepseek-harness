@@ -18,6 +18,9 @@ const FILES = [
   { name: 'deploy.ps1', lang: 'ps1', previewLang: 'powershell', text: 'param([string]$Name = "World")\nWrite-Host "Hello, $Name"\n' },
   { name: 'table.csv', lang: 'csv', previewLang: 'csv', text: 'name,count\napples,12\npears,7\n' },
 ] as const
+// FORK(replay-residual-1022): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 修法).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 it('replays highlighted Python stubs, PowerShell and CSV reads with their document previews', async () => {
   const prompt = MODE === 'record'
@@ -26,6 +29,7 @@ it('replays highlighted Python stubs, PowerShell and CSV reads with their docume
   const scaffold = await launchWebScaffold({
     ...(MODE === 'record' ? {} : { replayFixture: FIXTURE }),
     compareReplaySession: true,
+    extraOverlayPath: CATALOG_OVERLAY,
   })
   let browser: Browser | undefined
   try {

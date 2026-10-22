@@ -44,6 +44,9 @@ const TASK = 'Plan a small change: add a --greeting flag to a CLI. Do not read o
   + 'Call exit_plan_mode with a short plan of at most five bullet points. '
   + 'Once the plan is approved, reply with the single word DONE and stop.'
 const LINE = `/plan ${TASK}`
+// FORK(replay-residual-1022): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 修法).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 describe('web e2e: plan review takeover round trip', () => {
   let scaffold: WebScaffold
@@ -54,7 +57,9 @@ describe('web e2e: plan review takeover round trip', () => {
   let reviewedSession: SessionId
 
   beforeAll(async () => {
-    scaffold = await launchWebScaffold(MODE === 'record' ? {} : { replayFixture: FIXTURE, paceMs: 15, compareReplaySession: true })
+    scaffold = await launchWebScaffold(MODE === 'record'
+      ? { extraOverlayPath: CATALOG_OVERLAY }
+      : { replayFixture: FIXTURE, paceMs: 15, compareReplaySession: true, extraOverlayPath: CATALOG_OVERLAY })
     scaffold.ctx.on('session/event', (_session, event: SessionEvent) => { sessionEvents.push(event) })
     browser = await chromium.launch()
     // English page: the decision copy is the surface under test, and the
@@ -341,7 +346,7 @@ describe.skipIf(MODE === 'record')('web e2e: pending plan review across Sidebar 
   }
 
   beforeAll(async () => {
-    scaffold = await launchWebScaffold({})
+    scaffold = await launchWebScaffold({ extraOverlayPath: CATALOG_OVERLAY })
     planned = await seedSession(scaffold, await readFile(FIXTURE, 'utf8'), 'plan-review-seat-planned')
     other = await seedSession(scaffold, await readFile(OTHER_FIXTURE, 'utf8'), 'plan-review-seat-other')
     browser = await chromium.launch()
@@ -397,7 +402,13 @@ describe('web e2e: dismissed plan history', () => {
     const replayOverride = join(replayRoot, 'replay.override.json')
     const script = deriveReplayScript(parseSessionLog(await readFile(FIXTURE, 'utf8')))
     await writeFile(replayOverride, JSON.stringify(script.slice(0, 1)))
-    const scaffold = await launchWebScaffold({ replayFixture: FIXTURE, replayOverride, compareReplaySession: false, paceMs: 15 })
+    const scaffold = await launchWebScaffold({
+      replayFixture: FIXTURE,
+      replayOverride,
+      compareReplaySession: false,
+      paceMs: 15,
+      extraOverlayPath: CATALOG_OVERLAY,
+    })
     let browser: Browser | undefined
     const events: SessionEvent[] = []
     scaffold.ctx.on('session/event', (_session, event: SessionEvent) => { events.push(event) })

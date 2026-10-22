@@ -24,6 +24,9 @@ const ACK_EXPANDED_EXPECTED = join(SNAPSHOT_DIR, 'ack-expanded.expected.md')
 const MODE = webSnapshotMode()
 
 const PROMPT = 'Reply with the single word LIGHTHOUSE and stop.'
+// FORK(replay-residual-1022): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 修法).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 describe('web e2e: /feedback command acknowledgement', () => {
   let scaffold: WebScaffold
@@ -34,6 +37,7 @@ describe('web e2e: /feedback command acknowledgement', () => {
   beforeAll(async () => {
     scaffold = await launchWebScaffold({
       compareReplaySession: true,
+      extraOverlayPath: CATALOG_OVERLAY,
       ...(MODE === 'record' ? {} : { replayFixture: FIXTURE, paceMs: 5 }),
     })
     browser = await chromium.launch()

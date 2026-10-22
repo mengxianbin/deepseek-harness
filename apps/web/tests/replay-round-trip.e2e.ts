@@ -47,6 +47,9 @@ const MODE = webSnapshotMode()
 // committed fixture recorded exactly it, so drive script and fixture cannot
 // drift apart.
 const PROMPT = 'Use the bash tool to run exactly: echo WEB_E2E_OK. Then reply with the single word DONE and stop.'
+// FORK(replay-residual-1022): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 修法).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 type SessionListResponse = { result: RemoteResult<SessionListValue> }
 
@@ -69,6 +72,7 @@ describe('web e2e: fresh round trip through the real assembly', () => {
   beforeAll(async () => {
     scaffold = await launchWebScaffold({
       compareReplaySession: true,
+      extraOverlayPath: CATALOG_OVERLAY,
       ...(MODE === 'record' ? {} : { replayFixture: FIXTURE, paceMs: 15 }),
     })
     scaffold.ctx.on('session/event', (_session, event: SessionEvent) => { sessionEvents.push(event) })
@@ -242,7 +246,7 @@ describe('web e2e: fresh round trip through the real assembly', () => {
   it('exposes the assembled Web URL to the real bash tool', async () => {
     // This host probe records job events too; keep it out of the shared
     // conversation fixture that other browser scenarios replay.
-    const probe = await launchWebScaffold()
+    const probe = await launchWebScaffold({ extraOverlayPath: CATALOG_OVERLAY })
     try {
       const handle = await probe.ctx.agents.create({
         sessionId: SessionId('web-url-probe'),

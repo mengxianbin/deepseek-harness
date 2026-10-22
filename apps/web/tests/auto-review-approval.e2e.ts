@@ -21,6 +21,9 @@ const UI_EXPECTED = fileURLToPath(new URL('../../../snapshots/web/auto-review-ap
 const MODE = webSnapshotMode()
 const SEED_ID = 'auto-review-approval-web-e2e'
 const FAILURE = 'Auto review of tool "mystery" failed; its body was not executed: auto-review: reviewer ended with error UNKNOWN: provider unavailable'
+// FORK(replay-residual-1022): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 修法).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 describe.skipIf(MODE === 'record')('web e2e: cold Auto-review user rejection and reviewer failure', () => {
   let scaffold: WebScaffold
@@ -30,7 +33,10 @@ describe.skipIf(MODE === 'record')('web e2e: cold Auto-review user rejection and
 
   beforeAll(async () => {
     const fixture = await readFile(FIXTURE, 'utf8')
-    scaffold = await launchWebScaffold(AUTO_REVIEW_FIXTURE)
+    scaffold = await launchWebScaffold({
+      ...AUTO_REVIEW_FIXTURE,
+      extraOverlayPath: [AUTO_REVIEW_FIXTURE.extraOverlayPath, CATALOG_OVERLAY],
+    })
     await seedSession(scaffold, fixture, SEED_ID, undefined, { createdAt: WEB_FIXTURE_TIME })
     browser = await chromium.launch()
     page = await newEnglishPage(browser)

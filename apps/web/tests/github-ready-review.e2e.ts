@@ -23,6 +23,9 @@ import { saveFailureShot } from './support.ts'
 
 const MODE = webSnapshotMode()
 const OVERLAY = fileURLToPath(new URL('../../../packages/experimental/webhook-github/examples/github-review/cordis.yml', import.meta.url))
+// FORK(replay-residual-1022): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 修法).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 const EXPECTED = fileURLToPath(new URL('./expected/github-ready-review/conversation.expected.md', import.meta.url))
 const EXPANDED_EXPECTED = fileURLToPath(
   new URL('./expected/github-ready-review/conversation-expanded.expected.md', import.meta.url),
@@ -93,7 +96,7 @@ describe.skipIf(MODE === 'record')('web e2e: GitHub ready-for-review', () => {
     process.env.DSH_GITHUB_WEBHOOK_SECRET = SECRET
     webhookOrigin = `http://127.0.0.1:${String(port)}`
     scaffold = await launchWebScaffold({
-      extraOverlayPath: OVERLAY,
+      extraOverlayPath: [OVERLAY, CATALOG_OVERLAY],
       profile: { packages: [
         { dir: fileURLToPath(new URL('../../../packages/experimental/webhook', import.meta.url)) },
         { dir: fileURLToPath(new URL('../../../packages/experimental/webhook-github', import.meta.url)) },

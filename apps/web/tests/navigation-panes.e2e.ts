@@ -34,6 +34,9 @@ const CODE_CARD_EXPECTED = join(CODE_CARD_DIR, 'code-card.expected.md')
 const MODE = webSnapshotMode()
 const SEED_ID = 'navigation-panes-web-e2e'
 const EXPORTED_LOG_FILE = `session.v${SESSION_FORMAT_VERSION}.jsonl`
+// FORK(replay-residual-1022): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 修法).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 // Turn 1 leads with a distinctive word: the session-title fallback takes the
 // first words of the first message, so the sidebar-search scenario has a
@@ -90,7 +93,7 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
   let slotErrors: string[] = []
 
   beforeAll(async () => {
-    scaffold = await launchWebScaffold({})
+    scaffold = await launchWebScaffold({ extraOverlayPath: CATALOG_OVERLAY })
     // The workspace-aware flow runs sessions in <workspaceCwd>/workspace;
     // the read targets must live in that session cwd (pre-creation is safe
     // because the picker adopts an existing directory by path).
