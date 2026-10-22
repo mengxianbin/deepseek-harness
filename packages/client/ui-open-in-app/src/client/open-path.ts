@@ -1,6 +1,7 @@
 /**
  * Host desktop availability, file associations, and open/reveal actions over the Session Remote.
- * The desktop answer is read once per page; a failed read renders no control.
+ * The desktop answer is read once per page after it settles; a failed read stays unknown and is
+ * re-read instead of latching the page into "no desktop".
  */
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { RemoteResult } from '@deepseek-ai/dsh-api-remotes/client'
@@ -11,6 +12,18 @@ export type OpenInAppPathAction = 'open' | 'reveal'
 
 /** Failure kind of one settled path gesture, for the initiating control to announce. */
 export type OpenInAppPathFailure = 'openError' | 'revealError'
+
+/**
+ * How long a failed desktop read waits before it is read again. The wait is short so the
+ * page-load races that fail the first call heal on their own, without the user reloading.
+ */
+export const DESKTOP_RETRY_BACKOFF_MS = 2000
+
+/**
+ * Automatic re-reads after the initial attempt; a dead carrier is not polled forever —
+ * a newly mounted control still re-queries through `load()`.
+ */
+export const DESKTOP_RETRY_LIMIT = 3
 
 /** The slice of the Client Remote the path actions call. */
 export interface OpenInAppPathRemote {
@@ -28,18 +41,23 @@ export interface OpenInAppPathRemote {
 
 /** Page-lifetime desktop availability and the open/reveal carrier shared by every path control. */
 export class OpenInAppPathController {
-  /** Whether the Host desktop can open paths; null until the Host answered, false also after a failed read. */
+  /** Whether the Host desktop can open paths; null until the Host answered — and unknown again after a failed read. */
   readonly desktop: SnapshotStore<boolean | null> = createSnapshotStore<boolean | null>(null)
   private loading: Promise<void> | undefined
+  private retry: ReturnType<typeof setTimeout> | undefined
+  private retries = 0
 
   /**
    * @param remote - the Session Remote namespace answering availability and running gestures.
+   * @param retryBackoffMs - wait before an automatic re-read of a failed availability answer.
    */
-  constructor(private readonly remote: OpenInAppPathRemote) {}
+  constructor(private readonly remote: OpenInAppPathRemote, private readonly retryBackoffMs: number = DESKTOP_RETRY_BACKOFF_MS) {}
 
   /**
-   * Read desktop availability once per controller life; concurrent calls share the read.
-   * @returns after availability is published.
+   * Read desktop availability once per controller life after it settles; concurrent calls share
+   * the read. A failed read is not latched: it stays unknown, is re-read after a short bounded
+   * backoff, and any later `load()` — a newly mounted control seeing the unknown answer — re-queries.
+   * @returns after availability is published, or once the failed read has been handed to its retry.
    */
   load(): Promise<void> {
     this.loading ??= this.run()
@@ -83,14 +101,39 @@ export class OpenInAppPathController {
   }
 
   private async run(): Promise<void> {
-    let available = false
+    let answer: boolean | null = null
     try {
       const result = await this.remote.session.canOpenWorkspacePath()
-      available = result.ok && result.value
-    } catch {
-      // Swallows carrier rejections: an unreachable Host reads as no desktop,
-      // so the preview shows no path control rather than a broken one.
+      if (result.ok) {
+        answer = result.value
+      } else {
+        console.warn('open-in-app: desktop availability read failed:', result.error)
+      }
+    } catch (error) {
+      // A carrier rejection (transport refusal, page-load race) is transient. The answer
+      // stays unknown and is read again, instead of latching the page into "no desktop"
+      // with every path control missing until the next reload.
+      console.warn('open-in-app: desktop availability read rejected:', error)
     }
-    this.desktop.set(available)
+    if (answer === null) {
+      this.loading = undefined
+      this.armRetry()
+      return
+    }
+    if (this.retry !== undefined) {
+      clearTimeout(this.retry)
+      this.retry = undefined
+    }
+    this.desktop.set(answer)
+  }
+
+  /** Arm one bounded automatic re-read of a failed answer; mount-driven loads re-query past the bound. */
+  private armRetry(): void {
+    if (this.retries >= DESKTOP_RETRY_LIMIT || this.retry !== undefined) return
+    this.retries += 1
+    this.retry = setTimeout(() => {
+      this.retry = undefined
+      void this.load()
+    }, this.retryBackoffMs)
   }
 }
