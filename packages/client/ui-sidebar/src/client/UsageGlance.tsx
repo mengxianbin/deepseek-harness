@@ -545,12 +545,14 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
               const pair = row.elapsed === undefined || row.total === undefined || row.unit === undefined
                 ? '—'
                 : `${String(row.elapsed)}/${String(row.total)}${row.unit}`
-              // An over-pace row splits the fill at the tick: the primary
-              // color keeps the on-pace share, the warn color takes the
-              // overrun — the overrun IS the ahead-of-schedule segment
-              // (2026-10-22, plan B).
+              // An over-pace row splits the fill at the tick — but the
+              // gradient box IS the fill, not the track: convert the tick's
+              // track-relative percent into a share of the fill (`tick /
+              // percent`) so the warn boundary lands exactly under the tick
+              // (2026-10-22 用户实测交界与刻度相离 → 基准修正; overPace ⇒
+              // percent > tick ≥ 0, so the division is safe).
               const overPaceSplit = row.overPace === true && tickPercent !== undefined
-                ? `${String(tickPercent)}%`
+                ? `${String(Math.round((tickPercent / row.percent) * 100))}%`
                 : undefined
               const fillStyle: CSSProperties & Record<string, string> = {
                 width: `${String(row.percent)}%`,

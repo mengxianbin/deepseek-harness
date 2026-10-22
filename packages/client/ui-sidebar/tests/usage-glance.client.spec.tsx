@@ -304,9 +304,11 @@ describe('UsageGlance', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
     const fills = [...container.querySelectorAll('[class*="glanceFill"]')]
     expect(fills).toHaveLength(3)
-    // Week: 50% used at ~49.1% of the clock → warn class + split at the tick.
+    // Week: 50% used at ~49.1% of the clock → warn class + the split
+    // converted to the FILL's own box (tick 49 / percent 50 = 98% of the fill
+    // = 49% of the track — the boundary must land exactly under the tick).
     expect(fills[1]?.className).toContain('glanceFillOver')
-    expect(fills[1]?.getAttribute('style')).toContain('--glance-split: 49%')
+    expect(fills[1]?.getAttribute('style')).toContain('--glance-split: 98%')
     // Month (85% at ~93%) and 5h (13% at 70%) are behind the clock: no split.
     expect(fills[0]?.className).not.toContain('glanceFillOver')
     expect(fills[2]?.className).not.toContain('glanceFillOver')

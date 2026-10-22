@@ -678,7 +678,7 @@
 .glanceBody {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
   max-width: 100%;
 }
@@ -691,12 +691,19 @@
   flex-direction: column;
   gap: 0;
   min-width: 0;
+  /* FORK (usage glance v2.4.2, 2026-10-22): overflow safety — a squeezed row
+     box clips its fixed-width columns instead of spilling them over the stats
+     column (the text-overlap failure the two-column split exposed on narrow
+     sidebars). The track absorbs the whole shortage first (.glanceTrack). */
+  overflow: hidden;
 }
 
+/* FORK (usage glance v2.4.2): inner gaps 6→4px — every px goes to the
+   narrow-sidebar budget. */
 .glanceRow {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
   max-width: 100%;
 }
@@ -717,7 +724,9 @@
   position: relative;
   flex: 0 1 88px;
   width: 88px;
-  min-width: 44px;
+  /* FORK (usage glance v2.4.2): the ONLY elastic element — it absorbs width
+     down to a 24px sliver before any fixed column would have to clip. */
+  min-width: 24px;
   height: 6px;
   border-radius: var(--dsw-radius-sm);
   background: var(--dsw-alias-border-l2);
@@ -736,8 +745,11 @@
 }
 
 /* FORK (usage glance v2.4): an over-pace fill splits at the tick —
-   `--glance-split` is the tick's elapsed share; the primary color covers the
-   on-pace part and the warn color takes the overrun (usage past the clock). */
+   `--glance-split` is the tick position converted to a share OF THE FILL
+   (`tick / percent`, since the gradient box is the fill, not the track); the
+   primary color covers the on-pace part and the warn color takes the overrun
+   (usage past the clock). v2.4.2 fixed the base: the boundary now lands
+   exactly under the tick (2026-10-22 用户实测交界与刻度相离 → 修正). */
 .glanceFillOver {
   background: linear-gradient(
     to right,
@@ -760,10 +772,10 @@
 
 /* FORK (usage glance v2.4.1, 2026-10-22 用户指示): the percent column — fixed
    width, right-aligned so the figures stack into one readable column beside
-   the track (100% at 10px tabular fits the 30px). */
+   the track (100% at 10px tabular fits the 28px). */
 .glancePercent {
   flex: none;
-  width: 30px;
+  width: 28px;
   font-size: 10px;
   line-height: 12px;
   letter-spacing: 0;
@@ -773,10 +785,11 @@
 }
 
 /* FORK (usage glance v2.4.1): the time-pair column — the same right-aligned
-   rules, widening only to `31/31d`; a row without a span renders an em dash. */
+   rules, widening only to `31/31d` (42px); a row without a span renders an
+   em dash. */
 .glancePair {
   flex: none;
-  width: 46px;
+  width: 42px;
   font-size: 10px;
   line-height: 12px;
   letter-spacing: 0;
