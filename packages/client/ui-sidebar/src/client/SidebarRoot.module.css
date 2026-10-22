@@ -758,13 +758,30 @@
   background: var(--dsw-alias-label-primary);
 }
 
-.glanceValue {
+/* FORK (usage glance v2.4.1, 2026-10-22 用户指示): the percent column — fixed
+   width, right-aligned so the figures stack into one readable column beside
+   the track (100% at 10px tabular fits the 30px). */
+.glancePercent {
   flex: none;
-  min-width: 52px;
+  width: 30px;
   font-size: 10px;
   line-height: 12px;
   letter-spacing: 0;
   font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* FORK (usage glance v2.4.1): the time-pair column — the same right-aligned
+   rules, widening only to `31/31d`; a row without a span renders an em dash. */
+.glancePair {
+  flex: none;
+  width: 46px;
+  font-size: 10px;
+  line-height: 12px;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
   color: var(--dsw-alias-label-secondary);
 }
 

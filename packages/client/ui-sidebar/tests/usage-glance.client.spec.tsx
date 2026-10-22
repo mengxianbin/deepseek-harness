@@ -58,11 +58,16 @@ const OVERVIEW: UsageOverviewView = {
   },
 }
 
-/** The merged read-out one row renders (`85% · 28/30d`). */
-function readout(row: GlanceWindowRow): string {
+/** The percent column one row renders (`33%`). */
+function percentOf(row: GlanceWindowRow): string {
+  return `${String(row.percent)}%`
+}
+
+/** The time-pair column one row renders (`5/31d`), em dash without a span. */
+function pairOf(row: GlanceWindowRow): string {
   return row.elapsed === undefined || row.total === undefined || row.unit === undefined
-    ? `${String(row.percent)}%`
-    : `${String(row.percent)}% · ${String(row.elapsed)}/${String(row.total)}${row.unit}`
+    ? '—'
+    : `${String(row.elapsed)}/${String(row.total)}${row.unit}`
 }
 
 /** Flush pending microtasks and timers inside act(). */
@@ -264,9 +269,13 @@ describe('UsageGlance', () => {
     // the same derivation so the expectation cannot drift across a day boundary.
     const rows = deriveGlance(OVERVIEW).windows ?? []
     expect(rows.map(row => row.key)).toEqual(['month', 'week', '5h'])
-    expect(await screen.findByText(readout(rows[0]!))).toBeTruthy()
-    expect(screen.getByText(readout(rows[1]!))).toBeTruthy()
-    expect(screen.getByText(readout(rows[2]!))).toBeTruthy()
+    // Each row carries the percent and the time pair as separate columns.
+    expect(await screen.findByText(percentOf(rows[0]!))).toBeTruthy()
+    expect(screen.getByText(pairOf(rows[0]!))).toBeTruthy()
+    expect(screen.getByText(percentOf(rows[1]!))).toBeTruthy()
+    expect(screen.getByText(pairOf(rows[1]!))).toBeTruthy()
+    expect(screen.getByText(percentOf(rows[2]!))).toBeTruthy()
+    expect(screen.getByText(pairOf(rows[2]!))).toBeTruthy()
     // Short labels in display order, one tick per row, per-window tooltips.
     // Class selectors match the scoped CSS-module names by substring.
     const labels = [...container.querySelectorAll('[class*="glanceLabel"]')].map((el: Element) => el.textContent)
@@ -359,7 +368,7 @@ describe('UsageGlance', () => {
       release?.({ status: 200, ok: true, json: async () => OVERVIEW })
       await Promise.resolve()
     })
-    expect(await screen.findByText(/^85% ·/)).toBeTruthy()
+    expect(await screen.findByText('85%')).toBeTruthy()
     const loaded = screen.getByTitle(
       new RegExp(`^${t('glance.today')} · ${t('glance.cycle')} · ${t('glance.refreshed')} \\d{2}\\.\\d{2}\\.\\d{2} \\d{2}:\\d{2}$`),
     )

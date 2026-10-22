@@ -6,8 +6,9 @@
  * among `month`/`week`/`5h`, in that order (FORK v2.4, 2026-10-22, three
  * quota windows on screen — the row order is cycle-first, so the month row
  * keeps today's top-bar seat): each row is a short window label
- * (`glance.window.*.label`), a same-width left-aligned track, and a merged
- * read-out `85% · 28/30d`. The fill is the window's consumed share of 100; a
+ * (`glance.window.*.label`), a same-width left-aligned track, and two
+ * right-aligned read-out columns — the usage percent (`33%`) beside the time
+ * pair (`5/31d`, em dash without a span); 2026-10-22 用户指示拆列右对齐. The fill is the window's consumed share of 100; a
  * 1px tick marks its continuous time progress — the span is back-derived from
  * `resetsAt` (one month / seven days / five hours before the reset) — and the
  * fill segment past the tick paints in the warn color, i.e. usage running
@@ -461,7 +462,7 @@ export interface UsageGlanceProps {
 /**
  * Render the plan glance (FORK v2.4): one row per on-screen quota window —
  * short label, usage fill with the time-progress tick (overrun in warn), and
- * the merged read-out — plus the 今日/周期 token rows in their own column
+ * the right-aligned percent and time-pair columns — plus the 今日/周期 token rows in their own column
  * (refresh stamp in that column's tooltip), or nothing while the host half is
  * off. Rows the host does not report are absent; before the first load the
  * control shows only the token column's placeholders.
@@ -538,11 +539,12 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
           <span className={css.glanceRows}>
             {windows.map((row) => {
               // The tick sits at the continuous elapsed share of the window;
-              // the merged read-out pairs the percent with the day/hour pair.
+              // the percent and the day/hour pair each hold their own
+              // right-aligned column (2026-10-22 用户指示：百分比与天数分列右对齐).
               const tickPercent = row.timeFraction === undefined ? undefined : Math.round(row.timeFraction * 100)
-              const readout = row.elapsed === undefined || row.total === undefined || row.unit === undefined
-                ? `${String(row.percent)}%`
-                : `${String(row.percent)}% · ${String(row.elapsed)}/${String(row.total)}${row.unit}`
+              const pair = row.elapsed === undefined || row.total === undefined || row.unit === undefined
+                ? '—'
+                : `${String(row.elapsed)}/${String(row.total)}${row.unit}`
               // An over-pace row splits the fill at the tick: the primary
               // color keeps the on-pace share, the warn color takes the
               // overrun — the overrun IS the ahead-of-schedule segment
@@ -566,7 +568,8 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
                       ? null
                       : <span className={css.glanceTick} style={{ left: `${String(tickPercent)}%` }} />}
                   </span>
-                  <span className={css.glanceValue}>{readout}</span>
+                  <span className={css.glancePercent}>{`${String(row.percent)}%`}</span>
+                  <span className={css.glancePair}>{pair}</span>
                 </span>
               )
             })}
