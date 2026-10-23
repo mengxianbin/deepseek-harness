@@ -118,7 +118,8 @@ it.each([
   resources.browser = browser
   const page = await browser.newPage({ locale: copy.locale })
   await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
-  await page.getByRole('button', { name: copy.plugins, exact: true }).click()
+  // FORK(replay-residual-1022): 宽态 nav 退役（7ee61be915）——同文件 :335 先例走 selectGlobalPanel
+  await selectGlobalPanel(page, copy.plugins)
   const panel = page.locator('[data-plugin-panel]')
   const card = panel.locator('[data-plugin-package="@deepseek-ai/dsh-experimental-inspector-profile"]')
   await card.getByText(copy.description, { exact: true }).waitFor()

@@ -213,15 +213,19 @@ it.skipIf(webSnapshotMode() === 'record')('guides voice setup, records from stan
   // New Session since the brand-row capsule retired (fork dddb378b76/1e4ea68e04)
   // — the old `New session` capsule button no longer exists. Same gesture as
   // question-composer.e2e.ts: open the menu, pick the item.
-  await page.getByRole('button', { name: 'More', exact: true }).click()
+  // FORK(replay-residual-1022): 裸 More 在面板共存时 strict 双命中——收窄页脚 footArea（:222 同款）
+  await page.locator('[class*="footArea"]').getByRole('button', { name: 'More', exact: true }).click()
   await page.getByRole('menuitem', { name: 'New Session', exact: true }).click()
   await mic.waitFor()
   await expect.poll(() => page.evaluate(() => (window as Window & { voiceTestStreams?: MediaStream[] }).voiceTestStreams!
     .every(stream => stream.getTracks().every(track => track.readyState === 'ended')))).toBe(true)
-  await page.getByRole('button', { name: 'Plugins', exact: true }).click()
+  // FORK(replay-residual-1022): 插件面板入口同随 7ee61be915 收进页脚 ⋯ 菜单（宽态无裸 Plugins 按钮）
+  await page.locator('[class*="footArea"]').getByRole('button', { name: 'More', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Plugins', exact: true }).click()
   await page.locator('[data-plugin-package="@deepseek-ai/dsh-experimental-voice-input-bundle"]').waitFor()
   expect(await page.locator('[data-plugin-detail]').count()).toBe(0)
-  await page.getByRole('button', { name: 'More', exact: true }).click()
+  // FORK(replay-residual-1022): 同上——裸 More strict 双命中收窄页脚 footArea
+  await page.locator('[class*="footArea"]').getByRole('button', { name: 'More', exact: true }).click()
   await page.getByRole('menuitem', { name: 'New Session', exact: true }).click()
   await mic.waitFor()
   const micBox = await mic.boundingBox(), modelBox = await page.getByRole('button', { name: /^Select model, current/ }).boundingBox()
