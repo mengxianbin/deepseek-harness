@@ -82,6 +82,7 @@ function mountShell({ collapsed = false, width = 300, shortcuts = [] }: {
   return {
     startSession,
     toggleSidebar,
+    trackEntryClick,
     regionOwner: () => {
       if (regionOwner === undefined) throw new Error('region owner not rendered')
       return regionOwner
@@ -115,10 +116,11 @@ describe('SidebarRoot shell', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'New Session' }))
     cleanup()
     render(<HeaderLeadingControls toggleSidebar={vi.fn()} startSession={vi.fn()} selectPanel={vi.fn()} t={t}
-      trackEntryClick={vi.fn()} usePanelInfo={neverHook} useSessions={neverHook} useSessionStatus={neverHook}
+      trackEntryClick={vi.fn()} setPinned={() => {}} usePanelInfo={neverHook} useSessions={neverHook} useSessionStatus={neverHook}
       useSessionRetainInfo={neverHook} useResource={useResource} useWorkspaces={neverHook}
       {...allowAllAccess}
-      usePanels={select => select([])} useShortcuts={select => select([shortcut])} />)
+      usePanels={select => select([])} useEntryPins={select => select([])} useEntryActions={select => select(false)}
+      useShortcuts={select => select([shortcut])} />)
     const button = screen.getByRole('button', { name: 'New session' })
     expect(button.getAttribute('aria-keyshortcuts')).toBe('Control+N')
     fireEvent.focus(button)
@@ -135,9 +137,11 @@ describe('SidebarRoot shell', () => {
     fireEvent.click(screen.getByRole('button', { name: 'More' }))
     fireEvent.click(screen.getByRole('menuitem', { name: 'New Session' }))
     expect(b.startSession).toHaveBeenCalledExactlyOnceWith()
-    // rc.3 merge: the ⋯ head row reports a sidebar New Session click first.
-    expect(b.trackEntryClick).toHaveBeenCalledExactlyOnceWith({ menu_name: 'new_session', position: 'sidebar' })
-    expect(b.trackEntryClick.mock.invocationCallOrder[0]).toBeLessThan(b.startSession.mock.invocationCallOrder[0]!)
+    // rc.3 merge: opening the ⋯ menu reports 'more'; its head row reports New Session first.
+    expect(b.trackEntryClick).toHaveBeenNthCalledWith(1, { menu_name: 'more', position: 'sidebar' })
+    expect(b.trackEntryClick).toHaveBeenNthCalledWith(2, { menu_name: 'new_session', position: 'sidebar' })
+    expect(b.trackEntryClick).toHaveBeenCalledTimes(2)
+    expect(b.trackEntryClick.mock.invocationCallOrder[1]).toBeLessThan(b.startSession.mock.invocationCallOrder[0]!)
     fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
     expect(b.toggleSidebar).toHaveBeenCalledOnce()
   })

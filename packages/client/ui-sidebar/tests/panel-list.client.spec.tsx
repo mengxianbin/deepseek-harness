@@ -428,19 +428,20 @@ describe('sidebar entry actions in the footer menu', () => {
     await mountPanels(runtime, locale)
     await mountProbeActions(runtime)
     const { menu } = await openPanelsMenu(view)
-    expect(menu.getAllByRole('menuitem').map(row => row.textContent))
+    const rows = within(menu)
+    expect(rows.getAllByRole('menuitem').map(row => row.textContent))
       .toEqual(['New Session', 'Beta panel', 'Alpha panel',
         'Open Beta panel', 'Unpin Beta panel', 'Open Alpha panel', 'Unpin Alpha panel', 'Dismiss'])
 
-    fireEvent.click(menu.getByRole('menuitem', { name: 'Unpin Alpha panel' }))
-    expect(menu.getByRole('menuitem', { name: 'Pin Alpha panel' })).toBeTruthy()
+    fireEvent.click(rows.getByRole('menuitem', { name: 'Unpin Alpha panel' }))
+    expect(rows.getByRole('menuitem', { name: 'Pin Alpha panel' })).toBeTruthy()
     // FORK ruling: the ⋯ menu keeps full reachability — pins filter the rail launchers only.
-    expect(menu.getAllByRole('menuitem').map(row => row.textContent)).toEqual(['New Session', 'Beta panel', 'Alpha panel',
-      'Open Beta panel', 'Unpin Beta panel', 'Pin Alpha panel', 'Open Alpha panel', 'Dismiss'])
-    fireEvent.click(menu.getByRole('menuitem', { name: 'Pin Alpha panel' }))
-    expect(menu.getByRole('menuitem', { name: 'Unpin Alpha panel' })).toBeTruthy()
+    expect(rows.getAllByRole('menuitem').map(row => row.textContent)).toEqual(['New Session', 'Beta panel', 'Alpha panel',
+      'Open Beta panel', 'Unpin Beta panel', 'Open Alpha panel', 'Pin Alpha panel', 'Dismiss'])
+    fireEvent.click(rows.getByRole('menuitem', { name: 'Pin Alpha panel' }))
+    expect(rows.getByRole('menuitem', { name: 'Unpin Alpha panel' })).toBeTruthy()
 
-    fireEvent.click(menu.getByRole('menuitem', { name: 'Open Alpha panel' }))
+    fireEvent.click(rows.getByRole('menuitem', { name: 'Open Alpha panel' }))
     expect(layout.selectPanel).toHaveBeenLastCalledWith(ALPHA)
     expect(view.getByRole('heading', { name: 'Alpha content' })).toBeTruthy()
     await waitFor(() => { expect(view.queryByRole('menu')).toBeNull() })
