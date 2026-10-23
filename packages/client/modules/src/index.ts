@@ -24,11 +24,11 @@
  */
 
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createRequire } from 'node:module'
-import { dirname, isAbsolute, join } from 'node:path'
+import { basename, dirname, isAbsolute, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
@@ -211,15 +211,53 @@ function shortHash(input: string): string {
 }
 
 /** Hash several response fields without allowing bytes to move across field boundaries. */
-function framedHash(domain: string, parts: readonly string[]): string {
+function framedHash(domain: string, parts: readonly (string | Buffer)[]): string {
   const hash = createHash('sha1').update(domain).update('\0')
   for (const part of parts) hash.update(`${String(Buffer.byteLength(part))}:`).update(part)
   return hash.digest('hex').slice(0, HASH_REVISION_LENGTH)
 }
 
-/** Identify an entry's build from filesystem metadata without hashing its contents. */
-function artifactRevision(baseline: ClientArtifactBaseline): string {
-  return framedHash('plugin-artifact', [String(baseline.mtimeMs), String(baseline.ctimeMs), String(baseline.size)])
+/** Served sibling artifact names sharing one entry's revisioned URL space. */
+const SERVED_CHUNK = /^client\.[A-Za-z0-9][A-Za-z0-9._-]*\.js(?:\.map)?$/
+
+/**
+ * Identify an entry's build from its served bytes — the bundle, its source
+ * map, and every served sibling chunk — so a rebuild that regenerates
+ * byte-identical artifacts keeps its revision and every page plugin fiber
+ * stays mounted. FORK dsh-local (hmr-content-rev-1024): revisions used to
+ * hash only mtime/ctime/size, so full rebuilds with identical bytes still
+ * swapped every fiber. Sibling reads are best-effort per generation: a chunk
+ * that vanishes or fails to read mid-scan drops out of this revision; the
+ * next stat change re-enumerates it.
+ * @param clientPath - absolute path of the built client entry bundle.
+ * @param bundle - the entry bytes already read for this generation.
+ * @returns the 12-hex content-addressed revision.
+ */
+function artifactRevision(clientPath: string, bundle: Buffer): string {
+  const parts: (string | Buffer)[] = [bundle]
+  const directory = dirname(clientPath)
+  // The entry's own map rides the combo map URL inside the same rev-keyed immutable space.
+  try {
+    parts.push(`${basename(clientPath)}.map`, readFileSync(`${clientPath}.map`))
+  } catch {
+    // A missing or unreadable map does not block the executable generation.
+  }
+  let names: string[] = []
+  try {
+    names = readdirSync(directory).sort()
+  } catch {
+    // A missing directory contributes no siblings; serving fails downstream.
+  }
+  for (const name of names) {
+    // The entry and its map are framed above; node-half scripts are never served under this URL space.
+    if (name === basename(clientPath) || name.startsWith('client.node.') || !SERVED_CHUNK.test(name)) continue
+    try {
+      parts.push(name, readFileSync(join(directory, name)))
+    } catch {
+      // Transient sibling state belongs to the next generation, not this one.
+    }
+  }
+  return framedHash('plugin-artifact-content', parts)
 }
 
 /** Absolute route prefix serving every plugin resource. */
@@ -722,7 +760,10 @@ export class ClientModuleRegistry extends Service {
   /**
    * Publish one completed bundle generation (the HMR watch's registration
    * hook — the only entry point through which build changes reach the graph).
-   * Unchanged mtime, ctime and size preserve the graph without reading the bundle.
+   * Filesystem metadata only gates the re-read: the rev is content-addressed
+   * ({@link artifactRevision}), so a rebuild that regenerates byte-identical
+   * artifacts keeps the graph — and every page plugin fiber — without
+   * notifying anyone.
    * @param id - entry id (package name).
    * @returns the current artifact rev, or undefined for an unknown id.
    */
@@ -730,10 +771,12 @@ export class ClientModuleRegistry extends Service {
     const record = this.table.get(id)
     if (record === undefined) return undefined
     const baseline = this.captureArtifactBaseline(record.meta.clientPath)
-    const rev = artifactRevision(baseline)
-    if (rev === record.entry.rev) return rev
     const bundle = readFileSync(record.meta.clientPath)
+    const rev = artifactRevision(record.meta.clientPath, bundle)
     record.baseline = baseline
+    // Identical bytes: keep serving the current generation (the cached bundle
+    // is byte-identical) and leave every page fiber mounted.
+    if (rev === record.entry.rev) return rev
     record.entry = graphRow(id, rev, record.meta)
     record.bundle = bundle
     this.composed = this.compose()
@@ -1055,9 +1098,9 @@ export class ClientModuleRegistry extends Service {
     const source = sources[0]
     if (source === undefined) return this.table.delete(packageName)
     if (this.table.get(packageName)?.sourceKey === source.sourceKey) return false
-    // Startup and HMR share revisions so unchanged artifacts survive a server restart.
+    // Startup and HMR share content-addressed revisions so byte-identical artifacts survive a server restart.
     const snapshot = this.initialBundleSnapshot(packageName, source.meta.clientPath)
-    const rev = artifactRevision(snapshot.baseline)
+    const rev = artifactRevision(source.meta.clientPath, snapshot.bundle)
     this.table.set(packageName, {
       entry: graphRow(packageName, rev, source.meta),
       loaderName: source.loaderName,
