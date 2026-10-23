@@ -46,4 +46,4 @@ pre-merge-commit:
 pre-push:
   jobs:
     - name: typecheck
-      run: pnpm exec tsx scripts/heavy-io-gate.ts "pnpm run typecheck"
+      run: pnpm exec tsx scripts/heavy-io-gate.ts 'pnpm run typecheck'
