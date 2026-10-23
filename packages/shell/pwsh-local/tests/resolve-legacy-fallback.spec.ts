@@ -31,7 +31,9 @@ it.skipIf(process.platform !== 'win32')('the 5.1 candidate is appended by defaul
 
 it.skipIf(process.platform !== 'win32')('resolution lands on 5.1 only when the legacy fallback is allowed', () => {
   const root = mkdtempSync(join(tmpdir(), 'dsh-pwsh-legacy-'))
-  onTestFinished(() => rmSync(root, { recursive: true, force: true }))
+  onTestFinished(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
   // The only reachable candidate is the 5.1 executable: no PowerShell 7 install,
   // no PATH entry.
   const legacyExe = join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
