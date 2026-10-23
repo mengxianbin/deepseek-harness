@@ -18,7 +18,7 @@
   ],
   "scripts": {
     "prepare:primary-runtime": "tsx scripts/primary-runtime/prepare.ts",
-    "build": "tsx scripts/build.ts",
+    "build": "tsx scripts/heavy-io-gate.ts \"tsx scripts/build.ts\"",
     "build:artifacts": "tsx scripts/build.ts --scope artifacts",
     "build:check": "tsx scripts/build.ts --scope check",
     "build:bench": "npm run build:native-system && npm run build:lib && tsdown --config-loader native --config benchmarks/tsdown.config.ts",
@@ -50,7 +50,7 @@
     "upload:latest:win:x64": "pnpm --filter @deepseek-ai/dsh-desktop run upload:latest:win:x64",
     "clean": "tsx scripts/clean.ts",
     "change-scope": "tsx scripts/change-scope.ts",
-    "typecheck": "tsx scripts/heavy-io-gate.ts \"tsx scripts/build.ts --scope typecheck\"",
+    "typecheck": "tsx scripts/build.ts --scope typecheck",
     "typecheck:contracts-ready": "tsc -b tsconfig.client.json",
     "lint": "tsx scripts/heavy-io-gate.ts \"tsx scripts/compile-referenced-projects.ts host-contracts && npm run lint:contracts-ready\"",
     "lint:contracts-ready": "tsx scripts/run-oxlint.ts .",
