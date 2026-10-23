@@ -43,6 +43,8 @@ export const zh = {
   'hostRelease.unknown': '未解析',
   'hostRelease.reload': '刷新以加载新版本',
   'hostRelease.later': '暂不刷新',
+  'authExpired.title': '登录已过期 —— 请重新打开 dsh web 打印的网址',
+  'authExpired.hint': '这不是网络故障，等待重连不会自愈。',
 } satisfies Record<string, string>
 
 /** The settings namespace key union. */
@@ -91,4 +93,6 @@ export const en = {
   'hostRelease.unknown': 'Unknown',
   'hostRelease.reload': 'Reload to load the new version',
   'hostRelease.later': 'Not now',
+  'authExpired.title': 'Sign-in expired — reopen the URL printed by dsh web',
+  'authExpired.hint': 'This is not a network fault: waiting for reconnection will not recover it.',
 } satisfies Record<SettingsKey, string>

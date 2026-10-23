@@ -14,6 +14,7 @@ import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 // Type-only: pulls the ctx.modules merge.
 import type {} from '@deepseek-ai/dsh-client-modules/client'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 import { closeTopModal } from '@deepseek-ai/dsh-client-ui-primitives'
 // Type-only: the settings slot declarations plus the ctx.configForms Context
@@ -40,6 +41,8 @@ import { DeveloperToolsRow, type DeveloperToolsRowInjected } from './DeveloperTo
 import { SettingsDocumentAction } from './SettingsDocumentAction.tsx'
 import type { SettingsDocumentActionInjected } from './SettingsDocumentAction.tsx'
 import { SettingsDocumentStore } from './settings-document-store.ts'
+import { AuthExpiredOverlay, type AuthExpiredOverlayInjected } from './AuthExpiredOverlay.tsx'
+import { AUTH_EXPIRED_EVENT } from './auth-expired.ts'
 import { HostReleasePrompt, type HostReleasePromptInjected } from './HostReleasePrompt.tsx'
 import { en, zh, type SettingsKey } from './locales.ts'
 
@@ -240,6 +243,21 @@ export function apply(ctx: ClientContext): void {
     locale: NS,
     children: { 'settings.general.item': { kind: 'list', scope: 'root' } },
   }, GeneralSection))
+  // A dead browser cookie is terminal: the connection heartbeat broadcasts the
+  // expiry once per page (its own expired flag), this listener latches it
+  // false → true, and the shell overlay covers the app instead of letting its
+  // reconnect spinner imply recovery. The latch rides the inject hooks
+  // compartment, so the component subscribes through the standard `use` seat.
+  const authExpired = createSnapshotStore(false)
+  ctx.effect(() => {
+    const onExpired = (): void => { authExpired.set(true) }
+    window.addEventListener(AUTH_EXPIRED_EVENT, onExpired)
+    return () => { window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired) }
+  }, 'ui-settings-general: auth expiry listener')
+  ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+    name: 'shell.overlay', id: 'auth-expired', locale: NS,
+    inject: (): AuthExpiredOverlayInjected => ({ hooks: { authExpired } }),
+  }, AuthExpiredOverlay))
   // The page's module system applies no plugin update from another Host release; this dialog offers the reload.
   const releasePromptInjected = (): HostReleasePromptInjected => ({
     dismissRelease: () => { ctx.modules.entries.dismissRelease() },

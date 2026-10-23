@@ -26,6 +26,7 @@ import { en, zh } from '../src/client/locales.ts'
 import { CurrentVersionRow } from '../src/client/CurrentVersionRow.tsx'
 import { DesktopUpdateBadge } from '../src/client/DesktopUpdateIndicator.tsx'
 import { HostReleasePrompt, type HostReleasePromptProps } from '../src/client/HostReleasePrompt.tsx'
+import { AuthExpiredOverlay, type AuthExpiredOverlayProps } from '../src/client/AuthExpiredOverlay.tsx'
 import type { DesktopUpdateView } from '../src/types.ts'
 
 afterEach(() => { cleanup(); vi.unstubAllEnvs() })
@@ -246,6 +247,37 @@ describe('current version', () => {
     vi.stubEnv('DSH_CLIENT_VERSION', undefined)
     const view = render(<CurrentVersionRow {...kit} t={t} />)
     expect(view.container.textContent).toBe('')
+  })
+})
+
+describe('Auth expired full-page notice', () => {
+  function notice(expired: boolean, dictionary: Record<string, string> = en) {
+    const latch = createSnapshotStore(expired)
+    const props: AuthExpiredOverlayProps = {
+      ...kit,
+      t: key => dictionary[key] ?? key,
+      useAuthExpired: bindSnapshotSelector(latch),
+    }
+    return { latch, view: render(<AuthExpiredOverlay {...props} />) }
+  }
+
+  it('stays out of the page while the session is alive', () => {
+    notice(false)
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('covers the page with the localized notice once the latch moves', async () => {
+    const { latch } = notice(false)
+    latch.set(true)
+    await waitFor(() => { expect(screen.getByRole('alert')).toBeTruthy() })
+    const english = screen.getByRole('alert')
+    expect(english.textContent).toContain(en['authExpired.title'])
+    expect(english.textContent).toContain(en['authExpired.hint'])
+    cleanup()
+    notice(true, zh)
+    const chinese = screen.getByRole('alert')
+    expect(chinese.textContent).toContain(zh['authExpired.title'])
+    expect(chinese.textContent).toContain(zh['authExpired.hint'])
   })
 })
 

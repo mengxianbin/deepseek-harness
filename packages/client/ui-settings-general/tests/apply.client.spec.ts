@@ -15,6 +15,11 @@ import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 import { LOCALE_SETTINGS_NAMESPACE, LocaleSettingsSchema } from '@deepseek-ai/dsh-client-locale/src/locale-settings.ts'
 import { inject } from '../src/client/index.ts'
 import type { DeveloperToolsRowInjected } from '../src/client/DeveloperToolsRow.tsx'
+import { AuthExpiredOverlay, type AuthExpiredOverlayInjected } from '../src/client/AuthExpiredOverlay.tsx'
+import { AUTH_EXPIRED_EVENT } from '../src/client/auth-expired.ts'
+// Connection owns the dispatch; its browser source is transport, so the page
+// redeclares the name (no static bundle edge) and this spec pins the pair.
+import { AUTH_EXPIRED_EVENT as CONNECTION_EVENT } from '@deepseek-ai/dsh-client-connection/src/client/cookie-refresh.ts'
 import { HostReleasePrompt, type HostReleasePromptInjected } from '../src/client/HostReleasePrompt.tsx'
 import { CloseLabel, HeaderContent, TriggerContent } from '../src/client/chrome.tsx'
 import { GeneralSection } from '../src/client/GeneralSection.tsx'
@@ -308,5 +313,27 @@ describe('ui-settings-general apply', () => {
     await c.unload(SELF)
     await c.flush()
     expect(overlay()).toBeUndefined()
+  })
+
+  it('latches the heartbeat expiry event into the shell overlay notice and stops listening on unload', async ({ mock, start }) => {
+    const { c } = await client(mock, start)
+    // Contract: the listener key stays the name cookie-refresh dispatches.
+    expect(AUTH_EXPIRED_EVENT).toBe(CONNECTION_EVENT)
+    const overlay = () => c.ctx.slots.entries('shell.overlay').find(row => row.options.id === 'auth-expired')
+    expect(overlay()?.component).toBe(AuthExpiredOverlay)
+    expect(overlay()?.locale).toBe(NS)
+    const face = overlay()!.inject as unknown as () => AuthExpiredOverlayInjected
+    const latch = face().hooks.authExpired
+    expect(latch.getSnapshot()).toBe(false)
+    window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT))
+    expect(latch.getSnapshot()).toBe(true)
+    // The source broadcasts at most once per page; a repeat changes nothing.
+    window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT))
+    expect(latch.getSnapshot()).toBe(true)
+    const remove = vi.spyOn(window, 'removeEventListener')
+    await c.unload(SELF)
+    await c.flush()
+    expect(overlay()).toBeUndefined()
+    expect(remove).toHaveBeenCalledWith(AUTH_EXPIRED_EVENT, expect.any(Function))
   })
 })
