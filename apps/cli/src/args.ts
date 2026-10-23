@@ -57,16 +57,23 @@ interface PluginInvocation {
   args: string[]
 }
 
-/** The resolved `dsh` invocation. Help, version, and errors exit inside {@link parseDshArgs}. */
-export type DshInvocation = ProfileInvocation | DumpConfigInvocation | DumpConfigSchemaInvocation | PluginInvocation
+/** Reprint the running web instance's login URL and exit without booting. */
+interface PrintUrlInvocation {
+  mode: 'print-url'
+  profile: string
+}
 
-/** Launcher flags for profile boot and configuration dumps. */
+/** The resolved `dsh` invocation. Help, version, and errors exit inside {@link parseDshArgs}. */
+export type DshInvocation = ProfileInvocation | DumpConfigInvocation | DumpConfigSchemaInvocation | PluginInvocation | PrintUrlInvocation
+
+/** Launcher flags for profile boot, configuration dumps, and the URL reprint. */
 interface BootOptions {
   patch?: string[]
   dumpConfig?: boolean
   dumpDefaultConfig?: boolean
   dumpConfigSchema?: boolean
   fromDefaultProfile?: string
+  printUrl?: boolean
 }
 
 /**
@@ -96,6 +103,7 @@ Examples:
   dsh tui --patch ./extra.yml               boot a custom profile with one extra overlay
   dsh tui --resume <session>                arguments after the launcher flags reach the app
   dsh web --help                            the web app's own flags and help
+  dsh web --print-url                       re-print the running instance's login URL (no boot)
   dsh plugin --profile tui add <package>    install a plugin into the tui profile
 `
 
@@ -113,6 +121,15 @@ function resolveBoot(program: Command, profile: string, options: BootOptions, ar
   if (patches.includes('')) program.error('error: --patch needs a path')
   if (options.fromDefaultProfile === '') program.error('error: --from-default-profile needs a name')
   const dumps = [options.dumpConfig, options.dumpDefaultConfig, options.dumpConfigSchema].filter(Boolean)
+  if (options.printUrl === true) {
+    if (dumps.length > 0) {
+      program.error('error: --print-url cannot combine with --dump-config, --dump-default-config, or --dump-config-schema')
+    }
+    if (args.length > 0) program.error('error: --print-url takes no app arguments')
+    // The URL is read from dsh web's stdout log, which only the web profile writes.
+    if (profile.toLowerCase() !== 'web') program.error('error: --print-url reprints the running dsh web login URL; run: dsh web --print-url')
+    return { mode: 'print-url', profile }
+  }
   if (dumps.length === 0) {
     return { mode: 'profile', profile, fromDefaultProfile: options.fromDefaultProfile, patches, args }
   }
@@ -171,6 +188,7 @@ export function parseDshArgs(argv: readonly string[], version: string, manageDes
     .option('--dump-config', 'print the composed profile tree and exit')
     .option('--dump-config-schema', 'print JSON Schema for profile entries and patches without mounting')
     .option('--dump-default-config', 'print the profile tree without its user layer or --patch overlays and exit')
+    .option('--print-url', "print the running dsh web instance's login URL from its stdout log and exit (boot-free)")
     .action((args: string[], options: BootOptions & { profile?: string }) => {
       // With the app owning -h, the launcher's own help is what a bare
       // `dsh -h` (no profile to hand it to) must print.

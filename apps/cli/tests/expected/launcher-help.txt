@@ -20,6 +20,8 @@ Options:
                                  patches without mounting
   --dump-default-config          print the profile tree without its user layer
                                  or --patch overlays and exit
+  --print-url                    print the running dsh web instance's login URL
+                                 from its stdout log and exit (boot-free)
 
 Examples:
   dsh web                                   boot the web profile (same as: dsh --profile web)
@@ -29,4 +31,5 @@ Examples:
   dsh tui --patch ./extra.yml               boot a custom profile with one extra overlay
   dsh tui --resume <session>                arguments after the launcher flags reach the app
   dsh web --help                            the web app's own flags and help
+  dsh web --print-url                       re-print the running instance's login URL (no boot)
   dsh plugin --profile tui add <package>    install a plugin into the tui profile

@@ -67,6 +67,11 @@ export async function runCli(options: RunCliOptions = {}): Promise<void> {
       await runDumpConfigSchema(invocation.profile, invocation.patches, invocation.fromDefaultProfile)
       break
     }
+    case 'print-url': {
+      const { runPrintUrl } = await import('./print-url.ts')
+      process.exit(await runPrintUrl())
+      break
+    }
     default:
       invocation satisfies never
       throw new Error(`dsh: unhandled invocation mode ${JSON.stringify(invocation)}`)

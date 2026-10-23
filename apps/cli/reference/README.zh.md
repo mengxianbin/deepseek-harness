@@ -54,6 +54,14 @@ dsh --profile web --patch ./extra.yml --dump-config
 
 `--dump-default-config` 只打印组合包各层；`--dump-config` 额外加上 profile 的 `cordis.patch.yml`、home 级的 `$DSH_HOME/cordis.patch.yml` 和 `--patch` overlay。两者都会打印注释，标明每行由哪个文件提供，以及哪些 overlay 修改过它；`!!js` 表达式保持未求值，插入行中的相对插件名以各自 patch 文件所在目录解析，找不到目标的 patch 会报告到 stderr。dump 操作会初始化缺失的 profile 文件。它不会运行应用的命令行参数提供方，因此展示的是解析任何应用参数之前的组合配置树；如果调用中包含应用参数，dump 会拒绝该调用。
 
+不启动任何东西，复打运行中 web 实例的登录 URL：
+
+```sh
+dsh web --print-url
+```
+
+`--print-url` 读取 web 实例打印到 stdout 日志的启动行 `dsh web: <url>?token=…`——显式设置的 `DSH_WEB_LOG` 指定该日志，否则先取启动器旁的 `dsh-web.log`，再取 `$DSH_HOME/dsh-web.log`——打印前先重放该行自身的登录兑换：HTTP 303 证明实例存活且启动 token 仍被接受，随即把完整 URL（完整启动 token，绝不截断）作为单行写入 stdout；连接被拒、日志缺失，或 HTTP 401（日志早于当前实例的启动）各在 stderr 打印一行可读说明并以 1 退出。该 flag 只接受 `web` profile、不接应用参数、不能与配置 dump flag 同用，自身不提供任何服务：复打只为让本地终端恢复过期 cookie，任何 HTTP 端点都不会返回该 URL。
+
 <a id="config-schema-dump"></a>
 ### 配置 schema dump
 
