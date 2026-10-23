@@ -79,9 +79,12 @@ interface Workspace {
    * unknown ids, missing or invalid cwd values, and mismatches reject without
    * writing.
    * @param sessionId - The session to record.
+   * @param header - The session's known header, when the caller holds the
+   * stored one; validation then skips the persistence read it would otherwise
+   * perform (same facts, same checks).
    * @returns resolution after durability.
    */
-  attachSession(sessionId: SessionId): Promise<void>
+  attachSession(sessionId: SessionId, header?: SessionHeader): Promise<void>
 
   /**
    * Move an accounted session within the manual order, DOM-insertBefore-like:
