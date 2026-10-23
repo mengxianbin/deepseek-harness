@@ -295,7 +295,7 @@ interface CancelOptions {
 ```ts type-equiv
 /** Why an active agent driver was cancelled. */
 type AgentCancelCause =
-  | { readonly kind: 'user' }
+  | { readonly kind: 'user'; readonly entry?: AgentCancelEntry }
   | { readonly kind: 'parent' }
   | { readonly kind: 'hook'; readonly reason: string }
   | { readonly kind: 'disposed' }
