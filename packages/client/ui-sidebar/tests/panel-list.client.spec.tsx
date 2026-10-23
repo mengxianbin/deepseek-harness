@@ -11,6 +11,7 @@ import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts
 import { IconGlobeOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ILayout, MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import type { PropsRenderSlots, PropsRuntime, SlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
+import type { TrackProductEvent } from '@deepseek-ai/dsh-client-product-analytics/client'
 import { apply, inject } from '../src/client/index.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -21,6 +22,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 const ALPHA = 'sidebar-test-alpha' as MainPanelId
 const BETA = 'sidebar-test-beta' as MainPanelId
+const PLUGINS = 'plugins' as MainPanelId
+const SCHEDULES = 'schedules' as MainPanelId
 const runtimes = new Set<SlotTestRuntime>()
 
 afterEach(async () => {
@@ -29,10 +32,11 @@ afterEach(async () => {
   } finally {
     runtimes.clear()
     cleanup()
+    localStorage.clear()
   }
 })
 
-async function bench(collapsed = false) {
+async function bench(collapsed = false, track?: TrackProductEvent) {
   const runtime = await SlotTestRuntime.create()
   runtimes.add(runtime)
   const locale = new LocaleRuntime(runtime.ctx)
@@ -53,6 +57,7 @@ async function bench(collapsed = false) {
       ctx.provide('layout', layout)
       ctx.provide('uiWorkspace', { startSession } as never)
       ctx.provide('locale', locale)
+      if (track !== undefined) ctx.provide('productAnalytics', { track } as never)
       ctx.effect(() => locale.register('common', { zh: commonZh, en: commonEn }), 'panel test: common locale')
       ctx.effect(() => locale.register('sidebar-panel-test', {
         zh: { alpha: '甲面板' }, en: { alpha: 'Alpha panel' },
@@ -79,6 +84,50 @@ async function bench(collapsed = false) {
   const sidebar = await runtime.mount({ inject: [...inject], apply })
   const view = runtime.renderRoot()
   return { runtime, locale, layout, startSession, sidebar, view }
+}
+
+/** A More menu occupant that exposes each owner callback as a plain button. */
+function ProbeActions({ entries, onOpen, onPinnedChange, onDismiss }: PropsRuntime<'sidebar.panellist.actions'>) {
+  return (
+    <>
+      {entries.map(entry => (
+        <span key={entry.id}>
+          <button type="button" role="menuitem" aria-current={entry.active ? 'page' : undefined}
+            onClick={() => { onOpen(entry.id) }}>Open {entry.label}</button>
+          <button type="button" role="menuitem" onClick={() => { onPinnedChange(entry.id, !entry.pinned) }}>
+            {entry.pinned ? 'Unpin' : 'Pin'} {entry.label}
+          </button>
+        </span>
+      ))}
+      <button type="button" role="menuitem" onClick={onDismiss}>Dismiss</button>
+    </>
+  )
+}
+
+/** Requests a panel id that the test unregisters while the menu is open. */
+function StaleOpen({ onOpen }: PropsRuntime<'sidebar.panellist.actions'>) {
+  return <button type="button" role="menuitem" onClick={() => { onOpen(ALPHA) }}>Open removed panel</button>
+}
+
+/** Requests the official panels by id, including Plugins, which the menu entries omit. */
+function OfficialOpen({ onOpen }: PropsRuntime<'sidebar.panellist.actions'>) {
+  return (
+    <>
+      <button type="button" role="menuitem" onClick={() => { onOpen(PLUGINS) }}>Open Plugins by id</button>
+      <button type="button" role="menuitem" onClick={() => { onOpen(SCHEDULES) }}>Open Automation by id</button>
+    </>
+  )
+}
+
+async function mountProbeActions(runtime: SlotTestRuntime, id = 'probe', component = ProbeActions) {
+  return runtime.mount({
+    inject: ['slots'],
+    apply(ctx: Context) {
+      ctx.slots.inject('sidebar.panellist.actions', () => ctx.slots.register(
+        { name: 'sidebar.panellist.actions', id }, component,
+      ))
+    },
+  })
 }
 
 interface TestPanel {
@@ -366,5 +415,115 @@ describe('sidebar global panels', () => {
     expect(view.getByRole('heading', { name: 'Alpha content' })).toBeTruthy()
     act(() => { locale.setLocale('zh') })
     expect(view.queryByRole('button', { name: '更多入口' })).toBeNull()
+  })
+})
+
+// rc.3 merge (2026-10-24): upstream's entry-customization rows and entry-click
+// analytics, adapted to the FORK layout — the footer ⋯ menu hosts the actions
+// rows (the rail has no More launcher), and panel opens from the menu report
+// at the sidebar_more position.
+describe('sidebar entry actions in the footer menu', () => {
+  it('renders probe rows after the data rows and routes open, pin, and dismiss', async () => {
+    const { runtime, locale, layout, view } = await bench()
+    await mountPanels(runtime, locale)
+    await mountProbeActions(runtime)
+    const { menu } = await openPanelsMenu(view)
+    expect(menu.getAllByRole('menuitem').map(row => row.textContent))
+      .toEqual(['New Session', 'Beta panel', 'Alpha panel',
+        'Open Beta panel', 'Unpin Beta panel', 'Open Alpha panel', 'Unpin Alpha panel', 'Dismiss'])
+
+    fireEvent.click(menu.getByRole('menuitem', { name: 'Unpin Alpha panel' }))
+    expect(menu.getByRole('menuitem', { name: 'Pin Alpha panel' })).toBeTruthy()
+    // FORK ruling: the ⋯ menu keeps full reachability — pins filter the rail launchers only.
+    expect(menu.getAllByRole('menuitem').map(row => row.textContent)).toEqual(['New Session', 'Beta panel', 'Alpha panel',
+      'Open Beta panel', 'Unpin Beta panel', 'Pin Alpha panel', 'Open Alpha panel', 'Dismiss'])
+    fireEvent.click(menu.getByRole('menuitem', { name: 'Pin Alpha panel' }))
+    expect(menu.getByRole('menuitem', { name: 'Unpin Alpha panel' })).toBeTruthy()
+
+    fireEvent.click(menu.getByRole('menuitem', { name: 'Open Alpha panel' }))
+    expect(layout.selectPanel).toHaveBeenLastCalledWith(ALPHA)
+    expect(view.getByRole('heading', { name: 'Alpha content' })).toBeTruthy()
+    await waitFor(() => { expect(view.queryByRole('menu')).toBeNull() })
+  })
+
+  it('drops the probe rows when its registration goes away', async () => {
+    const { runtime, locale, view } = await bench()
+    await mountPanels(runtime, locale)
+    const probe = await mountProbeActions(runtime)
+    await openPanelsMenu(view)
+    expect(view.getByRole('menuitem', { name: 'Dismiss' })).toBeTruthy()
+    await probe.dispose()
+    await waitFor(() => { expect(view.queryByRole('menuitem', { name: 'Dismiss' })).toBeNull() })
+  })
+
+  it('ignores an open request for a panel that is no longer registered', async () => {
+    const { runtime, locale, layout, view } = await bench()
+    const { alpha } = await mountPanels(runtime, locale)
+    await runtime.mount({
+      inject: ['slots'],
+      apply(ctx: Context) {
+        ctx.slots.inject('sidebar.panellist.actions', () => ctx.slots.register(
+          { name: 'sidebar.panellist.actions', id: 'stale' }, StaleOpen,
+        ))
+      },
+    })
+    await openPanelsMenu(view)
+    await alpha.dispose()
+    fireEvent.click(view.getByRole('menuitem', { name: 'Open removed panel' }))
+    expect(layout.selectPanel).not.toHaveBeenCalled()
+  })
+})
+
+describe('sidebar entry click analytics', () => {
+  async function analyticsBench() {
+    const track = vi.fn<TrackProductEvent>()
+    const b = await bench(false, track)
+    await mountPanels(b.runtime, b.locale)
+    await mountPanel(b.runtime, { id: PLUGINS, heading: 'Plugins content', label: 'Plugins', order: 0 })
+    await mountPanel(b.runtime, { id: SCHEDULES, heading: 'Automation content', label: 'Automation', order: 5 })
+    return { ...b, track }
+  }
+
+  it('reports the More trigger and the New Session head row first', async () => {
+    const { runtime, track, view, startSession } = await analyticsBench()
+    await mountProbeActions(runtime)
+    const trigger = await view.findByRole('button', { name: 'More' })
+    fireEvent.click(trigger)
+    expect(track).toHaveBeenLastCalledWith('sidebar_menu_click', { menu_name: 'more', position: 'sidebar' })
+    const menu = await view.findByRole('menu')
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'New Session' }))
+    expect(track).toHaveBeenLastCalledWith('sidebar_menu_click', { menu_name: 'new_session', position: 'sidebar' })
+    expect(track.mock.invocationCallOrder[1]).toBeLessThan(startSession.mock.invocationCallOrder[0]!)
+  })
+
+  it('reports official panel rows opened from the ⋯ menu at sidebar_more and leaves others unreported', async () => {
+    const { runtime, layout, track, view } = await analyticsBench()
+    await mountProbeActions(runtime, 'official', OfficialOpen)
+    await openPanelsMenu(view)
+    const menu = within(view.getByRole('menu'))
+    fireEvent.click(menu.getByRole('menuitem', { name: 'Plugins' }))
+    expect(track).toHaveBeenLastCalledWith('sidebar_menu_click', { menu_name: 'plugin', position: 'sidebar_more' })
+    expect(layout.selectPanel).toHaveBeenLastCalledWith(PLUGINS)
+    await openPanelsMenu(view)
+    fireEvent.click(within(view.getByRole('menu')).getByRole('menuitem', { name: 'Beta panel' }))
+    // The non-official row itself reports nothing; only the trigger's reopen did.
+    expect(track).toHaveBeenCalledTimes(3)
+    expect(track).toHaveBeenLastCalledWith('sidebar_menu_click', { menu_name: 'more', position: 'sidebar' })
+    // The probe's by-id rows report official opens too, and unregistered ids stay silent.
+    await openPanelsMenu(view)
+    fireEvent.click(within(view.getByRole('menu')).getByRole('menuitem', { name: 'Open Automation by id' }))
+    expect(track).toHaveBeenLastCalledWith('sidebar_menu_click', { menu_name: 'cron', position: 'sidebar_more' })
+    expect(layout.selectPanel).toHaveBeenLastCalledWith(SCHEDULES)
+  })
+
+  it('leaves the collapsed rail rows unreported for non-official panels', async () => {
+    const track = vi.fn<TrackProductEvent>()
+    const { runtime, locale, view } = await bench(true, track)
+    await mountPanels(runtime, locale)
+    const navigation = await view.findByRole('navigation', { name: 'Global panels' })
+    fireEvent.click(within(navigation).getByRole('button', { name: 'Alpha panel' }))
+    fireEvent.click(within(navigation).getByRole('button', { name: 'Beta panel' }))
+    // FORK ruling: non-official rail rows report nothing (upstream reports official rows only; none are mounted here).
+    expect(track).not.toHaveBeenCalled()
   })
 })
