@@ -236,6 +236,40 @@ public static class DshFileAssociations {
 }`
 
 /**
+ * Restore a display name whose registrant wrote ANSI (GBK) bytes straight into a
+ * UTF-16 field: the Shell then reports one code point per byte, so `百度网盘`
+ * (GBK `B0 D9 B6 C8 CD F8 C5 CC`) surfaces as `°Ù¶ÈÍøÅÌ` — the `°ÙÈïñåì`-shaped
+ * mojibake the open-in-app menu shows. Repair is deliberately narrow: every
+ * character must be a non-ASCII Latin-1 code unit and the whole byte sequence
+ * must decode strictly as GBK into CJK text. Correctly stored Unicode names
+ * (code units above U+00FF) and real Latin-1/ASCII names (any code unit below
+ * U+0080) never match that shape and pass through untouched; a name whose GBK
+ * bytes fall in the ASCII trail range likewise stays untouched rather than
+ * guessing. Display names only — identifiers stay byte-faithful so the open
+ * route keeps matching what the Shell reports.
+ * @param name - display name the Shell reported for a Windows handler.
+ * @returns the restored name, or the input unchanged when the shape does not match.
+ */
+export function repairWindowsAppName(name: string): string {
+  if (name.length < 2) return name
+  const bytes = new Uint8Array(name.length)
+  for (let index = 0; index < name.length; index++) {
+    const code = name.charCodeAt(index)
+    if (code < 0x80 || code > 0xff) return name
+    bytes[index] = code
+  }
+  let decoded: string
+  try {
+    decoded = new TextDecoder('gbk', { fatal: true }).decode(bytes)
+  } catch {
+    // A sequence GBK rejects (truncated pair, reserved lead) is not this shape.
+    return name
+  }
+  // The shape exists to carry Chinese product names; non-CJK results stay untouched.
+  return /[一-鿿]/.test(decoded) ? decoded : name
+}
+
+/**
  * Execute the Windows Shell adapter in a Unicode STA PowerShell process; the adapter
  * source is a private temporary script file, removed once the call settles.
  * @param path - Windows file path, translated by the caller for WSL.

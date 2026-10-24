@@ -711,6 +711,13 @@ export class ReactLoopAgent implements Agent {
         }
         throw error
       }
+      // Durable assistant row of this attempt: the blank-reject guard below
+      // may re-issue only while it is unset (a refused row never enters the
+      // log), and it flips the moment the append commits. Held as an object
+      // property so the flip inside settle's append callback stays visible to
+      // type analysis (a `let` binding reads as narrowed-to-false and trips
+      // no-unnecessary-condition).
+      const rowCommitted = { assistant: false }
       try {
         const finish = live.finish
         if (finish.kind === 'error' || finish.kind === 'aborted') {
@@ -746,13 +753,17 @@ export class ReactLoopAgent implements Agent {
         })
         live.settle(
           'assistant/message',
-          () => this.session.append('assistant/message', {
-            turn,
-            step,
-            message,
-            ...live.usage === undefined ? {} : { usage: live.usage },
-            stream: live.stream,
-          }, { surfaceOp: 'append' }).seq,
+          () => {
+            const seq = this.session.append('assistant/message', {
+              turn,
+              step,
+              message,
+              ...live.usage === undefined ? {} : { usage: live.usage },
+              stream: live.stream,
+            }, { surfaceOp: 'append' }).seq
+            rowCommitted.assistant = true
+            return seq
+          },
         )
         if (finish.kind === 'max-tokens') return { kind: 'max-tokens' }
 
@@ -766,6 +777,19 @@ export class ReactLoopAgent implements Agent {
       } catch (error: unknown) {
         if (!live.ended) live.abandon()
         if (!blankCallRetryUsed && isBlankToolCallRejection(error)) {
+          // J1 assertion (dual-review 2026-10-09, pinned 2026-10-24): a blank
+          // tool-call rejection can only originate at the assistant/message
+          // append site, which refuses the poisoned row before it enters the
+          // log — that is what makes the re-issue below idempotent. Once the
+          // row has committed, no later append on this attempt can still raise
+          // it: the post-commit path (executeToolCalls) replays call ids the
+          // append site already proved nonempty. Re-issuing here would commit
+          // a second assistant row for the same step, so fail loudly instead.
+          if (rowCommitted.assistant) {
+            throw new Error(
+              `agent "${this.id}": blank tool-call rejection after the assistant row committed (turn ${turn}, step ${step}): re-issuing would commit a second assistant row for the same step (rejection: ${String(error)})`,
+            )
+          }
           // The rejected row is not in the log (append refused it), so the
           // retry rebuilds the exact same request from durable history — the
           // model gets one fresh chance to emit a well-formed tool call.

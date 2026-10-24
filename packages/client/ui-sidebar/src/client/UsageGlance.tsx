@@ -43,11 +43,21 @@
  * snapshot and retry on the next tick. The whole control degrades to silence,
  * so the shell never depends on it.
  *
- * The OpenCode Go quota endpoint reports `percent` + `resetsAt` only (raw
- * response verified 2026-10-15; the three-window shape re-verified 2026-10-22),
- * so every read-out derives from those two fields alone: the percent pair for
- * the fill, and the window span — a month / seven days / five hours before the
- * reset — for the tick and the elapsed/total pair.
+ * v3 (FORK usage-glance v3, 2026-10-24): a window may carry an absolute
+ * water-line pair (`used`/`limit` — the host now sources OpenCode Go from
+ * console go/status, where the pair is authoritative and unrounded). The
+ * read-out stays percent-only (the `$used / $limit` column was ruled
+ * off-screen on 2026-10-24 to keep the v2.4.x three-column geometry); the
+ * pair instead feeds the switch trigger: `used / limit >= 0.85` marks the
+ * row, every marked row paints its percent figure in the error red, and the
+ * week/month rows — the two windows the A-plan trigger reads (go-plan
+ * 2026-10-22 §5) — also paint the fill solid red and append
+ * `glance.trigger.hint` ("switch to MiMo official") to their tooltip. The
+ * 5-hour row turns its figure only: a five-hour pool is not a switch signal.
+ * Windows without the pair (other providers, or a host still serving the
+ * pre-restart overview) never trigger. The fill for the tick still comes from
+ * the window's percent, and the span still derives from `resetsAt` — a month
+ * / seven days / five hours before the reset.
  *
  * Clicking the control opens the settings panel on the usage section by
  * replaying the user's own path — the shell owns the panel state and exposes
@@ -72,6 +82,13 @@ const DAY_MS = 86_400_000
 
 /** Hour length in ms (the 5-hour window's arithmetic unit). */
 const HOUR_MS = 3_600_000
+
+/**
+ * The A-plan switch threshold: a water line at 85% of its pool (go-plan
+ * 2026-10-22 §5), compared on the UNROUNDED `used/limit` pair — the percent
+ * column rounds, the trigger must not fire (or hold back) on the rounding.
+ */
+const TRIGGER_RATIO = 0.85
 
 /**
  * Figure space (U+2007): a digit-wide pad CSS white-space processing does NOT
@@ -119,6 +136,10 @@ interface PlanWindowView {
   key?: string
   percent?: number
   resetsAt?: string
+  /** Absolute water line consumed (currency units), when the host reports one. */
+  used?: number
+  /** Absolute window capacity (currency units), when the host reports one. */
+  limit?: number
 }
 
 /** One provider row of the overview the glance reads. */
@@ -173,6 +194,12 @@ export interface GlanceWindowRow {
   timeFraction?: number
   /** True when usage runs ahead of the clock (percent past the tick). */
   overPace?: boolean
+  /**
+   * True when the window carries an absolute water line at or over the switch
+   * threshold (`used / limit >= 0.85`, unrounded — v3 trigger, go-plan
+   * 2026-10-22 §5). Absent on windows without the pair.
+   */
+  trigger?: boolean
 }
 
 /** What the glance renders once an overview has been derived. */
@@ -388,10 +415,12 @@ export function formatRefreshStamp(at: number): string {
 }
 
 /**
- * Reduce an overview document to the glance's read-outs (FORK v2.4): one row
+ * Reduce an overview document to the glance's read-outs (FORK v2.4, v3): one row
  * per on-screen quota window (`month`/`week`/`5h`, display order) derived from
  * the picked provider row — percent always, time pair / tick / over-pace flag
- * when the window yields a span — plus the token column's facts. Each fact
+ * when the window yields a span, and the v3 switch trigger when the window
+ * carries an absolute `used/limit` pair at or over the threshold — plus the
+ * token column's facts. Each fact
  * degrades on its own: a host may report a ledger day without a plan (or the
  * reverse), a window missing or percent-less drops its whole row, and a row
  * without a span still reads its percent alone.
@@ -410,6 +439,10 @@ export function deriveGlance(overview: UsageOverviewView, now: number = Date.now
       const percent = Math.max(0, Math.min(100, Math.round(found.percent)))
       const time = windowTime(found, now)
       const row: GlanceWindowRow = { key, percent }
+      if (typeof found.used === 'number' && typeof found.limit === 'number' && found.limit > 0
+        && found.used / found.limit >= TRIGGER_RATIO) {
+        row.trigger = true
+      }
       if (time.elapsed !== undefined && time.total !== undefined && time.unit !== undefined) {
         row.elapsed = time.elapsed
         row.total = time.total
@@ -468,11 +501,13 @@ export interface UsageGlanceProps {
 }
 
 /**
- * Render the plan glance (FORK v2.4): one row per on-screen quota window —
+ * Render the plan glance (FORK v2.4, v3): one row per on-screen quota window —
  * short label, usage fill with the time-progress tick (overrun in warn), and
  * the right-aligned percent and time-pair columns — plus the 今日/周期 token rows in their own column
- * (refresh stamp in that column's tooltip), or nothing while the host half is
- * off. Rows the host does not report are absent; before the first load the
+ * (refresh stamp in that column's tooltip). A v3 triggered row (water line
+ * >= 85%) reds its percent figure; the week/month rows also paint the fill
+ * solid red and append the switch hint to the tooltip. Nothing renders while
+ * the host half is off. Rows the host does not report are absent; before the first load the
  * control shows only the token column's placeholders.
  * @param props - the shell's locale translator.
  * @returns the glance button, or null when the usage host serves no routes.
@@ -562,23 +597,44 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
               const overPaceSplit = row.overPace === true && tickPercent !== undefined
                 ? `${String(Math.round((tickPercent / row.percent) * 100))}%`
                 : undefined
+              // v3 switch trigger (go-plan 2026-10-22 §5): the unrounded
+              // used/limit pair is the authoritative read. The figure turns
+              // red on every marked row, while the solid-red fill and the
+              // switch hint belong to the week/month rows only — the windows
+              // the A-plan switch reads; the 5-hour pool is a water-level
+              // warning, not a switch signal. The solid red takes the
+              // over-pace gradient's place while the trigger holds (the tick
+              // still marks the pace).
+              const triggerOn = row.trigger === true
+              const triggerHint = triggerOn && (row.key === 'week' || row.key === 'month')
+              const rowTitle = triggerHint
+                ? `${t(WINDOW_TITLE_KEY[row.key])} · ${t('glance.trigger.hint')}`
+                : t(WINDOW_TITLE_KEY[row.key])
+              const fillTrigger = triggerOn && row.key !== '5h'
               const fillStyle: CSSProperties & Record<string, string> = {
                 width: `${String(row.percent)}%`,
                 ...(overPaceSplit === undefined ? {} : { '--glance-split': overPaceSplit }),
               }
+              const fillClass = [
+                css.glanceFill,
+                ...(overPaceSplit === undefined ? [] : [css.glanceFillOver]),
+                ...(fillTrigger ? [css.glanceFillTrigger] : []),
+              ].join(' ')
               return (
-                <span key={row.key} className={css.glanceRow} title={t(WINDOW_TITLE_KEY[row.key])}>
+                <span key={row.key} className={css.glanceRow} title={rowTitle}>
                   <span className={css.glanceLabel}>{t(WINDOW_LABEL_KEY[row.key])}</span>
                   <span className={css.glanceTrack}>
                     <span
-                      className={overPaceSplit === undefined ? css.glanceFill : `${css.glanceFill} ${css.glanceFillOver}`}
+                      className={fillClass}
                       style={fillStyle}
                     />
                     {tickPercent === undefined
                       ? null
                       : <span className={css.glanceTick} style={{ left: `${String(tickPercent)}%` }} />}
                   </span>
-                  <span className={css.glancePercent}>{`${String(row.percent)}%`.padStart(4, COLUMN_PAD)}</span>
+                  <span
+                    className={triggerOn ? `${css.glancePercent} ${css.glancePercentTrigger}` : css.glancePercent}
+                  >{`${String(row.percent)}%`.padStart(4, COLUMN_PAD)}</span>
                   <span className={css.glancePair}>{pair.padStart(6, COLUMN_PAD)}</span>
                 </span>
               )

@@ -809,6 +809,21 @@
   color: var(--dsw-alias-label-secondary);
 }
 
+/* FORK (usage glance v3, 2026-10-24): the >=85% switch-trigger row (the
+   water line at the A-plan threshold, go-plan 2026-10-22 §5) — the percent
+   figure paints in the error red on every marked row. */
+.glancePercentTrigger {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+/* FORK (usage glance v3): the week/month rows' fill goes solid error red
+   while the trigger holds — declared after .glanceFillOver so it wins the
+   same-specificity race and covers the over-pace split (the alarm outranks
+   the pace split; the tick still marks the pace). */
+.glanceFillTrigger {
+  background: var(--dsw-alias-state-error-primary);
+}
+
 /* FORK dsh-local (usage glance v2.3, 2026-10-22): the stats column stacks two
    labeled rows — a muted 10px locale label (今日 / 周期) beside a 12px compact
    total — in their own sub-column to the right of the window rows; the cycle

@@ -1,7 +1,7 @@
 /** Native file associations queried from the desktop that owns the path. */
 import { runNativeCommand } from './runner.ts'
 import { linuxFileApplications } from './file-applications-linux.ts'
-import { windowsFileApplications } from './file-applications-windows.ts'
+import { repairWindowsAppName, windowsFileApplications } from './file-applications-windows.ts'
 import { nativeFileManager } from './path-opener.ts'
 import type { PathOpenerInternals } from './path-opener.ts'
 import { parseNativeFileApplications, type NativeFileApplication } from './types.ts'
@@ -77,7 +77,9 @@ async function queryFileApplications(
   }
   if (target.platform !== 'win32') return []
   const stdout = await windowsFileApplications(target.path, null, signal, run)
+  // Windows display names may carry byte-widened ANSI registrations; identifiers stay as reported.
   return parseNativeFileApplications(JSON.parse(stdout))
+    .map(entry => ({ ...entry, name: repairWindowsAppName(entry.name) }))
 }
 
 /** One validated macOS handler with the grouping metadata the display query strips. */

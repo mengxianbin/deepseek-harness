@@ -20,6 +20,7 @@ export const zh = {
   'glance.today.label': '今日',
   'glance.cycle.label': '周期',
   'glance.refreshed': '数据刷新于',
+  'glance.trigger.hint': '≥85%：切 MiMo 官方',
 } satisfies Record<string, string>
 
 /** The sidebar namespace key union. */
@@ -45,4 +46,5 @@ export const en = {
   'glance.today.label': 'Today',
   'glance.cycle.label': 'Cycle',
   'glance.refreshed': 'Refreshed',
+  'glance.trigger.hint': '≥85%: switch to MiMo official',
 } satisfies Record<SidebarKey, string>
