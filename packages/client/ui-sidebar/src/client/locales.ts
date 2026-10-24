@@ -20,7 +20,14 @@ export const zh = {
   'glance.today.label': '今日',
   'glance.cycle.label': '周期',
   'glance.refreshed': '数据刷新于',
-  'glance.trigger.hint': '≥85%：切 MiMo 官方',
+  // 双层口径（2026-10-24 裁定）：85% 只是 UI 预警红层，99% 才是自动动作线。
+  'glance.trigger.hint': '≥85% 预警；99% 自动切 MiMo',
+  'glance.source.label': '源',
+  'glance.source.go': 'OpenCode Go',
+  'glance.source.mimo': 'MiMo 官方',
+  'glance.source.baseline': '常态',
+  'glance.source.triggered': '自动切换中',
+  'glance.source.decided': '最近决策',
 } satisfies Record<string, string>
 
 /** The sidebar namespace key union. */
@@ -46,5 +53,12 @@ export const en = {
   'glance.today.label': 'Today',
   'glance.cycle.label': 'Cycle',
   'glance.refreshed': 'Refreshed',
-  'glance.trigger.hint': '≥85%: switch to MiMo official',
+  // Double-layer ruling (2026-10-24): 85% is the UI warning red, 99% the auto-action line.
+  'glance.trigger.hint': '≥85% warn; auto-switch at 99% to MiMo',
+  'glance.source.label': 'Source',
+  'glance.source.go': 'OpenCode Go',
+  'glance.source.mimo': 'MiMo official',
+  'glance.source.baseline': 'Baseline',
+  'glance.source.triggered': 'Auto-switched',
+  'glance.source.decided': 'Decided',
 } satisfies Record<SidebarKey, string>

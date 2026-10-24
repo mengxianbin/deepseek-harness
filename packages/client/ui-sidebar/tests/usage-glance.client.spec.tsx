@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
-import { deriveGlance, formatCompactTokens, formatRefreshStamp, openUsageSection, UsageGlance, type GlanceWindowRow, type UsageOverviewView } from '../src/client/UsageGlance.tsx'
+import { deriveGlance, formatCompactTokens, formatRefreshStamp, openUsageSection, readSourceBadge, UsageGlance, type GlanceWindowRow, type UsageOverviewView } from '../src/client/UsageGlance.tsx'
 import { en } from '../src/client/locales.ts'
 
 const t = makeTranslate({ ...commonEn, ...en })
@@ -463,18 +463,20 @@ describe('UsageGlance', () => {
 
   it('refreshes on the poll cadence and on visibility changes', async () => {
     vi.useFakeTimers()
+    // Each load cycle issues two same-origin reads: the overview AND the
+    // auto-route status the current-source badge consumes (v3.5).
     const fetchMock = vi.fn(async () => ({ status: 200, ok: true, json: async () => OVERVIEW }))
     vi.stubGlobal('fetch', fetchMock)
     render(<UsageGlance t={t} />)
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
     expect(fetchMock).toHaveBeenCalledTimes(2)
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    expect(fetchMock).toHaveBeenCalledTimes(4)
     await act(async () => {
       document.dispatchEvent(new Event('visibilitychange'))
       await vi.advanceTimersByTimeAsync(0)
     })
-    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock).toHaveBeenCalledTimes(6)
   })
 
   it('replays the user path onto the usage section', async () => {
@@ -554,5 +556,90 @@ describe('UsageGlance', () => {
     expect(triggerClicks).toBe(1)
     await flush()
     expect(document.querySelectorAll('[data-settings-section]')).toHaveLength(0)
+  })
+})
+
+describe('readSourceBadge — the policy-layer read (auto-route badge, v3.5)', () => {
+  it('drops foreign and partial payloads — the dot is absent, never wrong', () => {
+    expect(readSourceBadge(undefined)).toBeUndefined()
+    expect(readSourceBadge(null)).toBeUndefined()
+    expect(readSourceBadge('status')).toBeUndefined()
+    expect(readSourceBadge({})).toBeUndefined()
+    expect(readSourceBadge({ policy: {} })).toBeUndefined()
+    expect(readSourceBadge({ policy: { effectiveSource: '' } })).toBeUndefined()
+    // The overview document itself carries no policy layer.
+    expect(readSourceBadge(OVERVIEW)).toBeUndefined()
+  })
+
+  it('parses phase, source, and a finite decision stamp only', () => {
+    expect(readSourceBadge({ policy: { effectiveSource: 'mimo', phase: 'triggered', lastDecisionAt: 123 } }))
+      .toEqual({ source: 'mimo', triggered: true, decidedAt: 123 })
+    expect(readSourceBadge({ policy: { effectiveSource: 'opencode-go', phase: 'baseline' } }))
+      .toEqual({ source: 'opencode-go', triggered: false })
+    // A non-finite stamp is dropped rather than rendered as Invalid Date.
+    expect(readSourceBadge({ policy: { effectiveSource: 'x', phase: 'baseline', lastDecisionAt: Number.NaN } }))
+      .toEqual({ source: 'x', triggered: false })
+    expect(readSourceBadge({ policy: { effectiveSource: 'deepseek-official', phase: 'other' } }))
+      .toEqual({ source: 'deepseek-official', triggered: false })
+  })
+})
+
+describe('current-source badge (auto-route, v3.5)', () => {
+  /** The status route contract (host-only endpoint; loopback in production). */
+  const STATUS_ROUTE = '/api/auto-route/status'
+
+  it('renders the dot at baseline and repaints it when the policy switches (closed-loop criterion)', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+    let status: unknown = {
+      ok: true,
+      service: 'dsh-auto-route',
+      policy: { phase: 'baseline', effectiveSource: 'opencode-go', lastDecisionAt: NOW - 5_000 },
+    }
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => ({
+      status: 200,
+      ok: true,
+      json: async () => (url === STATUS_ROUTE ? status : OVERVIEW),
+    })))
+    const { container } = render(<UsageGlance t={t} />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    const dot = () => container.querySelector('[class*="glanceSourceDot"]')
+    expect(dot()?.className).toContain('glanceSourceDot')
+    expect(dot()?.className).not.toContain('glanceSourceDotActive')
+    expect(dot()?.getAttribute('title')).toBe(
+      `${t('glance.source.label')}: ${t('glance.source.go')}`
+      + ` · ${t('glance.source.baseline')}`
+      + ` · ${t('glance.source.decided')} ${formatRefreshStamp(NOW - 5_000)}`,
+    )
+    // The controller's trigger edge (any window >= 0.99) flips the policy to
+    // mimo; the next cycle repaints the dot — the badge-change criterion of
+    // the auto-route closed loop, observed from the UI side.
+    status = { ok: true, service: 'dsh-auto-route', policy: { phase: 'triggered', effectiveSource: 'mimo', lastDecisionAt: NOW } }
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    expect(dot()?.className).toContain('glanceSourceDotActive')
+    expect(dot()?.getAttribute('title')).toContain(t('glance.source.mimo'))
+    expect(dot()?.getAttribute('title')).toContain(t('glance.source.triggered'))
+    expect(dot()?.getAttribute('title')).toContain(t('glance.source.decided'))
+  })
+
+  it('keeps the overview snapshot alive when the status fetch fails', async () => {
+    // Real timers: waitFor's polling needs them (the cadence test above owns
+    // the fake-timer surface).
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (url === STATUS_ROUTE
+      ? { status: 503, ok: false, json: async () => ({}) }
+      : { status: 200, ok: true, json: async () => OVERVIEW })))
+    const { container } = render(<UsageGlance t={t} />)
+    // The rows still render; the dot is simply absent.
+    expect(await screen.findByText('85%')).toBeTruthy()
+    expect(container.querySelectorAll('[class*="glanceSourceDot"]')).toHaveLength(0)
+  })
+
+  it('hides the dot when the controller is absent (404)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (url === STATUS_ROUTE
+      ? { status: 404, ok: false, json: async () => ({}) }
+      : { status: 200, ok: true, json: async () => OVERVIEW })))
+    const { container } = render(<UsageGlance t={t} />)
+    expect(await screen.findByText('85%')).toBeTruthy()
+    expect(container.querySelectorAll('[class*="glanceSourceDot"]')).toHaveLength(0)
   })
 })

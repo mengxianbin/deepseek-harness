@@ -59,6 +59,20 @@
  * the window's percent, and the span still derives from `resetsAt` — a month
  * / seven days / five hours before the reset.
  *
+ * v3.5 (FORK auto-route-1024, 2026-10-25): a current-source status dot rides
+ * left of the window rows — the badge for the auto-routing controller
+ * (`dsh-auto-route`, ruling form 乙). It reads the controller's own policy
+ * state at `GET /api/auto-route/status` (same origin, same cadence; a 404 —
+ * controller not installed — hides it, so the badge degrades together with
+ * the feature), never the overview's `current{provider,model,source}` — that
+ * is last-request-routing semantics and would flap while both sources run
+ * (三层解耦契约「策略层配置化」: the badge is a pure policy-layer consumer).
+ * The dot is quiet secondary at baseline and warn while the policy is
+ * triggered (the controller switched the active set to MiMo official); its
+ * tooltip spells the source name, the phase, and the last decision time. The
+ * dot is a width-only addition — the wide titlebar logo row's 40px height
+ * budget (3 × 12px rows + 4px padding) stays untouched.
+ *
  * Clicking the control opens the settings panel on the usage section by
  * replaying the user's own path — the shell owns the panel state and exposes
  * no service for it, so every step degrades silently.
@@ -70,6 +84,9 @@ import type { SidebarKey } from './locales.ts'
 
 /** Same-origin overview the dsh-usage host half serves. */
 const OVERVIEW_ROUTE = '/api/dsh-usage/overview'
+
+/** Same-origin policy status the dsh-auto-route host half serves (badge authority). */
+const AUTO_ROUTE_STATUS_ROUTE = '/api/auto-route/status'
 
 /** Request ceiling: a stalled host must not pile up glance fetches. */
 const GLANCE_TIMEOUT_MS = 10_000
@@ -212,6 +229,50 @@ export interface GlanceState {
   cycleTokens?: number
   /** True when the trend window omits in-cycle days — the total is a floor. */
   cycleTruncated?: boolean
+}
+
+/** One current-source badge reading, from the auto-route controller's policy layer. */
+export interface SourceBadgeView {
+  /** Provider id the policy considers in force (rendered via the locale map; raw id as fallback). */
+  source: string
+  /** True while the policy sits in its triggered (switched) phase. */
+  triggered: boolean
+  /** Epoch ms of the last policy decision, when the host reported one. */
+  decidedAt?: number
+}
+
+/** The source name for the dot's tooltip (the raw id when the locale map lacks it). */
+export function sourceBadgeName(t: (key: SidebarKey) => string, source: string): string {
+  const key: SidebarKey | undefined = source === 'opencode-go'
+    ? 'glance.source.go'
+    : source === 'mimo'
+      ? 'glance.source.mimo'
+      : undefined
+  return key === undefined ? source : t(key)
+}
+
+/**
+ * Reduce the auto-route status document to the badge facts. Foreign or
+ * partial payloads (a host without the controller, an older one) read as
+ * "no badge" — the dot is absent, never wrong.
+ * @param document_ - the parsed `/api/auto-route/status` body.
+ * @returns the badge facts, or undefined when the policy layer is absent.
+ */
+export function readSourceBadge(document_: unknown): SourceBadgeView | undefined {
+  if (typeof document_ !== 'object' || document_ === null) return undefined
+  const policy = (document_ as { policy?: unknown }).policy
+  if (typeof policy !== 'object' || policy === null) return undefined
+  const { effectiveSource, phase, lastDecisionAt } = policy as {
+    effectiveSource?: unknown
+    phase?: unknown
+    lastDecisionAt?: unknown
+  }
+  if (typeof effectiveSource !== 'string' || effectiveSource === '') return undefined
+  return {
+    source: effectiveSource,
+    triggered: phase === 'triggered',
+    ...(typeof lastDecisionAt === 'number' && Number.isFinite(lastDecisionAt) ? { decidedAt: lastDecisionAt } : {}),
+  }
 }
 
 /**
@@ -516,6 +577,7 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
   const [state, setState] = useState<GlanceState | null>(null)
   const [hostOff, setHostOff] = useState(false)
   const [refreshedAt, setRefreshedAt] = useState<number | undefined>(undefined)
+  const [sourceBadge, setSourceBadge] = useState<SourceBadgeView | undefined>(undefined)
 
   useEffect(() => {
     let alive = true
@@ -540,6 +602,25 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
         setHostOff(false)
       } catch {
         // Keep the last snapshot; the next tick retries.
+      }
+      // The current-source badge rides the same load in its own failure
+      // domain: an absent (404) or failing controller only hides/keeps the
+      // dot, never touching the overview snapshot above.
+      try {
+        const badgeResponse = await fetch(AUTO_ROUTE_STATUS_ROUTE, {
+          headers: { accept: 'application/json' },
+          cache: 'no-store',
+          signal: AbortSignal.timeout(GLANCE_TIMEOUT_MS),
+        })
+        if (!alive || mine !== seq) return
+        if (badgeResponse.status === 404) {
+          setSourceBadge(undefined)
+          return
+        }
+        if (!badgeResponse.ok) throw new Error('auto-route status ' + String(badgeResponse.status))
+        setSourceBadge(readSourceBadge(await badgeResponse.json()))
+      } catch {
+        // Keep the last badge; the next tick retries.
       }
     }
     void load()
@@ -579,6 +660,22 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
         onClick={() => { openUsageSection() }}
       >
         <span className={css.glanceBody}>
+          {sourceBadge === undefined
+            ? null
+            : (
+              <span
+                className={sourceBadge.triggered
+                  ? `${css.glanceSourceDot} ${css.glanceSourceDotActive}`
+                  : css.glanceSourceDot}
+                title={[
+                  `${t('glance.source.label')}: ${sourceBadgeName(t, sourceBadge.source)}`,
+                  t(sourceBadge.triggered ? 'glance.source.triggered' : 'glance.source.baseline'),
+                  ...(sourceBadge.decidedAt === undefined
+                    ? []
+                    : [`${t('glance.source.decided')} ${formatRefreshStamp(sourceBadge.decidedAt)}`]),
+                ].join(' · ')}
+              />
+            )}
           <span className={css.glanceRows}>
             {windows.map((row) => {
               // The tick sits at the continuous elapsed share of the window;
