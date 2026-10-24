@@ -22,7 +22,7 @@
 
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readlinkSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
@@ -255,16 +255,36 @@ export function computeConfigStamp(dshHome: string, registryQuery: string): stri
   for (const profileDir of profileDirectories(dshHome)) {
     for (const file of PROFILE_CONFIG_FILES) {
       const path = join(profileDir, file)
-      try {
-        const content = readFileSync(path)
+      const content = readConfigFile(path)
+      if (content !== undefined) {
         lines.push(`file:${path.replace(/\\/g, '/')}=${createHash('sha256').update(content).digest('hex')}`)
-      } catch {
-        // Absent profile files simply do not contribute a line.
       }
     }
   }
   lines.sort()
   return sha256(lines.join('\n'))
+}
+
+/**
+ * Read one configuration file, following a single link hop when the runtime
+ * position itself cannot be opened: the repo-managed profile patches sit
+ * behind junctions whose target is a file, a shape plain reads reject with
+ * ENOENT while the loader's linked-path resolution reads fine. The
+ * fingerprint must see the same bytes the loader sees, or an edit to the
+ * primary profile patch never moves S_cfg.
+ * @param path - Runtime position of the configuration file.
+ * @returns The file bytes, or `undefined` when neither the path nor one link hop opens.
+ */
+function readConfigFile(path: string): Buffer | undefined {
+  try {
+    return readFileSync(path)
+  } catch {
+    try {
+      return readFileSync(readlinkSync(path))
+    } catch {
+      return undefined
+    }
+  }
 }
 
 function profileDirectories(dshHome: string): string[] {

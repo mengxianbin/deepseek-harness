@@ -12,7 +12,8 @@
     "src/restart-host.ts",
     "src/restart-signal.ts",
     "src/restart-signal-host.ts",
-    "src/restart-stamp.ts"
+    "src/restart-stamp.ts",
+    "src/stamp-poll-host.ts"
   ],
   "references": [
     { "path": "../../../vendor/cordis" },

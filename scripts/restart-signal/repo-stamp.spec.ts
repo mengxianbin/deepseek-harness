@@ -6,7 +6,7 @@
  * stay out of both.
  */
 import { execFileSync } from 'node:child_process'
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -67,6 +67,19 @@ describe('source stamps', () => {
     const root = fixtureRepository()
     const before = repoStateStamp(root)
     appendFileSync(join(root, 'a.ts'), '// edit\n')
+    expect(repoStateStamp(root)).not.toBe(before)
+  })
+
+  it('treats a tree dirtied only by runtime data as clean for the repo stamp', () => {
+    const root = fixtureRepository()
+    const before = repoStateStamp(root)
+    mkdirSync(join(root, 'sessions', 'workspace-1'), { recursive: true })
+    writeFileSync(join(root, 'sessions', 'workspace-1', 'session.jsonl'), 'turn\n')
+    writeFileSync(join(root, 'dsh-restart.log'), 'restart\n')
+    // Runtime directories and logs are data, not source: neither their
+    // porcelain lines nor their bytes may move the change detector.
+    expect(repoStateStamp(root)).toBe(before)
+    appendFileSync(join(root, 'a.ts'), '// real source edit\n')
     expect(repoStateStamp(root)).not.toBe(before)
   })
 })

@@ -123,14 +123,20 @@ function diskIdentity(root: string, path: string): string {
  * @returns sha256 hex over the design-defined layers.
  */
 export function repoStateStamp(root: string): string {
-  const porcelain = git(root, ['status', '--porcelain'])
+  // Runtime data churn (sessions, storages, logs) is not source churn: the
+  // porcelain layer filters it the way the untracked-content layer and
+  // `facePathsSignature`'s porcelain filter already do, and a tree dirtied
+  // only by runtime data stamps as clean. (Quoted porcelain paths keep their
+  // leading quote; the segment match still lands for directory churn.)
+  const porcelainLines = git(root, ['status', '--porcelain']).toString('utf8')
+    .split('\n')
+    .filter(line => line !== '' && !isRuntimeData(line.slice(3)))
   const hash = createHash('sha256')
   hash.update('HEAD ')
   hash.update(git(root, ['rev-parse', 'HEAD']))
   hash.update('\nPORCELAIN\n')
-  hash.update(porcelain)
-  const clean = porcelain.toString('utf8').trim() === ''
-  if (!clean) {
+  hash.update(porcelainLines.join('\n'))
+  if (porcelainLines.length > 0) {
     hash.update('\nDIFF\n')
     hash.update(git(root, ['diff', 'HEAD']))
     hash.update('\nUNTRACKED\n')

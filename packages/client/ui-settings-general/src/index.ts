@@ -8,6 +8,7 @@ import z from '@deepseek-ai/schemastery'
 import { registerRestart } from './restart-host.ts'
 import { registerRestartSignal } from './restart-signal-host.ts'
 import { restartStamp } from './restart-stamp.ts'
+import { registerStampPoll } from './stamp-poll-host.ts'
 
 /** Runtime preferences projected to the browser. */
 export interface Config {
@@ -28,6 +29,10 @@ export const Config = z.object({
  */
 export function apply(ctx: Context): void {
   restartStamp()
+  // The polling sensor (design triggers ① and ②) needs neither route
+  // service: it captures source and configuration fingerprints on its own
+  // interval and fires the state machine's recheck when they move.
+  registerStampPoll(ctx)
   ctx.inject(['settings'], (child) => { child.effect(() => child.settings.configure({ auto: false }, ctx.fiber)) })
   // Both routes ride Connection's authenticated exact-route fence; the dispatch additionally
   // gates on the configured command and the served-page injection table.

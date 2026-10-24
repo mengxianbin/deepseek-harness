@@ -4,7 +4,7 @@
  * host face hash plus an S_cfg snapshot once every manifest exists, and the
  * capability gate that keeps stamp-less linked repositories out of scope.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -119,6 +119,23 @@ describe('config stamp', () => {
     writeFileSync(profileFile, '[plugin]\n')
     expect(computeConfigStamp(dshHome, '')).not.toBe(base)
     expect(computeConfigStamp(dshHome, '    DSH_HOME    REG_SZ    D:\\somewhere')).not.toBe(base)
+  })
+
+  it('sees an edit behind a linked profile file (the runtime junction form)', () => {
+    // The repo-managed profile patches sit at runtime positions that are
+    // junctions pointing at a FILE; plain reads reject that shape while the
+    // loader follows the link. The fingerprint must follow it too, or an
+    // edit to the primary profile patch never moves S_cfg.
+    const dshHome = fixtureRoot('dsh-restart-stamp-cfglink-')
+    const targetDir = fixtureRoot('dsh-restart-stamp-target-')
+    const target = join(targetDir, 'patch.yml')
+    writeFileSync(target, '[]\n')
+    mkdirSync(join(dshHome, 'profiles', 'web'), { recursive: true })
+    symlinkSync(target, join(dshHome, 'profiles', 'web', 'cordis.patch.yml'), 'file')
+    const base = computeConfigStamp(dshHome, '')
+
+    writeFileSync(target, '- id: moved\n')
+    expect(computeConfigStamp(dshHome, '')).not.toBe(base)
   })
 })
 
