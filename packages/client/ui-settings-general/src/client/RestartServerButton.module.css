@@ -1,0 +1,31 @@
+/* Compact restart control, same 28x28 box and rounding as the panel's close control. */
+.restart {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  cursor: pointer;
+  color: var(--dsw-alias-label-primary);
+}
+
+.restart:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* Dispatch outcome line, squeezed between the trigger and the connection pill. */
+.notice {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

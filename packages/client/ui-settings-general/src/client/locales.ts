@@ -45,6 +45,14 @@ export const zh = {
   'hostRelease.later': '暂不刷新',
   'authExpired.title': '登录已过期 —— 请重新打开 dsh web 打印的网址',
   'authExpired.hint': '这不是网络故障，等待重连不会自愈。',
+  'restart.button': '重启服务器',
+  'restart.confirm.title': '重启服务器？',
+  'restart.confirm.description.zero': '当前没有正在执行的会话。重启会短暂中断服务，随后自动恢复。',
+  'restart.confirm.description.some': '有 {n} 个会话正在执行，重启会中断这些会话。重启后本页面会自动重新连接。',
+  'restart.confirm.confirm': '重启',
+  'restart.confirm.cancel': '取消',
+  'restart.accepted': '重启指令已发送，服务器即将重启。',
+  'restart.failed': '重启指令发送失败，请重试。',
 } satisfies Record<string, string>
 
 /** The settings namespace key union. */
@@ -95,4 +103,12 @@ export const en = {
   'hostRelease.later': 'Not now',
   'authExpired.title': 'Sign-in expired — reopen the URL printed by dsh web',
   'authExpired.hint': 'This is not a network fault: waiting for reconnection will not recover it.',
+  'restart.button': 'Restart server',
+  'restart.confirm.title': 'Restart the server?',
+  'restart.confirm.description.zero': 'No sessions are running. The restart briefly interrupts the service, then it recovers on its own.',
+  'restart.confirm.description.some': '{n} sessions are running and will be interrupted by the restart. This page reconnects automatically afterwards.',
+  'restart.confirm.confirm': 'Restart',
+  'restart.confirm.cancel': 'Cancel',
+  'restart.accepted': 'Restart dispatched. The server is restarting.',
+  'restart.failed': 'Could not dispatch the restart. Please try again.',
 } satisfies Record<SettingsKey, string>

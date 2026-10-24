@@ -54,6 +54,10 @@ export type SettingsRootInjected = {
     sections: HostObservable<readonly SettingsSectionRow[]>
     /** settings.onboarding ledger projected into coordinator order. */
     onboardingSteps: HostObservable<readonly SettingsOnboardingStep[]>
+    /** Whether the Host configured a restart command for this page; false hides the button. */
+    restartConfigured: HostObservable<boolean>
+    /** Sessions currently running, named in the restart confirmation copy. */
+    restartRunningSessions: HostObservable<number>
   }
 }
 

@@ -11,6 +11,7 @@ import { createClientTest, type TestClient, webApp } from '@deepseek-ai/dsh-clie
 import { inject } from '../src/client/index.ts'
 import type { SettingsRootInjected } from '../src/client/shell-contract.ts'
 import { SettingsRoot } from '../src/client/SettingsRoot.tsx'
+import { RESTART_GLOBAL } from '../src/restart.ts'
 import type { DesktopUpdatePresentation } from '../src/types.ts'
 
 const SELF = '@deepseek-ai/dsh-client-ui-settings-general'
@@ -77,7 +78,23 @@ describe('ui-settings-general shell', () => {
   }, COLD_BOOT_TIMEOUT_MS)
 
   it('declares its services', () => {
-    expect(inject).toEqual(['slots', 'locale', 'connection', 'remote', 'remote.settings', 'configForms', 'shortcuts', 'modules'])
+    expect(inject).toEqual([
+      'slots', 'locale', 'connection', 'remote', 'remote.settings', 'configForms', 'shortcuts', 'modules', 'uiSession',
+    ])
+  })
+
+  it('publishes the restart hooks with no capability while the page announces none', async ({ start }) => {
+    const c = await start()
+    const { restartConfigured, restartRunningSessions } = injectedOf(c).hooks
+    expect(restartConfigured.getSnapshot()).toBe(false)
+    expect(restartRunningSessions.getSnapshot()).toBe(0)
+  })
+
+  it('reads a configured restart capability announced by the served page global', async ({ start }) => {
+    vi.stubGlobal(RESTART_GLOBAL, { configured: true })
+    onTestFinished(() => { vi.unstubAllGlobals() })
+    const c = await start()
+    expect(injectedOf(c).hooks.restartConfigured.getSnapshot()).toBe(true)
   })
 
   it('occupies sidebar.settings, declared by ui-sidebar, and declares every child slot', async ({ start }) => {

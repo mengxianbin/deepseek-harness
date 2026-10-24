@@ -47,6 +47,8 @@ function mount({
   desktopUpdate = { failed: false, opening: false },
   onboardingActive = true,
   mainView = true,
+  restartConfigured = false,
+  restartRunningSessions = 0,
   rows = [
     { id: 'general', order: 0, label: 'General' },
     { id: 'models', order: 10, label: 'Models' },
@@ -64,6 +66,8 @@ function mount({
   desktopUpdate?: DesktopUpdateView
   onboardingActive?: boolean
   mainView?: boolean
+  restartConfigured?: boolean
+  restartRunningSessions?: number
   rows?: Row[]
   steps?: Step[]
 } = {}) {
@@ -120,6 +124,8 @@ function mount({
       return select(currentConnectionState)
     },
     useOnboardingSteps: select => select(steps),
+    useRestartConfigured: select => select(restartConfigured),
+    useRestartRunningSessions: select => select(restartRunningSessions),
     useSections: (select) => {
       const [, force] = useState(0)
       useEffect(() => {
@@ -528,4 +534,29 @@ it('passes current Settings key labels to the launcher and removes them when unb
 
   setShortcuts([{ ...row, keys: [], aria: undefined, binding: null, modified: true }])
   expect(launcher()).not.toHaveProperty('settingsShortcut')
+})
+
+it('shows no restart control until the Host announced a restart command', () => {
+  mount()
+  expect(screen.queryByRole('button', { name: 'Restart server' })).toBeNull()
+})
+
+it('keeps the restart control out of the collapsed rail', () => {
+  mount({ wide: false, restartConfigured: true })
+  expect(screen.queryByRole('button', { name: 'Restart server' })).toBeNull()
+})
+
+it('uses the localized restart label', () => {
+  mount({ dictionary: zh, restartConfigured: true })
+  expect(screen.getByRole('button', { name: '重启服务器' })).toBeTruthy()
+})
+
+it('places the restart control in the trigger row ahead of the connection indicator', () => {
+  mount({ restartConfigured: true, connectionState: 'disconnected' })
+  const restart = screen.getByRole('button', { name: 'Restart server' })
+  const settings = screen.getByRole('button', { name: 'Settings' })
+  const indicator = screen.getByRole('button', { name: 'Disconnected, reconnect now' })
+  expect(restart.parentElement?.contains(settings)).toBe(true)
+  expect(settings.compareDocumentPosition(restart) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0)
+  expect(restart.compareDocumentPosition(indicator) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0)
 })
