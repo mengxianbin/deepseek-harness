@@ -137,6 +137,34 @@ it('encodes Windows query and invocation data separately from native adapter sou
   expect(scripts[1]!).toMatch(/^\uFEFF/)
 })
 
+it('restores byte-widened ANSI display names reported by the Windows Shell', async () => {
+  // Captured from SHAssocEnumHandlers on 2026-10-24: BaiduNetdisk registers
+  // 百度网盘 as GBK bytes in a UTF-16 field, so the Shell reports one code
+  // point per byte (°Ù¶ÈÍøÅÌ) — the open-in-app menu's mojibake.
+  const run = vi.fn<runner.NativeCommandRunner>(async () => ({ stdout: JSON.stringify([
+    { id: 'C:\\Users\\x\\BaiduNetdisk.exe', name: '°Ù¶ÈÍøÅÌ', default: true, icon: null },
+    { id: '看图', name: '看图', default: false, icon: null },
+    { id: 'C:\\apps\\code.exe', name: 'Visual Studio Code', default: false, icon: null },
+    { id: 'C:\\apps\\fr.exe', name: 'Déjà Vu', default: false, icon: null },
+  ]), stderr: '' }))
+  const apps = await nativeFileApplications('C:\\work\\报告.md', signal, { platform: 'win32', run })
+  expect(apps.map(app => app.name)).toEqual(['百度网盘', '看图', 'Visual Studio Code', 'Déjà Vu'])
+  // Identifiers stay byte-faithful: the open route matches what the Shell reports.
+  expect(apps[0]!.id).toBe('C:\\Users\\x\\BaiduNetdisk.exe')
+})
+
+it.each([
+  ['a single code unit', '°'],
+  ['a truncated GBK pair', '°ÙÈ'],
+  ['a non-CJK GBK sequence', '¡¡'],
+])('keeps the Windows display name %s untouched', async (_label, name) => {
+  const run = vi.fn<runner.NativeCommandRunner>(async () => ({ stdout: JSON.stringify([
+    { id: 'C:\\apps\\entry.exe', name, default: false, icon: null },
+  ]), stderr: '' }))
+  const apps = await nativeFileApplications('C:\\work\\a.md', signal, { platform: 'win32', run })
+  expect(apps[0]!.name).toBe(name)
+})
+
 it('keeps the complete Windows command line below the CreateProcess limit for long multibyte paths', async () => {
   const run = vi.fn<runner.NativeCommandRunner>(async () => ({ stdout: '[]', stderr: '' }))
   const paths = [
