@@ -9,13 +9,15 @@
     "src/index.ts",
     "src/types.ts",
     "src/restart.ts",
-    "src/restart-host.ts"
+    "src/restart-host.ts",
+    "src/restart-stamp.ts"
   ],
   "references": [
     { "path": "../../../vendor/cordis" },
     { "path": "../../../vendor/schemastery" },
     { "path": "../../settings/settings" },
     { "path": "../connection/tsconfig.host.json" },
-    { "path": "../../host/webserver" }
+    { "path": "../../host/webserver" },
+    { "path": "../../util/home-paths" }
   ]
 }

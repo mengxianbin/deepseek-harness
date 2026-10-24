@@ -19,7 +19,7 @@
     "./locale/*.json": "./locale/*.json"
   },
   "scripts": {
-    "bundle": "tsdown",
+    "bundle": "tsx ../../scripts/restart-signal/build-stamp.ts run --faces auto -- tsdown",
     "watch": "tsdown --watch"
   },
   "license": "MIT",
