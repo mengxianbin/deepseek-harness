@@ -114,7 +114,13 @@ function findRepositoryRoot(startDir: string): string | undefined {
   }
 }
 
-function defaultRepositoryRoot(): string {
+/**
+ * The repository tree owning this module: the nearest directory above it
+ * holding `pnpm-workspace.yaml`.
+ * @returns The absolute repository root.
+ * @throws If no workspace root exists above this module.
+ */
+export function defaultRepositoryRoot(): string {
   // import.meta.url points at this module's file: source under src/, built under lib/.
   const moduleDir = dirname(fileURLToPath(import.meta.url))
   const root = findRepositoryRoot(moduleDir)

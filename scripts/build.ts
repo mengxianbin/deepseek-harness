@@ -23,6 +23,7 @@ import {
 import { aggregateBuildArgs, aggregateCheckArgs, contractSteps, libraryBuildSteps } from './compile-referenced-projects.ts'
 import type { LibraryStep } from './compile-referenced-projects.ts'
 import { beginBuild, endBuild, STAMP_ACTIVE_ENV } from './restart-signal/build-stamp.ts'
+import { readStartStamp, writeFailedStamp } from './restart-signal/manifest.ts'
 import { pnpmCommand } from './release/process.ts'
 import { defaultParallelism, describeDefaultParallelism } from './parallelism.ts'
 import { runAggregate } from './run-gates.ts'
@@ -182,7 +183,24 @@ async function main(): Promise<number> {
   rmSync(resolve(root, CLIENT_BUILD_RECORD_PATH), { force: true })
   const gates = buildGates(root, scope, environment)
   const exitCode = await runAggregate(name, gates, workers(gates))
-  if (exitCode !== 0) return exitCode
+  if (exitCode !== 0) {
+    // Restart-signal failure record: the closing step never runs on a failed
+    // aggregate, so this owner records the failure over the start capture.
+    if (ownsStamp) {
+      const start = readStartStamp(root)
+      if (start !== undefined) {
+        writeFailedStamp(root, {
+          version: 1,
+          kind: 'harness-failed',
+          time: new Date().toISOString(),
+          faces: start.faces,
+          sStart: start.sStart,
+          exitCode,
+        })
+      }
+    }
+    return exitCode
+  }
   if (ownsStamp) endBuild(root)
   const record = writeClientBuildRecord(root, clientEnvironment)
   console.log(

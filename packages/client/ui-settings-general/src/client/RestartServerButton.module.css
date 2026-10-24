@@ -29,3 +29,54 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+
+/* Lit restart-signal badge in the expanded column: dot-prefixed next-step pill. */
+.signalBadge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 220px;
+  padding: 2px 8px;
+  border-radius: var(--dsw-radius-sm);
+  color: var(--dsw-alias-state-warn-primary);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.signalBadgeDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.signalBadge[data-restart-signal='BUILD_FAILED'] {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.signalBadge[data-restart-signal='BUILDING'] {
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* Collapsed rail: the whole badge is one status dot carrying the copy as its accessible name. */
+.signalDot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-warn-primary);
+}
+
+.signalDot[data-restart-signal='BUILD_FAILED'] {
+  background: var(--dsw-alias-state-error-primary);
+}
+
+.signalDot[data-restart-signal='BUILDING'] {
+  background: var(--dsw-alias-label-secondary);
+}

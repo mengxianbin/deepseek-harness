@@ -2,16 +2,17 @@
  * Build-stamp opening/closing steps over a throwaway git repository: the
  * manifest advances only the rebuilt face, `midBuildDirty` fires when a built
  * face's source moves between the two steps, a failed window never reaches
- * the closing step's manifest, and a face absent from the invocation carries
+ * the closing step's manifest, the runner records a failure over the start
+ * capture, and a face absent from the invocation carries
  * its previous baseline forward.
  */
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { beginBuild, endBuild } from './build-stamp.ts'
-import { readHarnessManifest, readStartStamp } from './manifest.ts'
+import { readFailedStamp, readHarnessManifest, readStartStamp, writeFailedStamp } from './manifest.ts'
 
 const temporary: string[] = []
 
@@ -86,5 +87,43 @@ describe('build stamp closing step', () => {
     expect(hostBuilt?.hostFaceHash).toBe(hostBuilt?.sStart.host)
     expect(hostBuilt?.clientFaceHash).toBe(clientBuilt?.clientFaceHash)
     expect(hostBuilt?.midBuildDirty).toBe(false)
+  })
+})
+
+describe('build failure record', () => {
+  it('records the failure over the start capture and clears it on the next opening step', () => {
+    const root = fixtureRepository()
+    beginBuild(root, ['host'])
+    const start = readStartStamp(root)
+    expect(start).toBeDefined()
+    writeFailedStamp(root, {
+      version: 1,
+      kind: 'harness-failed',
+      time: new Date().toISOString(),
+      faces: start?.faces ?? [],
+      sStart: start?.sStart ?? { repo: 'r', host: 'h', client: 'c' },
+      exitCode: 7,
+    })
+    expect(readStartStamp(root)).toBeUndefined()
+    expect(readFailedStamp(root)?.exitCode).toBe(7)
+    expect(readHarnessManifest(root)).toBeUndefined()
+
+    beginBuild(root, ['host'])
+    expect(readFailedStamp(root)).toBeUndefined()
+    expect(readStartStamp(root)).toBeDefined()
+  })
+
+  it('leaves a failure record and no manifest when the wrapped command exits non-zero', () => {
+    const root = fixtureRepository()
+    const runner = resolve(import.meta.dirname, 'build-stamp.ts')
+    const result = spawnSync(process.execPath, [runner, 'run', '--faces', 'host', '--root', root, '--', 'exit 3'], {
+      cwd: root,
+      encoding: 'utf8',
+      windowsHide: true,
+    })
+    expect(result.status).toBe(3)
+    expect(readStartStamp(root)).toBeUndefined()
+    expect(readFailedStamp(root)?.exitCode).toBe(3)
+    expect(readHarnessManifest(root)).toBeUndefined()
   })
 })

@@ -115,7 +115,7 @@ export function SettingsRoot(props: SettingsRootComponentProps) {
   const {
     wide, reconnect, useConnectionState, useSections, useOnboardingSteps, useSessions, renderSlot, t,
     useDesktopUpdate, openDesktopUpdate, useStore, actions, useShortcuts,
-    useRestartConfigured, useRestartRunningSessions,
+    useRestartConfigured, useRestartRunningSessions, useRestartSignal,
   } = props
   const { open, activeId } = useStore(state => state)
   const shortcut = useShortcuts(rows => rows.find(row => row.id === 'settings.open'))
@@ -134,6 +134,7 @@ export function SettingsRoot(props: SettingsRootComponentProps) {
   const connectionState = useConnectionState(state => state)
   const restartConfigured = useRestartConfigured(value => value)
   const restartRunningSessions = useRestartRunningSessions(value => value)
+  const restartSignal = useRestartSignal(value => value)
   const previousConnectionState = useRef(connectionState)
   const onboardingSteps = useOnboardingSteps(s => s)
   const onboardingActive = useSessions((state) => {
@@ -237,7 +238,8 @@ export function SettingsRoot(props: SettingsRootComponentProps) {
           </button>
         </Tooltip> })}
         <RestartServerButton
-          t={t} wide={wide} configured={restartConfigured} runningSessions={restartRunningSessions} />
+          t={t} wide={wide} configured={restartConfigured} runningSessions={restartRunningSessions}
+          signal={restartSignal} />
         <ConnectionIndicator
           state={wide && desktopUpdate.presentation?.phase !== 'installing' ? connectionIndicator : undefined}
           disconnectedLabel={t('connection.error')}

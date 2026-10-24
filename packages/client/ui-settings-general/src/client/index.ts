@@ -45,8 +45,9 @@ import { AuthExpiredOverlay, type AuthExpiredOverlayInjected } from './AuthExpir
 import { AUTH_EXPIRED_EVENT } from './auth-expired.ts'
 import { HostReleasePrompt, type HostReleasePromptInjected } from './HostReleasePrompt.tsx'
 import { countRunningSessions } from './restart-count.ts'
+import { startRestartSignalFlow } from './restart-signal-flow.ts'
 import { en, zh, type SettingsKey } from './locales.ts'
-import { RESTART_GLOBAL, resolveRestartCapability } from '../restart.ts'
+import { RESTART_GLOBAL, resolveRestartCapability, type RestartSignalView } from '../restart.ts'
 
 export type {
   CloseLabelProps, HeaderContentProps, TriggerContentProps,
@@ -142,6 +143,21 @@ export function apply(ctx: ClientContext): void {
   recountRunningSessions()
   ctx.effect(() => ctx.uiSession.sessionStatus.subscribe(recountRunningSessions),
     'ui-settings-general: restart running sessions')
+  // The restart-signal badge: one recheck flow (boot + return-to-visibility,
+  // design trigger ③) publishes Host judgments into a snapshot store, and the
+  // connected transition after a disconnect rechecks too, so the灯自灭 chain
+  // (R6: reconnect → recompute → delivery) clears the badge without user action.
+  const restartSignal = createSnapshotStore<RestartSignalView | undefined>(undefined)
+  const restartSignalFlow = startRestartSignalFlow((view) => { restartSignal.set(view) })
+  ctx.effect(() => () => { restartSignalFlow.dispose() }, 'ui-settings-general: restart-signal flow')
+  let previousConnectionState = connection.state.getSnapshot()
+  ctx.effect(() => connection.state.subscribe(() => {
+    const next = connection.state.getSnapshot()
+    const reconnected = next === 'connected'
+      && (previousConnectionState === 'disconnected' || previousConnectionState === 'connecting')
+    previousConnectionState = next
+    if (reconnected) restartSignalFlow.recheck()
+  }), 'ui-settings-general: restart-signal reconnect')
   const shellInjected = (): SettingsRootInjected => ({
     openDesktopUpdate: () => { desktopUpdate.open() },
     reconnect: () => { connection.reconnect() },
@@ -151,6 +167,7 @@ export function apply(ctx: ClientContext): void {
       connectionState: connection.state,
       restartConfigured,
       restartRunningSessions,
+      restartSignal,
       sections: {
         getSnapshot: () => {
           const version = ctx.slots.getVersion('settings.section')

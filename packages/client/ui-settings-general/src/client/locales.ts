@@ -53,6 +53,12 @@ export const zh = {
   'restart.confirm.cancel': '取消',
   'restart.accepted': '重启指令已发送，服务器即将重启。',
   'restart.failed': '重启指令发送失败，请重试。',
+  'restart.signal.init': '未建基线：先构建再重启一次以建立基线',
+  'restart.signal.building': '构建中…',
+  'restart.signal.buildFailed': '构建失败：查看构建输出，修复后重新构建',
+  'restart.signal.needBuild': '有改动未构建：先运行构建',
+  'restart.signal.needRestart.config': '配置已改动：重启服务器使其生效',
+  'restart.signal.needRestart.built': '已构建：重启服务器使其生效',
 } satisfies Record<string, string>
 
 /** The settings namespace key union. */
@@ -111,4 +117,10 @@ export const en = {
   'restart.confirm.cancel': 'Cancel',
   'restart.accepted': 'Restart dispatched. The server is restarting.',
   'restart.failed': 'Could not dispatch the restart. Please try again.',
+  'restart.signal.init': 'No build baseline: build, then restart once to establish it',
+  'restart.signal.building': 'Building…',
+  'restart.signal.buildFailed': 'Build failed: inspect the build output, fix, and rebuild',
+  'restart.signal.needBuild': 'Changes are not built: run a build first',
+  'restart.signal.needRestart.config': 'Configuration changed: restart the server to apply it',
+  'restart.signal.needRestart.built': 'Built: restart the server to apply it',
 } satisfies Record<SettingsKey, string>

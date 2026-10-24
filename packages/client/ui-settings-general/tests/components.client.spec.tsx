@@ -418,4 +418,50 @@ describe('Restart server button', () => {
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toBe(en['restart.failed'])
   })
+
+  it('wears the wide badge with the state copy and its data marker', () => {
+    render(<RestartServerButton {...base} signal={{ state: 'NEED_BUILD' }} />)
+    const badge = screen.getByRole('status')
+    expect(badge.textContent).toBe(en['restart.signal.needBuild'])
+    expect(badge.getAttribute('data-restart-signal')).toBe('NEED_BUILD')
+  })
+
+  it('names the restart branch in the NEED_RESTART copy', () => {
+    const view = render(<RestartServerButton {...base} signal={{ state: 'NEED_RESTART', reason: 'config' }} />)
+    expect(screen.getByRole('status').textContent).toBe(en['restart.signal.needRestart.config'])
+    view.rerender(<RestartServerButton {...base} signal={{ state: 'NEED_RESTART', reason: 'built' }} />)
+    expect(screen.getByRole('status').textContent).toBe(en['restart.signal.needRestart.built'])
+  })
+
+  it.each([['INIT'], ['BUILDING'], ['BUILD_FAILED']] as const)('shows the %s badge with its single next step', (state) => {
+    render(<RestartServerButton {...base} signal={{ state }} />)
+    const copy = {
+      INIT: en['restart.signal.init'],
+      BUILDING: en['restart.signal.building'],
+      BUILD_FAILED: en['restart.signal.buildFailed'],
+    }[state]
+    expect(screen.getByRole('status').textContent).toBe(copy)
+  })
+
+  it('lights nothing for OK or the client-only state', () => {
+    const view = render(<RestartServerButton {...base} signal={{ state: 'OK' }} />)
+    expect(screen.queryByRole('status')).toBeNull()
+    view.rerender(<RestartServerButton {...base} signal={{ state: 'CLIENT_UPDATED' }} />)
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('collapses the lit badge into a status dot carrying the copy as its accessible name', () => {
+    render(<RestartServerButton {...base} wide={false} signal={{ state: 'NEED_RESTART', reason: 'built' }} />)
+    const dot = screen.getByRole('status')
+    expect(dot.getAttribute('aria-label')).toBe(en['restart.signal.needRestart.built'])
+    expect(dot.getAttribute('data-restart-signal')).toBe('NEED_RESTART')
+    expect(screen.queryByRole('button')).toBeNull()
+  })
+
+  it('shows no collapsed dot without a configured restart command or while the judgment is dark', () => {
+    const view = render(<RestartServerButton {...base} wide={false} configured={false} signal={{ state: 'NEED_BUILD' }} />)
+    expect(screen.queryByRole('status')).toBeNull()
+    view.rerender(<RestartServerButton {...base} wide={false} signal={{ state: 'OK' }} />)
+    expect(screen.queryByRole('status')).toBeNull()
+  })
 })

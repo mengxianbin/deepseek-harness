@@ -12,6 +12,7 @@ import type { SettingsRootComponentProps } from '../src/client/shell-contract.ts
 import { SettingsRoot } from '../src/client/SettingsRoot.tsx'
 import { en, zh } from '../src/client/locales.ts'
 import type { DesktopUpdateView } from '../src/types.ts'
+import type { RestartSignalView } from '../src/restart.ts'
 import { Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 
 // Every fixture carries the resource hook the resources plugin merges into GlobalStandardProps.
@@ -49,6 +50,7 @@ function mount({
   mainView = true,
   restartConfigured = false,
   restartRunningSessions = 0,
+  restartSignal,
   rows = [
     { id: 'general', order: 0, label: 'General' },
     { id: 'models', order: 10, label: 'Models' },
@@ -68,6 +70,7 @@ function mount({
   mainView?: boolean
   restartConfigured?: boolean
   restartRunningSessions?: number
+  restartSignal?: RestartSignalView | undefined
   rows?: Row[]
   steps?: Step[]
 } = {}) {
@@ -126,6 +129,7 @@ function mount({
     useOnboardingSteps: select => select(steps),
     useRestartConfigured: select => select(restartConfigured),
     useRestartRunningSessions: select => select(restartRunningSessions),
+    useRestartSignal: select => select(restartSignal),
     useSections: (select) => {
       const [, force] = useState(0)
       useEffect(() => {
@@ -559,4 +563,18 @@ it('places the restart control in the trigger row ahead of the connection indica
   expect(restart.parentElement?.contains(settings)).toBe(true)
   expect(settings.compareDocumentPosition(restart) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0)
   expect(restart.compareDocumentPosition(indicator) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0)
+})
+
+it('delivers the restart-signal judgment to the wide badge', () => {
+  mount({ restartConfigured: true, restartSignal: { state: 'NEED_BUILD' } })
+  const badge = screen.getByRole('status')
+  expect(badge.textContent).toBe(en['restart.signal.needBuild'])
+  expect(badge.getAttribute('data-restart-signal')).toBe('NEED_BUILD')
+})
+
+it('delivers the restart-signal judgment to the collapsed dot', () => {
+  mount({ wide: false, restartConfigured: true, restartSignal: { state: 'NEED_RESTART', reason: 'built' } })
+  const dot = screen.getByRole('status')
+  expect(dot.getAttribute('aria-label')).toBe(en['restart.signal.needRestart.built'])
+  expect(screen.queryByRole('button', { name: 'Restart server' })).toBeNull()
 })

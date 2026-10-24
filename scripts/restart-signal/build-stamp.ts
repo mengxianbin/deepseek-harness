@@ -44,6 +44,7 @@ import {
   type BuildFace,
   readHarnessManifest,
   readStartStamp,
+  writeFailedStamp,
   writeHarnessManifest,
   writeStartStamp,
 } from './manifest.ts'
@@ -183,6 +184,20 @@ function main(args: readonly string[]): number {
   if (code === 0) {
     endBuild(root)
     return 0
+  }
+  // A failed command leaves the baseline untouched and records the failure
+  // instead of the build-start capture, so the state machine reports
+  // BUILD_FAILED rather than an eternally running build.
+  const start = readStartStamp(root)
+  if (start !== undefined) {
+    writeFailedStamp(root, {
+      version: 1,
+      kind: 'harness-failed',
+      time: new Date().toISOString(),
+      faces: start.faces,
+      sStart: start.sStart,
+      exitCode: code,
+    })
   }
   return code
 }

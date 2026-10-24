@@ -34,9 +34,18 @@ const GIT_MAX_BUFFER = 256 * 1024 * 1024
  */
 const RUNTIME_SEGMENTS: readonly string[] = ['sessions', 'sessions-backup', 'storages', 'profiles', '.tmp', '.tmp-ask', '.dsh-build']
 
-function isRuntimeData(path: string): boolean {
+/**
+ * Whether a repository-relative path holds runtime state rather than source.
+ * @param path - Slash-separated repository-relative path.
+ * @returns True for logs and paths under runtime segments.
+ */
+export function isRuntimeDataPath(path: string): boolean {
   if (path.endsWith('.log')) return true
   return path.split('/').some(segment => RUNTIME_SEGMENTS.includes(segment))
+}
+
+function isRuntimeData(path: string): boolean {
+  return isRuntimeDataPath(path)
 }
 
 function git(root: string, args: readonly string[]): Buffer {
@@ -137,19 +146,15 @@ export function repoStateStamp(root: string): string {
 }
 
 /**
- * The content-state stamp of one face's paths: index blobs for files whose
- * working tree matches the index, disk hashes for modified and untracked
- * files, deleted markers for removals.
- * @param root - Repository tree to stamp.
- * @param facePaths - Face path set (repository-relative, slash-separated).
- * @returns sha256 hex over the sorted per-path content identities.
- * @throws If git cannot list the tree's index.
+ * The content-state stamp over one path filter: index blobs for tracked
+ * files, disk hashes for modified and untracked files, deleted markers for
+ * removals; every emitted line is `path\tidentity`, sorted.
  */
-export function faceContentStamp(root: string, facePaths: ReadonlySet<string>): string {
+function contentStamp(root: string, include: (path: string) => boolean): string {
   const blobs = indexBlobs(root)
   const lines: string[] = []
   for (const [path, blob] of blobs) {
-    if (facePaths.has(path)) lines.push(`${path}\t${blob}`)
+    if (include(path)) lines.push(`${path}\t${blob}`)
   }
   const dirty = new Set<string>()
   for (const entry of porcelainEntries(root)) {
@@ -159,7 +164,7 @@ export function faceContentStamp(root: string, facePaths: ReadonlySet<string>): 
   }
   for (const path of untrackedPaths(root)) dirty.add(path)
   for (const path of dirty) {
-    if (facePaths.has(path)) lines.push(`${path}\t${diskIdentity(root, path)}`)
+    if (include(path)) lines.push(`${path}\t${diskIdentity(root, path)}`)
   }
   lines.sort()
   const hash = createHash('sha256')
@@ -168,4 +173,32 @@ export function faceContentStamp(root: string, facePaths: ReadonlySet<string>): 
     hash.update('\n')
   }
   return hash.digest('hex')
+}
+
+/**
+ * The content-state stamp of one face's paths: index blobs for files whose
+ * working tree matches the index, disk hashes for modified and untracked
+ * files, deleted markers for removals.
+ * @param root - Repository tree to stamp.
+ * @param facePaths - Face path set (repository-relative, slash-separated).
+ * @returns sha256 hex over the sorted per-path content identities.
+ * @throws If git cannot list the tree's index.
+ */
+export function faceContentStamp(root: string, facePaths: ReadonlySet<string>): string {
+  return contentStamp(root, path => facePaths.has(path))
+}
+
+/**
+ * The whole-repository content stamp: the same identity scheme over every
+ * path git knows, with no face filter and no runtime-path filter. This
+ * mirrors the dsh-web repository's `scripts/build-stamp.mjs` whole-repo
+ * stamp byte-for-byte (that repository stamps its single host face as the
+ * whole tree), so a harness-side recompute of a dsh-web tree's current
+ * state compares equal to the baseline its own runner wrote.
+ * @param root - Repository tree to stamp.
+ * @returns sha256 hex over the sorted per-path content identities of all paths.
+ * @throws If git cannot list the tree's index.
+ */
+export function wholeRepoContentStamp(root: string): string {
+  return contentStamp(root, () => true)
 }

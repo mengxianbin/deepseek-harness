@@ -10,6 +10,8 @@
     "src/types.ts",
     "src/restart.ts",
     "src/restart-host.ts",
+    "src/restart-signal.ts",
+    "src/restart-signal-host.ts",
     "src/restart-stamp.ts"
   ],
   "references": [
