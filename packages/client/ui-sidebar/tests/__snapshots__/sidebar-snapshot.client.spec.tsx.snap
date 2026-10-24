@@ -121,7 +121,7 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
             />
             <span
               class="glanceStats"
-              title="Tokens today · Tokens this plan cycle · MiMo balance —"
+              title="Tokens today · Tokens this plan cycle · Balance —"
             >
               <span
                 class="glanceStat"
@@ -157,7 +157,7 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
                 <span
                   class="glanceStatLabel"
                 >
-                  MiMo balance
+                  Balance
                 </span>
                 <span
                   class="glanceStatValue"
@@ -393,7 +393,7 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
             />
             <span
               class="glanceStats"
-              title="Tokens today · Tokens this plan cycle · MiMo balance —"
+              title="Tokens today · Tokens this plan cycle · Balance —"
             >
               <span
                 class="glanceStat"
@@ -429,7 +429,7 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
                 <span
                   class="glanceStatLabel"
                 >
-                  MiMo balance
+                  Balance
                 </span>
                 <span
                   class="glanceStatValue"
@@ -556,7 +556,7 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
             />
             <span
               class="glanceStats"
-              title="今日 token 用量 · 套餐周期 token 用量 · mimo 余额 —"
+              title="今日 token 用量 · 套餐周期 token 用量 · 余额 —"
             >
               <span
                 class="glanceStat"
@@ -592,7 +592,7 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
                 <span
                   class="glanceStatLabel"
                 >
-                  mimo 余额
+                  余额
                 </span>
                 <span
                   class="glanceStatValue"

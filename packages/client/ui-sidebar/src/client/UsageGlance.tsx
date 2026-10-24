@@ -60,15 +60,16 @@
  * / seven days / five hours before the reset.
  *
  * mimo balance row (FORK usage-glance-mimo-balance, 2026-10-25): the stats
- * column gains a third labeled row — `mimo 余额` above/below the 今日/周期
- * readings — carrying the MiMo official pay-as-you-go balance the host
- * reports on the `mimo` route (`providers[].mimo.balance = { currency,
- * totalBalance, updatedAt }`). The row is bound to the STABLE route id
- * (`mimo`), never to "the first provider that has a balance": today's
- * overview also carries deepseek-official's `-0.18 CNY`, which must not
- * answer for mimo's row. The label carries the attribution (`mimo`) because
- * the two rows above are OpenCode readings while this one is mimo's. A host
- * that reports no mimo balance (adapter absent, cookie expired, probe
+ * column gains a third labeled row — `余额` below the 今日/周期 readings —
+ * carrying the MiMo official pay-as-you-go balance the host reports on the
+ * `mimo` route (`providers[].mimo.balance = { currency, totalBalance,
+ * updatedAt }`). Copy ruling (2026-10-25 用户裁定): the label drops the
+ * `mimo` attribution prefix — ownership stays pinned by the stable key
+ * (`glance.mimoBalance.label`) and the route-id binding below, so the copy
+ * can stay short. The row is bound to the STABLE route id (`mimo`), never to
+ * "the first provider that has a balance": today's overview also carries
+ * deepseek-official's `-0.18 CNY`, which must not answer for mimo's row. A
+ * host that reports no mimo balance (adapter absent, cookie expired, probe
  * failed) degrades this row alone to an em dash — the v2.3 single-column
  * degrade contract, the rest of the control untouched. The figure prints as
  * `¥6.16` / `$12.00` for the known symbols, `1.23 XXX` otherwise, and the
