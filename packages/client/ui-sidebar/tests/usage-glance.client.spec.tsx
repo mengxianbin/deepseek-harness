@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
-import { deriveGlance, formatCompactTokens, formatRefreshStamp, openUsageSection, UsageGlance, type GlanceWindowRow, type UsageOverviewView } from '../src/client/UsageGlance.tsx'
+import { deriveGlance, formatBalanceFigure, formatCompactTokens, formatRefreshStamp, openUsageSection, UsageGlance, type GlanceWindowRow, type UsageOverviewView } from '../src/client/UsageGlance.tsx'
 import { en } from '../src/client/locales.ts'
 
 const t = makeTranslate({ ...commonEn, ...en })
@@ -261,6 +261,28 @@ describe('deriveGlance', () => {
     }
     expect(deriveGlance(overview, NOW)).toEqual({})
   })
+
+  it('binds the balance fact to the mimo route id — never the first provider carrying a balance', () => {
+    // Today's overview also carries deepseek-official's `-0.18 CNY`; it must
+    // not answer for mimo's row (the grab-the-first-balancer trap the mimo
+    // balance row guards against).
+    const overview: UsageOverviewView = {
+      providers: [
+        { provider: 'deepseek-official', balance: { currency: 'CNY', totalBalance: '-0.18', updatedAt: 1 } },
+        { provider: 'opencode-go', plan: { windows: [{ key: 'week', percent: 31, resetsAt: '2026-10-19T00:00:00Z' }] } },
+      ],
+    }
+    expect(deriveGlance(overview, NOW).mimoBalance).toBeUndefined()
+    // The mimo row itself arrives untouched, whatever the other providers report.
+    const withMimo: UsageOverviewView = {
+      providers: [
+        { provider: 'deepseek-official', balance: { currency: 'CNY', totalBalance: '-0.18', updatedAt: 1 } },
+        { provider: 'mimo', balance: { currency: 'CNY', totalBalance: '6.16', updatedAt: 2 } },
+      ],
+    }
+    expect(deriveGlance(withMimo, NOW).mimoBalance)
+      .toEqual({ currency: 'CNY', totalBalance: '6.16', updatedAt: 2 })
+  })
 })
 
 describe('formatCompactTokens', () => {
@@ -275,6 +297,19 @@ describe('formatCompactTokens', () => {
     [Number.NaN, '—'],
   ])('formats %d as %s', (tokens, expected) => {
     expect(formatCompactTokens(tokens)).toBe(expected)
+  })
+})
+
+describe('formatBalanceFigure', () => {
+  it.each([
+    [{ currency: 'CNY', totalBalance: '6.16' }, '¥6.16'],
+    [{ currency: 'USD', totalBalance: '12.00' }, '$12.00'],
+    [{ currency: 'GBP', totalBalance: '1.23' }, '1.23 GBP'],
+    [{ totalBalance: '2.50' }, '2.50'],
+    [{ currency: 'CNY' }, '—'],
+    [{}, '—'],
+  ] as const)('formats %o as %s', (balance, expected) => {
+    expect(formatBalanceFigure(balance)).toBe(expected)
   })
 })
 
@@ -321,15 +356,17 @@ describe('UsageGlance', () => {
     expect(screen.getByTitle(t('glance.window.month.title'))).toBeTruthy()
     expect(screen.getByTitle(t('glance.window.week.title'))).toBeTruthy()
     expect(screen.getByTitle(t('glance.window.5h.title'))).toBeTruthy()
-    // The stats column stacks the 今日/周期 labeled rows over no stamp line —
-    // the stamp rides the column tooltip with both readings.
+    // The stats column stacks the 今日/周期/mimo 余额 labeled rows over no stamp
+    // line — the stamp rides the column tooltip with every reading; the shared
+    // fixture reports no mimo balance, so its reading degrades to an em dash.
     expect(screen.getByText(formatCompactTokens(rows.length > 0 ? 200_000_000 : 0))).toBeTruthy()
     const column = screen.getByTitle(
-      new RegExp(`^${t('glance.today')} · ${t('glance.cycle')} · ${t('glance.refreshed')} \\d{2}\\.\\d{2}\\.\\d{2} \\d{2}:\\d{2}$`),
+      new RegExp(`^${t('glance.today')} · ${t('glance.cycle')} · ${t('glance.mimoBalance.label')} — · ${t('glance.refreshed')} \\d{2}\\.\\d{2}\\.\\d{2} \\d{2}:\\d{2}$`),
     )
     expect(column.textContent).toContain('200M')
     expect(screen.getByText(t('glance.today.label'))).toBeTruthy()
     expect(screen.getByText(t('glance.cycle.label'))).toBeTruthy()
+    expect(screen.getByText(t('glance.mimoBalance.label'))).toBeTruthy()
     expect(screen.getByRole('button', { name: t('glance.open') })).toBeTruthy()
   })
 
@@ -426,6 +463,25 @@ describe('UsageGlance', () => {
       .toBe(`${t('glance.cycle.label')}15M`)
   })
 
+  it('renders the mimo balance row with its attribution label and folds the reading into the tooltip', async () => {
+    const overview: UsageOverviewView = {
+      providers: [
+        { provider: 'opencode-go', plan: { windows: [{ key: 'month', percent: 31, resetsAt: '2026-10-17T10:25:48Z' }] } },
+        { provider: 'mimo', balance: { currency: 'CNY', totalBalance: '6.16', updatedAt: 1 } },
+      ],
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => overview })))
+    render(<UsageGlance t={t} />)
+    // Anchor on the FIGURE: the stat labels render before the first load
+    // lands, so waiting on the label alone would race the fetch.
+    expect((await screen.findByText('¥6.16')).parentElement?.textContent)
+      .toBe(`${t('glance.mimoBalance.label')}¥6.16`)
+    // The column tooltip folds the mimo reading between the cycle row and the stamp.
+    screen.getByTitle(
+      new RegExp(`^${t('glance.today')} · ${t('glance.cycle')} · ${t('glance.mimoBalance.label')} ¥6\\.16 · ${t('glance.refreshed')} \\d{2}\\.\\d{2}\\.\\d{2} \\d{2}:\\d{2}$`),
+    )
+  })
+
   it('renders nothing while the host half serves no routes', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ status: 404, ok: false, json: async () => ({}) })))
     const view = render(<UsageGlance t={t} />)
@@ -437,9 +493,10 @@ describe('UsageGlance', () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ status: 500, ok: false, json: async () => ({}) })))
     const { container } = render(<UsageGlance t={t} />)
     await flush()
-    // No window has been seen, so no rows render — only the column dashes.
+    // No window has been seen, so no rows render — only the column dashes
+    // (今日 / 周期 / mimo 余额, one per stat row).
     expect(container.querySelectorAll('[class*="glanceRow"]:not([class*="glanceRows"])')).toHaveLength(0)
-    expect(screen.getAllByText('—')).toHaveLength(2)
+    expect(screen.getAllByText('—')).toHaveLength(3)
   })
 
   it('shows no window rows while the first overview is in flight', async () => {
@@ -447,7 +504,7 @@ describe('UsageGlance', () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { release = resolve })))
     const { container } = render(<UsageGlance t={t} />)
     expect(container.querySelectorAll('[class*="glanceRow"]:not([class*="glanceRows"])')).toHaveLength(0)
-    const pending = screen.getByTitle(`${t('glance.today')} · ${t('glance.cycle')}`)
+    const pending = screen.getByTitle(`${t('glance.today')} · ${t('glance.cycle')} · ${t('glance.mimoBalance.label')} —`)
     expect(pending.textContent).toContain('—')
     expect(pending.textContent).not.toMatch(/\d{2}:\d{2}/)
     await act(async () => {
@@ -456,7 +513,7 @@ describe('UsageGlance', () => {
     })
     expect(await screen.findByText('85%')).toBeTruthy()
     const loaded = screen.getByTitle(
-      new RegExp(`^${t('glance.today')} · ${t('glance.cycle')} · ${t('glance.refreshed')} \\d{2}\\.\\d{2}\\.\\d{2} \\d{2}:\\d{2}$`),
+      new RegExp(`^${t('glance.today')} · ${t('glance.cycle')} · ${t('glance.mimoBalance.label')} — · ${t('glance.refreshed')} \\d{2}\\.\\d{2}\\.\\d{2} \\d{2}:\\d{2}$`),
     )
     expect(loaded.textContent).toContain('200M')
   })
