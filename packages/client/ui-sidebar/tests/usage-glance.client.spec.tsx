@@ -100,6 +100,36 @@ describe('deriveGlance', () => {
     })
   })
 
+  it('flags the switch trigger on the unrounded used/limit pair, never on percent alone', () => {
+    const overview: UsageOverviewView = {
+      providers: [{
+        provider: 'p',
+        plan: {
+          windows: [
+            // 50.9/60 = 84.83% raw → stays quiet even though the figure reads 85.
+            { key: 'month', percent: 85, used: 50.9, limit: 60, resetsAt: '2026-10-17T10:25:48Z' },
+            // 26.3/30 = 87.67% raw → fires on the authoritative pair.
+            { key: 'week', percent: 88, used: 26.3, limit: 30, resetsAt: '2026-10-19T00:00:00Z' },
+            // Percent-only window (pre-restart host / other provider): no pair, no trigger.
+            { key: '5h', percent: 92, resetsAt: '2026-10-15T12:00:00Z' },
+          ],
+        },
+      }],
+    }
+    const rows = deriveGlance(overview, NOW).windows!
+    // Display order is cycle-first (month, week, 5h), independent of fixture order.
+    expect(rows.map(row => [row.key, row.trigger])).toEqual([
+      ['month', undefined],
+      ['week', true],
+      ['5h', undefined],
+    ])
+    // The exact threshold edge counts as fired (used/limit >= 0.85).
+    const edge: UsageOverviewView = {
+      providers: [{ provider: 'p', plan: { windows: [{ key: 'week', percent: 85, used: 25.5, limit: 30, resetsAt: '2026-10-19T00:00:00Z' }] } }],
+    }
+    expect(deriveGlance(edge, NOW).windows?.[0]?.trigger).toBe(true)
+  })
+
   it('falls back when the current provider reports no plan', () => {
     const overview: UsageOverviewView = {
       current: { provider: 'deepseek-official' },
@@ -321,6 +351,53 @@ describe('UsageGlance', () => {
     expect(fills[2]?.className).not.toContain('glanceFillOver')
     const ticks = [...container.querySelectorAll('[class*="glanceTick"]')]
     expect(ticks[1]?.getAttribute('style')).toContain('left: 49%')
+  })
+
+  it('reddens a triggered row: week fill + switch hint, 5h figure only, month quiet', async () => {
+    const overview: UsageOverviewView = {
+      current: { provider: 'opencode-go' },
+      providers: [{
+        provider: 'opencode-go',
+        plan: {
+          windows: [
+            { key: 'month', percent: 49, used: 29.9, limit: 60, resetsAt: '2026-10-17T10:25:48Z' },
+            { key: 'week', percent: 87, used: 26.3, limit: 30, resetsAt: '2026-10-19T00:00:00Z' },
+            { key: '5h', percent: 92, used: 11.1, limit: 12, resetsAt: '2026-10-15T12:00:00Z' },
+          ],
+        },
+      }],
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => overview })))
+    const { container } = render(<UsageGlance t={t} />)
+    // The figures keep their percent text (the read-out column is unchanged);
+    // only the color classes and the week tooltip change.
+    await screen.findByText('87%')
+    const percents = [...container.querySelectorAll('[class*="glancePercent"]')]
+    expect(percents).toHaveLength(3)
+    expect(percents[0]?.className).not.toContain('glancePercentTrigger') // month: 49.8%, quiet
+    expect(percents[1]?.className).toContain('glancePercentTrigger') // week: 87.7%, fired
+    expect(percents[2]?.className).toContain('glancePercentTrigger') // 5h: 92.5%, fired
+    // The solid-red fill belongs to week/month only — 5h reds its figure alone.
+    const fills = [...container.querySelectorAll('[class*="glanceFill"]')]
+    expect(fills).toHaveLength(3)
+    expect(fills[0]?.className).not.toContain('glanceFillTrigger')
+    expect(fills[1]?.className).toContain('glanceFillTrigger')
+    expect(fills[2]?.className).not.toContain('glanceFillTrigger')
+    // Only the week row carries the A-plan switch hint in its tooltip.
+    expect(screen.getByTitle(`${t('glance.window.week.title')} · ${t('glance.trigger.hint')}`)).toBeTruthy()
+    expect(screen.getByTitle(t('glance.window.month.title'))).toBeTruthy()
+    expect(screen.getByTitle(t('glance.window.5h.title'))).toBeTruthy()
+  })
+
+  it('never marks rows when the overview carries no absolute pair', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => OVERVIEW })))
+    const { container } = render(<UsageGlance t={t} />)
+    await screen.findByText('85%')
+    // The shared fixture is percent-only (a pre-restart host or another
+    // provider): the v3 trigger must stay dark and the plain tooltips stand.
+    expect(container.querySelectorAll('[class*="glancePercentTrigger"]')).toHaveLength(0)
+    expect(container.querySelectorAll('[class*="glanceFillTrigger"]')).toHaveLength(0)
+    expect(screen.getByTitle(t('glance.window.week.title'))).toBeTruthy()
   })
 
   it('labels both stat rows with their compact totals', async () => {
