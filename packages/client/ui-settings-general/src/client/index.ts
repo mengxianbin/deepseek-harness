@@ -148,7 +148,13 @@ export function apply(ctx: ClientContext): void {
   // connected transition after a disconnect rechecks too, so the灯自灭 chain
   // (R6: reconnect → recompute → delivery) clears the badge without user action.
   const restartSignal = createSnapshotStore<RestartSignalView | undefined>(undefined)
-  const restartSignalFlow = startRestartSignalFlow((view) => { restartSignal.set(view) })
+  // The flow reports this page's own running-Session count with every recheck
+  // (P3 attestation): the store above is the same number the restart
+  // confirmation names, so the host fork compares its reading against the
+  // exact value this page would show.
+  const restartSignalFlow = startRestartSignalFlow((view) => { restartSignal.set(view) }, {
+    runningCount: () => restartRunningSessions.getSnapshot(),
+  })
   ctx.effect(() => () => { restartSignalFlow.dispose() }, 'ui-settings-general: restart-signal flow')
   let previousConnectionState = connection.state.getSnapshot()
   ctx.effect(() => connection.state.subscribe(() => {

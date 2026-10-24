@@ -10,6 +10,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-connection'
 // Type-only: pulls the `webserver/index-inject` event merge.
 import type {} from '@deepseek-ai/dsh-host-webserver'
+import { claimRestartDispatch } from './restart-disposition.ts'
 import { RESTART_GLOBAL, RESTART_PATH, type RestartCapability } from './restart.ts'
 
 /** Environment variable carrying the whole restart command line. */
@@ -33,7 +34,7 @@ export interface RestartInternals {
 }
 
 /** Default launcher: one command line through the OS shell, hidden and detached. */
-const spawnDetached: RestartLauncher = (commandLine, options) => spawn(commandLine, options)
+export const spawnDetached: RestartLauncher = (commandLine, options) => spawn(commandLine, options)
 
 /**
  * Run the restart command detached from this process: the response never waits
@@ -82,8 +83,17 @@ export function registerRestart(ctx: Context, internals: RestartInternals = {}):
     path: RESTART_PATH,
     methods: ['POST'],
     requestBody: 'buffered',
+    // The response is always the same 202 (the browser's "restart in
+    // progress" state), but only the first claimant spawns: the automatic
+    // fork (P3) and this manual route share one in-flight dispatch slot, so a
+    // click during an automatic dispatch — or a double click — answers the
+    // existing 202 without launching a second restart (design §四 P10).
     fetch: () => {
       const response = Response.json({ dispatched: true }, { status: 202 })
+      if (!claimRestartDispatch()) {
+        process.stderr.write('ui-settings-general: restart dispatch skipped: already in flight\n')
+        return Promise.resolve(response)
+      }
       dispatchRestart(commandLine, launch)
       return Promise.resolve(response)
     },

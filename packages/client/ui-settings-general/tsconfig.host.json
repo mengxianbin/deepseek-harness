@@ -13,6 +13,9 @@
     "src/restart-signal.ts",
     "src/restart-signal-host.ts",
     "src/restart-stamp.ts",
+    "src/restart-disposition.ts",
+    "src/restart-disposition-host.ts",
+    "src/auto-build-dispatch.ts",
     "src/stamp-poll-host.ts"
   ],
   "references": [

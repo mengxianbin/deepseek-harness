@@ -6,6 +6,7 @@ import type { BrowserAuth } from '@deepseek-ai/dsh-client-connection/src/browser
 import type { IndexInjection } from '@deepseek-ai/dsh-host-webserver'
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { RESTART_COMMAND_ENV, registerRestart, type RestartChild } from '../src/restart-host.ts'
+import { resetDispositionStateForTest } from '../src/restart-disposition.ts'
 import { RESTART_GLOBAL, RESTART_PATH } from '../src/restart.ts'
 import * as HostPlugin from '../src/index.ts'
 
@@ -19,6 +20,9 @@ afterEach(() => {
   vi.unstubAllEnvs()
   vi.restoreAllMocks()
   spawnMock.mockReset()
+  // The in-flight dispatch claim is per-process state (P3): each example owns
+  // a fresh claim, exactly like a fresh host process would.
+  resetDispositionStateForTest()
 })
 
 /** A child stand-in whose error listener the test fires directly. */
@@ -134,5 +138,21 @@ describe('restart dispatch', () => {
     expect((await post()).status).toBe(404)
     expect(emitIndex()).toEqual([])
     expect(spawnMock).not.toHaveBeenCalled()
+  })
+
+  it('answers 202 for every click but spawns exactly once (in-flight claim, P3)', async () => {
+    vi.stubEnv(RESTART_COMMAND_ENV, 'exit 0')
+    const { ctx, post } = fixture()
+    const { child } = stubChild()
+    spawnMock.mockImplementation(() => child)
+    registerRestart(ctx)
+    const write = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    const first = await post()
+    const second = await post()
+    expect(first.status).toBe(202)
+    expect(second.status).toBe(202)
+    expect(await second.json()).toEqual({ dispatched: true })
+    expect(spawnMock).toHaveBeenCalledOnce()
+    expect(write).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('already in flight'))
   })
 })

@@ -9,10 +9,12 @@ import { HostConnectionService } from '@deepseek-ai/dsh-client-connection'
 import type { BrowserAuth } from '@deepseek-ai/dsh-client-connection/src/browser-auth.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { registerRestartSignal } from '../src/restart-signal-host.ts'
+import { latestClientAttestation, resetDispositionStateForTest } from '../src/restart-disposition.ts'
 import { RECHECK_PATH } from '../src/restart.ts'
 
 afterEach(() => {
   vi.restoreAllMocks()
+  resetDispositionStateForTest()
 })
 
 /** Fresh context, real Connection fetch registry, and request helpers over `/api/stamp-recheck`. */
@@ -20,8 +22,10 @@ function fixture() {
   const ctx = new Context()
   const connection = new HostConnectionService(ctx, [], {} as BrowserAuth)
   const handler = connection.createSharedFetchHandler('/api')
-  const post = () => handler.fetch(new Request(`http://localhost${RECHECK_PATH}`, { method: 'POST' }),
-    connection.browserPeer)
+  const post = (body?: string) => handler.fetch(new Request(`http://localhost${RECHECK_PATH}`, {
+    method: 'POST',
+    ...(body === undefined ? {} : { body, headers: { 'content-type': 'application/json' } }),
+  }), connection.browserPeer)
   const get = () => handler.fetch(new Request(`http://localhost${RECHECK_PATH}`, { method: 'GET' }),
     connection.browserPeer)
   return { ctx, post, get }
@@ -63,5 +67,36 @@ describe('restart-signal recheck route', () => {
     const { ctx, post } = fixture()
     registerRestartSignal(ctx, { collect: async () => ({ state: 'INIT', detail: 'fixture' }) })
     expect((await post()).status).toBe(200)
+  })
+
+  it('records the client running-count attestation from the recheck body (P3)', async () => {
+    const { ctx, post } = fixture()
+    registerRestartSignal(ctx, { collect: async () => ({ state: 'OK', detail: 'fixture' }) })
+    const response = await post(JSON.stringify({ runningCount: 4 }))
+    expect(response.status).toBe(200)
+    await vi.waitFor(() => {
+      expect(latestClientAttestation()?.count).toBe(4)
+      expect(typeof latestClientAttestation()?.at).toBe('number')
+    })
+  })
+
+  it('keeps the previous attestation on a malformed body and still answers the judgment', async () => {
+    const { ctx, post } = fixture()
+    registerRestartSignal(ctx, { collect: async () => ({ state: 'OK', detail: 'fixture' }) })
+    await post(JSON.stringify({ runningCount: 0 }))
+    await vi.waitFor(() => { expect(latestClientAttestation()?.count).toBe(0) })
+    const response = await post('{not json')
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ state: 'OK' })
+    expect(latestClientAttestation()?.count).toBe(0)
+  })
+
+  it('ignores a body whose runningCount is not a clean count', async () => {
+    const { ctx, post } = fixture()
+    registerRestartSignal(ctx, { collect: async () => ({ state: 'OK', detail: 'fixture' }) })
+    await post(JSON.stringify({ runningCount: -2 }))
+    await post(JSON.stringify({ runningCount: 1.5 }))
+    await post(JSON.stringify({ runningCount: '7' }))
+    expect(latestClientAttestation()).toBeUndefined()
   })
 })

@@ -75,6 +75,16 @@ export interface RestartSignalInputs {
   readonly currentClientFace: string | undefined
 }
 
+/** The machine facts a judgment was computed from (P3 observation seam: change-sensitive
+ * consumers — the auto-build throttle — distinguish a moved source from a repeated
+ * identical judgment without a second stamp channel). */
+export interface RestartSignalFacts {
+  /** Combined current host-face source stamp; `undefined` when stamps were unavailable. */
+  readonly currentHostFace: string | undefined
+  /** Current configured-source stamp. */
+  readonly configStamp: string
+}
+
 /** One judgment: the state machine's full output. */
 export interface RestartSignalJudgment {
   readonly state: RestartSignalState
@@ -82,6 +92,8 @@ export interface RestartSignalJudgment {
   readonly reason?: RestartSignalReason
   /** Human-readable facts behind the judgment; log and test surface, never copy text. */
   readonly detail: string
+  /** Machine facts this judgment consumed; attached by every production collect. */
+  readonly facts?: RestartSignalFacts
 }
 
 /**
@@ -200,6 +212,34 @@ export async function runStampCli(
 
 let inFlight: Promise<RestartSignalJudgment> | undefined
 
+/** Host-side observers of every fresh judgment (P3: the auto-build throttle and the
+ * restart disposition both ride the route/polling recheck stream instead of running
+ * a second collector). Listener failures are isolated to one stderr line. */
+const judgmentListeners = new Set<(judgment: RestartSignalJudgment) => void>()
+
+/**
+ * Observe every fresh judgment the state machine produces (once per coalesced
+ * computation, on every collect path: recheck route, polling, client calls).
+ * @param listener - Called with the judgment carrying its machine facts.
+ * @returns Unsubscribe handle.
+ */
+export function onRestartSignalJudgment(listener: (judgment: RestartSignalJudgment) => void): () => void {
+  judgmentListeners.add(listener)
+  return () => { judgmentListeners.delete(listener) }
+}
+
+function publishJudgment(judgment: RestartSignalJudgment, facts: RestartSignalFacts): RestartSignalJudgment {
+  const enriched: RestartSignalJudgment = judgment.facts === undefined ? { ...judgment, facts } : judgment
+  for (const listener of judgmentListeners) {
+    try {
+      listener(enriched)
+    } catch (error) {
+      process.stderr.write(`ui-settings-general: restart-signal judgment listener failed: ${error instanceof Error ? error.message : String(error)}\n`)
+    }
+  }
+  return enriched
+}
+
 async function computeRestartSignal(options: RestartSignalOptions): Promise<RestartSignalJudgment> {
   const repositoryRoot = options.repositoryRoot ?? defaultRepositoryRoot()
   const runtime = restartStamp(options)
@@ -208,7 +248,10 @@ async function computeRestartSignal(options: RestartSignalOptions): Promise<Rest
   const failed = existsSync(join(repositoryRoot, STAMP_DIR, FAILURE_FILE))
   const configStamp = fresh.sCfg
   if (fresh.state === 'INIT') {
-    return judgeRestartSignal({ runtime, fresh, configStamp, building, failed, currentHostFace: undefined, currentClientFace: undefined })
+    return publishJudgment(
+      judgeRestartSignal({ runtime, fresh, configStamp, building, failed, currentHostFace: undefined, currentClientFace: undefined }),
+      { currentHostFace: undefined, configStamp },
+    )
   }
   const needsHostStamp = fresh.components.some(component => component.hostFaceHash !== null)
   let currentHostFace: string | undefined
@@ -236,7 +279,10 @@ async function computeRestartSignal(options: RestartSignalOptions): Promise<Rest
     currentHostFace = undefined
     currentClientFace = undefined
   }
-  return judgeRestartSignal({ runtime, fresh, configStamp, building, failed, currentHostFace, currentClientFace })
+  return publishJudgment(
+    judgeRestartSignal({ runtime, fresh, configStamp, building, failed, currentHostFace, currentClientFace }),
+    { currentHostFace, configStamp },
+  )
 }
 
 /**
@@ -251,7 +297,8 @@ export function collectRestartSignal(options: RestartSignalOptions = {}): Promis
   return inFlight
 }
 
-/** Drop the coalescing slot; tests only. */
+/** Drop the coalescing slot and the observer roster; tests only. */
 export function resetRestartSignalForTest(): void {
   inFlight = undefined
+  judgmentListeners.clear()
 }
