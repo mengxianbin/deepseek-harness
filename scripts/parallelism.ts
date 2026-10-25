@@ -31,6 +31,32 @@ export function defaultParallelism(
   return env.CI === 'true' ? available : Math.min(available, cap)
 }
 
+/** Environment variable carrying an explicit local Vitest fork budget. */
+export const COVERAGE_MAX_WORKERS_ENV = 'DSH_COVERAGE_MAX_WORKERS'
+
+/**
+ * Resolve the local Vitest fork budget, letting `DSH_COVERAGE_MAX_WORKERS` override the default — the
+ * override docs/development.md promises for Vitest forks and local coverage, including direct `vitest`
+ * runs that never pass `--maxWorkers`. Unset, empty, or malformed values keep the default budget:
+ * fail-soft by design, unlike run-gates' strict CI validation — a typo in a user-scope variable must not
+ * refuse every local test run.
+ * @param env - Environment carrying the override.
+ * @param available - CPU count Node reports for this process.
+ * @param cap - Local cap; {@link LOCAL_TEST_PARALLELISM_CAP} for Vitest forks.
+ * @returns The override when it is a positive integer, otherwise the default budget.
+ */
+export function localVitestMaxWorkers(
+  env: NodeJS.ProcessEnv = process.env,
+  available: number = availableParallelism(),
+  cap: number = LOCAL_TEST_PARALLELISM_CAP,
+): number {
+  const raw = env[COVERAGE_MAX_WORKERS_ENV]
+  if (raw === undefined || raw === '') return defaultParallelism(env, available, cap)
+  const parsed = Number.parseInt(raw, 10)
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || String(parsed) !== raw) return defaultParallelism(env, available, cap)
+  return parsed
+}
+
 /**
  * Describe a default worker budget for scheduler and tool start lines.
  * @param env - Environment whose `CI` value selects the CI budget.

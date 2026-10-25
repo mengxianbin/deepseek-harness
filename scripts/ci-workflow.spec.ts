@@ -915,6 +915,16 @@ describe('CI workflow', () => {
     expect(config).toContain('const laneTestBudget = coverageTestTimeoutOptions(process.env[COVERAGE_TEST_TIMEOUT_ENV])')
     expect(config.match(/^ {10}\.\.\.laneTestBudget,$/gm)).toHaveLength(2)
   })
+
+  it('routes the local worker budget through the DSH_COVERAGE_MAX_WORKERS override', () => {
+    // localVitestMaxWorkers owns the override parse and its fail-soft
+    // fallback (pinned by scripts/parallelism.spec.ts); this pins the root
+    // config actually routing its local maxWorkers through it, so direct
+    // vitest runs honor the variable docs/development.md documents.
+    const config = readFileSync(resolve(root, 'vitest.config.ts'), 'utf8')
+
+    expect(config).toContain("const localWorkerBudget = process.env.CI === 'true' ? {} : { maxWorkers: localVitestMaxWorkers(process.env) }")
+  })
 })
 
 describe('Runtime and LLM e2e Blacksmith routing', () => {
