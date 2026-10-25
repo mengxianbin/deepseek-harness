@@ -164,6 +164,16 @@ export function apply(ctx: ClientContext): void {
     previousConnectionState = next
     if (reconnected) restartSignalFlow.recheck()
   }), 'ui-settings-general: restart-signal reconnect')
+  // The Host push leg (design C.5): the poller emits this allowlisted event
+  // after its moved-fingerprint recheck lands, so an open, untouched page
+  // pulls the fresh judgment on its own (R3「页面开着不操作角标自现」).
+  // Payload-free by design — the judgment itself rides the recheck route —
+  // and the handler is the flow's own recheck command, shared with the
+  // boot/visibility/reconnect triggers.
+  ctx.effect(
+    () => ctx.remote.$on('restart-signal/changed', () => { restartSignalFlow.recheck() }),
+    'ui-settings-general: restart-signal push',
+  )
   const shellInjected = (): SettingsRootInjected => ({
     openDesktopUpdate: () => { desktopUpdate.open() },
     reconnect: () => { connection.reconnect() },

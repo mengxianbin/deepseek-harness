@@ -49,6 +49,10 @@ export const API_REMOTE_FORWARDED_EVENTS = [
   { event: 'plugin-manager/install-log', mode: 'emit' },
   { event: 'plugin-manager/install-state', mode: 'emit' },
   { event: 'plugin-market/changed', mode: 'emit' },
+  // Owner: the restart-signal machine in ui-settings-general. The declaration
+  // lives in this package's ./types (owner-side would close a project-
+  // reference cycle — that package's Client face consumes this assembly).
+  { event: 'restart-signal/changed', mode: 'emit' },
   { event: 'settings/document-updated', mode: 'emit' },
   { event: 'schedule/changed', mode: 'emit' },
   { event: 'user-questions/request', mode: 'waterfall' },
