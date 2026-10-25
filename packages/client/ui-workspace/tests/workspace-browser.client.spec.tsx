@@ -741,7 +741,7 @@ describe('WorkspaceBrowser', () => {
     })
     expect(rendered).not.toHaveBeenCalledWith('sidebar.workspaces.session.menu.item', expect.anything())
     fireEvent.click(screen.getByText('alpha'))
-    const owner = { sessionId: sid('alpha-s'), displayTitle: 'alpha-s' }
+    const owner = { sessionId: sid('alpha-s'), displayTitle: 'alpha-s', blank: false }
     expect(rendered).toHaveBeenCalledWith('sidebar.workspaces.session.menu.item', owner)
     expect(rendered).toHaveBeenCalledWith('sidebar.workspaces.session.row.action', owner)
     rendered.mockClear()

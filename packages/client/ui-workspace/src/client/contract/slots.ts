@@ -80,6 +80,14 @@ export interface SessionRowOwnerProps {
   sessionId: SessionId
   /** Row display title: persisted title, or empty when the Session has none. */
   displayTitle: string
+  /**
+   * FORK dsh-local (blank-row-archive-1026): the row is the provisional blank
+   * New Session placeholder (no prompt yet). The row's "..." menu stays closed
+   * for such a row, but the hover strip still renders so the archive verb can
+   * dismiss an abandoned placeholder; an entry whose action cannot apply
+   * (pin) returns nothing when this is true.
+   */
+  blank: boolean
 }
 
 /** The row menu's open state as its owner holds it: the `useState` pair. */
@@ -184,7 +192,10 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * `pin` (200) here. An entry renders one icon button (or nothing, when its
      * action does not apply to the row) and owns the action it performs. Clicks
      * inside the strip stay in the strip, so the button needs no propagation
-     * handling to keep the row from opening.
+     * handling to keep the row from opening. FORK dsh-local
+     * (blank-row-archive-1026): a provisional blank row (owner `blank`) shows
+     * this strip without its "..." menu, so an entry here decides blank
+     * applicability from the owner share.
      */
     'sidebar.workspaces.session.row.action': { kind: 'list'; scope: 'root'; owner: SessionRowOwnerProps }
   }
