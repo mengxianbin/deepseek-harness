@@ -276,7 +276,8 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
   // submission keeps its card up so the state it disabled stays readable.
   const [autoFolded, setAutoFolded] = useState(false)
   const collapsed = minimized || autoFolded
-  const frameRef = useRef<HTMLDivElement>(null)  // The free-form textarea autofocuses on first presentation; re-expanding a
+  const frameRef = useRef<HTMLDivElement>(null)
+  // The free-form textarea autofocuses on first presentation; re-expanding a
   // collapsed question must not steal focus from the expand toggle back into
   // the input, so focus is granted once per question index.
   const focusedQuestions = useRef(new Set<number>())
