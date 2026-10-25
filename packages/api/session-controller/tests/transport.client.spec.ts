@@ -251,11 +251,11 @@ describe('Session Client stream adapters', () => {
       { ...surfaceEvent(), surfaceOp: { op: 'replace', startSeq: 2, endSeq: 0 }, sourceEventSeqs: [2, 0] },
       { ...surfaceEvent('assistant/message'), data: { turn: 1, step: 1, message: {}, stream: [] } },
       { ...surfaceEvent('tool/result'), data: {
-        message: { role: 'tool', content: [], isError: true },
+        message: { role: 'tool', toolCallId: 'call-fixture', content: [], isError: true },
         error: { name: 'Error', code: 'FAILURE' }, meta: { extension: ['retained'] },
       } },
       { ...surfaceEvent('tool/result'), sourceEventSeqs: [0], data: {
-        message: { role: 'tool', content: [], isError: true },
+        message: { role: 'tool', toolCallId: 'call-fixture', content: [], isError: true },
       } },
       { type: 'request/header', seq: 10, time: 10, data: {
         reason: 'initial', header: { config: { provider: 'mock', model: 'mock' } },
