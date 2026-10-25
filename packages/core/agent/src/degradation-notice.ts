@@ -1,7 +1,8 @@
 /**
- * Degradation signal: count consecutive blank tool-call rejections and inject
- * an explicit notice once they repeat, so "the model is degenerating — switch
- * or stop" reaches the user instead of living only in vanishing toasts.
+ * Degradation signal: count consecutive blank tool-call rejection rounds
+ * (each round already includes one automatic re-send) and inject an explicit
+ * notice once they repeat, so "the model is degenerating — switch or stop"
+ * reaches the user instead of living only in vanishing toasts.
  * @module @deepseek-ai/dsh-agent/degradation-notice
  */
 
@@ -16,9 +17,12 @@ declare module '@deepseek-ai/dsh-llm' {
 }
 
 /**
- * Consecutive blank tool-call rejections before the notice fires.
- * 2 = the first rejection gets a chance to self-heal; the second consecutive
- * one is reported as a pattern rather than an isolated glitch.
+ * Consecutive blank tool-call rejection rounds before the notice fires.
+ * Since the single-retry guard (2026-10-09) each round already absorbed one
+ * automatic re-send, so 2 = the model produced malformed tool-calls on two
+ * consecutive rounds *despite* the in-step self-heal: the first round gets
+ * the retry's benefit of the doubt; the second consecutive one is reported
+ * as a pattern rather than an isolated glitch.
  */
 export const DEGRADATION_NOTICE_THRESHOLD = 2
 
@@ -47,19 +51,20 @@ function degradationNotice(consecutive: number) {
   return createUserMessage({
     content: [{
       type: 'text' as const,
-      text: `[model degradation: ${count} consecutive malformed tool-call${consecutive === 1 ? '' : 's'} rejected in this session; consider switching models or ending the session]`,
+      text: `[model degradation: ${count} consecutive malformed tool-call${consecutive === 1 ? '' : 's'} rejected in this session — each already got one automatic re-send and was still malformed; consider switching models or ending the session]`,
     }],
     source: {
       kind: 'tool-degradation',
       form: 'notice',
-      summary: boundContextSummary(`malformed tool-call ×${count}`),
+      summary: boundContextSummary(`malformed tool-call rounds ×${count}`),
     },
   })
 }
 
 /**
- * Count consecutive blank tool-call rejections for one live Agent and inject
- * a durable notice into the next admitted turn once they reach
+ * Count consecutive blank tool-call rejection rounds for one live Agent
+ * (each round already includes the single-retry guard's automatic re-send)
+ * and inject a durable notice into the next admitted turn once they reach
  * {@link DEGRADATION_NOTICE_THRESHOLD}. A successful model settlement resets
  * the count, so an isolated glitch never reports. Registration rides the
  * agent scope: listeners unregister with the agent's own teardown.
