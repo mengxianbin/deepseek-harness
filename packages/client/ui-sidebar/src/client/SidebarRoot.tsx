@@ -90,7 +90,7 @@ function PanelRow({ id, label, wide, usePanelInfo, selectPanel, trackEntryClick,
 type PanelMoreProps =
   Pick<SidebarRootComponentProps, 'usePanelInfo' | 't'>
   & Pick<InjectFace<SidebarRootInjected>, 'selectPanel' | 'startSession' | 'trackEntryClick' | 'setPinned'>
-  & Pick<PropsRenderSlots<'sidebar.panellist' | 'sidebar.panellist.actions'>, 'renderSlot'>
+  & Pick<PropsRenderSlots<'sidebar.panellist' | 'sidebar.panellist.actions' | 'sidebar.more.action'>, 'renderSlot'>
   & { readonly panels: readonly SidebarPanelMetadata[] }
   & { readonly unpinned: readonly string[] }
   & { readonly hasEntryActions: boolean }
