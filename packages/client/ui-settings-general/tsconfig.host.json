@@ -21,6 +21,7 @@
   "references": [
     { "path": "../../../vendor/cordis" },
     { "path": "../../../vendor/schemastery" },
+    { "path": "../../api/remotes/tsconfig.host.json" },
     { "path": "../../settings/settings" },
     { "path": "../connection/tsconfig.host.json" },
     { "path": "../../host/webserver" },
