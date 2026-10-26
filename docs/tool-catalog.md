@@ -502,7 +502,7 @@ Source: [`packages/experimental/browser-use-stagehand-native/src/index.ts`](../p
 
 ### `ask_user_question`
 
-Ask the user a concise question when you need confirmation, a choice, or missing information before proceeding.
+Ask the user a concise question when you need confirmation, a choice, or missing information before proceeding. Keep every question field brief — the card renders question, detail, and option text inline; put long reports in a file and reference its path instead.
 
 ```json
 {

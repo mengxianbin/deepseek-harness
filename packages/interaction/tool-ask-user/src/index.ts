@@ -28,7 +28,9 @@ export const Config: z<Config> = z.object({
 export const name = 'tool-ask-user'
 export const inject = ['tools', 'userQuestions']
 
-const description = 'Ask the user a concise question when you need confirmation, a choice, or missing information before proceeding.'
+const description = 'Ask the user a concise question when you need confirmation, a choice, or missing information before proceeding. '
+  + 'Keep every question field brief — the card renders question, detail, and option text inline; '
+  + 'put long reports in a file and reference its path instead.'
 
 export function apply(ctx: Context, config: Config = {}): void {
   if (config.mode === 'timed') {

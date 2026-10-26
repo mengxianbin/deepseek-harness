@@ -27,7 +27,9 @@ function validateQuestionIds(questions: readonly { readonly id: string }[]): voi
 const description = 'Ask brief, direct, self-contained questions about missing information, preferences, or decisions. '
   + 'Use user-facing terms; assume no knowledge of background work or internal names. '
   + 'Use distinct stable question IDs. A submitted skipped question is an answer item with empty selected and no custom; '
-  + 'pending instead means no answer batch arrived before the timeout and the user can still answer.'
+  + 'pending instead means no answer batch arrived before the timeout and the user can still answer. '
+  + 'Keep every question field brief — the card renders question, detail, and option text inline; '
+  + 'put long reports in a file and reference its path instead.'
 
 /**
  * Instruction the pending result carries in its `message` field. It is a field
