@@ -57,10 +57,16 @@
       "path": "../ui-tool"
     },
     {
+      "path": "../ui-sidebar-right"
+    },
+    {
       "path": "../../llm/llm"
     },
     {
       "path": "../../util/brand"
+    },
+    {
+      "path": "../../util/workspace-path"
     }
   ]
 }

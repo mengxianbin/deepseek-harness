@@ -1,4 +1,7 @@
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { agentEvents, type Agent } from '@deepseek-ai/dsh-agent'
 import UserQuestionService, {
@@ -939,5 +942,119 @@ describe('late replies', () => {
     expect(ctx.userQuestions.answer(agent, timedCallId, { answers: [{ id: 'scope', selected: [] }] })).toBe(false)
     expect(agent.steer).not.toHaveBeenCalled()
     await ctx.fiber.dispose()
+  })
+})
+
+describe('folding over-long question text out of the card', () => {
+  const longText = (chars: number, seed: string): string => seed.repeat(Math.ceil(chars / seed.length)).slice(0, chars)
+
+  async function foldContext(): Promise<{ ctx: Context; reportDir: string; p: ReturnType<typeof provider> }> {
+    const reportDir = await mkdtemp(join(tmpdir(), 'ask-fold-spec-'))
+    const ctx = new Context()
+    await ctx.plugin(AgentRegistry)
+    // Full Config literal, as the service's typed constructor expects; zod's
+    // defaults fill these in production, tests state them explicitly.
+    await ctx.plugin(UserQuestionService, { maxInlineChars: 1_500, summaryChars: 600, reportDir })
+    const p = provider('ok')
+    registerAnswerer(ctx, p)
+    return { ctx, reportDir, p }
+  }
+
+  it('parks over-long fields in a report file and hands the card a summary with an attachment', async () => {
+    const { ctx, p } = await foldContext()
+    const detail = longText(4_000, '呈报内容 diff 行 ')
+    const description = longText(1_800, '选项说明也很长 ')
+    const questions = [{ id: 'report', question: '收到？', detail, options: [{ label: '收到', description }] }]
+
+    const result = await ctx.userQuestions.ask({ questions })
+
+    expect(result.answers[0]?.selected).toEqual(['ok'])
+    const seen = p.seen[0]?.questions[0]
+    expect(seen).toBeDefined()
+    // Short fields stay verbatim; only the over-long ones fold.
+    expect(seen?.question).toBe('收到？')
+    expect(seen?.detail?.length).toBeLessThan(1_500)
+    expect(seen?.detail).toContain('已折叠')
+    expect(seen?.options?.[0]?.description?.length).toBeLessThan(1_500)
+    expect(seen?.attachment?.chars).toBe(4_000 + 1_800)
+    const written = await readFile(seen?.attachment?.path ?? '', 'utf8')
+    expect(written).toContain(detail)
+    expect(written).toContain(description)
+  })
+
+  it('leaves a short batch completely untouched', async () => {
+    const { ctx, p } = await foldContext()
+    const questions = [{ id: 'short', question: 'Continue?', options: [{ label: 'yes' }] }]
+
+    await ctx.userQuestions.ask({ questions })
+
+    expect(p.seen).toEqual([{ questions }])
+    expect(p.seen[0]?.questions[0]).not.toHaveProperty('attachment')
+  })
+
+  it('keeps a presentation intent verbatim — plan-review renders its own scrollable panel', async () => {
+    const { ctx, p } = await foldContext()
+    const plan = longText(6_000, '计划正文 block\n')
+    const questions = [{
+      id: 'plan', question: '执行这份计划？', detail: plan,
+      options: [{ label: 'approve' }, { label: 'decline' }],
+      intent: { kind: 'plan-review' as const, approve: 'approve' },
+    }]
+
+    await ctx.userQuestions.ask({ questions })
+
+    expect(p.seen?.[0]?.questions[0]?.detail).toBe(plan)
+    expect(p.seen?.[0]?.questions[0]).not.toHaveProperty('attachment')
+  })
+
+  it('folds the question, header, and option label fields too, under the Session directory', async () => {
+    const { ctx, p, reportDir } = await foldContext()
+    const agent = stubAgent('fold-session-1')
+    ctx.agents.enter(agent, undefined)
+    const question = longText(1_600, '问句被塞满 ')
+    const header = longText(1_600, '标题也被塞满 ')
+    const label = longText(1_600, '选项标签塞满 ')
+    const questions = [{ id: 'bloated', question, header, options: [{ label }] }]
+
+    await ctx.userQuestions.ask({ questions, agent })
+
+    const seen = p.seen[0]?.questions[0]
+    expect(seen?.question).toContain('已折叠')
+    expect(seen?.header).toContain('已折叠')
+    expect(seen?.options?.[0]?.label).toContain('已折叠')
+    const path = seen?.attachment?.path ?? ''
+    expect(path.startsWith(join(reportDir, String(agent.session.id)))).toBe(true)
+    expect(await readFile(path, 'utf8')).toContain(label)
+  })
+
+  it('passes a pre-attached question through without rewriting it', async () => {
+    const { ctx, p } = await foldContext()
+    const attachment = { path: 'C:/somewhere/already.md', chars: 9_999 }
+    const detail = longText(5_000, '已折叠过的内容 ')
+    const questions = [{ id: 'again', question: '带附件？', detail, attachment }]
+
+    await ctx.userQuestions.ask({ questions })
+
+    expect(p.seen[0]?.questions[0]).toEqual(questions[0])
+  })
+
+  it('keeps the original question when the report file cannot be written', async () => {
+    const blocker = await mkdtemp(join(tmpdir(), 'ask-fold-block-'))
+    const notADir = join(blocker, 'file-not-dir')
+    await writeFile(notADir, 'occupied', 'utf8')
+    const ctx = new Context()
+    await ctx.plugin(UserQuestionService, { maxInlineChars: 1_500, summaryChars: 600, reportDir: notADir })
+    const p = provider('ok')
+    registerAnswerer(ctx, p)
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    onTestFinished(() => { errorSpy.mockRestore() })
+    const detail = longText(4_000, '写盘失败也要留住 ')
+    const questions = [{ id: 'keep', question: '原文保留？', detail }]
+
+    await ctx.userQuestions.ask({ questions })
+
+    expect(p.seen).toEqual([{ questions }])
+    expect(p.seen[0]?.questions[0]).not.toHaveProperty('attachment')
+    expect(errorSpy).toHaveBeenCalledOnce()
   })
 })

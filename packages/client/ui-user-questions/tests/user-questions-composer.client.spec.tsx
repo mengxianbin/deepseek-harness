@@ -1203,3 +1203,38 @@ describe('QuestionComposer answer-surface wiring', () => {
     expect(harness.track).toHaveBeenLastCalledWith(expect.any(String), expect.any(Number), 'frozen', expect.any(Number))
   })
 })
+
+describe('folded long-content attachment row', () => {
+  const FOLDED: PendingQuestion['questions'] = [{
+    id: 'report',
+    question: '长呈报收到？',
+    detail: '（首屏摘要）以下内容已折叠。',
+    attachment: { path: 'C:/Users/dev/.dsh/ask-reports/s1/report.md', chars: 4_200 },
+    options: [{ label: '收到' }],
+  }]
+
+  it('offers the sidebar preview opener wired by the seat', () => {
+    const { carrier } = wait(FOLDED)
+    const openAttachment = vi.fn()
+    render(<QuestionComposer matched={carrier} {...kit} openAttachment={openAttachment} />)
+
+    expect(screen.getByText(/超长内容已折叠/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '在侧栏预览中打开' }))
+    expect(openAttachment).toHaveBeenCalledWith('C:/Users/dev/.dsh/ask-reports/s1/report.md')
+  })
+
+  it('shows the file path when no opener is reachable', () => {
+    const { carrier } = wait(FOLDED)
+    render(<QuestionComposer matched={carrier} {...kit} />)
+
+    expect(screen.queryByRole('button', { name: '在侧栏预览中打开' })).toBeNull()
+    expect(screen.getByText('C:/Users/dev/.dsh/ask-reports/s1/report.md')).toBeTruthy()
+  })
+
+  it('renders no attachment row for a question without one', () => {
+    const { carrier } = wait()
+    render(<QuestionComposer matched={carrier} {...kit} openAttachment={() => {}} />)
+
+    expect(screen.queryByText(/超长内容已折叠/)).toBeNull()
+  })
+})

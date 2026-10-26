@@ -181,6 +181,7 @@ export function QuestionComposer(props: QuestionComposerProps) {
         actions={props.actions}
         renderSlot={props.renderSlot}
         answerTriggers={props.answerTriggers}
+        {...(props.openAttachment === undefined ? {} : { openAttachment: props.openAttachment })}
       />
     )
     : <PlanReviewPanel key={question.key} pending={question} review={review} t={props.t} renderSlot={props.renderSlot} />
@@ -189,9 +190,9 @@ export function QuestionComposer(props: QuestionComposerProps) {
 type QuestionFlowProps =
   { pending: PendingQuestion }
   & Pick<QuestionComposerProps,
-    't' | 'useStore' | 'useQuestionCard' | 'actions' | 'renderSlot' | 'answerTriggers'>
+    't' | 'useStore' | 'useQuestionCard' | 'actions' | 'renderSlot' | 'answerTriggers' | 'openAttachment'>
 
-function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSlot, answerTriggers }: QuestionFlowProps) {
+function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSlot, answerTriggers, openAttachment }: QuestionFlowProps) {
   const questions = pending.questions
   // A read-only card built from a settled call's transcript: the same panel
   // over the recorded answers, with nothing left to submit.
@@ -298,6 +299,8 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
   // oxlint-disable-next-line typescript/no-non-null-assertion
   const draft = drafts[index]!
   const hasOptions = (question.options?.length ?? 0) > 0
+  // Folded long-content attachment; the opener exists only where a Sidebar is reachable.
+  const attachment = question.attachment
 
   const replaceProgress = (nextIndex: number, nextDrafts: QuestionDraftAnswer[]): void => {
     actions.replace(pending.key, {
@@ -712,6 +715,18 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
             >
               {question.detail !== undefined && (
                 <div className={css.detail}><MarkdownText text={question.detail} labels={markdownLabels} /></div>
+              )}
+              {attachment !== undefined && (
+                <div className={css.attachment}>
+                  <span className={css.attachmentText}>{t('attachment.folded', { chars: attachment.chars })}</span>
+                  {openAttachment !== undefined
+                    ? (
+                      <Button variant="outline" onClick={() => openAttachment(attachment.path)}>
+                        {t('attachment.open')}
+                      </Button>
+                    )
+                    : <span className={css.attachmentPath}>{attachment.path}</span>}
+                </div>
               )}
               <div className={css.options} role={question.multiSelect === true ? 'group' : 'radiogroup'}>
                 {(question.options ?? []).map((option, optionIndex) => {

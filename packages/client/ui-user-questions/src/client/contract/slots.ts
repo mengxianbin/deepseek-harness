@@ -611,6 +611,12 @@ export type QuestionComposerProps =
   & InjectFace<{
     keyedHooks: { questionCard: (key: string) => PendingQuestion | undefined }
     answerTriggers: AnswerTriggerSurface
+    /**
+     * Open a folded long-content attachment in the Sidebar preview. Built by
+     * the plugin entry only when a Sidebar service is reachable; absent keeps
+     * the card showing the file path instead of a dead button.
+     */
+    openAttachment?: (path: string) => void
   }>
   & { matched: QuestionWait }
   & PropsLocale<'question'>
