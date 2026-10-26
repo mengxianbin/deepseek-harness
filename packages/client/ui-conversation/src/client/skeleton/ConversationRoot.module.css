@@ -355,6 +355,18 @@ button.crumb:hover {
      elected overlay are siblings — and custom properties inherit down to
      whichever entry is mounted. */
   --dsh-composer-text-max-height: 336px;
+  /* FORK dsh-local (ask-scroll-container-cap, 2026-10-26): the seat's physical
+     ceiling is this scrollport, not the viewport. A takeover card budgets its
+     own height against the viewport (QuestionComposer .card min(60vh, 520px)),
+     but the box that clips a too-tall seat is THIS scrollport — an embedded
+     pane (the subagent sidebar chat) can be far shorter than 60vh. Without
+     this cap, a card taller than the pane sticks (bottom: 0) only up to the
+     containing-block top and spills out of the pane bottom: the footer actions
+     land in the clipped region while the card, still under its own cap, never
+     compresses and its body never scrolls. With the cap the seat compresses
+     its shrinkable occupant (the takeover frame/card, min-height: 0) and the
+     card's own body scroll takes over. Content below the cap is untouched. */
+  max-height: 100%;
 }
 
 /* Active phase: header is ordinary column chrome above the scrollport (not
