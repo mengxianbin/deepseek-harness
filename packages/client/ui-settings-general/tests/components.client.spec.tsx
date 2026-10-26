@@ -419,38 +419,54 @@ describe('Restart server button', () => {
     expect(alert.textContent).toBe(en['restart.failed'])
   })
 
-  it('wears the wide badge with the state copy and its data marker', () => {
+  it('lights the button with the state copy as its name and prints no copy pill', () => {
     render(<RestartServerButton {...base} signal={{ state: 'NEED_BUILD' }} />)
-    const badge = screen.getByRole('status')
-    expect(badge.textContent).toBe(en['restart.signal.needBuild'])
-    expect(badge.getAttribute('data-restart-signal')).toBe('NEED_BUILD')
+    const button = screen.getByRole('button', { name: en['restart.signal.needBuild'] })
+    expect(button.getAttribute('data-restart-signal')).toBe('NEED_BUILD')
+    // FORK sidebar-footer-ui-1026 (design §角标条款修订): the wide column
+    // prints no always-visible pill — the reason rides the tooltip/dialog.
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('leads the confirm dialog with the lit reason (the second-level layer carries it too)', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
+    onTestFinished(() => { vi.unstubAllGlobals() })
+    render(<RestartServerButton {...base} signal={{ state: 'NEED_RESTART', reason: 'built' }} />)
+    fireEvent.click(screen.getByRole('button', { name: en['restart.signal.needRestart.built'] }))
+    const dialog = screen.getByRole('dialog', { name: en['restart.confirm.title'] })
+    expect(dialog.textContent).toContain(en['restart.signal.needRestart.built'])
+    expect(dialog.textContent).toContain(en['restart.confirm.description.zero'])
   })
 
   it('names the restart branch in the NEED_RESTART copy', () => {
     const view = render(<RestartServerButton {...base} signal={{ state: 'NEED_RESTART', reason: 'config' }} />)
-    expect(screen.getByRole('status').textContent).toBe(en['restart.signal.needRestart.config'])
+    expect(screen.getByRole('button', { name: en['restart.signal.needRestart.config'] })).toBeTruthy()
     view.rerender(<RestartServerButton {...base} signal={{ state: 'NEED_RESTART', reason: 'built' }} />)
-    expect(screen.getByRole('status').textContent).toBe(en['restart.signal.needRestart.built'])
+    expect(screen.getByRole('button', { name: en['restart.signal.needRestart.built'] })).toBeTruthy()
   })
 
-  it.each([['INIT'], ['BUILDING'], ['BUILD_FAILED']] as const)('shows the %s badge with its single next step', (state) => {
+  it.each([['INIT'], ['BUILDING'], ['BUILD_FAILED']] as const)('lights the %s button with its single next step', (state) => {
     render(<RestartServerButton {...base} signal={{ state }} />)
     const copy = {
       INIT: en['restart.signal.init'],
       BUILDING: en['restart.signal.building'],
       BUILD_FAILED: en['restart.signal.buildFailed'],
     }[state]
-    expect(screen.getByRole('status').textContent).toBe(copy)
+    expect(screen.getByRole('button', { name: copy }).getAttribute('data-restart-signal')).toBe(state)
   })
 
   it('lights nothing for OK or the client-only state', () => {
     const view = render(<RestartServerButton {...base} signal={{ state: 'OK' }} />)
+    const dark = screen.getByRole('button', { name: en['restart.button'] })
+    expect(dark.hasAttribute('data-restart-signal')).toBe(false)
     expect(screen.queryByRole('status')).toBeNull()
     view.rerender(<RestartServerButton {...base} signal={{ state: 'CLIENT_UPDATED' }} />)
+    const stillDark = screen.getByRole('button', { name: en['restart.button'] })
+    expect(stillDark.hasAttribute('data-restart-signal')).toBe(false)
     expect(screen.queryByRole('status')).toBeNull()
   })
 
-  it('collapses the lit badge into a status dot carrying the copy as its accessible name', () => {
+  it('collapses the lit lamp into a status dot carrying the copy as its accessible name', () => {
     render(<RestartServerButton {...base} wide={false} signal={{ state: 'NEED_RESTART', reason: 'built' }} />)
     const dot = screen.getByRole('status')
     expect(dot.getAttribute('aria-label')).toBe(en['restart.signal.needRestart.built'])

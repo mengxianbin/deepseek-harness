@@ -1,6 +1,7 @@
-/** Restart-server control beside the settings trigger, with its confirm dialog and restart-signal badge. */
+/** Restart-server control beside the settings trigger, with its confirm dialog and restart-signal lamp. */
 import { useState } from 'react'
-import { Button, IconRefreshOutlineMedium, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import clsx from 'clsx'
+import { Button, IconRefreshOutlineMedium, Modal, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { RESTART_PATH, type RestartSignalView } from '../restart.ts'
 import css from './RestartServerButton.module.css'
@@ -19,10 +20,10 @@ export type RestartServerButtonProps = PropsLocale<'settings'> & {
 
 /**
  * The one next-step copy for a judgment; `OK` and the client-only
- * `CLIENT_UPDATED` state have no badge and never reach this function.
+ * `CLIENT_UPDATED` state have no lamp and never reach this function.
  * @param t - localized copy seat of the `settings` namespace.
  * @param signal - latest judgment.
- * @returns the single next-step line the badge and dot both carry.
+ * @returns the single next-step line the tooltip, confirm dialog, and rail dot all carry.
  */
 export function restartSignalCopy(t: PropsLocale<'settings'>['t'], signal: RestartSignalView): string {
   switch (signal.state) {
@@ -49,14 +50,16 @@ function lampLit(signal: RestartSignalView | undefined): signal is RestartSignal
  * `POST /api/restart` same-origin, and reports the outcome as one static
  * line — the page's existing reconnect machinery absorbs the restart.
  *
- * The restart-signal badge rides the same control: in the expanded column a
- * lit judgment (INIT/BUILDING/BUILD_FAILED/NEED_BUILD/NEED_RESTART) shows as
- * a dot-prefixed copy pill after the button; in the collapsed rail a lit
- * judgment shows as a standalone dot carrying the same copy as its accessible
- * name. `OK` and the client-only `CLIENT_UPDATED` state (F5/HMR territory,
- * design §二) render nothing.
+ * The restart-signal lamp rides the same control (FORK dsh-local
+ * sidebar-footer-ui-1026, 2026-10-26 — design §角标条款修订: the wide column
+ * no longer prints a copy pill): a lit judgment (INIT/BUILDING/BUILD_FAILED/
+ * NEED_BUILD/NEED_RESTART) lights the BUTTON itself, the hover/focus tooltip
+ * carries the one next-step line, and the confirm dialog repeats it as its
+ * first sentence; the collapsed rail keeps its standalone dot carrying the
+ * same copy as its accessible name. `OK` and the client-only `CLIENT_UPDATED`
+ * state (F5/HMR territory, design §二) render nothing.
  * @param props - localized copy, the page's restart capability, and the latest judgment as plain data.
- * @returns the control with its dialog and badge; nothing while unavailable.
+ * @returns the control with its dialog and lamp; nothing while unavailable.
  */
 export function RestartServerButton({ t, configured, runningSessions, wide, signal }: RestartServerButtonProps) {
   const [confirming, setConfirming] = useState(false)
@@ -85,21 +88,28 @@ export function RestartServerButton({ t, configured, runningSessions, wide, sign
       .then((response) => { setResult(response.ok ? 'accepted' : 'failed') })
       .catch(() => { setResult('failed') })
   }
-  const description = runningSessions === 0
+  const sessionsLine = runningSessions === 0
     ? t('restart.confirm.description.zero')
     : t('restart.confirm.description.some', { n: runningSessions })
+  // The lit judgment leads the confirm copy (二级层同样显示重启原因).
+  const description = lit ? `${copy} ${sessionsLine}` : sessionsLine
+  // Lit: the button's accessible name and hover tooltip carry the reason;
+  // dark: the plain control name.
+  const label = lit ? copy : t('restart.button')
 
   return (
     <>
-      <button type="button" className={css.restart} aria-label={t('restart.button')} onClick={openConfirm}>
-        <IconRefreshOutlineMedium size={16} />
-      </button>
-      {lit && (
-        <span className={css.signalBadge} role="status" data-restart-signal={signal.state}>
-          <span className={css.signalBadgeDot} aria-hidden="true" />
-          {copy}
-        </span>
-      )}
+      <Tooltip label={label} delayMs={500} side="top">
+        <button
+          type="button"
+          className={clsx(css.restart, lit && css.restartLit)}
+          aria-label={label}
+          data-restart-signal={lit ? signal.state : undefined}
+          onClick={openConfirm}
+        >
+          <IconRefreshOutlineMedium size={16} />
+        </button>
+      </Tooltip>
       {result !== 'idle' && (
         <span className={css.notice} role={result === 'failed' ? 'alert' : 'status'}>
           {result === 'accepted' ? t('restart.accepted') : t('restart.failed')}
