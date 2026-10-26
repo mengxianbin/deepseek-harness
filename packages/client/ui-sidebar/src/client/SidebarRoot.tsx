@@ -10,6 +10,9 @@
  * global panel rows and the foot is the `sidebar.workspaces` registrant's,
  * and the foot holds `sidebar.settings` plus `sidebar.footer.action`; the shell
  * hands them the wide flag (plus an expand request callback for the browser).
+ * Low-frequency actions fold into the footer ⋯ menu through
+ * `sidebar.more.action` (user ruling sidebar-footer-ui-1026); the collapsed
+ * rail — which has no ⋯ menu — keeps them in the foot.
  *
  * The column also owns whether the scroll regions nested in it draw a
  * scrollbar at all: the shell tracks the pointer and rebinds ui-theme's
@@ -74,10 +77,13 @@ function PanelRow({ id, label, wide, usePanelInfo, selectPanel, renderSlot }: Pa
 }
 
 type PanelMoreProps =
-  Pick<SidebarRootComponentProps, 'usePanelInfo' | 't'>
+  Pick<SidebarRootComponentProps, 'usePanelInfo' | 't' | 'renderSlot'>
   & Pick<InjectFace<SidebarRootInjected>, 'selectPanel' | 'startSession'>
-  & Pick<PropsRenderSlots<'sidebar.panellist'>, 'renderSlot'>
-  & { readonly panels: readonly SidebarPanelMetadata[] }
+  & {
+    readonly panels: readonly SidebarPanelMetadata[]
+    /** Whether the ⋯-menu action seat has registrants (draws the group separator). */
+    readonly hasMoreActions: boolean
+  }
 
 /** The New Session row's menu id (an action, not a registered main panel). */
 const NEW_SESSION_ITEM = 'new-session'
@@ -95,7 +101,7 @@ const NEW_SESSION_ITEM = 'new-session'
  * @param props - panel metadata plus the shell's action/render shares.
  * @returns the ⋯ anchor with its menu.
  */
-function PanelMore({ panels, usePanelInfo, selectPanel, startSession, renderSlot, t }: PanelMoreProps) {
+function PanelMore({ panels, hasMoreActions, usePanelInfo, selectPanel, startSession, renderSlot, t }: PanelMoreProps) {
   const [open, setOpen] = useState(false)
   const activePanelId = usePanelInfo(info => info.activePanelId)
   return (
@@ -113,6 +119,13 @@ function PanelMore({ panels, usePanelInfo, selectPanel, startSession, renderSlot
               icon: renderSlot('sidebar.panellist', { size: 16, active: id === activePanelId }, { only: id }),
             })),
           ]
+          : []),
+        // FORK dsh-local (sidebar-footer-ui-1026): low-frequency foot actions
+        // (phone pairing, remote access) fold into this menu as component
+        // rows after the data items; the separator only draws while the seat
+        // actually has registrants.
+        ...(hasMoreActions
+          ? [{ type: 'separator' as const, id: 'more-action-separator' }]
           : []),
       ]}
       selectedIds={activePanelId === null ? [] : [activePanelId]}
@@ -144,7 +157,13 @@ function PanelMore({ panels, usePanelInfo, selectPanel, startSession, renderSlot
           </button>
         </Tooltip>
       )}
-    />
+    >
+      {hasMoreActions && (
+        <div className={css.moreActions}>
+          {renderSlot('sidebar.more.action', { wide: true })}
+        </div>
+      )}
+    </Menu>
   )
 }
 
@@ -160,12 +179,14 @@ export function SidebarRoot({
   toggleSidebar,
   selectPanel,
   usePanels,
+  useMoreActions,
   useShortcuts,
   usePanelInfo,
   t,
   renderSlot,
 }: SidebarRootComponentProps) {
   const panels = usePanels(snapshot => snapshot)
+  const moreActions = useMoreActions(snapshot => snapshot)
   const shortcut = useShortcuts(rows => rows.find(row => row.id === 'sidebar.left.toggle'))
   const newShortcut = useShortcuts(rows => rows.find(row => row.id === 'session.new'))
   const toggleLabel = collapsed ? t('toggle.open') : t('toggle.collapse')
@@ -356,11 +377,13 @@ export function SidebarRoot({
       </div>
 
       {/* FORK dsh-local (sidebar-layout round 3): the wide foot is ONE row —
-          Settings, the ⋯ menu, then the footer actions (user ruling order).
-          The dsh-usage glance card is removed (usage-glance ruling,
-          2026-10-15): the plan cycle pair now lives in the logo row beside
-          the whale mark (UsageGlance), so nothing injects above this row.
-          The rail keeps its original stack. */}
+          Settings, the footer actions, then the ⋯ menu (user ruling order,
+          sidebar-footer-ui-1026: ⋯ sits right of the update badge; phone
+          pairing + remote access moved INTO the ⋯ menu). The dsh-usage glance
+          card is removed (usage-glance ruling, 2026-10-15): the plan cycle
+          pair now lives in the logo row beside the whale mark (UsageGlance),
+          so nothing injects above this row. The rail keeps its original stack
+          and folds the ⋯-menu actions into the foot (no ⋯ menu on the rail). */}
       <div className={css.footArea}>
         {wide
           ? (
@@ -368,22 +391,24 @@ export function SidebarRoot({
               <div className={css.settingsArea}>
                 {renderSlot('sidebar.settings', { wide })}
               </div>
+              <div className={css.footerActions}>
+                {renderSlot('sidebar.footer.action', { wide })}
+              </div>
               <PanelMore
                 panels={panels}
+                hasMoreActions={moreActions.length > 0}
                 usePanelInfo={usePanelInfo}
                 selectPanel={selectPanel}
                 startSession={startSession}
                 renderSlot={renderSlot}
                 t={t}
               />
-              <div className={css.footerActions}>
-                {renderSlot('sidebar.footer.action', { wide })}
-              </div>
             </div>
           )
           : (
             <>
               <div className={css.footerActions}>
+                {renderSlot('sidebar.more.action', { wide })}
                 {renderSlot('sidebar.footer.action', { wide })}
               </div>
               <div className={css.settingsArea}>

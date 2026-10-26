@@ -17,7 +17,7 @@ import { en, zh, type SidebarKey } from './locales.ts'
 
 export type {
   SidebarBrandMarkOwnerProps, SidebarBrandNameOwnerProps, SidebarFooterActionOwnerProps,
-  SidebarPanelIconOwnerProps, SidebarPanelMetadata,
+  SidebarMoreActionOwnerProps, SidebarPanelIconOwnerProps, SidebarPanelMetadata,
   SidebarRootComponentProps, SidebarRootInjected, SidebarSectionOwnerProps, SidebarSettingsOwnerProps,
 } from './contract/slots.ts'
 export type { SidebarKey } from './locales.ts'
@@ -62,6 +62,18 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.slots.subscribe('sidebar.panellist', syncPanels), 'ui-sidebar: panel entries')
   ctx.effect(() => ctx.locale.subscribe(syncPanels), 'ui-sidebar: panel labels')
 
+  // ⋯-menu action seat (sidebar-footer-ui-1026): only the registration ids
+  // matter to the shell — the count decides whether the menu draws the group
+  // separator above the folded actions.
+  const moreActions = createSnapshotStore<readonly string[]>([])
+  const syncMoreActions = (): void => {
+    const next = ctx.slots.entriesOfSlot('sidebar.more.action').map(({ options }) => String(options.id))
+    const previous = moreActions.getSnapshot()
+    if (previous.length === next.length && previous.every((id, index) => id === next[index])) return
+    moreActions.set(next)
+  }
+  ctx.effect(() => ctx.slots.subscribe('sidebar.more.action', syncMoreActions), 'ui-sidebar: more-action entries')
+
   const injectProps = (): SidebarRootInjected => ({
     // The shell's New Session button rides the Workspace UI's shared action
     // (current Session Workspace, then recent Workspace).
@@ -71,7 +83,7 @@ export function apply(ctx: ClientContext): void {
       if (id === 'plugins' || id === 'schedules') ctx.get('productAnalytics')?.track('sidebar_menu_click', { menu_name: id === 'plugins' ? 'plugin' : 'cron' })
       ctx.layout.selectPanel(id)
     },
-    hooks: { panels, shortcuts: ctx.shortcuts.catalog },
+    hooks: { panels, shortcuts: ctx.shortcuts.catalog, moreActions },
   })
   ctx.slots.inject('sidebar', () => ctx.slots.register({
     name: 'sidebar',
@@ -84,6 +96,7 @@ export function apply(ctx: ClientContext): void {
       'sidebar.workspaces': { kind: 'single', scope: 'root' },
       'sidebar.settings': { kind: 'single', scope: 'root' },
       'sidebar.footer.action': { kind: 'list', scope: 'root' },
+      'sidebar.more.action': { kind: 'list', scope: 'root' },
     },
     inject: injectProps,
   }, SidebarRoot))
@@ -97,4 +110,5 @@ export function apply(ctx: ClientContext): void {
     inject: injectProps,
   }, HeaderLeadingControls))
   syncPanels()
+  syncMoreActions()
 }
