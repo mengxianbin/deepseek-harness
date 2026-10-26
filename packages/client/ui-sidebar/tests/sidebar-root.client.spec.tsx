@@ -54,6 +54,7 @@ function mountShell({ collapsed = false, width = 300, shortcuts = [] }: {
       collapsed={current.collapsed} width={current.width}
       useSessions={neverHook} useSessionStatus={useSessionStatus} useSessionRetainInfo={neverHook}
       usePanelInfo={usePanelInfo} selectPanel={() => {}} usePanels={selector => selector([])} useShortcuts={selector => selector(shortcuts)}
+      useMoreActions={selector => selector([])}
       useEntryPins={selector => selector([])} useEntryActions={selector => selector(false)} setPinned={() => {}}
       useResource={useResource} useWorkspaces={neverHook}
       {...allowAllAccess}
@@ -72,6 +73,9 @@ function mountShell({ collapsed = false, width = 300, shortcuts = [] }: {
         if (key === 'sidebar.footer.action') {
           footerActionOwner = owner
           return <div data-testid="footer-action-seat" data-wide={owner.wide} />
+        }
+        if (key === 'sidebar.more.action') {
+          return <div data-testid="more-action-seat" data-wide={owner.wide} />
         }
         regionOwner = owner as SidebarSectionOwnerProps
         return <div data-testid="region" data-wide={owner.wide} />
@@ -120,6 +124,7 @@ describe('SidebarRoot shell', () => {
       useSessionRetainInfo={neverHook} useResource={useResource} useWorkspaces={neverHook}
       {...allowAllAccess}
       usePanels={select => select([])} useEntryPins={select => select([])} useEntryActions={select => select(false)}
+      useMoreActions={select => select([])}
       useShortcuts={select => select([shortcut])} />)
     const button = screen.getByRole('button', { name: 'New session' })
     expect(button.getAttribute('aria-keyshortcuts')).toBe('Control+N')
@@ -154,6 +159,7 @@ describe('SidebarRoot shell', () => {
       collapsed={false} width={300}
       useSessions={neverHook} useSessionStatus={useSessionStatus} useSessionRetainInfo={neverHook}
       usePanelInfo={usePanelInfo} selectPanel={() => {}} usePanels={selector => selector([])} useShortcuts={selector => selector([])}
+      useMoreActions={selector => selector([])}
       useEntryPins={selector => selector([])} useEntryActions={selector => selector(false)} setPinned={() => {}}
       useResource={useResource} useWorkspaces={neverHook}
       {...allowAllAccess}
@@ -181,6 +187,7 @@ describe('SidebarRoot shell', () => {
       collapsed={false} width={300}
       useSessions={neverHook} useSessionStatus={useSessionStatus} useSessionRetainInfo={neverHook}
       usePanelInfo={usePanelInfo} selectPanel={() => {}} usePanels={selector => selector([])} useShortcuts={selector => selector([])}
+      useMoreActions={selector => selector([])}
       useEntryPins={selector => selector([])} useEntryActions={selector => selector(false)} setPinned={() => {}}
       useResource={useResource} useWorkspaces={neverHook}
       {...allowAllAccess}
@@ -200,6 +207,7 @@ describe('SidebarRoot shell', () => {
       collapsed={false} width={300}
       useSessions={neverHook} useSessionStatus={useSessionStatus} useSessionRetainInfo={neverHook}
       usePanelInfo={usePanelInfo} selectPanel={() => {}} usePanels={selector => selector([])} useShortcuts={selector => selector([])}
+      useMoreActions={selector => selector([])}
       useEntryPins={selector => selector([])} useEntryActions={selector => selector(false)} setPinned={() => {}}
       useResource={useResource} useWorkspaces={neverHook}
       {...allowAllAccess}
@@ -253,6 +261,7 @@ describe('SidebarRoot shell', () => {
       collapsed width={56}
       useSessions={neverHook} useSessionStatus={useSessionStatus} useSessionRetainInfo={neverHook}
       usePanelInfo={usePanelInfo} selectPanel={() => {}} usePanels={selector => selector([])} useShortcuts={selector => selector([])}
+      useMoreActions={selector => selector([])}
       useEntryPins={selector => selector([])} useEntryActions={selector => selector(false)} setPinned={() => {}}
       useResource={useResource} useWorkspaces={neverHook}
       {...allowAllAccess}

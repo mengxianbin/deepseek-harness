@@ -5,7 +5,8 @@
  * everything between the workspace section header and the list bottom is the
  * `sidebar.workspaces` registrant's (ui-workspace), and the foot is the
  * `sidebar.settings` registrant's (ui-settings), followed by optional footer
- * actions in `sidebar.footer.action`.
+ * actions in `sidebar.footer.action` — low-frequency actions fold into the
+ * footer ⋯ menu through `sidebar.more.action` (rail keeps them in the foot).
  */
 import type { InjectFace, PropsLocale, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
@@ -54,6 +55,14 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * package's 'sidebar' entry; each action receives only the column state.
      */
     'sidebar.footer.action': { kind: 'list'; scope: 'root'; owner: SidebarFooterActionOwnerProps }
+    /**
+     * Low-frequency actions folded INTO the footer ⋯ menu (user ruling
+     * sidebar-footer-ui-1026: phone pairing + remote access leave the foot
+     * row). Declared by this package's 'sidebar' entry; each action receives
+     * the same column state as the foot seat — the collapsed rail has no ⋯
+     * menu, so the shell keeps these entries reachable in the rail foot.
+     */
+    'sidebar.more.action': { kind: 'list'; scope: 'root'; owner: SidebarMoreActionOwnerProps }
   }
 }
 
@@ -144,6 +153,12 @@ export interface SidebarFooterActionOwnerProps {
   wide: boolean
 }
 
+/** Owner share of an action folded into the footer ⋯ menu (rail: foot icons). */
+export interface SidebarMoreActionOwnerProps {
+  /** Whether the sidebar renders wide content (false = 56px rail). */
+  wide: boolean
+}
+
 /**
  * Registrant-private injected share (arrives via the register inject
  * factory). The renderer binds the panel metadata source to usePanels.
@@ -175,6 +190,8 @@ export type SidebarRootInjected = {
     entryPins: ObservableSnapshot<readonly string[]>
     /** Whether `sidebar.panellist.actions` has registrations. */
     entryActions: ObservableSnapshot<boolean>
+    /** Registration ids of the ⋯-menu action seat (drives the menu's group separator). */
+    moreActions: ObservableSnapshot<readonly string[]>
   }
 }
 
@@ -194,5 +211,6 @@ export type SidebarRootComponentProps =
     | 'sidebar.workspaces'
     | 'sidebar.settings'
     | 'sidebar.footer.action'
+    | 'sidebar.more.action'
   >
   & InjectFace<SidebarRootInjected> & PropsLocale<'sidebar'>

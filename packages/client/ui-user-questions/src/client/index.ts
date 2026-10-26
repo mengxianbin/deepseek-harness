@@ -32,8 +32,10 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 // Type-only: the slash-pipeline service face resolved as `inputTriggers`.
 import type { InputTriggerServiceContract } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import type { UserQuestionPanels, UserQuestionRecord } from '@deepseek-ai/dsh-client-ui-tool/client'
+import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { brandString } from '@deepseek-ai/dsh-brand'
+import { fileAddressFor } from '@deepseek-ai/dsh-util-workspace-path'
 import {
   createWaterfallRequest, PendingQuestion,
   type AnswerTriggerSurface, type QuestionRpcChannel,
@@ -387,6 +389,10 @@ export function apply(ctx: ClientContext): void {
   const questionDraftStore = createQuestionDraftStore()
   const inputTriggers = ctx.get('inputTriggers') as InputTriggerServiceContract
   const sessions = ctx.sessions
+  // Optional lookup rather than a cordis inject: an embedded conversation
+  // surface without a Sidebar must still mount the composer, and its cards
+  // fall back to showing the folded file path instead of a dead button.
+  const sidebar = ctx.get('sidebarRight')
   /**
    * Bind one Session's answer-surface face to its trigger controller. The
    * composer entry injects once per Session binding — exactly when the
@@ -428,6 +434,14 @@ export function apply(ctx: ClientContext): void {
       inject: (sessionId: SessionId | undefined) => ({
         keyedHooks: { questionCard: (key: string) => cards.source(key) },
         answerTriggers: answerSurfaceFor(sessionId),
+        ...(sessionId === undefined || sidebar === undefined
+          ? {}
+          : {
+            openAttachment: (path: string): void => {
+              const cwd = sessions.list.getSnapshot().byId[sessionId]?.cwd
+              sidebar.openResource(fileAddressFor(sessionId, cwd, path))
+            },
+          }),
       }),
       children: {
         'conversation.plan-review.actions': { kind: 'list', scope: 'session' },

@@ -74,6 +74,10 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
         class="footerActions"
       >
         <div
+          data-slot="sidebar.more.action"
+          style="display: contents;"
+        />
+        <div
           data-slot="sidebar.footer.action"
           style="display: contents;"
         />
@@ -218,6 +222,14 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
             style="display: contents;"
           />
         </div>
+        <div
+          class="footerActions"
+        >
+          <div
+            data-slot="sidebar.footer.action"
+            style="display: contents;"
+          />
+        </div>
         <span
           class="root panelMoreSlot"
         >
@@ -240,14 +252,6 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
             />
           </button>
         </span>
-        <div
-          class="footerActions"
-        >
-          <div
-            data-slot="sidebar.footer.action"
-            style="display: contents;"
-          />
-        </div>
       </div>
     </div>
   </div>
@@ -345,6 +349,10 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
       <div
         class="footerActions"
       >
+        <div
+          data-slot="sidebar.more.action"
+          style="display: contents;"
+        />
         <div
           data-slot="sidebar.footer.action"
           style="display: contents;"
@@ -490,6 +498,14 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
             style="display: contents;"
           />
         </div>
+        <div
+          class="footerActions"
+        >
+          <div
+            data-slot="sidebar.footer.action"
+            style="display: contents;"
+          />
+        </div>
         <span
           class="root panelMoreSlot"
         >
@@ -512,14 +528,6 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
             />
           </button>
         </span>
-        <div
-          class="footerActions"
-        >
-          <div
-            data-slot="sidebar.footer.action"
-            style="display: contents;"
-          />
-        </div>
       </div>
     </div>
   </div>
@@ -653,6 +661,14 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
             style="display: contents;"
           />
         </div>
+        <div
+          class="footerActions"
+        >
+          <div
+            data-slot="sidebar.footer.action"
+            style="display: contents;"
+          />
+        </div>
         <span
           class="root panelMoreSlot"
         >
@@ -675,14 +691,6 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
             />
           </button>
         </span>
-        <div
-          class="footerActions"
-        >
-          <div
-            data-slot="sidebar.footer.action"
-            style="display: contents;"
-          />
-        </div>
       </div>
     </div>
   </div>

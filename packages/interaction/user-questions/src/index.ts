@@ -8,6 +8,9 @@
  */
 
 import { Context } from '@deepseek-ai/cordis'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import type {} from '@deepseek-ai/dsh-agent'
 import { createUserMessage, HarnessError, type MessageId, type ToolCallId, type UserMessage } from '@deepseek-ai/dsh-llm'
 import type { Session } from '@deepseek-ai/dsh-session'
@@ -26,13 +29,13 @@ declare module '@deepseek-ai/cordis' {
 }
 
 import type {
-  AskUserQuestionAnswer, AskUserQuestionRequestEvent, PendingUserQuestion,
+  AskUserQuestionAnswer, AskUserQuestionItem, AskUserQuestionRequestEvent, PendingUserQuestion,
 } from './types.ts'
 
 export type {
-  AskUserQuestionAnswer, AskUserQuestionAnswerItem, AskUserQuestionIntent, AskUserQuestionItem,
-  AskUserQuestionOption, PendingUserQuestion, SettledUserQuestion, UserQuestionProjectionView,
-  UserQuestionState,
+  AskUserQuestionAnswer, AskUserQuestionAnswerItem, AskUserQuestionAttachment, AskUserQuestionIntent,
+  AskUserQuestionItem, AskUserQuestionOption, PendingUserQuestion, SettledUserQuestion,
+  UserQuestionProjectionView, UserQuestionState,
 } from './types.ts'
 export { isTimedAskUserQuestionSchema, TIMED_WAIT_PARAMETER } from './projection.ts'
 
@@ -88,13 +91,56 @@ function restoreUserQuestionError(reason: unknown): unknown {
 
 type QueuedReply = { messageId: MessageId; claimedTurn?: number }
 
+/** Deployment knobs for folding over-long question text out of the card. */
+export interface Config {
+  /** Per-field character budget for text rendered inline on the card; a longer field folds into an attachment. */
+  readonly maxInlineChars: number
+  /** Characters of a folded field kept inline as its summary. */
+  readonly summaryChars: number
+  /** Directory folded report files land in; defaults to `<dsh home>/ask-reports`. */
+  readonly reportDir?: string
+}
+
+/** Inline marker appended to a summary so a folded field never reads as complete. */
+const foldedNote = (chars: number): string => `\n\n…（已折叠：完整内容 ${String(chars)} 字见下方附件）`
+
+/**
+ * Default root for folded report files: `$DSH_HOME` (or `~/.dsh`) then
+ * `ask-reports`. Mirrors `@deepseek-ai/dsh-home-paths` `resolveDshHome`
+ * inline — a value import would need a package link this package does not
+ * declare, and this seam stays dependency-light on purpose.
+ * @returns the absolute default report directory.
+ */
+const defaultReportDir = (): string =>
+  join(process.env.DSH_HOME?.trim() || join(homedir(), '.dsh'), 'ask-reports')
+
+/** Cut a field to its inline summary, preferring a line boundary near the limit. */
+function foldSummary(text: string, limit: number): string {
+  if (text.length <= limit) return text
+  const cut = text.slice(0, limit)
+  const lastBreak = cut.lastIndexOf('\n')
+  return (lastBreak > limit / 2 ? cut.slice(0, lastBreak) : cut).trimEnd()
+}
+
+/** Keep a path segment filename-safe on every platform. */
+function safeSegment(value: string): string {
+  const safe = value.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 64)
+  return safe.length > 0 ? safe : 'unnamed'
+}
+
 /** `ctx.userQuestions`: validation plus the scoped answerer waterfall. */
 export class UserQuestionService extends TypertRemoteService {
-  static Config = z.object({})
+  static Config: z<Config> = z.object({
+    maxInlineChars: z.number().step(1).min(200).default(1_500),
+    summaryChars: z.number().step(1).min(80).default(600),
+    // Schemastery validates a present value and passes on absence — no
+    // `.optional()` exists here; an absent reportDir means the default root.
+    reportDir: z.string(),
+  })
   private readonly waits = new Map<Agent, Map<ToolCallId, TimedQuestionWait>>()
   private readonly queuedReplies = new WeakMap<Session, Map<ToolCallId, QueuedReply>>()
 
-  constructor(ctx: Context) {
+  constructor(ctx: Context, private readonly config: Config) {
     super(ctx, 'userQuestions')
     ctx.inject(['sessionProjections'], (projectionCtx) => {
       projectionCtx.sessionProjections.register(userQuestionProjectionDefinition)
@@ -282,6 +328,81 @@ export class UserQuestionService extends TypertRemoteService {
   }
 
   /**
+   * Fold every question whose text fields exceed the inline budget into an
+   * attachment: the over-long fields are written whole into one report file
+   * under the report directory, and the question keeps a summary plus the
+   * file path. A question carrying a presentation intent keeps its text
+   * verbatim — plan-review renders its own scrollable panel — and a fold
+   * whose file cannot be written keeps the original question, so the fold is
+   * a presentation default that never loses or rejects content.
+   * @param questions - validated question batch about to reach an answerer.
+   * @param sessionId - owning Session id when one is known, for the file's directory.
+   * @returns the batch as the card should present it.
+   */
+  private async foldLongQuestions(
+    questions: readonly AskUserQuestionItem[],
+    sessionId: string | undefined,
+  ): Promise<readonly AskUserQuestionItem[]> {
+    const { maxInlineChars, summaryChars } = this.config
+    const folded: AskUserQuestionItem[] = []
+    let directory: string | undefined
+    let stamp: string | undefined
+    for (const question of questions) {
+      if (question.intent !== undefined || question.attachment !== undefined) {
+        folded.push(question)
+        continue
+      }
+      const options = question.options ?? []
+      const over: { field: string; text: string }[] = []
+      const scan = (field: string, text: string): void => {
+        if (text.length > maxInlineChars) over.push({ field, text })
+      }
+      scan('question', question.question)
+      if (question.detail !== undefined) scan('detail', question.detail)
+      if (question.header !== undefined) scan('header', question.header)
+      for (const [index, option] of options.entries()) {
+        scan(`option[${String(index)}].label`, option.label)
+        if (option.description !== undefined) scan(`option[${String(index)}].description`, option.description)
+      }
+      if (over.length === 0) {
+        folded.push(question)
+        continue
+      }
+      try {
+        directory ??= join(this.config.reportDir ?? defaultReportDir(), safeSegment(sessionId ?? 'no-session'))
+        stamp ??= new Date().toISOString().replace(/[:.]/g, '-')
+        await mkdir(directory, { recursive: true })
+        const path = join(directory, `${stamp}-${safeSegment(question.id)}.md`)
+        const body = over.map(field => `## ${field.field}\n\n${field.text}`).join('\n\n')
+        await writeFile(path, `# ask_user_question folded content\n\n${body}\n`, 'utf8')
+        const chars = over.reduce((total, field) => total + field.text.length, 0)
+        const overFields = new Set(over.map(field => field.field))
+        const summaryOf = (text: string): string => `${foldSummary(text, summaryChars)}${foldedNote(text.length)}`
+        const nextOptions = options.map((option, index) => ({
+          label: overFields.has(`option[${String(index)}].label`) ? summaryOf(option.label) : option.label,
+          ...option.description !== undefined && overFields.has(`option[${String(index)}].description`)
+            ? { description: summaryOf(option.description) }
+            : {},
+        }))
+        folded.push({
+          ...question,
+          question: overFields.has('question') ? summaryOf(question.question) : question.question,
+          ...question.detail !== undefined && overFields.has('detail') ? { detail: summaryOf(question.detail) } : {},
+          ...question.header !== undefined && overFields.has('header') ? { header: summaryOf(question.header) } : {},
+          ...nextOptions.length > 0 ? { options: nextOptions } : {},
+          attachment: { path, chars },
+        })
+      } catch (error) {
+        // A fold is a presentation default: when the report cannot be
+        // written, the question stays exactly as the asker spelled it.
+        console.error('[user-questions] folded report write failed:', error)
+        folded.push(question)
+      }
+    }
+    return folded
+  }
+
+  /**
    * Ask the scoped answerer waterfall and wait for the user's answer.
    *
    * When a caller supplies an agent, human interaction is valid only for the
@@ -333,16 +454,24 @@ export class UserQuestionService extends TypertRemoteService {
           'BAD_INTENT')
       }
     }
+    // Presentation fold, after validation and before dispatch: over-long
+    // text fields become a summary plus a file attachment, so the card never
+    // becomes the reading surface for a long report.
+    const questions = await this.foldLongQuestions(
+      request.questions,
+      agent === undefined ? undefined : String(agent.session.id),
+    )
+    const presented: AskUserQuestionRequest = { ...request, questions: [...questions] }
     const noAnswerer = () => Promise.reject(new UserQuestionError(
       'no user-questions answerer accepted the request',
       'NO_PROVIDER',
     ))
     const dispatch = () => (agent === undefined
-      ? this.ctx.waterfall('user-questions/request', request, noAnswerer)
+      ? this.ctx.waterfall('user-questions/request', presented, noAnswerer)
       : this.ctx.waterfall(
         scopeTarget(agent, agent),
         'user-questions/request',
-        { ...request, agent },
+        { ...presented, agent },
         noAnswerer,
       ))
     try {

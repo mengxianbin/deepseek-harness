@@ -479,18 +479,28 @@ class UiWorkspaceService extends Service implements UiWorkspace {
       this.replaceMain(saved.subagentAddress, this.lifetime.signal, 'preserve')
       return
     }
+    // FORK dsh-local (blank-restore-lazy-a): a selectionless startup settles
+    // into the empty state — restoration never pre-creates a blank Session on
+    // the Host, so stateless browser contexts (ego / CDP / remote UI / private
+    // windows) no longer leave ghost shells in the ledger. Manual New Session
+    // (startSession → connectBlank) and persisted blank/draft restoration keep
+    // their existing paths below.
+    if (saved.sessionId === undefined) {
+      this.clearMain()
+      return
+    }
     // FORK dsh-local (f5-list-states): the persisted non-blank selection opens
     // its history directly while the session.list pull is still in flight —
     // refresh no longer waits out the full list before returning to the
     // conversation (canRestore established the trust: blank === false, not
-    // archived, and no listed row to gate on).
-    if (saved.sessionId !== undefined
-      && sessions.phase === 'pending'
+    // archived, and no listed row to gate on). The selectionless case left
+    // above, so the persisted id is settled here.
+    if (sessions.phase === 'pending'
       && sessions.byId[saved.sessionId] === undefined) {
       this.replaceMain(saved.sessionId, this.lifetime.signal, 'preserve', undefined, true)
       return
     }
-    const summary = saved.sessionId === undefined ? undefined : sessions.byId[saved.sessionId]
+    const summary = sessions.byId[saved.sessionId]
     const workspace = summary === undefined ? undefined
       : workspaces.items.find(item => item.sessionIds.includes(summary.id))
     if (summary !== undefined && (!summary.blank || workspace === undefined)) {

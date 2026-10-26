@@ -30,6 +30,8 @@ kind: "package-reference"
 
 问题可以携带呈现意图 `intent`，声明它就是某种已知决策，识别该标记的 UI 可以按该决策呈现；目前唯一的标记是 `plan-review`，其 `detail` 是待审阅的计划，`approve` 指明表示同意的选项。意图只改变呈现：遵循它的 UI 回答的选项标签与通用 UI 相同，不认识该标记的 UI 则渲染通用选项列表。`ask()` 会以 `BAD_INTENT` 拒绝两种类型无法表达的断言：`approve` 未命名该问题自己的任何选项，以及没有 `detail` 的问题声明了意图。`dsh-plan-mode` 在 `exit_plan_mode` 的审阅问题上设置它。
 
+校验之后、派发之前，`ask()` 会把超长问题文本折叠出卡片：任何字段超过 `Config.maxInlineChars`（默认 1500 字符——question、detail、header 或选项的 label/description）时，全文原样写入 `Config.reportDir` 下的报告文件（默认 `<dsh home>/ask-reports/<session>/`），回答方收到的则是以 `Config.summaryChars`（默认 600）封顶的摘要加上指向该文件的 `attachment`，长报告因此不会把卡片变成阅读器。携带呈现意图的问题豁免折叠——`plan-review` 有自己的可滚动面板；报告文件写不出来时保持原文不动：折叠是呈现层默认，不是内容闸门。
+
 请求包含 agent 时，`ask()` 会通过当前 `AgentRegistry` 验证该 agent 与注册表中的存活实例是同一对象，并且只允许运行时根调用。存活子级不能发起人机交互。不含 agent 的程序化请求仍会交给本地未限定 scope 的 waterfall listener，若无人接受则以 `NO_PROVIDER` 失败。
 
 工具调用开放期间，唯一的回答路径就是这条请求；重新连接的浏览器会再次收到它，仍可完成。调用返回 pending 之后，或拥有它的进程结束之后，问题进入 `continued`：`answer` Remote 方法把回复作为 `user-question-reply` 消息 steer 给 agent。没有任何 Remote 方法会放弃问题——Client 收起面板时不发送任何内容，因此该调用在收到回答前一直可回答。回答已关闭的会话时先恢复其根 agent。两条路径都不会为已结束的工具调用伪造结果。

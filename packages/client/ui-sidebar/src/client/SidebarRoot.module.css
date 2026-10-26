@@ -604,10 +604,11 @@
 }
 
 /* FORK dsh-local (sidebar-layout round 3): the wide foot is ONE row —
-   Settings, the ⋯ menu, then the footer actions (user ruling order) — while
-   the width:100% seats above keep the rail's stack. The dsh-usage glance card
-   is REMOVED (usage-glance ruling, 2026-10-15): its content moved to the
-   logo-row plan glance beside the whale mark, so nothing rides above this row. */
+   Settings, the footer actions, then the ⋯ menu (user ruling order,
+   sidebar-footer-ui-1026) — while the width:100% seats above keep the rail's
+   stack. The dsh-usage glance card is REMOVED (usage-glance ruling,
+   2026-10-15): its content moved to the logo-row plan glance beside the whale
+   mark, so nothing rides above this row. */
 .footRow {
   display: flex;
   align-items: center;
@@ -626,21 +627,69 @@
 
 /* FORK dsh-local (sidebar-layout round 3b): dsh-web-all's shipped CSS orders
    [class*=settingsArea] (order:3) inside its own foot scheme; pin the row to
-   the ruled order — Settings (3, plugin) → ⋯ (4) → footer actions (5).
-   Without the plugin every order falls back to 0 = DOM order, same result. */
+   the ruled order. FORK dsh-local (sidebar-footer-ui-1026): the ruling order
+   is Settings (3, plugin) → footer actions (4) → ⋯ menu (5) — the ⋯ menu sits
+   RIGHT OF the update badge, and the phone-pairing / remote-access actions
+   left the foot row for inside the menu. Without the plugin every order falls
+   back to 0 = DOM order, same result. */
 /* FORK dsh-local (sidebar-layout round 3c): the ⋯ button sits inside the
    Menu primitive's anchor SPAN — the span is the flex item, so the ruled row
    order rides this class (via Menu's className), not the button. */
 .footRow .panelMoreSlot {
-  order: 4;
+  order: 5;
 }
 
 .footRow .footerActions {
-  order: 5;
+  order: 4;
 }
 
 .panelMore {
   flex: none;
+}
+
+/* FORK dsh-local (sidebar-footer-ui-1026): the ⋯-menu action seat renders
+   third-party foot triggers (compact icon pills sized for the foot) as
+   full-width menu rows — the row label rides the trigger's own localized
+   aria-label, so no copy is owned here. Specificity note: the nested
+   [data-slot] anchor is display:contents, so the ROW geometry belongs to the
+   trigger button itself. */
+.moreActions {
+  display: flex;
+  flex-direction: column;
+}
+
+.moreActions [data-slot] button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  line-height: 18px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.moreActions [data-slot] button::after {
+  content: attr(aria-label);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.moreActions [data-slot] button:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.moreActions [data-slot] button:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-info-primary, currentColor);
+  outline-offset: -2px;
 }
 
 .collapsed .footArea {

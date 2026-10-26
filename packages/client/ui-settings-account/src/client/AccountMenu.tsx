@@ -13,12 +13,15 @@ export type AccountMenuProps = PropsRuntime<'settings.launcher'> & PropsLocale<'
 /**
  * FORK dsh-local (settings-launcher, 2026-10-21): the sidebar launcher is no
  * longer the account "More" menu — it IS the settings button that menu opened
- * as its first row: the gear glyph plus the 设置/Settings label opens the panel
- * on one click (aria-haspopup=dialog, the shell-owned shortcut rides the
- * button and its tooltip), and the menu's remaining entries (feedback, sign-in,
- * sign-out) leave the sidebar with the menu. The account side effects this seat
+ * as its first row: the gear glyph opens the panel on one click
+ * (aria-haspopup=dialog, the shell-owned shortcut rides the button and its
+ * tooltip), and the menu's remaining entries (feedback, sign-in, sign-out)
+ * leave the sidebar with the menu. The account side effects this seat
  * hosts — the bonus notice stack, the credential toasts, the shared sign-in
  * dialog, and the refresh on a Settings entry — stay put.
+ * FORK dsh-local (sidebar-footer-ui-1026, 2026-10-26): the wide column drops
+ * the visible 设置/Settings label — the gear is icon-only; the accessible
+ * name and the hover tooltip keep the copy.
  * @param props - sidebar geometry, settings navigation and account operations.
  * @returns the settings trigger plus the account dialogs and notices behind it.
  */
@@ -60,7 +63,6 @@ export function AccountMenu({
         onClick={() => { openSettings() }}
       >
         <IconSettingsOutlineMedium size={wide ? 16 : 18} />
-        {wide && <span className={css.label}>{t('settings')}</span>}
       </button>
     </Tooltip>
     {account.loginVisible && !account.onboarding && <SignInDialog account={account} colorScheme={colorScheme}

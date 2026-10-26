@@ -133,6 +133,18 @@ describe('Remote event Host source', () => {
       value: { event: 'schedule/changed', args: [] },
     })
 
+    // The restart-signal push leg (design C.5): payload-free, so the state
+    // machine stays the sole judgment source.
+    emitRaw(ctx, 'restart-signal/changed', [])
+    await expect(first.next()).resolves.toEqual({
+      done: false,
+      value: { event: 'restart-signal/changed', args: [] },
+    })
+    await expect(second.next()).resolves.toEqual({
+      done: false,
+      value: { event: 'restart-signal/changed', args: [] },
+    })
+
     const firstDone = first.next()
     firstAbort.abort(new Error('first Client disconnected'))
     emitRaw(ctx, 'commands/change', [])

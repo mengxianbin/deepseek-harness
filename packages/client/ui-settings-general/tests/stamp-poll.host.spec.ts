@@ -41,7 +41,7 @@ function pollFixture(runProbe: FingerprintRunner, extra: Partial<StampPollIntern
   const recheck = vi.fn(() => Promise.resolve({ state: 'OK' }))
   const warn = vi.fn()
   registerStampPoll(ctx, { intervalMs: 30_000, runProbe, recheck, warn, dshHome: TEST_HOME, ...extra })
-  return { recheck, warn }
+  return { recheck, warn, ctx }
 }
 
 describe('poll interval', () => {
@@ -177,6 +177,72 @@ describe('stamp poll', () => {
     void ctx.fiber.dispose()
     await vi.advanceTimersByTimeAsync(180_000)
     expect(runProbe).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('restart-signal push leg (design C.5)', () => {
+  it('emits restart-signal/changed once a moved fingerprint rechecks, and only then', async () => {
+    vi.useFakeTimers()
+    const answers = [probe({ '/r': 'a' }), probe({ '/r': 'b' }), probe({ '/r': 'b' })]
+    const runProbe = vi.fn(() => Promise.resolve(answers.shift() ?? probe({ '/r': 'b' })))
+    const { recheck, ctx } = pollFixture(runProbe)
+    const pushed = vi.fn()
+    ctx.on('restart-signal/changed', pushed)
+
+    // The priming capture pins the baseline: no recheck, no push.
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(recheck).not.toHaveBeenCalled()
+    expect(pushed).not.toHaveBeenCalled()
+
+    // A moved fingerprint rechecks, and the landed recheck pushes exactly once.
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(recheck).toHaveBeenCalledTimes(1)
+    expect(pushed).toHaveBeenCalledTimes(1)
+
+    // An unmoved fingerprint rechecks nothing and pushes nothing.
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(recheck).toHaveBeenCalledTimes(1)
+    expect(pushed).toHaveBeenCalledTimes(1)
+  })
+
+  it('never pushes when the recheck fails — there is no fresh judgment to deliver', async () => {
+    vi.useFakeTimers()
+    const answers = [probe({ '/r': 'a' }), probe({ '/r': 'b' })]
+    const runProbe = vi.fn(() => Promise.resolve(answers.shift() ?? probe({ '/r': 'b' })))
+    const recheck = vi.fn(() => Promise.reject(new Error('collect blew up')))
+    const warn = vi.fn()
+    const ctx = new Context()
+    onTestFinished(() => ctx.fiber.dispose())
+    registerStampPoll(ctx, { intervalMs: 30_000, runProbe, recheck, warn, dshHome: TEST_HOME })
+    const pushed = vi.fn()
+    ctx.on('restart-signal/changed', pushed)
+
+    await vi.advanceTimersByTimeAsync(2_000)
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(warn).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('recheck failed'))
+    expect(pushed).not.toHaveBeenCalled()
+  })
+
+  it('stops pushing after disposal, including a recheck that lands late', async () => {
+    vi.useFakeTimers()
+    const ctx = new Context()
+    onTestFinished(() => ctx.fiber.dispose())
+    let release: ((value: unknown) => void) | undefined
+    const recheck = vi.fn(() => new Promise((resolve) => { release = resolve }))
+    const answers = [probe({ '/r': 'a' }), probe({ '/r': 'b' })]
+    const runProbe = vi.fn(() => Promise.resolve(answers.shift() ?? probe({ '/r': 'b' })))
+    registerStampPoll(ctx, { intervalMs: 30_000, runProbe, recheck, warn: vi.fn(), dshHome: TEST_HOME })
+    const pushed = vi.fn()
+    ctx.on('restart-signal/changed', pushed)
+
+    await vi.advanceTimersByTimeAsync(2_000)
+    await vi.advanceTimersByTimeAsync(30_000)
+    // The recheck is in flight; disposal lands before it resolves.
+    expect(recheck).toHaveBeenCalledTimes(1)
+    void ctx.fiber.dispose()
+    release?.(undefined)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(pushed).not.toHaveBeenCalled()
   })
 })
 

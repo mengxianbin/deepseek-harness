@@ -140,6 +140,37 @@
   margin: 0 2px 8px;
 }
 
+/* Folded long-content attachment: a chip between the detail summary and the
+   options, pointing at the file that holds the complete text. */
+.attachment {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  margin: 0 2px 8px;
+  padding: 6px 10px;
+  /* Neutral-token borders are hairlines (ui-theme elevation rule). */
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-md);
+}
+
+.attachmentText {
+  flex: 1;
+  min-width: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.attachmentPath {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
 .footerActions {
   display: flex;
   align-items: center;

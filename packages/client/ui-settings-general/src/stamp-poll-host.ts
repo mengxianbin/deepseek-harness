@@ -20,11 +20,22 @@
  * untouched — and the interval env (`DSH_STAMP_POLL_INTERVAL_MS`) accepts
  * `0` as an operational off-switch, clamps everything else into the design's
  * 30–60s band, and defaults to 30s.
+ *
+ * Push leg (design C.5, closes R3「页面开着不操作角标自现」): after a moved
+ * fingerprint's recheck lands, the poll emits the allowlisted
+ * `restart-signal/changed` Host event, which the Remote carrier forwards to
+ * every connected page; the browser half subscribes and answers with its
+ * existing `recheck()` — the judgment itself keeps riding the recheck route,
+ * so the push event carries no payload and cannot drift from the state
+ * machine. A failed recheck emits nothing (there is no fresh judgment to
+ * deliver) and keeps the pre-P2 warn line.
  * @module @deepseek-ai/dsh-client-ui-settings-general/stamp-poll-host
  */
 
 import { execFile } from 'node:child_process'
 import type { Context } from '@deepseek-ai/cordis'
+// Type-only: pulls the `restart-signal/changed` Events declaration the push emit names.
+import type {} from '@deepseek-ai/dsh-api-remotes/types'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
@@ -228,7 +239,14 @@ export function registerStampPoll(ctx: Context, internals: StampPollInternals = 
       }
       if (!fingerprintMoved(baseline, probe)) return
       baseline = probe
-      void recheck().catch((error: unknown) => {
+      void recheck().then(() => {
+        if (disposed) return
+        // Design C.5 push leg: the judgment was just recomputed, so poke
+        // every open page to pull it — payload-free by design (see module
+        // doc). Emitted only on success: a failed recheck has no fresh
+        // judgment to deliver.
+        ctx.emit('restart-signal/changed')
+      }, (error: unknown) => {
         if (disposed) return
         warn(`ui-settings-general: stamp-poll recheck failed: ${errorText(error)}`)
       })

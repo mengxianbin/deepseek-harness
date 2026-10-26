@@ -132,9 +132,10 @@ it.each([en, zh].flatMap(copy => (['signed-out', 'credential-stored'] as const).
       useTheme={selector => selector(operations.hooks.theme.getSnapshot())} wide openOnboarding={() => {}} openSettings={openSettings}
       t={key => key in copy ? copy[key as AccountKey] : key} />)
     // FORK dsh-local (settings-launcher): the old account More row is gone in both
-    // states — the launcher carries the gear glyph and the settings label only.
+    // states — the launcher is the gear trigger only; FORK sidebar-footer-ui-1026
+    // drops the visible label too (accessible name keeps 设置/Settings).
     const trigger = screen.getByRole('button', { name: copy.settings })
-    expect(trigger.textContent).toBe(copy.settings)
+    expect(trigger.textContent).toBe('')
     expect(trigger.querySelector('svg')).not.toBeNull()
     expect(trigger.getAttribute('aria-haspopup')).toBe('dialog')
     fireEvent.click(trigger)

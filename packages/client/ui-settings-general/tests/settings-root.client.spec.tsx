@@ -565,11 +565,13 @@ it('places the restart control in the trigger row ahead of the connection indica
   expect(restart.compareDocumentPosition(indicator) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0)
 })
 
-it('delivers the restart-signal judgment to the wide badge', () => {
+it('delivers the restart-signal judgment to the lit restart control (no printed pill)', () => {
   mount({ restartConfigured: true, restartSignal: { state: 'NEED_BUILD' } })
-  const badge = screen.getByRole('status')
-  expect(badge.textContent).toBe(en['restart.signal.needBuild'])
-  expect(badge.getAttribute('data-restart-signal')).toBe('NEED_BUILD')
+  // FORK sidebar-footer-ui-1026: the judgment rides the button itself — its
+  // accessible name is the next-step copy, and nothing prints beside it.
+  const lamp = screen.getByRole('button', { name: en['restart.signal.needBuild'] })
+  expect(lamp.getAttribute('data-restart-signal')).toBe('NEED_BUILD')
+  expect(screen.queryByRole('status')).toBeNull()
 })
 
 it('delivers the restart-signal judgment to the collapsed dot', () => {

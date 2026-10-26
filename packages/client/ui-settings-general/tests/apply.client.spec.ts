@@ -310,6 +310,23 @@ describe('ui-settings-general apply', () => {
     expect(settings.mutate).not.toHaveBeenCalled()
   })
 
+  it('rechecks on the Host push event restart-signal/changed (design C.5)', async ({ mock, start }) => {
+    // The flow's recheck rides the page's fetch; stub it before boot so the
+    // boot recheck and the push-triggered recheck are both observable. Only
+    // recheck-route calls are counted — other plugins may share the surface.
+    const fetchSpy = vi.fn(async (_input: string, _init?: unknown) => ({ ok: true, status: 200, json: async () => ({ state: 'OK' }) }))
+    vi.stubGlobal('fetch', fetchSpy)
+    onTestFinished(() => { vi.unstubAllGlobals() })
+    const rechecks = () => fetchSpy.mock.calls.filter(call => call[0] === '/api/stamp-recheck')
+    const { c } = await client(mock, start)
+    await vi.waitFor(() => { expect(rechecks().length).toBeGreaterThan(0) })
+    const bootRechecks = rechecks().length
+
+    await c.mock.streams.opened('$events', 1)
+    c.mock.streams.push('$events', { type: 'emit', event: 'restart-signal/changed', args: [] })
+    await vi.waitFor(() => { expect(rechecks().length).toBeGreaterThan(bootRechecks) })
+  })
+
   it('re-registers after a Loader rebuild of the declaring chain (stale disposers must not block)', async ({ mock, start }) => {
     const { c, settings } = await client(mock, start)
     const before = SEATS.map(([name]) => ownEntries(c, name)[0])
