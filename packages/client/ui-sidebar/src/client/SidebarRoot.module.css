@@ -911,6 +911,15 @@
   color: var(--dsw-alias-label-primary);
 }
 
+/*
+ * A stale-carried balance figure (FORK usage-glance-stale-fact-ttl): the
+ * probe half reports an error while the row still carries the last success,
+ * so the number reads dimmed behind its asterisk instead of as a live value.
+ */
+.glanceStatValueStale {
+  color: var(--dsw-alias-label-secondary);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .wide,
   .fading > *,
