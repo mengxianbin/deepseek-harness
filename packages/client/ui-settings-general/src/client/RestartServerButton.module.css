@@ -30,41 +30,24 @@
   text-overflow: ellipsis;
 }
 
-/* Lit restart-signal badge in the expanded column: dot-prefixed next-step pill. */
-.signalBadge {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  max-width: 220px;
-  padding: 2px 8px;
-  border-radius: var(--dsw-radius-sm);
+/* FORK dsh-local (sidebar-footer-ui-1026): a lit restart-signal judgment
+   LIGHTS THE BUTTON — no copy pill beside it (design §角标条款修订
+   2026-10-26). The lamp keeps the per-state hues the old pill used; the
+   reason itself rides the hover/focus tooltip and the confirm dialog. */
+.restartLit {
   color: var(--dsw-alias-state-warn-primary);
-  font-size: 12px;
-  line-height: 18px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  background: color-mix(in srgb, currentColor 12%, transparent);
 }
 
-.signalBadgeDot {
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-}
-
-.signalBadge[data-restart-signal='BUILD_FAILED'] {
+.restart[data-restart-signal='BUILD_FAILED'] {
   color: var(--dsw-alias-state-error-primary);
 }
 
-.signalBadge[data-restart-signal='BUILDING'] {
+.restart[data-restart-signal='BUILDING'] {
   color: var(--dsw-alias-label-secondary);
 }
 
-/* Collapsed rail: the whole badge is one status dot carrying the copy as its accessible name. */
+/* Collapsed rail: the whole lamp is one status dot carrying the copy as its accessible name. */
 .signalDot {
   flex: none;
   width: 8px;
