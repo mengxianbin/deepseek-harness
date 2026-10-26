@@ -771,8 +771,34 @@ describe('client bundle activation', () => {
     expect(onGraphChanged).not.toHaveBeenCalled()
   })
 
-  it('hashes only metadata when publishing initial and rebuilt artifact revisions', () => {
-    const packageName = '@fixture/metadata-revision'
+  // FORK dsh-local (hmr-content-rev-1024): a full rebuild that regenerates
+  // byte-identical bundles must not swap page plugin fibers — the 2026-10-15
+  // attachment-loss incident form.
+  it('keeps the revision, graph, and subscribers when a rebuild rewrites byte-identical artifacts', () => {
+    const packageName = '@fixture/identical-rebuild'
+    const clientPath = writePackage(packageName)
+    mkdirSync(dirname(clientPath), { recursive: true })
+    writeFileSync(clientPath, 'module.exports = { generation: 1 }\n')
+    const service = construct([packageName])
+    const graph = service.graph()
+    const onRebuilt = vi.fn()
+    const onGraphChanged = vi.fn()
+    service.onRebuilt(onRebuilt)
+    service.onGraphChanged(onGraphChanged)
+    const before = statSync(clientPath)
+
+    writeFileSync(clientPath, 'module.exports = { generation: 1 }\n')
+    utimesSync(clientPath, before.atime, new Date(before.mtimeMs + 1_000))
+    expect(statSync(clientPath)).toMatchObject({ size: before.size })
+
+    expect(service.rebuilt(packageName)).toBe(graph.entries[0]!.rev)
+    expect(service.graph()).toBe(graph)
+    expect(onRebuilt).not.toHaveBeenCalled()
+    expect(onGraphChanged).not.toHaveBeenCalled()
+  })
+
+  it('hashes served bytes when publishing initial and rebuilt artifact revisions', () => {
+    const packageName = '@fixture/content-revision'
     const clientPath = writePackage(packageName)
     mkdirSync(dirname(clientPath), { recursive: true })
     const bundle = `module.exports = ${JSON.stringify('x'.repeat(64 * 1024))}\n`
@@ -785,15 +811,21 @@ describe('client bundle activation', () => {
       writeFileSync(clientPath, `module.exports = ${JSON.stringify('y'.repeat(64 * 1024))}\n`)
       utimesSync(clientPath, before.atime, new Date(before.mtimeMs + 1_000))
       expect(service.rebuilt(packageName)).not.toBe(first)
+      // The whole served generation is hashed, not just its stat metadata.
       const inputBytes = update.mock.calls.map(([input]) => Buffer.byteLength(input))
-      expect(inputBytes.length).toBeGreaterThan(0)
-      expect(inputBytes.reduce((total, bytes) => total + bytes, 0)).toBeLessThan(4 * 1024)
+      const totalBytes = inputBytes.reduce((total, bytes) => total + bytes, 0)
+      expect(totalBytes).toBeGreaterThan(64 * 1024)
     } finally {
       update.mockRestore()
     }
   })
 
-  it.each(['bytes', 'build stamp'])('agrees with a fresh registry after rebuilding changed %s', (change) => {
+  it.each([
+    // Genuinely changed bytes rotate the rev; a build-stamp-only rewrite of
+    // byte-identical artifacts keeps it (and the fresh registry agrees either way).
+    ['bytes', false],
+    ['build stamp', true],
+  ] as const)('agrees with a fresh registry after rebuilding changed %s', (change, preserved) => {
     const packageName = '@fixture/changed-rebuild'
     const clientPath = writePackage(packageName)
     mkdirSync(dirname(clientPath), { recursive: true })
@@ -811,7 +843,12 @@ describe('client bundle activation', () => {
     }
 
     const rev = service.rebuilt(packageName)
-    expect(rev).not.toBe(before.entries[0]!.rev)
+    if (preserved) {
+      expect(rev).toBe(before.entries[0]!.rev)
+      expect(service.graph()).toBe(before)
+    } else {
+      expect(rev).not.toBe(before.entries[0]!.rev)
+    }
     expect(construct([packageName]).graph()).toEqual(service.graph())
   })
 

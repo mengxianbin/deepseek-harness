@@ -560,6 +560,127 @@ describe('PendingQuestion domain face', () => {
   })
 })
 
+describe('occlusion fold', () => {
+  /** The real seat ancestry: transcript scroller owns the composer seat, so
+   *  the fold sensor's reach test has something to read. jsdom has no layout,
+   *  so the card's share of the viewport is pinned through the frame rect. */
+  function renderInSeatView(card: QuestionComposerProps['matched'], tall = true) {
+    const view = render(
+      <div data-conversation-scroll="">
+        <div data-composer-seat="">
+          <QuestionComposer matched={card} {...kit} />
+        </div>
+      </div>,
+    )
+    const frame = view.container.querySelector('[data-question-key]') as HTMLElement
+    vi.spyOn(frame, 'getBoundingClientRect').mockReturnValue(
+      { height: tall ? 480 : 120, width: 680, top: 0, left: 0, bottom: 0, right: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect,
+    )
+    return { view, frame }
+  }
+
+  it('folds a tall card when a press reaches the transcript, and the strip press unfolds it', () => {
+    const { carrier } = wait()
+    const { frame } = renderInSeatView(carrier)
+    expect(screen.getByRole('radiogroup')).toBeTruthy()
+
+    // The reader presses the conversation to scroll/read: the card yields.
+    fireEvent.pointerDown(document.querySelector('[data-conversation-scroll]')!, { bubbles: true })
+
+    expect(screen.queryByRole('radiogroup')).toBeNull()
+    expect(screen.getByText('选择候选人类型')).toBeTruthy()
+    expect(frame.hasAttribute('data-question-folded')).toBe(true)
+
+    // Pressing the strip brings the card back; the fold flag lifts with it.
+    fireEvent.click(screen.getByText('选择候选人类型'))
+    expect(screen.getByRole('radiogroup')).toBeTruthy()
+    expect(frame.hasAttribute('data-question-folded')).toBe(false)
+  })
+
+  it('leaves a short card alone — only a card that blocks the transcript folds', () => {
+    const { carrier } = wait()
+    renderInSeatView(carrier, false)
+
+    fireEvent.pointerDown(document.querySelector('[data-conversation-scroll]')!, { bubbles: true })
+
+    expect(screen.getByRole('radiogroup')).toBeTruthy()
+  })
+
+  it('ignores presses on composer furniture — the seat is not the transcript', () => {
+    const { carrier } = wait()
+    renderInSeatView(carrier)
+    const seat = document.querySelector('[data-composer-seat]')!
+
+    fireEvent.pointerDown(seat, { bubbles: true })
+
+    expect(screen.getByRole('radiogroup')).toBeTruthy()
+  })
+
+  it('a press inside the card never folds it', () => {
+    const { carrier } = wait()
+    renderInSeatView(carrier)
+
+    fireEvent.pointerDown(screen.getByRole('radiogroup'), { bubbles: true })
+
+    expect(screen.getByRole('radiogroup')).toBeTruthy()
+  })
+
+  it('keeps a manual minimize pinned: transcript presses and strip presses do not lift it, only the toggle does', () => {
+    const { carrier } = wait()
+    const { frame } = renderInSeatView(carrier)
+    fireEvent.click(screen.getByLabelText(zh['nav.minimize']))
+    expect(screen.queryByRole('radiogroup')).toBeNull()
+
+    fireEvent.pointerDown(document.querySelector('[data-conversation-scroll]')!, { bubbles: true })
+    fireEvent.click(screen.getByText('选择候选人类型'))
+
+    // Still collapsed, and not flagged as an auto-fold: the pinned choice is
+    // the only reason the strip is up.
+    expect(screen.queryByRole('radiogroup')).toBeNull()
+    expect(frame.hasAttribute('data-question-folded')).toBe(false)
+
+    fireEvent.click(screen.getByLabelText(zh['nav.maximize']))
+    expect(screen.getByRole('radiogroup')).toBeTruthy()
+  })
+
+  it('the toggle lifts both reasons: an auto-folded card expands through the same chevron', () => {
+    const { carrier } = wait()
+    renderInSeatView(carrier)
+    fireEvent.pointerDown(document.querySelector('[data-conversation-scroll]')!, { bubbles: true })
+    expect(screen.queryByRole('radiogroup')).toBeNull()
+
+    fireEvent.click(screen.getByLabelText(zh['nav.maximize']))
+
+    expect(screen.getByRole('radiogroup')).toBeTruthy()
+    expect(screen.getByLabelText(zh['nav.minimize']).getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('a busy submission keeps its card up even when the transcript is pressed', async () => {
+    const { carrier, answer } = wait([{ id: 'scope', question: '选择范围', options: [{ label: '仅工具' }, { label: '全部' }] }])
+    answer.mockReturnValueOnce(new Promise(() => {}))
+    renderInSeatView(carrier)
+
+    fireEvent.click(screen.getByRole('radio', { name: '仅工具' }))
+    fireEvent.click(screen.getByRole('button', { name: '提交' }))
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '正在提交…' }).disabled).toBe(true)
+
+    fireEvent.pointerDown(document.querySelector('[data-conversation-scroll]')!, { bubbles: true })
+
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '正在提交…' })).toBeTruthy()
+  })
+
+  it('folds when focus reaches the transcript, and focus back into the card unfolds it', () => {
+    const { carrier } = wait()
+    renderInSeatView(carrier)
+
+    fireEvent.focusIn(document.querySelector('[data-conversation-scroll]')!, { bubbles: true })
+    expect(screen.queryByRole('radiogroup')).toBeNull()
+
+    fireEvent.focusIn(screen.getByText('选择候选人类型'), { bubbles: true })
+    expect(screen.getByRole('radiogroup')).toBeTruthy()
+  })
+})
+
 describe('parseRecommendedLabel', () => {
   it('recognizes English and Chinese suffixes without changing ordinary labels', () => {
     expect(parseRecommendedLabel('Fast (Recommended)')).toEqual({ label: 'Fast', recommended: true })

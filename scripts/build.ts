@@ -22,6 +22,8 @@ import {
 } from './client-build-environment.ts'
 import { aggregateBuildArgs, aggregateCheckArgs, contractSteps, libraryBuildSteps } from './compile-referenced-projects.ts'
 import type { LibraryStep } from './compile-referenced-projects.ts'
+import { beginBuild, endBuild, STAMP_ACTIVE_ENV } from './restart-signal/build-stamp.ts'
+import { readStartStamp, writeFailedStamp } from './restart-signal/manifest.ts'
 import { pnpmCommand } from './release/process.ts'
 import { defaultParallelism, describeDefaultParallelism } from './parallelism.ts'
 import { runAggregate } from './run-gates.ts'
@@ -170,11 +172,36 @@ async function main(): Promise<number> {
 
   const repositoryEnvironment = repositoryClientBuildEnvironment(root, process.env)
   const clientEnvironment = resolveClientBuildEnvironment(repositoryEnvironment, profile ?? process.env[CLIENT_BUILD_PROFILE_SELECTOR])
-  const environment = environmentOverlay(process.env, clientBuildProcessEnvironment(process.env, clientEnvironment))
+  // Restart-signal stamp: this process owns the artifact build's opening and
+  // closing steps, and the marker turns every stamped script a gate spawns
+  // (build:web, the desktop bundle) into a passthrough of this owner.
+  const marker = process.env[STAMP_ACTIVE_ENV]
+  const ownsStamp = marker === undefined || marker === '' || marker === '0'
+  if (ownsStamp) beginBuild(root, ['host', 'client'])
+  const childEnvironment = { ...clientBuildProcessEnvironment(process.env, clientEnvironment), [STAMP_ACTIVE_ENV]: '1' }
+  const environment = environmentOverlay(process.env, childEnvironment)
   rmSync(resolve(root, CLIENT_BUILD_RECORD_PATH), { force: true })
   const gates = buildGates(root, scope, environment)
   const exitCode = await runAggregate(name, gates, workers(gates))
-  if (exitCode !== 0) return exitCode
+  if (exitCode !== 0) {
+    // Restart-signal failure record: the closing step never runs on a failed
+    // aggregate, so this owner records the failure over the start capture.
+    if (ownsStamp) {
+      const start = readStartStamp(root)
+      if (start !== undefined) {
+        writeFailedStamp(root, {
+          version: 1,
+          kind: 'harness-failed',
+          time: new Date().toISOString(),
+          faces: start.faces,
+          sStart: start.sStart,
+          exitCode,
+        })
+      }
+    }
+    return exitCode
+  }
+  if (ownsStamp) endBuild(root)
   const record = writeClientBuildRecord(root, clientEnvironment)
   console.log(
     `build: recorded ${String(record.artifacts.fileCount)} client artifact(s) with ${String(Object.keys(record.environment).length)} public value(s)`,

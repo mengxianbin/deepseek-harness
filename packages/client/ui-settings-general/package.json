@@ -39,17 +39,19 @@
         "@deepseek-ai/dsh-client-ui-sidebar",
         "@deepseek-ai/dsh-client-shortcuts",
         "@deepseek-ai/dsh-client-modules",
-        "@deepseek-ai/dsh-client-ui-layout"
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-session"
       ],
       "platform": "web"
     }
   },
   "scripts": {
-    "bundle": "tsdown",
+    "bundle": "tsx ../../scripts/restart-signal/build-stamp.ts run --faces auto -- tsdown",
     "watch": "tsdown --watch"
   },
   "license": "MIT",
   "dependencies": {
+    "@deepseek-ai/dsh-home-paths": "workspace:*",
     "@deepseek-ai/schemastery": "workspace:~"
   },
   "peerDependencies": {
@@ -71,6 +73,7 @@
     "@deepseek-ai/dsh-client-ui-settings": "workspace:*",
     "@deepseek-ai/dsh-client-ui-sidebar": "workspace:*",
     "@deepseek-ai/dsh-client-ui-slots": "workspace:*",
+    "@deepseek-ai/dsh-host-webserver": "workspace:*",
     "@deepseek-ai/dsh-remote-mock": "workspace:*",
     "clsx": "^2.0.0",
     "react": "^18.2.0",

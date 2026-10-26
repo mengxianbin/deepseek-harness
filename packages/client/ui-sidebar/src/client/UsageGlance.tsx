@@ -43,11 +43,38 @@
  * snapshot and retry on the next tick. The whole control degrades to silence,
  * so the shell never depends on it.
  *
- * The OpenCode Go quota endpoint reports `percent` + `resetsAt` only (raw
- * response verified 2026-10-15; the three-window shape re-verified 2026-10-22),
- * so every read-out derives from those two fields alone: the percent pair for
- * the fill, and the window span — a month / seven days / five hours before the
- * reset — for the tick and the elapsed/total pair.
+ * v3 (FORK usage-glance v3, 2026-10-24): a window may carry an absolute
+ * water-line pair (`used`/`limit` — the host now sources OpenCode Go from
+ * console go/status, where the pair is authoritative and unrounded). The
+ * read-out stays percent-only (the `$used / $limit` column was ruled
+ * off-screen on 2026-10-24 to keep the v2.4.x three-column geometry); the
+ * pair instead feeds the switch trigger: `used / limit >= 0.85` marks the
+ * row, every marked row paints its percent figure in the error red, and the
+ * week/month rows — the two windows the A-plan trigger reads (go-plan
+ * 2026-10-22 §5) — also paint the fill solid red and append
+ * `glance.trigger.hint` ("switch to MiMo official") to their tooltip. The
+ * 5-hour row turns its figure only: a five-hour pool is not a switch signal.
+ * Windows without the pair (other providers, or a host still serving the
+ * pre-restart overview) never trigger. The fill for the tick still comes from
+ * the window's percent, and the span still derives from `resetsAt` — a month
+ * / seven days / five hours before the reset.
+ *
+ * mimo balance row (FORK usage-glance-mimo-balance, 2026-10-25): the stats
+ * column gains a third labeled row — `余额` below the 今日/周期 readings —
+ * carrying the MiMo official pay-as-you-go balance the host reports on the
+ * `mimo` route (`providers[].mimo.balance = { currency, totalBalance,
+ * updatedAt }`). Copy ruling (2026-10-25 用户裁定): the label drops the
+ * `mimo` attribution prefix — ownership stays pinned by the stable key
+ * (`glance.mimoBalance.label`) and the route-id binding below, so the copy
+ * can stay short. The row is bound to the STABLE route id (`mimo`), never to
+ * "the first provider that has a balance": today's overview also carries
+ * deepseek-official's `-0.18 CNY`, which must not answer for mimo's row. A
+ * host that reports no mimo balance (adapter absent, cookie expired, probe
+ * failed) degrades this row alone to an em dash — the v2.3 single-column
+ * degrade contract, the rest of the control untouched. The figure prints as
+ * `¥6.16` / `$12.00` for the known symbols, `1.23 XXX` otherwise, and the
+ * column tooltip folds the reading in alongside 今日/周期 and the refresh
+ * stamp (v2.3 tooltip precedent).
  *
  * Clicking the control opens the settings panel on the usage section by
  * replaying the user's own path — the shell owns the panel state and exposes
@@ -72,6 +99,13 @@ const DAY_MS = 86_400_000
 
 /** Hour length in ms (the 5-hour window's arithmetic unit). */
 const HOUR_MS = 3_600_000
+
+/**
+ * The A-plan switch threshold: a water line at 85% of its pool (go-plan
+ * 2026-10-22 §5), compared on the UNROUNDED `used/limit` pair — the percent
+ * column rounds, the trigger must not fire (or hold back) on the rounding.
+ */
+const TRIGGER_RATIO = 0.85
 
 /**
  * Figure space (U+2007): a digit-wide pad CSS white-space processing does NOT
@@ -108,6 +142,17 @@ const WINDOW_TITLE_KEY = {
 } as const satisfies Record<(typeof GLANCE_WINDOW_KEYS)[number], SidebarKey>
 
 /**
+ * The MiMo official route key the balance row reads (FORK
+ * usage-glance-mimo-balance): a STABLE id, never localized text and never
+ * "whichever provider reports a balance" — the overview today also carries
+ * deepseek-official's balance, which must not answer for mimo's row.
+ */
+const MIMO_ROUTE_ID = 'mimo'
+
+/** Currency symbols the balance row knows; others print `1.23 XXX`. */
+const BALANCE_SYMBOL: Record<string, string> = { CNY: '¥', USD: '$' }
+
+/**
  * Stable selector for the usage nav row. The settings shell stamps each nav
  * button with `data-settings-section`, so the replay addresses the row by its
  * section id instead of localized text.
@@ -119,12 +164,27 @@ interface PlanWindowView {
   key?: string
   percent?: number
   resetsAt?: string
+  /** Absolute water line consumed (currency units), when the host reports one. */
+  used?: number
+  /** Absolute window capacity (currency units), when the host reports one. */
+  limit?: number
+}
+
+/** One provider balance fact as the host normalizes it. */
+interface BalanceView {
+  /** ISO-4217 code the host reports (`CNY`, `USD`, …). */
+  currency?: string
+  /** Spendable total, display-formatted (no currency symbol). */
+  totalBalance?: string
+  /** Probe instant of the fact; the column tooltip rides the load stamp instead. */
+  updatedAt?: number
 }
 
 /** One provider row of the overview the glance reads. */
 interface ProviderSnapshotView {
   provider?: string
   plan?: { windows?: PlanWindowView[] }
+  balance?: BalanceView
 }
 
 /** One per-day trend entry of the overview's ledger series. */
@@ -173,6 +233,12 @@ export interface GlanceWindowRow {
   timeFraction?: number
   /** True when usage runs ahead of the clock (percent past the tick). */
   overPace?: boolean
+  /**
+   * True when the window carries an absolute water line at or over the switch
+   * threshold (`used / limit >= 0.85`, unrounded — v3 trigger, go-plan
+   * 2026-10-22 §5). Absent on windows without the pair.
+   */
+  trigger?: boolean
 }
 
 /** What the glance renders once an overview has been derived. */
@@ -185,6 +251,8 @@ export interface GlanceState {
   cycleTokens?: number
   /** True when the trend window omits in-cycle days — the total is a floor. */
   cycleTruncated?: boolean
+  /** The mimo route's pay-as-you-go balance; absent when the host reports none. */
+  mimoBalance?: BalanceView
 }
 
 /**
@@ -208,6 +276,19 @@ function pickPlanRow(overview: UsageOverviewView): ProviderSnapshotView | undefi
     return WINDOW_PREFERENCE.some(key =>
       windows.some(window => window.key === key && typeof window.percent === 'number'))
   })
+}
+
+/**
+ * The mimo route's balance fact (FORK usage-glance-mimo-balance): bound to
+ * the stable route id `mimo` — deliberately NOT the first provider carrying a
+ * balance, which today would be deepseek-official's `-0.18 CNY` answering a
+ * question about MiMo's wallet. The row degrades on its own when the host
+ * reports no mimo balance (adapter absent, cookie expired, probe failed).
+ * @param overview - the host overview document.
+ * @returns the mimo balance fact, or undefined when the host reports none.
+ */
+function pickMimoBalance(overview: UsageOverviewView): BalanceView | undefined {
+  return (overview.providers ?? []).find(row => row.provider === MIMO_ROUTE_ID)?.balance
 }
 
 /**
@@ -373,6 +454,23 @@ export function formatCompactTokens(tokens: number): string {
 }
 
 /**
+ * Balance figure for the glance's mimo row (`¥6.16`, `$12.00`, `1.23 GBP`).
+ * The host already formats the total for display (a numeric string, no
+ * symbol), so this only prepends the known currency symbol; an unknown or
+ * missing currency prints the bare total, a missing total the em dash.
+ * @param balance - one mimo balance fact.
+ * @returns the figure string.
+ */
+export function formatBalanceFigure(balance: BalanceView): string {
+  const total = balance.totalBalance
+  if (total === undefined || total === '') return '—'
+  const currency = balance.currency
+  if (currency === undefined || currency === '') return total
+  const symbol = BALANCE_SYMBOL[currency]
+  return symbol === undefined ? `${total} ${currency}` : `${symbol}${total}`
+}
+
+/**
  * Local-time data-refresh stamp (`26.10.15 21:30`), carried in the stats
  * column's tooltip since v2.3. Two-digit year, zero-padded month/day and a
  * 24-hour clock, read in the viewer's own time zone — it is when the payload
@@ -388,10 +486,12 @@ export function formatRefreshStamp(at: number): string {
 }
 
 /**
- * Reduce an overview document to the glance's read-outs (FORK v2.4): one row
+ * Reduce an overview document to the glance's read-outs (FORK v2.4, v3): one row
  * per on-screen quota window (`month`/`week`/`5h`, display order) derived from
  * the picked provider row — percent always, time pair / tick / over-pace flag
- * when the window yields a span — plus the token column's facts. Each fact
+ * when the window yields a span, and the v3 switch trigger when the window
+ * carries an absolute `used/limit` pair at or over the threshold — plus the
+ * token column's facts. Each fact
  * degrades on its own: a host may report a ledger day without a plan (or the
  * reverse), a window missing or percent-less drops its whole row, and a row
  * without a span still reads its percent alone.
@@ -410,6 +510,10 @@ export function deriveGlance(overview: UsageOverviewView, now: number = Date.now
       const percent = Math.max(0, Math.min(100, Math.round(found.percent)))
       const time = windowTime(found, now)
       const row: GlanceWindowRow = { key, percent }
+      if (typeof found.used === 'number' && typeof found.limit === 'number' && found.limit > 0
+        && found.used / found.limit >= TRIGGER_RATIO) {
+        row.trigger = true
+      }
       if (time.elapsed !== undefined && time.total !== undefined && time.unit !== undefined) {
         row.elapsed = time.elapsed
         row.total = time.total
@@ -424,11 +528,13 @@ export function deriveGlance(overview: UsageOverviewView, now: number = Date.now
   }
   const todayTokens = todayTokenTotal(overview)
   const cycle = cycleTokenTotal(overview, pickWindow(overview), now)
+  const mimoBalance = pickMimoBalance(overview)
   return {
     ...(rows.length === 0 ? {} : { windows: rows }),
     ...(todayTokens === undefined ? {} : { todayTokens }),
     ...(cycle.tokens === undefined ? {} : { cycleTokens: cycle.tokens }),
     ...(cycle.truncated === undefined ? {} : { cycleTruncated: cycle.truncated }),
+    ...(mimoBalance === undefined ? {} : { mimoBalance }),
   }
 }
 
@@ -468,11 +574,14 @@ export interface UsageGlanceProps {
 }
 
 /**
- * Render the plan glance (FORK v2.4): one row per on-screen quota window —
+ * Render the plan glance (FORK v2.4, v3, usage-glance-mimo-balance): one row per on-screen quota window —
  * short label, usage fill with the time-progress tick (overrun in warn), and
- * the right-aligned percent and time-pair columns — plus the 今日/周期 token rows in their own column
- * (refresh stamp in that column's tooltip), or nothing while the host half is
- * off. Rows the host does not report are absent; before the first load the
+ * the right-aligned percent and time-pair columns — plus the 今日/周期 token rows and the mimo
+ * balance row in their own column (every reading in that column's tooltip,
+ * refresh stamp included). A v3 triggered row (water line
+ * >= 85%) reds its percent figure; the week/month rows also paint the fill
+ * solid red and append the switch hint to the tooltip. Nothing renders while
+ * the host half is off. Rows the host does not report are absent; before the first load the
  * control shows only the token column's placeholders.
  * @param props - the shell's locale translator.
  * @returns the glance button, or null when the usage host serves no routes.
@@ -527,11 +636,14 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
   const todayTokens = state?.todayTokens
   const cycleTokens = state?.cycleTokens
   const cycleTruncated = state?.cycleTruncated === true
-  // One tooltip for the whole column: both readings plus the refresh stamp
+  const mimoBalance = state?.mimoBalance
+  const mimoFigure = mimoBalance === undefined ? '—' : formatBalanceFigure(mimoBalance)
+  // One tooltip for the whole column: every reading plus the refresh stamp
   // (the stamp stays off-screen; v2.2 spent a third line on it).
   const columnTitle = [
     t('glance.today'),
     t('glance.cycle'),
+    `${t('glance.mimoBalance.label')} ${mimoFigure}`,
     ...(refreshedAt === undefined ? [] : [`${t('glance.refreshed')} ${formatRefreshStamp(refreshedAt)}`]),
   ].join(' · ')
   return (
@@ -562,23 +674,44 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
               const overPaceSplit = row.overPace === true && tickPercent !== undefined
                 ? `${String(Math.round((tickPercent / row.percent) * 100))}%`
                 : undefined
+              // v3 switch trigger (go-plan 2026-10-22 §5): the unrounded
+              // used/limit pair is the authoritative read. The figure turns
+              // red on every marked row, while the solid-red fill and the
+              // switch hint belong to the week/month rows only — the windows
+              // the A-plan switch reads; the 5-hour pool is a water-level
+              // warning, not a switch signal. The solid red takes the
+              // over-pace gradient's place while the trigger holds (the tick
+              // still marks the pace).
+              const triggerOn = row.trigger === true
+              const triggerHint = triggerOn && (row.key === 'week' || row.key === 'month')
+              const rowTitle = triggerHint
+                ? `${t(WINDOW_TITLE_KEY[row.key])} · ${t('glance.trigger.hint')}`
+                : t(WINDOW_TITLE_KEY[row.key])
+              const fillTrigger = triggerOn && row.key !== '5h'
               const fillStyle: CSSProperties & Record<string, string> = {
                 width: `${String(row.percent)}%`,
                 ...(overPaceSplit === undefined ? {} : { '--glance-split': overPaceSplit }),
               }
+              const fillClass = [
+                css.glanceFill,
+                ...(overPaceSplit === undefined ? [] : [css.glanceFillOver]),
+                ...(fillTrigger ? [css.glanceFillTrigger] : []),
+              ].join(' ')
               return (
-                <span key={row.key} className={css.glanceRow} title={t(WINDOW_TITLE_KEY[row.key])}>
+                <span key={row.key} className={css.glanceRow} title={rowTitle}>
                   <span className={css.glanceLabel}>{t(WINDOW_LABEL_KEY[row.key])}</span>
                   <span className={css.glanceTrack}>
                     <span
-                      className={overPaceSplit === undefined ? css.glanceFill : `${css.glanceFill} ${css.glanceFillOver}`}
+                      className={fillClass}
                       style={fillStyle}
                     />
                     {tickPercent === undefined
                       ? null
                       : <span className={css.glanceTick} style={{ left: `${String(tickPercent)}%` }} />}
                   </span>
-                  <span className={css.glancePercent}>{`${String(row.percent)}%`.padStart(4, COLUMN_PAD)}</span>
+                  <span
+                    className={triggerOn ? `${css.glancePercent} ${css.glancePercentTrigger}` : css.glancePercent}
+                  >{`${String(row.percent)}%`.padStart(4, COLUMN_PAD)}</span>
                   <span className={css.glancePair}>{pair.padStart(6, COLUMN_PAD)}</span>
                 </span>
               )
@@ -598,6 +731,10 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
                   ? '—'
                   : `${cycleTruncated ? '≥ ' : ''}${formatCompactTokens(cycleTokens)}`}
               </span>
+            </span>
+            <span className={css.glanceStat}>
+              <span className={css.glanceStatLabel}>{t('glance.mimoBalance.label')}</span>
+              <span className={css.glanceStatValue}>{mimoFigure}</span>
             </span>
           </span>
         </span>

@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import type { GlobalStandardProps } from '@deepseek-ai/dsh-client-ui-slots'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { allowAllAccess, bindSnapshotSelector, RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
+import { allowAllAccess, bindSnapshotSelector, makeTranslate, RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
 import type { GeneralSectionComponentProps } from '../src/client/GeneralSection.tsx'
 import { GeneralSection } from '../src/client/GeneralSection.tsx'
 import { CloseLabel, HeaderContent, TriggerContent } from '../src/client/chrome.tsx'
@@ -27,6 +27,8 @@ import { CurrentVersionRow } from '../src/client/CurrentVersionRow.tsx'
 import { DesktopUpdateBadge } from '../src/client/DesktopUpdateIndicator.tsx'
 import { HostReleasePrompt, type HostReleasePromptProps } from '../src/client/HostReleasePrompt.tsx'
 import { AuthExpiredOverlay, type AuthExpiredOverlayProps } from '../src/client/AuthExpiredOverlay.tsx'
+import { RestartServerButton, type RestartServerButtonProps } from '../src/client/RestartServerButton.tsx'
+import { RESTART_PATH } from '../src/restart.ts'
 import type { DesktopUpdateView } from '../src/types.ts'
 
 afterEach(() => { cleanup(); vi.unstubAllEnvs() })
@@ -340,5 +342,126 @@ describe('Host release change confirmation', () => {
     cleanup()
     prompt({ page: { version: '0.2.1' }, previous: { version: '0.2.1' }, host: undefined })
     expect(screen.getByRole('dialog').textContent).toContain('Service0.2.1UnknownPage0.2.1Unknown')
+  })
+})
+
+describe('Restart server button', () => {
+  const t = makeTranslate(en)
+  const base: RestartServerButtonProps = { t, configured: true, runningSessions: 0, wide: true }
+
+  it('renders nothing until the Host announced a command, or while the rail column is collapsed', () => {
+    const view = render(<RestartServerButton {...base} configured={false} />)
+    expect(screen.queryByRole('button')).toBeNull()
+    view.rerender(<RestartServerButton {...base} wide={false} />)
+    expect(screen.queryByRole('button')).toBeNull()
+    view.rerender(<RestartServerButton {...base} />)
+    expect(screen.getByRole('button', { name: en['restart.button'] })).toBeTruthy()
+  })
+
+  it('confirms against the running count and reports a dispatched restart', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true })
+    vi.stubGlobal('fetch', fetchMock)
+    onTestFinished(() => { vi.unstubAllGlobals() })
+    render(<RestartServerButton {...base} runningSessions={2} />)
+
+    fireEvent.click(screen.getByRole('button', { name: en['restart.button'] }))
+    const dialog = screen.getByRole('dialog', { name: en['restart.confirm.title'] })
+    expect(dialog.textContent).toContain(en['restart.confirm.description.some'].replace('{n}', '2'))
+    const confirm = screen.getByRole('button', { name: en['restart.confirm.confirm'] })
+    // The dialog opens from this click, so Enter dispatches the restart.
+    expect(document.activeElement).toBe(confirm)
+    fireEvent.click(confirm)
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(RESTART_PATH, { method: 'POST' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    const status = await screen.findByRole('status')
+    expect(status.textContent).toBe(en['restart.accepted'])
+  })
+
+  it('cancels without dispatching and clears a stale outcome when reopened', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true })
+    vi.stubGlobal('fetch', fetchMock)
+    onTestFinished(() => { vi.unstubAllGlobals() })
+    render(<RestartServerButton {...base} />)
+
+    fireEvent.click(screen.getByRole('button', { name: en['restart.button'] }))
+    expect(screen.getByRole('dialog').textContent).toContain(en['restart.confirm.description.zero'])
+    // The footer action and the dialog's close control share the cancel label.
+    fireEvent.click(screen.getAllByRole('button', { name: en['restart.confirm.cancel'] }).at(-1)!)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: en['restart.button'] }))
+    fireEvent.click(screen.getByRole('button', { name: en['restart.confirm.confirm'] }))
+    expect(await screen.findByRole('status')).toBeTruthy()
+    // Reopening starts from a clean slate: the previous outcome line is gone.
+    fireEvent.click(screen.getByRole('button', { name: en['restart.button'] }))
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.getByRole('dialog')).toBeTruthy()
+  })
+
+  it('reports a dispatch the Host refused', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }))
+    onTestFinished(() => { vi.unstubAllGlobals() })
+    render(<RestartServerButton {...base} />)
+    fireEvent.click(screen.getByRole('button', { name: en['restart.button'] }))
+    fireEvent.click(screen.getByRole('button', { name: en['restart.confirm.confirm'] }))
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toBe(en['restart.failed'])
+  })
+
+  it('reports a dispatch that never reached the Host', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+    onTestFinished(() => { vi.unstubAllGlobals() })
+    render(<RestartServerButton {...base} />)
+    fireEvent.click(screen.getByRole('button', { name: en['restart.button'] }))
+    fireEvent.click(screen.getByRole('button', { name: en['restart.confirm.confirm'] }))
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toBe(en['restart.failed'])
+  })
+
+  it('wears the wide badge with the state copy and its data marker', () => {
+    render(<RestartServerButton {...base} signal={{ state: 'NEED_BUILD' }} />)
+    const badge = screen.getByRole('status')
+    expect(badge.textContent).toBe(en['restart.signal.needBuild'])
+    expect(badge.getAttribute('data-restart-signal')).toBe('NEED_BUILD')
+  })
+
+  it('names the restart branch in the NEED_RESTART copy', () => {
+    const view = render(<RestartServerButton {...base} signal={{ state: 'NEED_RESTART', reason: 'config' }} />)
+    expect(screen.getByRole('status').textContent).toBe(en['restart.signal.needRestart.config'])
+    view.rerender(<RestartServerButton {...base} signal={{ state: 'NEED_RESTART', reason: 'built' }} />)
+    expect(screen.getByRole('status').textContent).toBe(en['restart.signal.needRestart.built'])
+  })
+
+  it.each([['INIT'], ['BUILDING'], ['BUILD_FAILED']] as const)('shows the %s badge with its single next step', (state) => {
+    render(<RestartServerButton {...base} signal={{ state }} />)
+    const copy = {
+      INIT: en['restart.signal.init'],
+      BUILDING: en['restart.signal.building'],
+      BUILD_FAILED: en['restart.signal.buildFailed'],
+    }[state]
+    expect(screen.getByRole('status').textContent).toBe(copy)
+  })
+
+  it('lights nothing for OK or the client-only state', () => {
+    const view = render(<RestartServerButton {...base} signal={{ state: 'OK' }} />)
+    expect(screen.queryByRole('status')).toBeNull()
+    view.rerender(<RestartServerButton {...base} signal={{ state: 'CLIENT_UPDATED' }} />)
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('collapses the lit badge into a status dot carrying the copy as its accessible name', () => {
+    render(<RestartServerButton {...base} wide={false} signal={{ state: 'NEED_RESTART', reason: 'built' }} />)
+    const dot = screen.getByRole('status')
+    expect(dot.getAttribute('aria-label')).toBe(en['restart.signal.needRestart.built'])
+    expect(dot.getAttribute('data-restart-signal')).toBe('NEED_RESTART')
+    expect(screen.queryByRole('button')).toBeNull()
+  })
+
+  it('shows no collapsed dot without a configured restart command or while the judgment is dark', () => {
+    const view = render(<RestartServerButton {...base} wide={false} configured={false} signal={{ state: 'NEED_BUILD' }} />)
+    expect(screen.queryByRole('status')).toBeNull()
+    view.rerender(<RestartServerButton {...base} wide={false} signal={{ state: 'OK' }} />)
+    expect(screen.queryByRole('status')).toBeNull()
   })
 })

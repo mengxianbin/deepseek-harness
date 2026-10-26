@@ -1,6 +1,6 @@
 import {
   useEffect, useLayoutEffect, useMemo, useRef, useState,
-  type ChangeEvent, type FocusEvent, type KeyboardEvent, type RefObject,
+  type ChangeEvent, type FocusEvent, type KeyboardEvent, type MouseEvent, type RefObject,
 } from 'react'
 import clsx from 'clsx'
 import {
@@ -82,6 +82,15 @@ const ARBITRATE_KEYS: Record<string, ArbitrateKey> = {
   Escape: 'escape',
   Tab: 'tab',
 }
+
+/**
+ * FORK dsh-local (occlusion-fold): the share of the viewport a takeover must
+ * occupy before losing attention folds it. The card's own cap is
+ * viewport-relative (`min(60vh, 520px)`), so the line that counts as
+ * "blocking the conversation" is too: below it the transcript still has room
+ * and a fold would only cost the reader their place.
+ */
+const OCCLUSION_FOLD_RATIO = 0.3
 
 /** The free-text answer field shared by both question variants. */
 interface AnswerFieldProps {
@@ -256,6 +265,18 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
   // Collapsed to the header strip so the conversation above stays readable
   // while the user decides; answer drafts live in the Session store above.
   const [minimized, setMinimized] = useState(false)
+  // FORK dsh-local (occlusion-fold, 2026-10-26): a takeover card the user
+  // stepped away from — the press landed outside the frame, or focus left it —
+  // folds to the header strip so the transcript reclaims the space; any
+  // engagement inside unfolds it again. Orthogonal to the manual minimize by
+  // design: `minimized` is the user's pinned choice (only the toggle lifts
+  // it), `autoFolded` yields to attention (any inside press or focus lifts
+  // it), and the card renders collapsed while either holds. A freshly
+  // presented question always starts unfolded — it must be seen. The busy
+  // submission keeps its card up so the state it disabled stays readable.
+  const [autoFolded, setAutoFolded] = useState(false)
+  const collapsed = minimized || autoFolded
+  const frameRef = useRef<HTMLDivElement>(null)
   // The free-form textarea autofocuses on first presentation; re-expanding a
   // collapsed question must not steal focus from the expand toggle back into
   // the input, so focus is granted once per question index.
@@ -327,6 +348,56 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
     }
   }, [pending])
 
+  // FORK dsh-local (occlusion-fold): attention reaching for the conversation —
+  // a press or a focus that lands in the transcript scroller while this card
+  // holds real estate — folds the open card to its header strip so the reader
+  // gets the space back. The seat's own furniture (queue dock, InputBar, the
+  // card itself) is deliberately out of the trigger set: those are interaction
+  // with the composer, not with the transcript, and folding on them would
+  // yank the question away mid-gesture. Edge-triggered on the gesture, not
+  // level-triggered on focus: a freshly presented question that never held
+  // the keyboard (an options card autofocuses nothing) stays up until someone
+  // actually reaches for the transcript. A busy submission keeps its card.
+  useEffect(() => {
+    if (collapsed || busy !== null) return
+    const frame = frameRef.current
+    if (frame === null) return
+    // The transcript scroller owns the seat as a descendant (`composerSeat`
+    // sits inside `data-conversation-scroll`), so the seat check carves the
+    // composer furniture back out of the transcript reach.
+    const transcriptReach = (target: EventTarget | null): boolean =>
+      target instanceof Element
+      && !frame.contains(target)
+      && target.closest('[data-conversation-scroll]') !== null
+      && target.closest('[data-composer-seat]') === null
+    // Size-gated like the rule it serves: only a card that actually blocks a
+    // meaningful share of the viewport folds, so a two-line question stays put
+    // while the reader picks at the transcript and the layout never jitters
+    // under a card they could already see around.
+    const blocksTheTranscript = (): boolean =>
+      frame.getBoundingClientRect().height > window.innerHeight * OCCLUSION_FOLD_RATIO
+    const onGesture = (event: Event): void => {
+      if (transcriptReach(event.target) && blocksTheTranscript()) setAutoFolded(true)
+    }
+    document.addEventListener('pointerdown', onGesture, true)
+    document.addEventListener('focusin', onGesture, true)
+    return () => {
+      document.removeEventListener('pointerdown', onGesture, true)
+      document.removeEventListener('focusin', onGesture, true)
+    }
+  }, [collapsed, busy])
+
+  // Unfold paths: focus entering the card, or a press on the header strip of
+  // an auto-folded card. Buttons are excluded — the toggle lifts the fold
+  // through its own handler, and the close action must not flash the card
+  // open on its way out. A manually minimized card ignores the strip press —
+  // the pinned choice lifts only through the toggle, as it always has.
+  const unfoldFromStrip = (event: MouseEvent<HTMLDivElement>): void => {
+    if (!autoFolded) return
+    if ((event.target as Element).closest('button') !== null) return
+    setAutoFolded(false)
+  }
+
   const dismissFlow = (): void => {
     // A tool-call-keyed panel only leaves the seat; nothing is sent and nothing
     // is persisted, and the tool call row brings it back.
@@ -389,16 +460,16 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
   // surface, so tracks from the hidden InputBar draft are ignored; collapsing
   // the takeover detaches, which also closes any open menu.
   useEffect(() => {
-    if (minimized) return
+    if (collapsed) return
     return answerTriggers.attach((text, span, keep) => insertRef.current(text, span, keep))
-  }, [answerTriggers, minimized])
+  }, [answerTriggers, collapsed])
 
   // One feed per commit: content edits bump the revision, caret-only motion
   // keeps it, and a locked field tracks frozen — which closes any open menu.
   // Text and caret read from the live element so a store write that just
   // landed is tracked with the text the caret actually sits in.
   useEffect(() => {
-    if (minimized) return
+    if (collapsed) return
     const el = textRef.current
     const value = el === null ? draft.custom : el.value
     if (lastTrackedRef.current !== value) {
@@ -421,7 +492,7 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
 
   // Caret motion and focus re-track the live text without a revision bump.
   const trackCaret = (): void => {
-    if (minimized) return
+    if (collapsed) return
     const el = textRef.current
     if (el === null) return
     answerTriggers.track(el.value, el.selectionStart, locked ? 'frozen' : 'plain', revRef.current)
@@ -550,15 +621,26 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
   }
 
   return (
-    <div className={css.frame} data-question-key={pending.key} data-composer-card="">
+    <div
+      ref={frameRef}
+      className={css.frame}
+      data-question-key={pending.key}
+      data-composer-card=""
+      data-question-folded={autoFolded ? '' : undefined}
+      // Any engagement inside the card lifts an auto-fold; the manually
+      // minimized card ignores it (the strip press below agrees — only the
+      // toggle lifts a pinned choice).
+      onFocus={() => { if (autoFolded) setAutoFolded(false) }}
+      onClick={unfoldFromStrip}
+    >
       {/* Floating slash-menu anchor for the answer field: the card clips its
           own scroll, so the overlay seats outside it, sized to the card's
           width (mirrors the InputBar's overlay anchor inside its card). */}
-      {!minimized && (
+      {!collapsed && (
         <div className={css.triggerAnchor}>{renderSlot('conversation.composer.overlay', {})}</div>
       )}
       <section
-        className={clsx(css.card, minimized && css.cardMinimized)}
+        className={clsx(css.card, collapsed && css.cardMinimized)}
         aria-labelledby={`question-${pending.key}-${String(index)}`}
       >
         <header className={css.header}>
@@ -590,13 +672,23 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
             {review !== undefined && <span className={css.waitStatus}>{t('review.status')}</span>}
             <button
               type="button" className={css.iconButton}
-              aria-label={t(minimized ? 'nav.maximize' : 'nav.minimize')}
-              title={t(minimized ? 'nav.maximize' : 'nav.minimize')}
-              aria-expanded={!minimized}
+              aria-label={t(collapsed ? 'nav.maximize' : 'nav.minimize')}
+              title={t(collapsed ? 'nav.maximize' : 'nav.minimize')}
+              aria-expanded={!collapsed}
               disabled={busy !== null}
-              onClick={() => { setMinimized(current => !current) }}
+              // One toggle over the union: expanded → pin a manual minimize;
+              // collapsed by either reason → lift both (an auto-folded card
+              // must not stay folded after the user asks for it back).
+              onClick={() => {
+                if (collapsed) {
+                  setMinimized(false)
+                  setAutoFolded(false)
+                } else {
+                  setMinimized(true)
+                }
+              }}
             >
-              {minimized ? <IconChevronUpOutlineRegular /> : <IconChevronDownOutlineRegular />}
+              {collapsed ? <IconChevronUpOutlineRegular /> : <IconChevronDownOutlineRegular />}
             </button>
             <button
               type="button" className={css.iconButton}
@@ -609,7 +701,7 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
           </div>
         </header>
 
-        {!minimized && (
+        {!collapsed && (
           <>
             <div
               ref={answerSurface}

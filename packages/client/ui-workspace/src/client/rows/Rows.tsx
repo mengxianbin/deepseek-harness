@@ -644,9 +644,13 @@ export function SessionNodeItem({
         {title}
       </span>
       {/* A blank New Session row is a provisional placeholder: nothing has
-          happened in it yet, so a "now" timestamp and the row verbs
-          (rename/fork/archive) would all act on content that does not
-          exist — both trailing cells stay off until the first prompt. */}
+          happened in it yet, so a "now" timestamp and the content verbs
+          (rename/fork) would all act on content that does not exist — the
+          time cell and the "..." menu stay off until the first prompt.
+          FORK dsh-local (blank-row-archive-1026): the hover action strip
+          still renders so the archive verb can dismiss an abandoned
+          placeholder; each entry reads the owner `blank` flag for
+          applicability. */}
       {!row.blank && (
         <span
           className={css.time}
@@ -661,8 +665,8 @@ export function SessionNodeItem({
       {/* The strip's clicks stay in the strip: the trigger and every
           row.action entry act without also opening the row, so an entry's
           button needs no propagation handling of its own. */}
-      {!row.blank && (
-        <span className={css.rowActions} onClick={(e) => { e.stopPropagation() }}>
+      <span className={css.rowActions} onClick={(e) => { e.stopPropagation() }}>
+        {!row.blank && (
           <Menu
             open={menuOpen}
             onClose={() => { setMenuOpen(false) }}
@@ -681,13 +685,13 @@ export function SessionNodeItem({
           >
             {renderSlot(
               'sidebar.workspaces.session.menu.item',
-              { sessionId: node.id, displayTitle: row.title },
+              { sessionId: node.id, displayTitle: row.title, blank: row.blank },
               { hookContext: menuOpenState },
             )}
           </Menu>
-          {renderSlot('sidebar.workspaces.session.row.action', { sessionId: node.id, displayTitle: row.title })}
-        </span>
-      )}
+        )}
+        {renderSlot('sidebar.workspaces.session.row.action', { sessionId: node.id, displayTitle: row.title, blank: row.blank })}
+      </span>
     </div>
   )
   return (

@@ -5,6 +5,13 @@ import type { Volatile, Context } from '@deepseek-ai/cordis'
 
 import z from '@deepseek-ai/schemastery'
 
+import { registerAutoBuild } from './auto-build-dispatch.ts'
+import { registerRestart } from './restart-host.ts'
+import { registerRestartDisposition } from './restart-disposition-host.ts'
+import { registerRestartSignal } from './restart-signal-host.ts'
+import { restartStamp } from './restart-stamp.ts'
+import { registerStampPoll } from './stamp-poll-host.ts'
+
 /** Runtime preferences projected to the browser. */
 export interface Config {
   /** Last acknowledged welcome notice version. */
@@ -16,9 +23,29 @@ export const Config = z.object({
   welcomeNoticeVersion: z.string().volatile(),
 })
 
-/** The browser consumes the configuration form projection.
- * @param ctx Plugin context used for optional settings presentation.
+/** The browser consumes the configuration form projection, and the configured restart command
+ * (absent by default) gains its dispatch route and capability page global. The process-start
+ * read of the restart-signal build manifest (R stamp) happens unconditionally at load, and the
+ * recheck route serves the seven-state signal judgment the browser badge renders.
+ * @param ctx Plugin context used for optional settings presentation and restart registration.
  */
 export function apply(ctx: Context): void {
+  restartStamp()
+  // The polling sensor (design triggers ① and ②) needs neither route
+  // service: it captures source and configuration fingerprints on its own
+  // interval and fires the state machine's recheck when they move.
+  registerStampPoll(ctx)
+  // The disposition layer (P3, design §四): a throttled auto-build rides the
+  // same judgment stream, and the automatic-restart fork stays dark until
+  // DSH_AUTO_RESTART=1 opts in (T2 handover point). Neither needs a route
+  // service; the fork resolves the agents registry lazily per tick.
+  registerAutoBuild(ctx)
+  registerRestartDisposition(ctx)
   ctx.inject(['settings'], (child) => { child.effect(() => child.settings.configure({ auto: false }, ctx.fiber)) })
+  // Both routes ride Connection's authenticated exact-route fence; the dispatch additionally
+  // gates on the configured command and the served-page injection table.
+  ctx.inject(['connection', 'webServer'], (webCtx) => {
+    registerRestart(webCtx)
+    registerRestartSignal(webCtx)
+  })
 }

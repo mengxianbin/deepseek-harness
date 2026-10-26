@@ -3,6 +3,7 @@
  * cases keep the default.
  */
 import { spawnSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -20,6 +21,9 @@ import {
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url))
 const gateScript = fileURLToPath(new URL('./heavy-io-gate.ts', import.meta.url))
 const tsxCli = fileURLToPath(new URL('../node_modules/tsx/dist/cli.mjs', import.meta.url))
+const packageScripts = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+  scripts: Record<string, string>
+}).scripts
 
 function lockDir(name: string): string {
   return join(tmpdir(), `heavy-io-gate-spec-${name}`)
@@ -132,5 +136,45 @@ describe('heavy-io gate lock', () => {
     expect(result.error).toBeUndefined()
     expect(result.status).not.toBe(0)
     expect(`${result.stdout}${result.stderr}`).toContain('expected a shell command argument')
+  }, 90_000)
+})
+
+describe('heavy-io gate wiring', () => {
+  it('routes every heavy entry script through the gate without touching load-bearing originals', () => {
+    for (const [entry, inner] of [
+      ['heavy:build:lib', 'pnpm run build:lib'],
+      ['heavy:build:lib:host', 'pnpm run build:lib:host'],
+      ['heavy:build:lib:client', 'pnpm run build:lib:client'],
+      ['heavy:test', 'pnpm run test'],
+      ['heavy:test:coverage', 'pnpm run test:coverage'],
+      ['heavy:test:coverage:partitioned', 'pnpm run test:coverage:partitioned'],
+      ['heavy:install', 'pnpm install'],
+    ] as const) {
+      expect(packageScripts[entry], entry).toBe(`tsx scripts/heavy-io-gate.ts "${inner}"`)
+    }
+
+    // The CI gate graph consumes these originals verbatim (ci-workflow/run-gates
+    // contracts), so the gated entries must stay separate keys.
+    expect(packageScripts.typecheck).toBe('tsx scripts/build.ts --scope typecheck')
+    expect(packageScripts.test).toBe('pnpm run build:native-system && vitest run')
+    expect(packageScripts['test:coverage']).toBe('pnpm run build:native-system && vitest run --coverage')
+    expect(packageScripts['test:coverage:partitioned']).toBe('tsx scripts/run-coverage-partitions.ts')
+    expect(packageScripts['build:lib']).toBe('pnpm run build:lib:host && pnpm run build:lib:client')
+    expect(packageScripts['build:lib:host']).toContain('tsc -b tsconfig.host.json')
+    expect(packageScripts['build:lib:client']).toContain('tsc -b tsconfig.client.json')
+  })
+
+  it('appends trailing wrapper arguments so filters reach the inner command', () => {
+    const directory = lockDir('forwarding')
+    const result = runGate(['echo', 'alpha', 'beta'], {
+      DSH_HEAVY_IO_LOCK_DIR: directory,
+      DSH_HEAVY_IO_POLL_MS: '100',
+      DSH_HEAVY_IO_WAIT_MS: '2000',
+      DSH_HEAVY_IO_STALE_MS: '60000',
+    })
+
+    expect(result.error).toBeUndefined()
+    expect(result.status).toBe(0)
+    expect(result.stdout.trim()).toBe('alpha beta')
   }, 90_000)
 })

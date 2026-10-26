@@ -45,7 +45,10 @@ import { SettingsDocumentStore } from './settings-document-store.ts'
 import { AuthExpiredOverlay, type AuthExpiredOverlayInjected } from './AuthExpiredOverlay.tsx'
 import { AUTH_EXPIRED_EVENT } from './auth-expired.ts'
 import { HostReleasePrompt, type HostReleasePromptInjected } from './HostReleasePrompt.tsx'
+import { countRunningSessions } from './restart-count.ts'
+import { startRestartSignalFlow } from './restart-signal-flow.ts'
 import { en, zh, type SettingsKey } from './locales.ts'
+import { RESTART_GLOBAL, resolveRestartCapability, type RestartSignalView } from '../restart.ts'
 
 export type {
   CloseLabelProps, HeaderContentProps, TriggerContentProps,
@@ -72,8 +75,9 @@ const NS = 'settings'
  * Required services (cordis fiber inject). The target slots are declared by
  * ui-settings' apply, whose activation order relative to this one is NOT
  * constrained; registrations depend on their slots through `slots.inject()`.
+ * `uiSession` feeds the restart confirmation's running-Session count.
  */
-export const inject = ['slots', 'locale', 'connection', 'remote', 'remote.settings', 'configForms', 'shortcuts', 'modules']
+export const inject = ['slots', 'locale', 'connection', 'remote', 'remote.settings', 'configForms', 'shortcuts', 'modules', 'uiSession']
 
 /**
  * Register the `settings` dictionaries, the chrome content, and the General
@@ -135,6 +139,40 @@ export function apply(ctx: ClientContext): void {
   let rows: readonly SettingsSectionRow[] = []
   let onboardingVersion = -1
   let onboardingSteps: readonly SettingsOnboardingStep[] = []
+  // The restart capability is baked into the served page: read once at apply
+  // (defensive read — an absent or malformed global simply disables the button),
+  // and the confirmation copy counts running Sessions from the status source
+  // through its own snapshot store, so the shell sees both as ordinary hooks.
+  const pageGlobals = globalThis as Partial<Record<typeof RESTART_GLOBAL, unknown>>
+  const restartConfigured = createSnapshotStore(resolveRestartCapability(pageGlobals[RESTART_GLOBAL]))
+  const restartRunningSessions = createSnapshotStore(0)
+  const recountRunningSessions = (): void => {
+    restartRunningSessions.set(countRunningSessions(ctx.uiSession.sessionStatus.getSnapshot()))
+  }
+  recountRunningSessions()
+  ctx.effect(() => ctx.uiSession.sessionStatus.subscribe(recountRunningSessions),
+    'ui-settings-general: restart running sessions')
+  // The restart-signal badge: one recheck flow (boot + return-to-visibility,
+  // design trigger ③) publishes Host judgments into a snapshot store, and the
+  // connected transition after a disconnect rechecks too, so the灯自灭 chain
+  // (R6: reconnect → recompute → delivery) clears the badge without user action.
+  const restartSignal = createSnapshotStore<RestartSignalView | undefined>(undefined)
+  // The flow reports this page's own running-Session count with every recheck
+  // (P3 attestation): the store above is the same number the restart
+  // confirmation names, so the host fork compares its reading against the
+  // exact value this page would show.
+  const restartSignalFlow = startRestartSignalFlow((view) => { restartSignal.set(view) }, {
+    runningCount: () => restartRunningSessions.getSnapshot(),
+  })
+  ctx.effect(() => () => { restartSignalFlow.dispose() }, 'ui-settings-general: restart-signal flow')
+  let previousConnectionState = connection.state.getSnapshot()
+  ctx.effect(() => connection.state.subscribe(() => {
+    const next = connection.state.getSnapshot()
+    const reconnected = next === 'connected'
+      && (previousConnectionState === 'disconnected' || previousConnectionState === 'connecting')
+    previousConnectionState = next
+    if (reconnected) restartSignalFlow.recheck()
+  }), 'ui-settings-general: restart-signal reconnect')
   const shellInjected = (): SettingsRootInjected => ({
     openDesktopUpdate: () => { desktopUpdate.open() },
     reconnect: () => { connection.reconnect() },
@@ -142,6 +180,9 @@ export function apply(ctx: ClientContext): void {
       shortcuts: ctx.shortcuts.catalog,
       desktopUpdate: desktopUpdate.store,
       connectionState: connection.state,
+      restartConfigured,
+      restartRunningSessions,
+      restartSignal,
       sections: {
         getSnapshot: () => {
           const version = ctx.slots.getVersion('settings.section')

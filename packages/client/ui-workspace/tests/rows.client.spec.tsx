@@ -665,12 +665,20 @@ describe('workspace browser rows', () => {
         runningSubagentCount: 0, completed: false, updatedAt: 0, pinned: false, archived: false,
       }
       const rendered = vi.fn()
-      const renderSlot: RowRenderSlot = (name: RowSlotName) => { rendered(name); return null }
+      const renderSlot: RowRenderSlot = (name: RowSlotName, owner: object, opts?: object) => {
+        rendered(name, owner, opts)
+        return null
+      }
       render(<SessionNodeItem node={node} currentId={node.id} now={0} onOpen={vi.fn()} renderSlot={renderSlot} t={t} />)
-      // The placeholder has no content yet: no row verbs (neither list is
-      // asked for anything), no "now" stamp.
+      // The placeholder has no content yet: no "..." menu (the menu list is
+      // never asked), no "now" stamp. FORK dsh-local (blank-row-archive-1026):
+      // the hover strip still renders so archive can dismiss the placeholder,
+      // and its owner share flags the row blank.
       expect(screen.queryByRole('button', { name: /会话.*的操作/ })).toBeNull()
-      expect(rendered).not.toHaveBeenCalled()
+      expect(rendered).toHaveBeenCalledExactlyOnceWith(
+        'sidebar.workspaces.session.row.action',
+        { sessionId: node.id, displayTitle: 'ignored', blank: true }, undefined,
+      )
       expect(screen.queryByText('刚刚')).toBeNull()
       // The hover card keeps title + status but drops the timestamp line.
       const wrapper = screen.getByRole('treeitem').parentElement as HTMLElement
@@ -737,10 +745,10 @@ describe('workspace browser rows', () => {
 
     // Both lists receive the row identity; only the menu list carries the open state.
     expect(rendered).toHaveBeenCalledWith(
-      'sidebar.workspaces.session.menu.item', { sessionId: node.id, displayTitle: 'One' }, [false, expect.any(Function)],
+      'sidebar.workspaces.session.menu.item', { sessionId: node.id, displayTitle: 'One', blank: false }, [false, expect.any(Function)],
     )
     expect(rendered).toHaveBeenCalledWith(
-      'sidebar.workspaces.session.row.action', { sessionId: node.id, displayTitle: 'One' }, undefined,
+      'sidebar.workspaces.session.row.action', { sessionId: node.id, displayTitle: 'One', blank: false }, undefined,
     )
     expect(screen.queryByRole('menuitem')).toBeNull()
     const trigger = screen.getByRole('button', { name: '会话“One”的操作' })
@@ -748,7 +756,7 @@ describe('workspace browser rows', () => {
     fireEvent.click(trigger)
     expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Export'])
     expect(rendered).toHaveBeenCalledWith(
-      'sidebar.workspaces.session.menu.item', { sessionId: node.id, displayTitle: 'One' }, [true, expect.any(Function)],
+      'sidebar.workspaces.session.menu.item', { sessionId: node.id, displayTitle: 'One', blank: false }, [true, expect.any(Function)],
     )
     fireEvent.click(screen.getByRole('menuitem', { name: 'Export' }))
     expect(onEntry).toHaveBeenCalledWith(node.id, 'One', true)
