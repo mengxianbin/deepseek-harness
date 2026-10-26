@@ -20,6 +20,7 @@ export const zh = {
   'glance.today.label': '今日',
   'glance.cycle.label': '周期',
   'glance.mimoBalance.label': '余额',
+  'glance.mimoBalance.stale': '陈旧，最后探测',
   'glance.refreshed': '数据刷新于',
   'glance.trigger.hint': '≥85%：切 MiMo 官方',
 } satisfies Record<string, string>
@@ -47,6 +48,7 @@ export const en = {
   'glance.today.label': 'Today',
   'glance.cycle.label': 'Cycle',
   'glance.mimoBalance.label': 'Balance',
+  'glance.mimoBalance.stale': 'stale, last probe',
   'glance.refreshed': 'Refreshed',
   'glance.trigger.hint': '≥85%: switch to MiMo official',
 } satisfies Record<SidebarKey, string>
