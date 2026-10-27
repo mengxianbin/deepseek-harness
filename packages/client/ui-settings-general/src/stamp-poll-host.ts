@@ -141,8 +141,23 @@ export function buildFingerprintProbeCode(options: FingerprintProbeCodeOptions):
   ].join('\n')
 }
 
-function parseProbeOutput(text: string): FingerprintProbe {
-  const parsed: unknown = JSON.parse(text)
+/**
+ * Parse the probe child's stdout into a captured fingerprint.
+ * @param text - raw stdout of the probe child.
+ * @returns the validated fingerprint.
+ * @throws When the body is not JSON (with byte count and a head snippet) or
+ *   fails the shape checks — so an unreadable body names itself instead of
+ *   surfacing a bare `Unexpected end of JSON input` (③, 2026-10-26).
+ */
+export function parseProbeOutput(text: string): FingerprintProbe {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch (error) {
+    const head = text.length > 0 ? JSON.stringify(text.slice(0, 120)) : '(empty)'
+    const cause = error instanceof Error ? error.message : String(error)
+    throw new Error(`stamp-poll: probe body is not JSON (bytes=${text.length}, head=${head}): ${cause}`)
+  }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new Error('stamp-poll: probe returned a non-object body')
   }
@@ -195,8 +210,38 @@ function fingerprintMoved(baseline: FingerprintProbe, probe: FingerprintProbe): 
   return false
 }
 
+/**
+ * Render one failure for the single-line log (③, 2026-10-26: the old form
+ * dumped the probe child's full `-e` script — hundreds of lines — and buried
+ * the exit code; a JSON body failure surfaced as a bare
+ * `Unexpected end of JSON input` with no body context).
+ *
+ * Child-process failures (code/signal/stderr attached) collapse to a compact
+ * `exit=… signal=… stderr:"…"` fact line; everything else keeps its message.
+ * The text is deterministic per failure state, so the one-line-per-state
+ * dedupe still holds.
+ * @param error - any thrown value from a probe or recheck run.
+ * @returns a single-line, diagnosis-ready description.
+ */
 function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  if (!(error instanceof Error)) return String(error)
+  // Explicit unknown: Reflect.get returns any; annotate to keep the log path lint-clean.
+  const code: unknown = Reflect.get(error, 'code')
+  const signal: unknown = Reflect.get(error, 'signal')
+  const stderr: unknown = Reflect.get(error, 'stderr')
+  const isChildFailure = code !== undefined || signal !== undefined || typeof stderr === 'string'
+  if (!isChildFailure) return error.message
+  const codeText = typeof code === 'string' || typeof code === 'number' ? String(code) : 'unknown'
+  const parts: string[] = [`exit=${codeText}`]
+  if (typeof signal === 'string' && signal !== '') parts.push(`signal=${signal}`)
+  if (typeof stderr === 'string' && stderr.trim() !== '') {
+    const flat = stderr.trim().replace(/\s+/g, ' ')
+    // Head, not tail: child diagnostics (git warnings, thrown error + top
+    // stack frames) lead the stream; the tail is mostly `at …` frames.
+    const head = flat.length > 200 ? `${flat.slice(0, 200)}…` : flat
+    parts.push(`stderr:"${head}"`)
+  }
+  return `probe child failed (${parts.join(' ')})`
 }
 
 /**
