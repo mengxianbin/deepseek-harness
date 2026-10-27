@@ -627,7 +627,7 @@ export class SessionCommandController {
       throw apiSessionSubagentOwnershipError(request.sessionId)
     }
     // R2: carry the requesting UI entry into the durable turn/end cause;
-    // callers without provenance omit it and the record stays entry-less.
+    // callers without a recorded entry omit it and the record stays entry-less.
     agent.cancel(
       request.entry === undefined ? { kind: 'user' } : { kind: 'user', entry: request.entry },
       { keepInbox: true },

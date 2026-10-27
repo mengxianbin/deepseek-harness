@@ -48,7 +48,7 @@ it('keeps settings and expanded plugin dialogs clear of the Windows caption acro
       expect(await settings.isVisible()).toBe(true)
       await settings.getByRole('button', { name: '关闭', exact: true }).click()
       if (await reopenSidebar.isVisible()) await reopenSidebar.click()
-      // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+      // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
       await selectGlobalPanel(page, '插件')
       await page.locator('[data-plugin-panel]').getByRole('button', { name: '添加插件', exact: true }).click()
       const plugin = page.getByRole('dialog', { name: '添加插件', exact: true })

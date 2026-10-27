@@ -187,7 +187,7 @@ export type PrepareSessionOptions =
   | RestoredSessionOptions
 
 /**
- * Which UI entry requested a user cancellation (R2 stop-entry provenance).
+ * Which UI entry requested a user cancellation (R2 stop-entry record).
  * `primary` = the composer's primary button flipped to Stop, `stop-button` =
  * the standalone Stop button, `esc-esc` = the double-Escape chord, `archive` =
  * archive admission stopping the turn with the Session. Optional so records

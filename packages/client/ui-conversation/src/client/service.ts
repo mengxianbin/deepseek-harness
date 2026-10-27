@@ -65,7 +65,7 @@ export interface IConversation {
   updateQueue(itemId: MessageId, action: QueueAction): Promise<void>
   /**
    * Cancel the scoped session's in-flight turn while preserving its pending Queue.
-   * @param entry - UI entry that requested the stop (R2 provenance); optional.
+   * @param entry - UI entry that requested the stop (R2 stop-entry record); optional.
    * @returns completion; failures reject as in send.
    */
   cancel(entry?: AgentCancelEntry): Promise<void>

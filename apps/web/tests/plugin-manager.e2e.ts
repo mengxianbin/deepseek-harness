@@ -85,7 +85,7 @@ describe('web e2e: plugin manager', () => {
   /** Select the sidebar's Plugins entry and wait for the management page in the main column. */
   async function openPluginsPanel() {
     await closeSettings()
-    // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+    // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
     await selectGlobalPanel(page, '插件')
     const panel = page.locator('[data-plugin-panel]')
     await panel.waitFor({ timeout: 10_000 })
@@ -121,7 +121,7 @@ describe('web e2e: plugin manager', () => {
           const consoleWatch = watchConsole(probe)
           await probe.goto(headerScaffold.authenticatedUrl, { waitUntil: 'load' })
           const title = language === 'en' ? 'Plugins' : '插件'
-          // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+          // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
           await selectGlobalPanel(probe, title)
           const panel = probe.locator('[data-plugin-panel]')
           const header = panel.locator(':scope > header')
@@ -256,7 +256,7 @@ describe('web e2e: plugin manager', () => {
         const consoleWatch = watchConsole(probe)
         await probe.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
         await probe.waitForSelector('[class*="frame"]', { timeout: 30_000 })
-        // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+        // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
         await selectGlobalPanel(probe, '插件')
         await expect.poll(() => spy.mock.calls.length, { timeout: 10_000 }).toBeGreaterThan(0)
         const panel = probe.locator('[data-plugin-panel]')
@@ -376,7 +376,7 @@ describe('web e2e: plugin manager', () => {
       onTestFailed(() => saveFailureShot(probe, 'web-e2e-plugin-manager-refresh'))
       await probe.clock.install()
       await probe.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
-      // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+      // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
       await selectGlobalPanel(probe, '插件')
       const panel = probe.locator('[data-plugin-panel]')
       const refresh = panel.getByRole('button', { name: '刷新', exact: true })
@@ -901,7 +901,7 @@ describe('web e2e: plugin manager', () => {
       onTestFailed(() => saveFailureShot(probe, 'web-e2e-plugin-manager-ime-enter'))
       await probe.clock.install()
       await probe.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
-      // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+      // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
       await selectGlobalPanel(probe, '插件')
       const panel = probe.locator('[data-plugin-panel]')
       await panel.getByRole('button', { name: '查看 @fixture/bundle', exact: true }).waitFor({ timeout: 20_000 })
@@ -1138,7 +1138,7 @@ describe('web e2e: startup-applied plugin management', () => {
       const tripwire = watchConsole(page)
       onTestFailed(() => saveFailureShot(page, 'web-e2e-plugin-manager-live'))
       await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
-      // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+      // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
       await selectGlobalPanel(page, '插件')
       const panel = page.locator('[data-plugin-panel]')
       const toggle = panel.getByRole('switch', { name: '启用 @fixture/bundle' })

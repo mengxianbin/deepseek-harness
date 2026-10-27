@@ -223,7 +223,7 @@ function fingerprintMoved(baseline: FingerprintProbe, probe: FingerprintProbe): 
  * @param error - any thrown value from a probe or recheck run.
  * @returns a single-line, diagnosis-ready description.
  */
-function errorText(error: unknown): string {
+function errorLine(error: unknown): string {
   if (!(error instanceof Error)) return String(error)
   // Explicit unknown: Reflect.get returns any; annotate to keep the log path lint-clean.
   const code: unknown = Reflect.get(error, 'code')
@@ -231,8 +231,8 @@ function errorText(error: unknown): string {
   const stderr: unknown = Reflect.get(error, 'stderr')
   const isChildFailure = code !== undefined || signal !== undefined || typeof stderr === 'string'
   if (!isChildFailure) return error.message
-  const codeText = typeof code === 'string' || typeof code === 'number' ? String(code) : 'unknown'
-  const parts: string[] = [`exit=${codeText}`]
+  const exitCode = typeof code === 'string' || typeof code === 'number' ? String(code) : 'unknown'
+  const parts: string[] = [`exit=${exitCode}`]
   if (typeof signal === 'string' && signal !== '') parts.push(`signal=${signal}`)
   if (typeof stderr === 'string' && stderr.trim() !== '') {
     const flat = stderr.trim().replace(/\s+/g, ' ')
@@ -293,17 +293,17 @@ export function registerStampPoll(ctx: Context, internals: StampPollInternals = 
         ctx.emit('restart-signal/changed')
       }, (error: unknown) => {
         if (disposed) return
-        warn(`ui-settings-general: stamp-poll recheck failed: ${errorText(error)}`)
+        warn(`ui-settings-general: stamp-poll recheck failed: ${errorLine(error)}`)
       })
     }, (error: unknown) => {
       probing = false
       if (disposed) return
       // One line per failure state, not one per tick: a persistent failure
       // (a missing repository, a broken git) logs once and stays visible.
-      const message = `ui-settings-general: stamp-poll probe failed: ${errorText(error)}`
-      if (message === lastFailure) return
-      lastFailure = message
-      warn(message)
+      const failureLine = `ui-settings-general: stamp-poll probe failed: ${errorLine(error)}`
+      if (failureLine === lastFailure) return
+      lastFailure = failureLine
+      warn(failureLine)
     })
   }
 

@@ -605,7 +605,7 @@ async function requestLazyChunk(page: Page, site: Site, manifest: ImageManifest)
  * @param page - Booted preview page.
  */
 async function toggleOptionalBundles(page: Page): Promise<void> {
-  // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+  // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
   await selectGlobalPanel(page, 'Plugins')
   const panel = page.locator('[data-plugin-panel]')
   const cards = panel.locator('[data-plugin-group="extensions"] [data-plugin-package]')

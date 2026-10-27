@@ -210,7 +210,7 @@ it.skipIf(webSnapshotMode() === 'record')('guides voice setup, records from stan
   expect(levelBounds.x + levelBounds.width).toBeLessThan(pickerBounds.x + pickerBounds.width)
   await page.setViewportSize({ width: 1280, height: 900 })
   // FORK (askq-presentation persistence): the wide sidebar's footer ⋯ menu owns
-  // New Session since the brand-row capsule retired (fork dddb378b76/1e4ea68e04)
+  // New Session since the brand-row capsule retired (rehome into footer ⋯ menu)
   // — the old `New session` capsule button no longer exists. Same gesture as
   // question-composer.e2e.ts: open the menu, pick the item.
   // FORK(replay-residual-1022): 裸 More 在面板共存时 strict 双命中——收窄页脚 footArea（:222 同款）
@@ -219,7 +219,7 @@ it.skipIf(webSnapshotMode() === 'record')('guides voice setup, records from stan
   await mic.waitFor()
   await expect.poll(() => page.evaluate(() => (window as Window & { voiceTestStreams?: MediaStream[] }).voiceTestStreams!
     .every(stream => stream.getTracks().every(track => track.readyState === 'ended')))).toBe(true)
-  // FORK(replay-residual-1022): 插件面板入口同随 7ee61be915 收进页脚 ⋯ 菜单（宽态无裸 Plugins 按钮）
+  // FORK(replay-residual-1022): 插件面板入口同随面板折入改动收进页脚 ⋯ 菜单（宽态无裸 Plugins 按钮）
   await page.locator('[class*="footArea"]').getByRole('button', { name: 'More', exact: true }).click()
   await page.getByRole('menuitem', { name: 'Plugins', exact: true }).click()
   await page.locator('[data-plugin-package="@deepseek-ai/dsh-experimental-voice-input-bundle"]').waitFor()

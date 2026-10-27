@@ -63,7 +63,7 @@ describe('web e2e: plugin configuration pages', () => {
       await page.keyboard.press('Escape')
       await expect.poll(() => page.getByRole('dialog', { name: '设置' }).count(), { timeout: 5_000 }).toBe(0)
     }
-    // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+    // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
     await selectGlobalPanel(page, '插件')
     const panel = page.locator('[data-plugin-panel]')
     await panel.waitFor({ timeout: 10_000 })

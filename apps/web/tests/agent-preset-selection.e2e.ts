@@ -387,7 +387,7 @@ describe('web e2e: agent-preset selection', () => {
       (JSON.parse(localStorage.getItem('dsh.sessions.current') ?? '{}') as { sessionId?: string }).sessionId)
     expect(currentSessionId).toBeDefined()
     const creation = page.waitForResponse('**/api/session/create')
-    // FORK(replay-residual-1022): New session 按钮已随 dddb378b76 退役入页脚 ⋯ 菜单（question-composer 10-19 先例）
+    // FORK(replay-residual-1022): New session 按钮已随品牌行收整退役入页脚 ⋯ 菜单（question-composer 10-19 先例）
     await page.locator('[class*="footArea"]').getByRole('button', { name: 'More', exact: true }).click()
     await page.getByRole('menuitem', { name: 'New Session', exact: true }).click()
     const created = await creation
@@ -462,7 +462,7 @@ it.each([false, true])('starts Creator from Plugins with Coding Tools=%s without
     const draft = 'Keep this unsent plugin idea.'
     await writeComposerDraft(page, composerOf(standard.id), draft)
 
-    // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+    // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
     await selectGlobalPanel(page, 'Plugins')
     await page.getByRole('button', { name: 'Choose how to add a plugin', exact: true }).click()
     // The draft's blank lists Standard, so the Creator entry names no blank and the Host creates a separate Creator Session.
@@ -508,7 +508,7 @@ it.each([false, true])('starts Creator from Plugins with Coding Tools=%s without
     creator.session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
     await scaffold.ctx.sessions.flush(creator.session)
     await page.getByText('Creator fixture completed without a model call.', { exact: true }).waitFor()
-    // FORK(replay-residual-1022): New session 按钮已随 dddb378b76 退役入页脚 ⋯ 菜单（question-composer 10-19 先例）
+    // FORK(replay-residual-1022): New session 按钮已随品牌行收整退役入页脚 ⋯ 菜单（question-composer 10-19 先例）
     // rc.3 merge: New Session now returns to the Standard blank and its unsent draft (upstream new-session-blank-reuse).
     await page.locator('[class*="footArea"]').getByRole('button', { name: 'More', exact: true }).click()
     const newSession = page.getByRole('menuitem', { name: 'New Session', exact: true })

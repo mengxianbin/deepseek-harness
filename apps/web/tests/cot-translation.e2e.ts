@@ -195,7 +195,7 @@ it.skipIf(MODE === 'record')('persists Bing reasoning translation across reopen 
   const recordedModelHistory = session.deriveMessages(), recordedRequestHeader = session.requestHeader()
 
   await settings.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
-  // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+  // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
   await selectGlobalPanel(settings, '插件')
   const panel = settings.locator('[data-plugin-panel]')
   await panel.getByRole('button', { name: '更多', exact: true }).click()

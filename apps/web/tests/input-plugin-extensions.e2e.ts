@@ -62,7 +62,7 @@ it('expands an input activity and inserts one undoable result without overwritin
 
 it('offers bundle guidance only after explicit activation and navigates to its configuration', async () => {
   const { page, tripwire } = await fixture(false)
-  // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+  // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
   await selectGlobalPanel(page, 'Plugins')
   const toggle = page.getByRole('switch', { name: 'Enable @fixture/input-extension', exact: true })
   await toggle.waitFor()

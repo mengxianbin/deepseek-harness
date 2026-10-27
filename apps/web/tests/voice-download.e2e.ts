@@ -42,7 +42,7 @@ it('shows the failed asset, actual download source and recovery advice, then ret
   resources.browser = browser
   const page = await newEnglishPage(browser), tripwire = watchConsole(page)
   await page.goto(scaffold.authenticatedUrl)
-  // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+  // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
   await selectGlobalPanel(page, 'Plugins')
   await page.locator('[data-plugin-package="@deepseek-ai/dsh-experimental-voice-input-bundle"]').getByRole('button').click()
   await page.getByRole('button', { name: 'Download and prepare', exact: true }).click()
@@ -103,7 +103,7 @@ it.each([{ winner: 0, manual: false }, { winner: 1, manual: false }, { winner: 0
     const browser = await chromium.launch(); resources.browser = browser
     const page = await newEnglishPage(browser), tripwire = watchConsole(page)
     await page.goto(scaffold.authenticatedUrl)
-    // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+    // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
     await selectGlobalPanel(page, 'Plugins')
     await page.locator('[data-plugin-package="@deepseek-ai/dsh-experimental-voice-input-bundle"]').getByRole('button').click()
     const picker = page.getByLabel('Model download source', { exact: true })

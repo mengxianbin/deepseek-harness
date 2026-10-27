@@ -111,6 +111,7 @@ export function claimRestartDispatch(now: number = Date.now()): boolean {
 /**
  * Whether a fresh restart-dispatch claim exists (the TTL window has not run out).
  * @param now - current time in epoch milliseconds; defaults to `Date.now()`.
+ * @returns True while a claim is still fresh; false when no claim exists or the TTL ran out.
  */
 export function restartDispatchClaimed(now: number = Date.now()): boolean {
   return dispatchClaimedAt !== undefined && now - dispatchClaimedAt < DISPATCH_CLAIM_TTL_MS

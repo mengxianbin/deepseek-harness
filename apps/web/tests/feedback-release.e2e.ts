@@ -288,7 +288,7 @@ describe.each(MODE === 'record' ? ['deepseek-official'] : ['deepseek-official', 
     await selectModel('Feedback mock')
     await selectModel('DeepSeek-V4-Flash')
     expect(captured()).toHaveLength(releasedCount)
-    // FORK(replay-residual-1022): New session 按钮已随 dddb378b76 退役入页脚 ⋯ 菜单（question-composer 10-19 先例）
+    // FORK(replay-residual-1022): New session 按钮已随品牌行收整退役入页脚 ⋯ 菜单（question-composer 10-19 先例）
     await page.locator('[class*="footArea"]').getByRole('button', { name: 'More', exact: true }).click()
     await page.getByRole('menuitem', { name: 'New Session', exact: true }).click()
     const input = page.locator('[data-composer-input][contenteditable="true"][data-placeholder="Describe what you want to build, / commands, @ files or sessions"]')

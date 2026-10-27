@@ -62,7 +62,7 @@ it('persists the Git Worktrees switch and removes its capability while retaining
     return manifest.dsh.profile.bundles
   }
   const openPlugins = async () => {
-    // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+    // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
     await selectGlobalPanel(page, 'Plugins')
     const panel = page.locator('[data-plugin-panel]')
     await panel.getByRole('heading', { name: 'Plugins', exact: true }).waitFor()

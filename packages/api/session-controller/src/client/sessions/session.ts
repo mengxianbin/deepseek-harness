@@ -342,7 +342,7 @@ export class Session implements SessionFace {
    * land in promptError (same error-strip display slot). A subagent address
    * routes through `subagents.interruptByParent`, whose durable parent-address
    * authority works without a live parent Agent (that parent-kind path carries
-   * no entry provenance).
+   * no recorded entry).
    * @param entry - UI entry that requested the stop (R2); omitted keeps the
    * pre-entry request shape byte-identical.
    * @returns the cancel result.

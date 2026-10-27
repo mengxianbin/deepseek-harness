@@ -57,6 +57,7 @@ interface HostFile {
  * Build the `file` provider over one Remote face and one change feed.
  * @param remote - the Remote face carrying `workspaceFiles.stat`.
  * @param changes - target-scoped change streams shared by file resources.
+ * @param options - per-provider knobs (see FileProviderOptions); production leaves them out.
  * @returns the provider to register into `ctx.resources`.
  */
 export function createFileResourceProvider(

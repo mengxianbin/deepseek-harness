@@ -854,7 +854,7 @@ describe('web e2e: settings modal and General preferences', () => {
       // and the unavailable notice a scaffold without a profile runtime shows.
       await enPage.keyboard.press('Escape')
       await expect.poll(() => enPage.getByRole('dialog', { name: 'Settings' }).count(), { timeout: 5_000 }).toBe(0)
-      // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+      // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
       await selectGlobalPanel(enPage, 'Plugins')
       await enPage.getByRole('button', { name: 'Add plugin', exact: true })
         .waitFor({ timeout: 10_000 })

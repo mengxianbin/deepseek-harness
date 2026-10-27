@@ -356,7 +356,7 @@ describe('dsh web keyless CLI smoke', () => {
         }
       })
       await page.goto(readyUrl)
-      // FORK(replay-residual-1022): New session 按钮已随 dddb378b76 退役入页脚 ⋯ 菜单（question-composer 10-19 先例）
+      // FORK(replay-residual-1022): New session 按钮已随品牌行收整退役入页脚 ⋯ 菜单（question-composer 10-19 先例）
       await page.locator('[class*="footArea"]').getByRole('button', { name: 'More', exact: true }).waitFor({ timeout: 30_000 })
       const batchPaths = [...new Set(pluginScripts)].sort()
       // The bootstrap phase is the modules package alone; the application phase

@@ -396,7 +396,7 @@ export interface SessionUpdateQueueValue {
 /** Active-turn cancellation request. */
 export interface SessionCancelRequest {
   readonly sessionId: SessionId
-  /** UI entry that requested the stop; omitted by callers that carry no provenance (old data default). */
+  /** UI entry that requested the stop; omitted by callers that record no entry (old data default). */
   readonly entry?: AgentCancelEntry
 }
 

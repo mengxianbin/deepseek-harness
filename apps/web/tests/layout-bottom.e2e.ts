@@ -58,7 +58,7 @@ it('reserves bottom content height without remounting it on main-panel navigatio
       expected.push(`open: ${JSON.stringify(await check(240))}`)
       await page.getByRole('button', { name: 'Grow bottom', exact: true }).click()
       expected.push(`grown: ${JSON.stringify(await check(360))}`)
-      // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+      // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
       await selectGlobalPanel(page, 'Plugins')
       await page.locator('[data-plugin-panel]').waitFor()
       expect(await input.inputValue()).toBe('Retained across main panels')

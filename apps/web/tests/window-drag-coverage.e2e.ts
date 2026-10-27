@@ -371,7 +371,7 @@ describe('web e2e: macOS window drag coverage', () => {
   it('keeps an entry page’s chrome row draggable', async () => {
     const { page, tripwire } = await darwinPage()
     try {
-      // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+      // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
       await selectGlobalPanel(page, 'Plugins')
       const head = page.locator('[class*="pageHead"]').first()
       await head.waitFor({ timeout: 15_000 })
@@ -409,7 +409,7 @@ describe('web e2e: macOS window drag coverage', () => {
   it('keeps a detail page’s head row draggable and its body out of the drag surface', async () => {
     const { page, tripwire } = await darwinPage()
     try {
-      // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+      // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
       await selectGlobalPanel(page, 'Plugins')
       const cards = page.locator('[data-plugin-package], [data-plugin-item]')
       await cards.first().waitFor({ timeout: 30_000 })

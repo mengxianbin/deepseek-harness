@@ -59,6 +59,8 @@ interface AskUserQuestionItem {
   question: string
   /** Optional supporting detail rendered with the question but kept out of option labels. */
   detail?: string
+  /** Present when over-long text fields were folded out of the card; names the file holding their complete content. */
+  attachment?: AskUserQuestionAttachment
   /** Optional short heading/group label. */
   header?: string
   /** Optional choices the UI can render as a menu. */

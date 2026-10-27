@@ -80,7 +80,7 @@ export function apply(ctx) {
     const list = panel.getByRole('heading', { name: '插件', exact: true })
     // The sidebar entry toggles the page, so it is pressed only while the page is closed.
     if (await panel.count() === 0) {
-      // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+      // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
       await selectGlobalPanel(page, '插件')
     } else if (!await list.isVisible()) {
       await panel.getByRole('button', { name: '返回插件', exact: true }).click()
@@ -235,7 +235,7 @@ describe('web e2e: plugin installation without HMR', () => {
       await page.goto(scaffold.authenticatedUrl)
       await page.waitForSelector('[class*="frame"]')
       if (await page.getByRole('dialog', { name: '设置' }).count() > 0) await page.keyboard.press('Escape')
-      // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+      // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
       await selectGlobalPanel(page, '插件')
       const panel = page.locator('[data-plugin-panel]')
       await panel.getByRole('button', { name: '添加插件', exact: true }).click()

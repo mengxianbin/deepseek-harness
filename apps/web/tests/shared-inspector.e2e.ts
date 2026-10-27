@@ -118,7 +118,7 @@ it.each([
   resources.browser = browser
   const page = await browser.newPage({ locale: copy.locale })
   await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
-  // FORK(replay-residual-1022): 宽态 nav 退役（7ee61be915）——同文件 :335 先例走 selectGlobalPanel
+  // FORK(replay-residual-1022): 宽态 nav 退役（面板折入 ⋯ 菜单）——同文件 :335 先例走 selectGlobalPanel
   await selectGlobalPanel(page, copy.plugins)
   const panel = page.locator('[data-plugin-panel]')
   const card = panel.locator('[data-plugin-package="@deepseek-ai/dsh-experimental-inspector-profile"]')
@@ -332,7 +332,7 @@ it('opens bottom DevTools and retains its document and selected panel across Ses
   await page.keyboard.press('ControlOrMeta+Shift+Period')
   await iframe.waitFor({ state: 'visible' })
   expect(await unchanged()).toEqual(identity)
-  // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+  // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
   await selectGlobalPanel(page, 'Plugins')
   await page.locator('[data-plugin-panel]').waitFor()
   expect(await iframe.isVisible()).toBe(true)

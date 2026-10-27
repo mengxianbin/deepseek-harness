@@ -138,7 +138,7 @@ describe('Subagent archive admission: stopping', () => {
     expect(idleChildAgent.cancels).toEqual([])
     expect(forkAgent.cancels).toEqual([])
     // The parent's own turn is the composed Agent registry's family, cancelled
-    // with the user cause marked entry=archive (R2 provenance).
+    // with the user cause marked entry=archive (R2 stop-entry record).
     expect(parentAgent.cancels).toEqual([[{ kind: 'user', entry: 'archive' }, undefined]])
   })
 

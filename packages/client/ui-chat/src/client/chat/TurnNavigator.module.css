@@ -207,8 +207,8 @@
 /* Fork patch 2026-10-22: upstream hides the rail below a 900px inline-size
    container; removed locally so the rail shows at every width (user request;
    m-note: content/tech/ai/dsh/dsh-web-turn-rail-width-threshold.md). Upstream
-   restored that threshold in 43a8a22824 — re-remove it if a merge brings it
-   back. container-type stays: the preview box queries 100cqw. */
+   restored that threshold in a later upstream commit — re-remove it if a
+   merge brings it back. container-type stays: the preview box queries 100cqw. */
 
 @media (prefers-reduced-motion: reduce) {
   .frame,

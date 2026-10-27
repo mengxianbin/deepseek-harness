@@ -923,7 +923,7 @@ describe('web e2e: shipped right Sidebar', () => {
 
         // The real New Session action selects a distinct blank Session; its
         // collapsed surface must not inherit the settled Session's tabs.
-        // FORK(replay-residual-1022): New session 按钮已随 dddb378b76 退役入页脚 ⋯ 菜单（question-composer 10-19 先例）
+        // FORK(replay-residual-1022): New session 按钮已随品牌行收整退役入页脚 ⋯ 菜单（question-composer 10-19 先例）
         await fx.locator('[class*="footArea"]').getByRole('button', { name: 'More', exact: true }).click()
         await fx.getByRole('menuitem', { name: 'New Session', exact: true }).click()
         await expect.poll(async () => await settled.getAttribute('aria-selected')).toBe('false')

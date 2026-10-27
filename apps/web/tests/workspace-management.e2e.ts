@@ -861,7 +861,7 @@ describe('web e2e: workspace management (create / rename / grouping / hover affo
     // The row disappears on the archive-set echo; with no other visible
     // stray, the whole Ungrouped bucket withdraws.
     await expect.poll(() => sessionRow.count(), { timeout: 10_000 }).toBe(0)
-    // FORK(replay-residual-1022): d70e823397 常驻空会话后，Ungrouped 桶不再因归档
+    // FORK(replay-residual-1022): 空会话常驻化后，Ungrouped 桶不再因归档
     // 最后一个具名会话而撤桶——桶内恒剩常驻空会话行。原「Ungrouped 计数→0」是
     // 旧隐藏式空会话契约的断言，现改为钉住新契约：桶仍在场（1），归档语义由上方
     // sessionRow→0 与下方 registry/持久化断言承载。
@@ -1063,8 +1063,8 @@ describe('web e2e: New Session after an outdated blank cache', () => {
       const before = await captureStableAria(page, '[role="tree"]', scaffold.workspaceCwd)
 
       // FORK (askq-presentation persistence): the wide sidebar's footer ⋯ menu
-      // owns New Session since the brand-row capsule retired (fork
-      // dddb378b76/1e4ea68e04) — the old `New session` capsule button no longer
+      // owns New Session since the brand-row capsule retired — the old
+      // `New session` capsule button no longer
       // exists. Open the menu, pick the item (same gesture as
       // question-composer.e2e.ts).
       // rc.3 merge: New Session names the blank startup created, not the recorded conversation, and the Host reuses it.

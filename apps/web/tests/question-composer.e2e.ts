@@ -489,8 +489,8 @@ describe('web e2e: resident question composer round trip', () => {
       const originalRow = page.locator('[role="treeitem"]')
         .filter({ hasText: 'Use the ask_user_question tool' }).first()
       // FORK (askq-presentation persistence): the wide sidebar's footer ⋯ menu
-      // owns New Session since the brand-row capsule retired (fork
-      // dddb378b76/1e4ea68e04): open the menu, pick it.
+      // owns New Session since the brand-row capsule retired: open the
+      // menu, pick it.
       await page.getByRole('button', { name: 'More', exact: true }).click()
       await page.getByRole('menuitem', { name: 'New Session', exact: true }).click()
       // Scope to the tree: the menu carries the same visible label, and an

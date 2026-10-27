@@ -69,7 +69,7 @@ describe.skipIf(webSnapshotMode() === 'record')('web session replay', () => {
       await compareOrRefreshGolden(UI_EXPECTED,
         await captureExpandedTurnProcessAria(page, '[class*="centerCol"]', scaffold.workspaceCwd), 'replay')
 
-      // FORK(replay-residual-1022): New session 按钮已随 dddb378b76 退役入页脚 ⋯ 菜单（question-composer 10-19 先例）
+      // FORK(replay-residual-1022): New session 按钮已随品牌行收整退役入页脚 ⋯ 菜单（question-composer 10-19 先例）
       await page.locator('[class*="footArea"]').getByRole('button', { name: 'More', exact: true }).click()
       await page.getByRole('menuitem', { name: 'New Session', exact: true }).click()
       await page.getByText('Into the Unknown', { exact: true }).waitFor()

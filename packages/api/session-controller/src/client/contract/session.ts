@@ -108,7 +108,7 @@ export interface ISession {
   /**
    * Cancel the running turn. Pending queued work remains and resumes in FIFO
    * order after the Host reaches cancellation quiescence.
-   * @param entry - UI entry that requested the stop (R2 provenance); omitted
+   * @param entry - UI entry that requested the stop (R2 stop-entry record); omitted
    * when the caller carries none, keeping the pre-entry request shape.
    * @returns acceptance, or the business error.
    */

@@ -45,7 +45,7 @@ describe('web e2e: the slash menu follows plugin switches', () => {
     await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
     await connectFreshWorkspace(page, scaffold.workspaceCwd)
     await plugins.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
-    // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+    // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
     await selectGlobalPanel(plugins, 'Plugins')
     const panel = plugins.locator('[data-plugin-panel]')
     await panel.getByRole('button', { name: 'More', exact: true }).click()

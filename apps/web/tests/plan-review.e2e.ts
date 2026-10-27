@@ -226,7 +226,7 @@ describe('web e2e: plan review takeover round trip', () => {
     // review arrives while neither is mounted; returning mounts both in one
     // commit, and the review's automatic open runs before the Sidebar's own
     // effects. A crash there retires the opener for the rest of the page.
-    // FORK(replay-residual-1022): 宽态 nav 退役（7ee61be915）——页脚 ⋯ 菜单路由
+    // FORK(replay-residual-1022): 宽态 nav 退役（面板折入 ⋯ 菜单）——页脚 ⋯ 菜单路由
     await page.locator('[class*="footArea"]').getByRole('button', { name: 'More', exact: true }).click()
     await page.getByRole('menuitem', { name: 'Plugins', exact: true }).click()
     await expect.poll(() => page.locator('[data-composer-input]').count()).toBe(0)
@@ -308,7 +308,7 @@ describe.skipIf(MODE === 'record')('web e2e: pending plan review across Sidebar 
   }
 
   async function showPlugins(): Promise<void> {
-    // FORK(replay-residual-1022): 宽态 nav 退役（7ee61be915）——页脚 ⋯ 菜单路由
+    // FORK(replay-residual-1022): 宽态 nav 退役（面板折入 ⋯ 菜单）——页脚 ⋯ 菜单路由
     await page.locator('[class*="footArea"]').getByRole('button', { name: 'More', exact: true }).click()
     await page.getByRole('menuitem', { name: 'Plugins', exact: true }).click()
     await expect.poll(() => page.locator('[data-composer-input]').count(), { timeout: 10_000 }).toBe(0)

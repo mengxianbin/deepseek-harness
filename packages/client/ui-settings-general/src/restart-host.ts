@@ -33,7 +33,11 @@ export interface RestartInternals {
   launch?: RestartLauncher
 }
 
-/** Default launcher: one command line through the OS shell, hidden and detached. */
+/**
+ * Default launcher: one command line through the OS shell, hidden and detached.
+ * @param commandLine - whole command line to run through the OS shell.
+ * @param options - spawn options passed through: shell, detached, stdio, windowsHide, env.
+ */
 export const spawnDetached: RestartLauncher = (commandLine, options) => spawn(commandLine, options)
 
 /**

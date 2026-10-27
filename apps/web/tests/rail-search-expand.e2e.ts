@@ -61,7 +61,7 @@ describe('web e2e: rail search click survives its own document-level bubble', ()
 
     // The guard ends with the gesture: a genuine outside click on an empty
     // query dismisses the expanded search as before.
-    // FORK(replay-residual-1022): New session 按钮已随 dddb378b76 退役入页脚 ⋯ 菜单（question-composer 10-19 先例）
+    // FORK(replay-residual-1022): New session 按钮已随品牌行收整退役入页脚 ⋯ 菜单（question-composer 10-19 先例）
     await page.locator('[class*="footArea"]').getByRole('button', { name: 'More', exact: true }).click()
     await page.getByRole('menuitem', { name: 'New Session', exact: true }).click()
     await expect.poll(async () => wideSearch.getAttribute('aria-expanded'), { timeout: 10_000 }).toBe('false')

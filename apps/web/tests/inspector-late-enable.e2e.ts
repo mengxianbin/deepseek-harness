@@ -33,7 +33,7 @@ it('opens bottom DevTools after the Developer Tools bundle is enabled on an alre
   await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
   await page.evaluate(() => { Reflect.set(window, '__inspectorLateEnableMarker', 'same-document') })
 
-  // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+  // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
   await selectGlobalPanel(page, 'Plugins')
   const plugins = page.locator('[data-plugin-panel]')
   const toggle = plugins.getByRole('switch', { name: 'Enable Developer Tools', exact: true })

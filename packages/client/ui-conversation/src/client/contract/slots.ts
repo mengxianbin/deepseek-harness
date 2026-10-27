@@ -519,7 +519,7 @@ export interface ComposerBarInjected {
   /** Restart one failed file upload; absent without a session. */
   retryFileUpload: ((id: DraftAttachmentId) => void) | undefined
   toggleCommandMenu: ((selection: EditSelection) => void) | undefined
-  /** Stop the live turn, naming the UI entry that asked (R2 provenance). */
+  /** Stop the live turn, naming the UI entry that asked (R2 stop-entry record). */
   stop: ((entry: AgentCancelEntry) => void) | undefined
   /**
    * Per-session send/stop debounce: it timestamps an accepted send and the

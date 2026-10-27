@@ -58,7 +58,7 @@ it.each(['network', 'timeout'] as const)('offers a mirror after a GitHub %s, the
   await page.goto(scaffold.authenticatedUrl)
   await page.waitForSelector('[class*="frame"]')
   if (await page.getByRole('dialog', { name: '设置' }).count() > 0) await page.keyboard.press('Escape')
-  // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（7ee61be915 后 nav 不再渲染）
+  // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
   await selectGlobalPanel(page, '插件')
   await page.getByRole('button', { name: '添加插件', exact: true }).click()
   const spec = 'https://github.com/example/dsh-plugin.git'
