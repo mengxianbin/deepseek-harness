@@ -402,6 +402,12 @@ describe('workspace browser rows', () => {
     const done = renderRow({ completed: true })
     expect(done.container.querySelector('[data-state="done"]')).not.toBeNull()
     done.unmount()
+    // A failed stop still unviewed: the red error dot, not the done dot.
+    const failed = renderRow({ completed: true, completionOutcome: 'failed' })
+    expect(failed.container.querySelector('[data-state="error"]')).not.toBeNull()
+    expect(failed.container.querySelector('[data-state="done"]')).toBeNull()
+    expect(screen.getByText('上轮失败')).toBeTruthy()
+    failed.unmount()
     // Running wins the slot: the animated ongoing dot, no done dot.
     const running = renderRow({ completed: true, running: true })
     expect(running.container.querySelector('[data-state="ongoing"]')).not.toBeNull()
@@ -1168,6 +1174,7 @@ describe('session row schedule seats', () => {
 
   it.each<[string, SessionNode, string]>([
     ['an unviewed completion (new message)', { ...idle, completed: true }, 'done'],
+    ['an unviewed failed stop', { ...idle, completed: true, completionOutcome: 'failed' as const }, 'error'],
     ['live activity', { ...idle, running: true }, 'ongoing'],
     ['a pending approval', { ...idle, pendingInteraction: 'approval' as const }, 'warning'],
     ['a running subagent', { ...idle, runningSubagentCount: 2 }, 'ongoing'],

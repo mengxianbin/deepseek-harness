@@ -343,10 +343,11 @@ interface SessionStatus {
 
 /**
  * Session status presentation; pending interaction is primary and live activity
- * outranks completion reminders.
+ * outranks completion reminders, with a failed stop reminding in error red.
  */
 function sessionStatuses(
-  node: Pick<SessionNode, 'pendingInteraction' | 'running' | 'runningSubagentCount' | 'completed'>,
+  node: Pick<SessionNode, 'pendingInteraction' | 'running' | 'runningSubagentCount'
+    | 'completed' | 'completionOutcome'>,
   t: RowTranslate,
 ): readonly [SessionStatus, ...SessionStatus[]] {
   const subagents: SessionStatus | undefined = node.runningSubagentCount === 0
@@ -393,7 +394,10 @@ function sessionStatuses(
     return subagents === undefined ? [primary] : [primary, subagents]
   }
   if (subagents !== undefined) return [subagents]
-  if (node.completed) return [{ state: 'done', label: t('status.completed') }]
+  if (node.completed) return [{
+    state: node.completionOutcome === 'failed' ? 'error' : 'done',
+    label: node.completionOutcome === 'failed' ? t('status.turnFailed') : t('status.completed'),
+  }]
   return [{ state: 'idle', label: t('status.idle') }]
 }
 
@@ -431,7 +435,8 @@ function SessionHoverContent({ node, now, renderSlot, t }: {
   t: RowTranslate
 }) {
   // On archived rows the archived line already says the session is inactive,
-  // so resting statuses (idle/completed) drop; live activity still shows.
+  // so resting statuses (idle/completed) drop; live activity and an unviewed
+  // failed stop still show.
   const statuses = sessionStatuses(node, t)
     .filter(status => !(node.archived && (status.state === 'done' || status.state === 'idle')))
   return (
