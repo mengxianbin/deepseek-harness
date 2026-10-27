@@ -16,9 +16,11 @@ export type AccountMenuProps = PropsRuntime<'settings.launcher'> & PropsLocale<'
  * as its first row: the gear glyph opens the panel on one click
  * (aria-haspopup=dialog, the shell-owned shortcut rides the button and its
  * tooltip), and the menu's remaining entries (feedback, sign-in, sign-out)
- * leave the sidebar with the menu. The account side effects this seat
- * hosts — the bonus notice stack, the credential toasts, the shared sign-in
- * dialog, and the refresh on a Settings entry — stay put.
+ * leave the sidebar with the menu — feedback later returned through the
+ * `sidebar.more.action` ⋯-menu seat (FORK sidebar-foot-1027, 2026-10-27;
+ * registered in index.ts, not from this launcher). The account side effects
+ * this seat hosts — the bonus notice stack, the credential toasts, the shared
+ * sign-in dialog, and the refresh on a Settings entry — stay put.
  * FORK dsh-local (sidebar-footer-ui-1026, 2026-10-26): the wide column drops
  * the visible 设置/Settings label — the gear is icon-only; the accessible
  * name and the hover tooltip keep the copy.

@@ -153,6 +153,28 @@ it('shares account actions across seats, publishes dialog ownership, and opens c
   expect(c.ctx.slots.entries('settings.launcher')).toHaveLength(0)
 }, 60_000)
 
+it('mounts the questionnaire into the sidebar more-action seat with the shared operation, and unmounts with the plugin', async ({ start }) => {
+  const open = vi.spyOn(window, 'open').mockReturnValue(null)
+  vi.stubGlobal(CONTACT_CONFIG_GLOBAL, { contactFormUrl: 'https://example.test/form/', contactSource: 'harness' })
+  const c = await start()
+  const [entry, ...rest] = c.ctx.slots.entries('sidebar.more.action')
+  expect(rest).toHaveLength(0)
+  expect(entry).toBeDefined()
+  expect(entry!.options.id).toBe('account-feedback')
+  // The seat carries the SAME contact operation the settings seats share (the
+  // factory narrows the face, so identity is asserted on the function), so the
+  // questionnaire click behaves identically from the sidebar and from Settings.
+  const seat = entry!.inject!() as { contactUs: () => void }
+  const launcher = c.ctx.slots.entries('settings.launcher')[0]!.inject!() as { contactUs: () => void }
+  expect(seat.contactUs).toBe(launcher.contactUs)
+  seat.contactUs()
+  expect(open).toHaveBeenCalledOnce()
+  const url = new URL(String(open.mock.calls.at(-1)![0]))
+  expect(url.searchParams.get('hide_uid')).toBe('1')
+  await c.unload(SELF)
+  expect(c.ctx.slots.entries('sidebar.more.action')).toHaveLength(0)
+}, 60_000)
+
 it('prefills the native device description from the Desktop bridge on every click', async ({ start }) => {
   const open = vi.spyOn(window, 'open').mockReturnValue(null)
   const deviceInfo = vi.fn(async () => 'platform=darwin; os=15.0; app_arch=arm64; cpu=Apple M3; memory_gib=16.0')
