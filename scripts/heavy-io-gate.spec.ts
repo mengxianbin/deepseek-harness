@@ -148,6 +148,7 @@ describe('heavy-io gate wiring', () => {
       ['heavy:test', 'pnpm run test'],
       ['heavy:test:coverage', 'pnpm run test:coverage'],
       ['heavy:test:coverage:partitioned', 'pnpm run test:coverage:partitioned'],
+      ['heavy:test:gui', 'vitest run packages/client packages/host'],
       ['heavy:install', 'pnpm install'],
     ] as const) {
       expect(packageScripts[entry], entry).toBe(`tsx scripts/heavy-io-gate.ts "${inner}"`)
@@ -159,6 +160,7 @@ describe('heavy-io gate wiring', () => {
     expect(packageScripts.test).toBe('pnpm run build:native-system && vitest run')
     expect(packageScripts['test:coverage']).toBe('pnpm run build:native-system && vitest run --coverage')
     expect(packageScripts['test:coverage:partitioned']).toBe('tsx scripts/run-coverage-partitions.ts')
+    expect(packageScripts['test:gui']).toBe('vitest run packages/client packages/host')
     expect(packageScripts['build:lib']).toBe('pnpm run build:lib:host && pnpm run build:lib:client')
     expect(packageScripts['build:lib:host']).toContain('tsc -b tsconfig.host.json')
     expect(packageScripts['build:lib:client']).toContain('tsc -b tsconfig.client.json')

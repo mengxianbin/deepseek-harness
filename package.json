@@ -32,6 +32,7 @@
     "heavy:test": "tsx scripts/heavy-io-gate.ts \"pnpm run test\"",
     "heavy:test:coverage": "tsx scripts/heavy-io-gate.ts \"pnpm run test:coverage\"",
     "heavy:test:coverage:partitioned": "tsx scripts/heavy-io-gate.ts \"pnpm run test:coverage:partitioned\"",
+    "heavy:test:gui": "tsx scripts/heavy-io-gate.ts \"vitest run packages/client packages/host\"",
     "heavy:install": "tsx scripts/heavy-io-gate.ts \"pnpm install\"",
     "build:web": "pnpm --filter @deepseek-ai/dsh-web-frontend run build",
     "build:desktop": "pnpm --filter @deepseek-ai/dsh-desktop run build",
