@@ -185,6 +185,13 @@ interface ProviderSnapshotView {
   provider?: string
   plan?: { windows?: PlanWindowView[] }
   balance?: BalanceView
+  /**
+   * The host's last probe failure for this route (FORK
+   * usage-glance-stale-fact-ttl, 2026-10-27): present means the row's
+   * retained facts are stale-but-carried — the glance marks the balance
+   * figure instead of presenting it as live.
+   */
+  error?: string
 }
 
 /** One per-day trend entry of the overview's ledger series. */
@@ -253,6 +260,13 @@ export interface GlanceState {
   cycleTruncated?: boolean
   /** The mimo route's pay-as-you-go balance; absent when the host reports none. */
   mimoBalance?: BalanceView
+  /**
+   * True when the mimo balance is a stale-carried fact (FORK
+   * usage-glance-stale-fact-ttl): the host's probe half reports an error
+   * while the row still carries the last success — the figure is marked
+   * stale rather than presented as live. Absent alongside a fresh fact.
+   */
+  mimoBalanceStale?: boolean
 }
 
 /**
@@ -284,11 +298,17 @@ function pickPlanRow(overview: UsageOverviewView): ProviderSnapshotView | undefi
  * balance, which today would be deepseek-official's `-0.18 CNY` answering a
  * question about MiMo's wallet. The row degrades on its own when the host
  * reports no mimo balance (adapter absent, cookie expired, probe failed).
+ * A row that still carries a balance while its probe half reports an error
+ * is a STALE-CARRIED fact (FORK usage-glance-stale-fact-ttl): the host kept
+ * the last success through a failing streak, so the figure is marked stale
+ * instead of presented as live.
  * @param overview - the host overview document.
- * @returns the mimo balance fact, or undefined when the host reports none.
+ * @returns the mimo balance fact with its staleness flag, or undefined when the host reports none.
  */
-function pickMimoBalance(overview: UsageOverviewView): BalanceView | undefined {
-  return (overview.providers ?? []).find(row => row.provider === MIMO_ROUTE_ID)?.balance
+function pickMimoBalance(overview: UsageOverviewView): { balance: BalanceView; stale: boolean } | undefined {
+  const row = (overview.providers ?? []).find(entry => entry.provider === MIMO_ROUTE_ID)
+  if (row?.balance === undefined) return undefined
+  return { balance: row.balance, stale: row.error !== undefined }
 }
 
 /**
@@ -528,13 +548,13 @@ export function deriveGlance(overview: UsageOverviewView, now: number = Date.now
   }
   const todayTokens = todayTokenTotal(overview)
   const cycle = cycleTokenTotal(overview, pickWindow(overview), now)
-  const mimoBalance = pickMimoBalance(overview)
+  const mimo = pickMimoBalance(overview)
   return {
     ...(rows.length === 0 ? {} : { windows: rows }),
     ...(todayTokens === undefined ? {} : { todayTokens }),
     ...(cycle.tokens === undefined ? {} : { cycleTokens: cycle.tokens }),
     ...(cycle.truncated === undefined ? {} : { cycleTruncated: cycle.truncated }),
-    ...(mimoBalance === undefined ? {} : { mimoBalance }),
+    ...(mimo === undefined ? {} : { mimoBalance: mimo.balance, ...(mimo.stale ? { mimoBalanceStale: true } : {}) }),
   }
 }
 
@@ -637,13 +657,21 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
   const cycleTokens = state?.cycleTokens
   const cycleTruncated = state?.cycleTruncated === true
   const mimoBalance = state?.mimoBalance
-  const mimoFigure = mimoBalance === undefined ? '—' : formatBalanceFigure(mimoBalance)
+  // A stale-carried fact (FORK usage-glance-stale-fact-ttl) asterisks the
+  // figure and swaps the load stamp for the fact's own probe instant: the
+  // number is the last success through a failing streak, not a live read.
+  const mimoStale = state?.mimoBalanceStale === true && mimoBalance !== undefined
+  const mimoFigure = mimoBalance === undefined
+    ? '—'
+    : `${formatBalanceFigure(mimoBalance)}${mimoStale ? '*' : ''}`
   // One tooltip for the whole column: every reading plus the refresh stamp
   // (the stamp stays off-screen; v2.2 spent a third line on it).
   const columnTitle = [
     t('glance.today'),
     t('glance.cycle'),
-    `${t('glance.mimoBalance.label')} ${mimoFigure}`,
+    mimoStale && mimoBalance.updatedAt !== undefined
+      ? `${t('glance.mimoBalance.label')} ${mimoFigure} ${t('glance.mimoBalance.stale')} ${formatRefreshStamp(mimoBalance.updatedAt)}`
+      : `${t('glance.mimoBalance.label')} ${mimoFigure}`,
     ...(refreshedAt === undefined ? [] : [`${t('glance.refreshed')} ${formatRefreshStamp(refreshedAt)}`]),
   ].join(' · ')
   return (
@@ -734,7 +762,9 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
             </span>
             <span className={css.glanceStat}>
               <span className={css.glanceStatLabel}>{t('glance.mimoBalance.label')}</span>
-              <span className={css.glanceStatValue}>{mimoFigure}</span>
+              <span className={mimoStale ? `${css.glanceStatValue} ${css.glanceStatValueStale}` : css.glanceStatValue}>
+                {mimoFigure}
+              </span>
             </span>
           </span>
         </span>

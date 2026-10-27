@@ -162,7 +162,8 @@ function toolStream(): StreamChunk[] {
   const command = process.platform === 'win32'
     ? [
       `Set-Content -Path '${TOOL_READY_FILE}' -Value '' -NoNewline`,
-      `while (-not (Test-Path -LiteralPath '${TOOL_RELEASE_FILE}')) { Start-Sleep -Milliseconds 20 }`,
+      // FORK(replay-residual-1022): 240s 封顶——release 未落也自退，防测试失败后任务与 teardown 互等（2026-10-23 SEG4 卡死复盘）
+      `$deadline=(Get-Date).AddSeconds(240); while (-not (Test-Path -LiteralPath '${TOOL_RELEASE_FILE}')) { if ((Get-Date) -gt $deadline) { break }; Start-Sleep -Milliseconds 20 }`,
       `1..64 | ForEach-Object { Write-Output ('${LIVE_TOOL_RESULT} line {0:d2}' -f $_) }`,
     ].join('; ')
     : [

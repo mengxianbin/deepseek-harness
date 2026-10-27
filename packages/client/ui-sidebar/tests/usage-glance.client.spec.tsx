@@ -283,6 +283,24 @@ describe('deriveGlance', () => {
     expect(deriveGlance(withMimo, NOW).mimoBalance)
       .toEqual({ currency: 'CNY', totalBalance: '6.16', updatedAt: 2 })
   })
+
+  it('marks a mimo balance stale when its row carries a probe error (FORK usage-glance-stale-fact-ttl)', () => {
+    // The host keeps the last success through a failing streak (within its
+    // TTL); the glance must mark that figure stale, not present it as live.
+    const overview: UsageOverviewView = {
+      providers: [
+        { provider: 'mimo', balance: { currency: 'CNY', totalBalance: '36.87', updatedAt: 2 }, error: 'HTTP 401' },
+      ],
+    }
+    const state = deriveGlance(overview, NOW)
+    expect(state.mimoBalance).toEqual({ currency: 'CNY', totalBalance: '36.87', updatedAt: 2 })
+    expect(state.mimoBalanceStale).toBe(true)
+    // A healthy fact carries no stale flag.
+    const healthy: UsageOverviewView = {
+      providers: [{ provider: 'mimo', balance: { currency: 'CNY', totalBalance: '36.87', updatedAt: 2 } }],
+    }
+    expect(deriveGlance(healthy, NOW).mimoBalanceStale).toBeUndefined()
+  })
 })
 
 describe('formatCompactTokens', () => {
@@ -480,6 +498,29 @@ describe('UsageGlance', () => {
     screen.getByTitle(
       new RegExp(`^${t('glance.today')} · ${t('glance.cycle')} · ${t('glance.mimoBalance.label')} ¥6\\.16 · ${t('glance.refreshed')} \\d{2}\\.\\d{2}\\.\\d{2} \\d{2}:\\d{2}$`),
     )
+  })
+
+  it('marks a stale-carried mimo balance with an asterisk, the dimmed class, and its own probe stamp (FORK usage-glance-stale-fact-ttl)', async () => {
+    // The probe half reports an error while the row still carries the last
+    // success — the figure must read stale, with the FACT's probe instant in
+    // the tooltip instead of implying it is a live read.
+    const overview: UsageOverviewView = {
+      providers: [
+        { provider: 'mimo', balance: { currency: 'CNY', totalBalance: '36.87', updatedAt: 1 }, error: 'HTTP 401' },
+      ],
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => overview })))
+    const { container } = render(<UsageGlance t={t} />)
+    const value = await screen.findByText('¥36.87*')
+    expect(value.className).toContain('glanceStatValueStale')
+    expect(value.parentElement?.textContent).toBe(`${t('glance.mimoBalance.label')}¥36.87*`)
+    // The tooltip swaps in the stale marker and the fact's own probe stamp.
+    const probeStamp = formatRefreshStamp(1)
+    screen.getByTitle(
+      new RegExp(`^${t('glance.today')} · ${t('glance.cycle')} · ${t('glance.mimoBalance.label')} ¥36\\.87\\* ${t('glance.mimoBalance.stale')} ${probeStamp.replace(/[.:]/g, '\\$&')} · ${t('glance.refreshed')} \\d{2}\\.\\d{2}\\.\\d{2} \\d{2}:\\d{2}$`),
+    )
+    // The on-screen figure stays the only asterisked reading.
+    expect(container.textContent).toContain('¥36.87*')
   })
 
   it('renders nothing while the host half serves no routes', async () => {
