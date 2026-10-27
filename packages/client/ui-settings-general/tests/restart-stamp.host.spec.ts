@@ -105,6 +105,27 @@ describe('restart stamp read', () => {
     expect(built.state).toBe('BASELINE')
     expect(built.components).toHaveLength(2)
   })
+
+  it('recognizes a linked repository as stamp-capable through scripts/build-stamp.mjs alone', () => {
+    // The dsh-web P0 shape ships scripts/build-stamp.mjs at the repository
+    // root; without it in the marker list the repository never enters scope.
+    const repositoryRoot = fixtureRoot('dsh-restart-stamp-')
+    const dshHome = fixtureRoot('dsh-restart-stamp-home-')
+    const linked = fixtureRoot('dsh-restart-stamp-dshweb-')
+    mkdirSync(join(linked, '.git'))
+    mkdirSync(join(linked, 'scripts'), { recursive: true })
+    writeFileSync(join(linked, 'scripts', 'build-stamp.mjs'), '')
+    writeManifest(repositoryRoot, 'a'.repeat(64))
+    writeProfileLink(dshHome, 'web', linked)
+
+    expect(linkedStampRepositories(dshHome)).toEqual([linked])
+    expect(readRestartStamp({ repositoryRoot, dshHome, registryQuery: () => '' }).state).toBe('INIT')
+
+    writeManifest(linked, 'b'.repeat(64))
+    const built = readRestartStamp({ repositoryRoot, dshHome, registryQuery: () => '' })
+    expect(built.state).toBe('BASELINE')
+    expect(built.components).toHaveLength(2)
+  })
 })
 
 describe('config stamp', () => {

@@ -33,8 +33,11 @@ const STAMP_DIR = '.dsh-build'
 /** Manifest file name inside the stamp directory. */
 const MANIFEST_FILE = 'restart-stamp.json'
 
-/** Stamp script whose presence marks a linked repository as stamp-capable. */
-const CAPABILITY_MARKERS: readonly string[] = ['scripts/restart-signal/build-stamp.ts', 'scripts/restart-stamp.mjs']
+/**
+ * Stamp scripts whose presence marks a linked repository as stamp-capable.
+ * `scripts/build-stamp.mjs` is the dsh-web P0 runner shape (commit `88004b22`).
+ */
+const CAPABILITY_MARKERS: readonly string[] = ['scripts/restart-signal/build-stamp.ts', 'scripts/restart-stamp.mjs', 'scripts/build-stamp.mjs']
 
 /** Explicit setx inventory whose persisted values enter the S_cfg snapshot. */
 const CONFIG_ENV_KEYS: readonly string[] = [
