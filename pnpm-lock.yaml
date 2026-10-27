@@ -5072,6 +5072,9 @@ importers:
       '@deepseek-ai/cordis':
         specifier: workspace:~
         version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-api-job-controller':
+        specifier: workspace:*
+        version: link:../../api/job-controller
       '@deepseek-ai/dsh-api-remote-access':
         specifier: workspace:*
         version: link:../../api/remote-access
@@ -5081,6 +5084,9 @@ importers:
       '@deepseek-ai/dsh-api-session-controller':
         specifier: workspace:*
         version: link:../../api/session-controller
+      '@deepseek-ai/dsh-client-connection':
+        specifier: workspace:*
+        version: link:../connection
       '@deepseek-ai/dsh-client-store':
         specifier: workspace:*
         version: link:../store
@@ -5093,6 +5099,9 @@ importers:
       '@deepseek-ai/dsh-client-ui-slots':
         specifier: workspace:*
         version: link:../ui-slots
+      '@deepseek-ai/dsh-goal':
+        specifier: workspace:*
+        version: link:../../goal/goal
       '@deepseek-ai/dsh-remote-mock':
         specifier: workspace:*
         version: link:../../test-support/remote-mock

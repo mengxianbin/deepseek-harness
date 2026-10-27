@@ -135,6 +135,22 @@
   white-space: nowrap;
 }
 
+/* Row-cell status glyphs, drawn where the dot would go and inheriting the
+ * slot's tertiary tone: the background-job gear carries its live count as a
+ * superscript; the wake-up sleep mark stays a quiet outline. */
+.statusGlyph {
+  display: inline-block;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.statusGlyphCount {
+  font-size: 8px;
+  font-weight: 600;
+  margin-left: 1px;
+}
+
 .folderActive {
   color: var(--dsw-alias-state-business-primary);
 }

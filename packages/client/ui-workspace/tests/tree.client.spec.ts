@@ -331,6 +331,34 @@ describe('deriveGroups', () => {
     expect(search.items[0]?.completionOutcome).toBe('failed')
   })
 
+  it('projects the job count, wake-up mark, and stale flag into session and search rows (absent = omitted)', () => {
+    const busy = summary('busy', 3)
+    const plain = summary('plain', 2)
+    const sessions = list(busy, plain)
+    const statuses: SessionStatusSnapshot = new Map([
+      [busy.id, status(undefined, { activeJobCount: 2, pendingWakeup: true, statusStale: true })],
+      [plain.id, status(undefined, { statusStale: true })],
+    ])
+    const groups = deriveGroups(
+      sessions, [workspace('first', ['busy', 'plain'])], noRows, statuses, view(['first']),
+    )
+    const busyNode = groups[0]!.sessions.find(session => session.id === busy.id)!
+    const plainNode = groups[0]!.sessions.find(session => session.id === plain.id)!
+    expect(busyNode).toMatchObject({ activeJobCount: 2, pendingWakeup: true, statusStale: true })
+    expect(plainNode.activeJobCount).toBeUndefined()
+    expect(plainNode.pendingWakeup).toBeUndefined()
+    expect(plainNode.statusStale).toBe(true)
+    const flatNode = deriveFlat(
+      sessions, visibleSessionIds(sessions, noArchive, 'default'), noRows, statuses,
+    ).find(node => node.id === busy.id)!
+    expect(flatNode).toMatchObject({ activeJobCount: 2, pendingWakeup: true, statusStale: true })
+    const search = deriveSearchResults(
+      sessions, [workspace('first', ['busy', 'plain'])], 'busy', noArchive, 'default',
+      statuses, { items: [], hasMore: false }, 10,
+    )
+    expect(search.items[0]).toMatchObject({ activeJobCount: 2, pendingWakeup: true, statusStale: true })
+  })
+
   it('hides subagent-origin sessions and reads direct running counts from catalogs', () => {
     const parent = summary('parent', 1)
     const subagent = {

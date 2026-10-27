@@ -57,6 +57,12 @@ export interface SessionNode {
   completed: boolean
   /** Outcome of that unviewed stop: `'failed'` renders the red error reminder. */
   completionOutcome?: SessionCompletionOutcome
+  /** Live background jobs this Session owns; omitted while the count is zero. */
+  activeJobCount?: number
+  /** A durable goal is on the books while the Session is stopped — the wake-up weak mark. */
+  pendingWakeup?: true
+  /** The status could not be confirmed: the connection is down or reconnecting. */
+  statusStale?: true
   /** In the registry-global pin set: leads its section, reorderable only among pinned rows. */
   pinned: boolean
   /** In the registry-global archive set: shown grayed in place and not openable. */
@@ -100,6 +106,12 @@ export interface SearchResultNode {
   completed: boolean
   /** Outcome of that unviewed stop: `'failed'` renders the red error reminder. */
   completionOutcome?: SessionCompletionOutcome
+  /** Live background jobs this Session owns; omitted while the count is zero. */
+  activeJobCount?: number
+  /** A durable goal is on the books while the Session is stopped — the wake-up weak mark. */
+  pendingWakeup?: true
+  /** The status could not be confirmed: the connection is down or reconnecting. */
+  statusStale?: true
   /** In the registry-global archive set: shown grayed and not openable. */
   archived: boolean
   snippet?: string
@@ -406,6 +418,9 @@ function sessionNode(
   const status = statuses.get(s.id)
   const pendingInteraction = visiblePendingKind(status?.pendingInteraction?.kind)
   const completionOutcome = status?.completionOutcome
+  const activeJobCount = status?.activeJobCount
+  const pendingWakeup = status?.pendingWakeup
+  const statusStale = status?.statusStale
   return {
     id: s.id,
     title: sessionTitle(s),
@@ -414,6 +429,9 @@ function sessionNode(
     runningSubagentCount: runningChildCount(list, s.id, statuses),
     completed: status?.completionUnread === true,
     ...(completionOutcome === undefined ? {} : { completionOutcome }),
+    ...(activeJobCount === undefined ? {} : { activeJobCount }),
+    ...(pendingWakeup === undefined ? {} : { pendingWakeup }),
+    ...(statusStale === undefined ? {} : { statusStale }),
     pinned: !archived.has(s.id) && pinned.has(s.id),
     archived: archived.has(s.id),
     updatedAt: s.updatedAt,
@@ -604,6 +622,9 @@ export function deriveSearchResults(
       const status = statuses.get(summary.id)
       const pendingInteraction = visiblePendingKind(status?.pendingInteraction?.kind)
       const completionOutcome = status?.completionOutcome
+      const activeJobCount = status?.activeJobCount
+      const pendingWakeup = status?.pendingWakeup
+      const statusStale = status?.statusStale
       return {
         id: summary.id,
         title: sessionTitle(summary),
@@ -615,6 +636,9 @@ export function deriveSearchResults(
           : { pendingInteraction }),
         completed: status?.completionUnread === true,
         ...(completionOutcome === undefined ? {} : { completionOutcome }),
+        ...(activeJobCount === undefined ? {} : { activeJobCount }),
+        ...(pendingWakeup === undefined ? {} : { pendingWakeup }),
+        ...(statusStale === undefined ? {} : { statusStale }),
         archived: archived.has(summary.id),
         ...match === undefined ? {} : { snippet: match.snippet },
       }

@@ -12,8 +12,14 @@ import { describe, expect, it } from 'vitest'
 const css = readFileSync(fileURLToPath(new URL('../src/StateDot.module.css', import.meta.url)), 'utf8')
 
 describe('StateDot.module.css', () => {
-  it.each(['done', 'warning', 'error', 'idle'] as const)('gives the %s state its own color rule', (state) => {
+  it.each(['done', 'warning', 'error', 'idle', 'stale'] as const)('gives the %s state its own color rule', (state) => {
     expect(css).toContain(`.dot[data-state='${state}']`)
+  })
+
+  it('paints stale as a gray dashed ring instead of a filled core', () => {
+    expect(css).toMatch(/\.dot\[data-state='stale'\][^{]*\{[^}]*--dsw-alias-state-idle-primary/su)
+    expect(css).toMatch(/\.dot\[data-state='stale'\]::after[^{]*\{[^}]*border: 1px dashed currentColor/su)
+    expect(css).toMatch(/\.dot\[data-state='stale'\]::after[^{]*\{[^}]*background: none/su)
   })
 
   it('renders solid states without a halo', () => {

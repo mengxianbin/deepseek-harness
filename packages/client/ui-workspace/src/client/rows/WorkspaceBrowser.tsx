@@ -271,7 +271,14 @@ type SessionTreeProps = Pick<
   WorkspaceBrowserProps,
   'useSessionStatus' | 'startSession' | 'open'
   | 'insertWorkspaceBefore' | 't' | 'usePanelInfo'
-> & PropsRenderSlots<
+> & {
+  /**
+   * Job-roster watcher threaded from the global standard prop. Required as a
+   * slot in the type (with `undefined` in it) because `exactOptionalPropertyTypes`
+   * rejects passing an explicitly-undefined optional down; the row owns absence.
+   */
+  watchSessionJobs: WorkspaceBrowserProps['watchSessionJobs']
+} & PropsRenderSlots<
   | 'sidebar.workspaces.session.menu.item'
   | 'sidebar.workspaces.session.row.action'
   | 'sidebar.session.row.leading'
@@ -389,7 +396,7 @@ function SessionTree({
   insertWorkspaceBefore,
   nestWorkspaces, groupExpansion, setGroupExpanded,
   setSessionOrder, home, t,
-  revealSessionId, onSessionRevealed, shortcuts,
+  revealSessionId, onSessionRevealed, shortcuts, watchSessionJobs,
 }: SessionTreeProps) {
   const panelActive = usePanelInfo(info => info.activePanelId !== null)
   const statuses = useSessionStatus(s => s)
@@ -717,6 +724,7 @@ function SessionTree({
                 ? () => { onSessionRevealed(node.id) }
                 : undefined}
               drag={dragProps}
+              watchSessionJobs={watchSessionJobs}
               t={t}
             />
           )
@@ -773,7 +781,7 @@ function SessionTree({
 function FlatList({
   list, sessionIds, rowState, onLeaveArchivedOnly, useSessionStatus, open, onSessionRenameRequest,
   usePanelInfo, setSessionOrder, workspaceReady, animationResetKey,
-  revealSessionId, onSessionRevealed, renderSlot, t,
+  revealSessionId, onSessionRevealed, renderSlot, t, watchSessionJobs,
 }: Pick<
   SessionTreeProps,
   | 'useSessionStatus'
@@ -789,6 +797,7 @@ function FlatList({
   | 'rowState'
   | 'onLeaveArchivedOnly'
   | 't'
+  | 'watchSessionJobs'
 > & {
   list: SessionListState
   sessionIds: readonly SessionId[]
@@ -841,6 +850,7 @@ function FlatList({
               onReveal={node.id === revealSessionId
                 ? () => { onSessionRevealed(node.id) }
                 : undefined}
+              watchSessionJobs={watchSessionJobs}
               drag={{
                 start: () => {
                   dropCommitted.current = false
@@ -893,7 +903,11 @@ function SearchResults({
   resultLimit,
   usePanelInfo,
   t,
+  watchSessionJobs,
 }: Pick<WorkspaceBrowserProps, 'useSessions' | 'useSessionStatus' | 'open' | 't' | 'usePanelInfo'> & {
+  /** Job-roster watcher threaded from the global standard prop; see SessionTreeProps. */
+  watchSessionJobs: WorkspaceBrowserProps['watchSessionJobs']
+} & {
   workspaces: readonly WorkspaceView[]
   archivedSessionIds: readonly SessionNode['id'][]
   /** Search matches follow the archived filter selected for the list. */
@@ -939,6 +953,7 @@ function SearchResults({
               currentId={currentId}
               onOpen={open}
               onUnarchive={onUnarchive}
+              watchSessionJobs={watchSessionJobs}
               t={t}
             />
           ))}
@@ -1008,6 +1023,7 @@ export function WorkspaceBrowser({
   setDirectoryBusy,
   renderSlot,
   t,
+  watchSessionJobs,
 }: WorkspaceBrowserProps) {
   const home = useHostInfo(info => info.home)
   const shortcuts = useShortcuts(rows => rows)
@@ -1508,6 +1524,7 @@ export function WorkspaceBrowser({
               query={normalizedQuery}
               remote={remoteSearch}
               resultLimit={searchResultLimit}
+              watchSessionJobs={watchSessionJobs}
               t={t}
             />
           )
@@ -1535,6 +1552,7 @@ export function WorkspaceBrowser({
                   setSessionOrder={saveSessionOrder}
                   revealSessionId={revealSessionId}
                   onSessionRevealed={acknowledgeSessionReveal}
+                  watchSessionJobs={watchSessionJobs}
                   t={t}
                 />
               )
@@ -1561,6 +1579,7 @@ export function WorkspaceBrowser({
                   insertWorkspaceBefore={insertWorkspaceBefore}
                   revealSessionId={revealSessionId}
                   onSessionRevealed={acknowledgeSessionReveal}
+                  watchSessionJobs={watchSessionJobs}
                   home={home}
                   t={t}
                   onRenameRequest={(workspaceId, displayTitle) => {

@@ -419,6 +419,81 @@ describe('workspace browser rows', () => {
     expect(delegated.container.querySelector('[data-state="done"]')).toBeNull()
   })
 
+  /** Row constructor for the status-wiring cases; every base field stays explicit. */
+  const statusRow = (over: Partial<SessionNode> = {}): SessionNode => ({
+    id: sid('s1'), title: 'One', blank: false, running: false,
+    runningSubagentCount: 0, completed: false, updatedAt: 0, pinned: false, archived: false, ...over,
+  })
+  const renderStatusRow = (over: Partial<SessionNode>, translate = t) => render(
+    <SessionNodeItem node={statusRow(over)} currentId={undefined} now={0} onOpen={vi.fn()} t={translate} />,
+  )
+
+  it('wears the gear glyph with its count when live background jobs are the only activity', () => {
+    const view = renderStatusRow({ activeJobCount: 2 })
+    const row = screen.getByRole('treeitem')
+    const cell = row.firstElementChild
+    expect(cell?.querySelector('[data-status-glyph="jobs"]')).toBeTruthy()
+    expect(cell?.querySelector('sup')?.textContent).toBe('2')
+    // The count's full sentence is the row's screen-reader label; no dot shares the cell.
+    expect(screen.getByText('2 个后台任务运行中')).toBeTruthy()
+    expect(row.querySelector('[data-state]')).toBeNull()
+    view.unmount()
+  })
+
+  it('ranks the wake-up glyph over the unread completion, and both over the stale ring', () => {
+    const wake = renderStatusRow({ completed: true, pendingWakeup: true })
+    expect(screen.getByRole('treeitem').querySelector('[data-status-glyph="wakeup"]')).not.toBeNull()
+    expect(screen.getByRole('treeitem').querySelector('[data-state="done"]')).toBeNull()
+    expect(screen.getByText('待唤醒')).toBeTruthy()
+    wake.unmount()
+
+    const stale = renderStatusRow({ statusStale: true })
+    expect(screen.getByRole('treeitem').querySelector('[data-state="stale"]')).not.toBeNull()
+    expect(screen.getByText('状态未同步')).toBeTruthy()
+    stale.unmount()
+
+    // A known signal survives the outage: the reminder stays, no dashed ring.
+    const known = renderStatusRow({ completed: true, statusStale: true })
+    expect(screen.getByRole('treeitem').querySelector('[data-state="done"]')).not.toBeNull()
+    expect(screen.getByRole('treeitem').querySelector('[data-state="stale"]')).toBeNull()
+    known.unmount()
+  })
+
+  it('keeps background jobs behind live activity and descendant activity', () => {
+    const runningFirst = renderStatusRow({ running: true, activeJobCount: 3 })
+    const row = screen.getByRole('treeitem')
+    expect(row.firstElementChild?.querySelector('[data-state="ongoing"]')).not.toBeNull()
+    expect(row.firstElementChild?.querySelector('[data-status-glyph]')).toBeNull()
+    expect(screen.getByText('3 个后台任务运行中')).toBeTruthy()
+    runningFirst.unmount()
+
+    const subagentsFirst = renderStatusRow({ runningSubagentCount: 1, activeJobCount: 3 })
+    expect(screen.getByRole('treeitem').firstElementChild?.querySelector('[data-status-glyph]')).toBeNull()
+    expect(screen.getByText('3 个后台任务运行中')).toBeTruthy()
+    subagentsFirst.unmount()
+  })
+
+  it('keeps jobs ahead of the wake-up mark, and both ahead of the unread completion', () => {
+    const all = renderStatusRow({ completed: true, activeJobCount: 1, pendingWakeup: true })
+    const cell = screen.getByRole('treeitem').firstElementChild
+    expect(cell?.querySelector('[data-status-glyph="jobs"]')).not.toBeNull()
+    expect(cell?.querySelector('[data-state="done"]')).toBeNull()
+    // The losing wake-up still reaches assistive technology from the cell.
+    expect(screen.getByText('待唤醒')).toBeTruthy()
+    expect(screen.getByText('1 个后台任务运行中')).toBeTruthy()
+    all.unmount()
+
+    const wakeOverGreen = renderStatusRow({ completed: true, pendingWakeup: true })
+    expect(screen.getByRole('treeitem').firstElementChild?.querySelector('[data-status-glyph="wakeup"]')).not.toBeNull()
+    wakeOverGreen.unmount()
+  })
+
+  it('labels the completed reminder New completion in English', () => {
+    const view = renderStatusRow({ completed: true }, tEn)
+    expect(screen.getByText('New completion')).toBeTruthy()
+    view.unmount()
+  })
+
   it('shows descendant activity without describing an idle parent as running', () => {
     vi.useFakeTimers()
     try {
@@ -484,6 +559,24 @@ describe('workspace browser rows', () => {
       currentId={undefined} onOpen={vi.fn()} onUnarchive={vi.fn()} t={t}
     />)
     expect(screen.getByRole('treeitem').querySelector('[data-state="done"]')).not.toBeNull()
+  })
+
+  it('shows the jobs glyph on a search result row and keeps its roster while shown', () => {
+    const release = vi.fn()
+    const watchSessionJobs = vi.fn(() => release)
+    const view = render(<SearchResultItem
+      result={{
+        id: sid('result-jobs'), title: 'Busy', workspace: 'Workspace', running: false,
+        runningSubagentCount: 0, completed: false, archived: false, activeJobCount: 1,
+      }}
+      currentId={undefined} onOpen={vi.fn()} onUnarchive={vi.fn()}
+      watchSessionJobs={watchSessionJobs} t={t}
+    />)
+    expect(screen.getByRole('treeitem').querySelector('[data-status-glyph="jobs"]')).not.toBeNull()
+    expect(screen.getByText('1 个后台任务运行中')).toBeTruthy()
+    expect(watchSessionJobs).toHaveBeenCalledWith(sid('result-jobs'))
+    view.unmount()
+    expect(release).toHaveBeenCalledOnce()
   })
 
   it('workspace row menu opens on the ellipsis, renames, and shows the danger delete row', () => {
@@ -973,7 +1066,7 @@ describe('workspace browser rows', () => {
     }
   })
 
-  it('completed hover card shows the Completed status line', () => {
+  it('completed hover card shows the New completion status line', () => {
     vi.useFakeTimers()
     try {
       const node: SessionNode = {
@@ -984,7 +1077,7 @@ describe('workspace browser rows', () => {
       fireEvent.pointerEnter(screen.getByRole('treeitem').parentElement as HTMLElement)
       act(() => { vi.advanceTimersByTime(800) })
       // Row's visually-hidden reminder label plus the hover card's status line.
-      expect(screen.getAllByText('已完成')).toHaveLength(2)
+      expect(screen.getAllByText('有新完成')).toHaveLength(2)
     } finally {
       vi.useRealTimers()
     }
@@ -1187,6 +1280,37 @@ describe('session row schedule seats', () => {
     expect(dotCell?.querySelector(`[data-state="${state}"]`)).toBeTruthy()
     expect(row.querySelector('[data-seat="sidebar.session.row.leading"]')).toBeNull()
     expect(renderSlot).not.toHaveBeenCalledWith('sidebar.session.row.leading', expect.anything())
+  })
+
+  it('replaces the seat with the wake-up glyph even though the row itself is idle', () => {
+    const renderSlot = seatSpy()
+    renderRow({ ...idle, pendingWakeup: true }, renderSlot)
+    const row = screen.getByRole('treeitem')
+    expect(row.firstElementChild?.querySelector('[data-status-glyph="wakeup"]')).toBeTruthy()
+    expect(row.querySelector('[data-state]')).toBeNull()
+    expect(row.querySelector('[data-seat="sidebar.session.row.leading"]')).toBeNull()
+    expect(renderSlot).not.toHaveBeenCalledWith('sidebar.session.row.leading', expect.anything())
+  })
+
+  it('keeps the stale ring in the leading cell instead of offering the seat', () => {
+    const renderSlot = seatSpy()
+    renderRow({ ...idle, statusStale: true }, renderSlot)
+    const row = screen.getByRole('treeitem')
+    expect(row.firstElementChild?.querySelector('[data-state="stale"]')).toBeTruthy()
+    expect(row.querySelector('[data-seat="sidebar.session.row.leading"]')).toBeNull()
+    expect(renderSlot).not.toHaveBeenCalledWith('sidebar.session.row.leading', expect.anything())
+  })
+
+  it('keeps the row job roster current while mounted and releases it on unmount', () => {
+    const release = vi.fn()
+    const watchSessionJobs = vi.fn(() => release)
+    const view = render(<SessionNodeItem
+      node={idle} currentId={undefined} now={0} onOpen={vi.fn()}
+      renderSlot={renderNoRowEntries} watchSessionJobs={watchSessionJobs} t={t}
+    />)
+    expect(watchSessionJobs).toHaveBeenCalledWith(idle.id)
+    view.unmount()
+    expect(release).toHaveBeenCalledOnce()
   })
 
   it.each<[string, SessionNode]>([
