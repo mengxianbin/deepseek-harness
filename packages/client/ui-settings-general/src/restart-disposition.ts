@@ -78,29 +78,42 @@ export function latestClientAttestation(
   return attestation
 }
 
-let dispatchClaimed = false
+/**
+ * How long one claim blocks re-dispatch (D, 2026-10-26 修订 design §四 P10：
+ * 原「进程生命周期一次性锁」在派发失败时把按钮锁死到进程重启——事故实证
+ * 12:57 派发未起内层，4 次重点全被 in-flight 吞掉）。60s 依据：派发→内层起
+ * 1-2s、起→kill 落地 1-3s，kill 最坏 3 轮 ~30s——进程活着即重启仍在途；
+ * 进程活过 60s = 上次派发没成事，放行重试。TTL 到点自动释放 = 锁只防抖、不锁死。
+ */
+export const DISPATCH_CLAIM_TTL_MS = 60_000
+
+let dispatchClaimedAt: number | undefined
 
 /** Drop the attestation slot and the dispatch claim; tests only. */
 export function resetDispositionStateForTest(): void {
   attestation = undefined
-  dispatchClaimed = false
+  dispatchClaimedAt = undefined
 }
 
 /**
  * Claim the one restart dispatch slot; the manual route and the automatic
- * fork both pass through here, so exactly one of them spawns per process.
- * @returns True when the caller now owns the dispatch; false when someone
- *   already claimed it (the caller must not spawn).
+ * fork both pass through here, so exactly one of them spawns per claim window.
+ * @param now - current time in epoch milliseconds; defaults to `Date.now()`.
+ * @returns True when the caller now owns the dispatch; false when a claim is
+ *   still fresh (the caller must not spawn).
  */
-export function claimRestartDispatch(): boolean {
-  if (dispatchClaimed) return false
-  dispatchClaimed = true
+export function claimRestartDispatch(now: number = Date.now()): boolean {
+  if (dispatchClaimedAt !== undefined && now - dispatchClaimedAt < DISPATCH_CLAIM_TTL_MS) return false
+  dispatchClaimedAt = now
   return true
 }
 
-/** Whether a restart dispatch has already been claimed in this process. */
-export function restartDispatchClaimed(): boolean {
-  return dispatchClaimed
+/**
+ * Whether a fresh restart-dispatch claim exists (the TTL window has not run out).
+ * @param now - current time in epoch milliseconds; defaults to `Date.now()`.
+ */
+export function restartDispatchClaimed(now: number = Date.now()): boolean {
+  return dispatchClaimedAt !== undefined && now - dispatchClaimedAt < DISPATCH_CLAIM_TTL_MS
 }
 
 /** Why the fork did or did not dispatch; every hold reason is fail-closed. */

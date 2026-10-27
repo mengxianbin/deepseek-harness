@@ -83,19 +83,18 @@ export function registerRestart(ctx: Context, internals: RestartInternals = {}):
     path: RESTART_PATH,
     methods: ['POST'],
     requestBody: 'buffered',
-    // The response is always the same 202 (the browser's "restart in
-    // progress" state), but only the first claimant spawns: the automatic
-    // fork (P3) and this manual route share one in-flight dispatch slot, so a
-    // click during an automatic dispatch — or a double click — answers the
-    // existing 202 without launching a second restart (design §四 P10).
+    // 如实回报（D, 2026-10-26 修订 design §四 P10「202 恒定」）：真派发才回
+    // 202 {dispatched:true}；claim 窗口内被跳过回 409 {dispatched:false,
+    // reason:'in-flight'}——旧实现恒 202 导致「点了没反应还显示已发送」的假成功
+    // （12:57 事故：派发未起内层 + 后续4次点击全被 in-flight 静默吞掉仍报 202）。
+    // claim 带 DISPATCH_CLAIM_TTL_MS 自动释放（restart-disposition），锁只防抖不锁死。
     fetch: () => {
-      const response = Response.json({ dispatched: true }, { status: 202 })
       if (!claimRestartDispatch()) {
         process.stderr.write('ui-settings-general: restart dispatch skipped: already in flight\n')
-        return Promise.resolve(response)
+        return Promise.resolve(Response.json({ dispatched: false, reason: 'in-flight' }, { status: 409 }))
       }
       dispatchRestart(commandLine, launch)
-      return Promise.resolve(response)
+      return Promise.resolve(Response.json({ dispatched: true }, { status: 202 }))
     },
   })
 }

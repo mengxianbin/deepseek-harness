@@ -63,7 +63,7 @@ function lampLit(signal: RestartSignalView | undefined): signal is RestartSignal
  */
 export function RestartServerButton({ t, configured, runningSessions, wide, signal }: RestartServerButtonProps) {
   const [confirming, setConfirming] = useState(false)
-  const [result, setResult] = useState<'idle' | 'accepted' | 'failed'>('idle')
+  const [result, setResult] = useState<'idle' | 'accepted' | 'failed' | 'busy'>('idle')
   if (!configured) return null
   const lit = lampLit(signal)
   const copy = lit ? restartSignalCopy(t, signal) : ''
@@ -85,7 +85,12 @@ export function RestartServerButton({ t, configured, runningSessions, wide, sign
   const dispatch = (): void => {
     setConfirming(false)
     fetch(RESTART_PATH, { method: 'POST' })
-      .then((response) => { setResult(response.ok ? 'accepted' : 'failed') })
+      .then((response) => {
+        // 409 = in-flight claim refusal (D): another dispatch owns the slot —
+        // report it honestly as "busy" instead of a fake success or a false failure.
+        if (response.status === 409) { setResult('busy'); return }
+        setResult(response.ok ? 'accepted' : 'failed')
+      })
       .catch(() => { setResult('failed') })
   }
   const sessionsLine = runningSessions === 0
@@ -112,7 +117,7 @@ export function RestartServerButton({ t, configured, runningSessions, wide, sign
       </Tooltip>
       {result !== 'idle' && (
         <span className={css.notice} role={result === 'failed' ? 'alert' : 'status'}>
-          {result === 'accepted' ? t('restart.accepted') : t('restart.failed')}
+          {result === 'accepted' ? t('restart.accepted') : result === 'busy' ? t('restart.busy') : t('restart.failed')}
         </span>
       )}
       <Modal

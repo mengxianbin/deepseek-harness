@@ -14,6 +14,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import {
   buildFingerprintProbeCode,
+  parseProbeOutput,
   registerStampPoll,
   resolvePollIntervalMs,
   runFingerprintProbe,
@@ -115,6 +116,46 @@ describe('stamp poll', () => {
     await vi.advanceTimersByTimeAsync(30_000)
     // The baseline survived the outage, so a genuine move still triggers.
     expect(recheck).toHaveBeenCalledTimes(1)
+  })
+
+  it('collapses a child-process failure into one exit/signal/stderr line instead of dumping the probe script (③)', async () => {
+    vi.useFakeTimers()
+    // execFile-shaped rejection: the default message embeds the whole giant
+    // -e command; the diagnosis facts live on the error object.
+    const childError = Object.assign(
+      new Error('Command failed: node --input-type=module -e import { repoStateStamp } from ...<huge probe script>'),
+      { code: 7, signal: null, killed: false, stderr: "fatal: not a git repository: 'D:\\x'\n" },
+    )
+    const runProbe = vi.fn<FingerprintRunner>()
+      .mockImplementationOnce(() => Promise.resolve(probe({ '/r': 'a' })))
+      .mockImplementationOnce(() => Promise.reject(childError))
+      .mockImplementationOnce(() => Promise.reject(childError))
+      .mockImplementationOnce(() => Promise.resolve(probe({ '/r': 'a' })))
+    const { warn } = pollFixture(runProbe)
+
+    await vi.advanceTimersByTimeAsync(2_000)
+    await vi.advanceTimersByTimeAsync(30_000)
+    const line = warn.mock.calls[0]?.[0] as string
+    expect(line).toContain('probe child failed (exit=7')
+    expect(line).toContain('stderr:"fatal: not a git repository')
+    // The giant probe command must not leak into the log line.
+    expect(line).not.toContain('--input-type=module')
+    // Deterministic per failure state: the duplicate stays deduped to one line.
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(warn).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('exit=7'))
+  })
+
+  it('names an unreadable probe body with its byte count and head instead of a bare JSON parse error (③)', () => {
+    expect(() => parseProbeOutput('')).toThrow(/not JSON \(bytes=0, head=\(empty\)\)/)
+    expect(() => parseProbeOutput('{"repos":')).toThrow(/not JSON \(bytes=9/)
+    expect(() => parseProbeOutput('{"repos":')).toThrow(/head="/)
+    // Shape failures keep their existing wording.
+    expect(() => parseProbeOutput('null')).toThrow('stamp-poll: probe returned a non-object body')
+    expect(() => parseProbeOutput('[]')).toThrow('stamp-poll: probe returned a non-object body')
+    expect(() => parseProbeOutput('{"repos":1}')).toThrow('stamp-poll: probe response has no repos record')
+    expect(() => parseProbeOutput('{"repos":{"a":1}}')).toThrow('stamp-poll: probe reported a non-string repository stamp')
+    expect(() => parseProbeOutput('{"repos":{"a":"x"}}')).toThrow('stamp-poll: probe response has no sCfg string')
+    expect(parseProbeOutput('{"repos":{"a":"x"},"sCfg":"y"}')).toEqual({ repos: { a: 'x' }, sCfg: 'y' })
   })
 
   it('never runs a second capture while one is in flight', async () => {
