@@ -409,6 +409,17 @@ describe('Restart server button', () => {
     expect(alert.textContent).toBe(en['restart.failed'])
   })
 
+  it('reports an in-flight 409 as busy — neither a fake success nor a false failure (D)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 409 }))
+    onTestFinished(() => { vi.unstubAllGlobals() })
+    render(<RestartServerButton {...base} />)
+    fireEvent.click(screen.getByRole('button', { name: en['restart.button'] }))
+    fireEvent.click(screen.getByRole('button', { name: en['restart.confirm.confirm'] }))
+    const status = await screen.findByRole('status')
+    expect(status.textContent).toBe(en['restart.busy'])
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
   it('reports a dispatch that never reached the Host', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
     onTestFinished(() => { vi.unstubAllGlobals() })

@@ -2,7 +2,9 @@
  * Restart disposition state (P3): the automatic-restart flag stays off unless
  * the environment opts in, the client attestation slot only accepts clean
  * non-negative integers and expires past its freshness window, the dispatch
- * claim is single-shot, and the pure judgment holds on every uncertainty.
+ * claim is single-shot within its TTL window (D: a failed dispatch must not
+ * lock the button for the rest of the process), and the pure judgment holds
+ * on every uncertainty.
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import {
@@ -10,6 +12,7 @@ import {
   AUTO_RESTART_ENV,
   autoRestartEnabled,
   claimRestartDispatch,
+  DISPATCH_CLAIM_TTL_MS,
   judgeRestartDisposition,
   latestClientAttestation,
   recordClientRunningCount,
@@ -58,11 +61,22 @@ describe('client running-count attestation', () => {
 })
 
 describe('restart dispatch claim', () => {
-  it('lets exactly one claimant own the dispatch per process', () => {
+  it('lets exactly one claimant own the dispatch while the claim is fresh', () => {
     expect(restartDispatchClaimed()).toBe(false)
     expect(claimRestartDispatch()).toBe(true)
     expect(restartDispatchClaimed()).toBe(true)
     expect(claimRestartDispatch()).toBe(false)
+  })
+
+  it('releases the claim after the TTL so a failed dispatch cannot lock the button for the process lifetime (D)', () => {
+    const t0 = 1_000_000
+    expect(claimRestartDispatch(t0)).toBe(true)
+    // Inside the window: still one claimant.
+    expect(restartDispatchClaimed(t0 + DISPATCH_CLAIM_TTL_MS - 1)).toBe(true)
+    expect(claimRestartDispatch(t0 + DISPATCH_CLAIM_TTL_MS - 1)).toBe(false)
+    // At expiry: the claim is gone and a retry may dispatch again.
+    expect(restartDispatchClaimed(t0 + DISPATCH_CLAIM_TTL_MS)).toBe(false)
+    expect(claimRestartDispatch(t0 + DISPATCH_CLAIM_TTL_MS)).toBe(true)
   })
 })
 

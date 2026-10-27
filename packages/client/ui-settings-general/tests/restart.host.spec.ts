@@ -6,7 +6,7 @@ import type { BrowserAuth } from '@deepseek-ai/dsh-client-connection/src/browser
 import type { IndexInjection } from '@deepseek-ai/dsh-host-webserver'
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { RESTART_COMMAND_ENV, registerRestart, type RestartChild } from '../src/restart-host.ts'
-import { resetDispositionStateForTest } from '../src/restart-disposition.ts'
+import { DISPATCH_CLAIM_TTL_MS, resetDispositionStateForTest } from '../src/restart-disposition.ts'
 import { RESTART_GLOBAL, RESTART_PATH } from '../src/restart.ts'
 import * as HostPlugin from '../src/index.ts'
 
@@ -17,6 +17,7 @@ vi.mock('node:child_process', async (importOriginal) => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllEnvs()
   vi.restoreAllMocks()
   spawnMock.mockReset()
@@ -140,7 +141,7 @@ describe('restart dispatch', () => {
     expect(spawnMock).not.toHaveBeenCalled()
   })
 
-  it('answers 202 for every click but spawns exactly once (in-flight claim, P3)', async () => {
+  it('answers 409 in-flight for a click inside the claim window but spawns exactly once (D, 如实回报)', async () => {
     vi.stubEnv(RESTART_COMMAND_ENV, 'exit 0')
     const { ctx, post } = fixture()
     const { child } = stubChild()
@@ -150,9 +151,25 @@ describe('restart dispatch', () => {
     const first = await post()
     const second = await post()
     expect(first.status).toBe(202)
-    expect(second.status).toBe(202)
-    expect(await second.json()).toEqual({ dispatched: true })
+    expect(await first.json()).toEqual({ dispatched: true })
+    // The skipped click is told the truth instead of a fake 202 (the 12:57 incident).
+    expect(second.status).toBe(409)
+    expect(await second.json()).toEqual({ dispatched: false, reason: 'in-flight' })
     expect(spawnMock).toHaveBeenCalledOnce()
     expect(write).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('already in flight'))
+  })
+
+  it('lets a retry dispatch again once the claim TTL expires', async () => {
+    vi.useFakeTimers()
+    vi.stubEnv(RESTART_COMMAND_ENV, 'exit 0')
+    const { ctx, post } = fixture()
+    const { child } = stubChild()
+    spawnMock.mockImplementation(() => child)
+    registerRestart(ctx)
+    expect((await post()).status).toBe(202)
+    expect((await post()).status).toBe(409)
+    vi.advanceTimersByTime(DISPATCH_CLAIM_TTL_MS + 1)
+    expect((await post()).status).toBe(202)
+    expect(spawnMock).toHaveBeenCalledTimes(2)
   })
 })
