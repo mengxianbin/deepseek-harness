@@ -1,6 +1,9 @@
 /** Session Controller fork boundaries, lineage, and inherited model routing. */
 
 import { describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { agentEvents } from '@deepseek-ai/dsh-agent'
 import type { Agent, AgentHandle, CreateAgentOptions } from '@deepseek-ai/dsh-agent'
@@ -179,6 +182,43 @@ describe('sessions.fork', () => {
       expect(ctx.sessions.get(result.value.sessionId)?.inheritedEventCount).toBe(2)
     } finally {
       await ctx.fiber.dispose()
+    }
+  })
+
+  it('records every fork in the fork audit ledger with the caller entry label', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'fork-audit-ledger-'))
+    const previousHome = process.env.DSH_HOME
+    process.env.DSH_HOME = home
+    const ctx = await composed()
+    const readLedger = (): Record<string, { parentSession?: string; source?: string; entry?: string; forkedAt?: number }> => {
+      const parsed = JSON.parse(readFileSync(join(home, 'fork-audit', 'fork-ledger.json'), 'utf8')) as
+        { entries?: Record<string, { parentSession?: string; source?: string; entry?: string; forkedAt?: number }> }
+      return parsed.entries ?? {}
+    }
+    try {
+      const source = ctx.sessions.create(sid('ledger-source'), { meta: { cwd: '/proj' } })
+      source.append('turn/start', { turn: 1 })
+      source.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+      ctx.provide('sessionPersistence', testSessionPersistence(ctx, {
+        stat: vi.fn(() => Promise.reject(new Error('unexpected metadata read'))),
+      }) as never)
+
+      const tagged = await remote(ctx).fork({ sessionId: source.id, allowMigration: false, entry: 'menu' })
+      if (!tagged.ok) throw tagged.error
+      expect(readLedger()[tagged.value.sessionId]).toMatchObject({
+        parentSession: source.id, source: 'host', entry: 'menu',
+      })
+      expect(typeof readLedger()[tagged.value.sessionId]?.forkedAt).toBe('number')
+
+      // An untagged caller records 'unknown' — never a guess.
+      const untagged = await remote(ctx).fork({ sessionId: source.id, allowMigration: false })
+      if (!untagged.ok) throw untagged.error
+      expect(readLedger()[untagged.value.sessionId]).toMatchObject({ source: 'host', entry: 'unknown' })
+    } finally {
+      await ctx.fiber.dispose()
+      if (previousHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previousHome
+      rmSync(home, { recursive: true, force: true })
     }
   })
 

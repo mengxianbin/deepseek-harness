@@ -148,6 +148,11 @@ export interface ISessions {
     onCreated?: (childId: SessionId) => void
     /** False refuses source migration; omission preserves the Host default. */
     allowMigration?: boolean
+    /**
+     * UI entry label (`'menu'` / `'shortcut'` / `'footer'`) the Host records in
+     * its fork audit ledger; callers that do not know one omit it.
+     */
+    entry?: string
   }): Promise<SessionId>
   /**
    * Borrow an already-retained Agent-scoped Context without extending its lifetime.

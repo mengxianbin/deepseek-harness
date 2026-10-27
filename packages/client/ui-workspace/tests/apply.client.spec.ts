@@ -383,7 +383,7 @@ describe('ui-workspace apply', () => {
     await vi.waitFor(() => {
       expect(toast.hooks.toast.getSnapshot()).toMatchObject({ kind: 'shortcutForkFailed', reason: 'unavailable' })
     })
-    expect(b.fork).toHaveBeenCalledExactlyOnceWith({ sessionId: sid('source'), increaseTitle: true })
+    expect(b.fork).toHaveBeenCalledExactlyOnceWith({ sessionId: sid('source'), increaseTitle: true, entry: 'shortcut' })
     expect(warning).not.toHaveBeenCalled()
     const unavailable = toast.hooks.toast.getSnapshot()
     b.fork.mockRejectedValueOnce(new Error('connection closed'))
@@ -628,7 +628,7 @@ describe('ui-workspace apply', () => {
     await forkSession.mock.results[0]!.value
     const [request] = b.fork.mock.calls[0]!
     const { onCreated, ...payload } = request
-    expect(payload).toEqual({ sessionId: 'session', increaseTitle: true, allowMigration: false })
+    expect(payload).toEqual({ sessionId: 'session', increaseTitle: true, allowMigration: false, entry: 'menu' })
     expect(onCreated).toBeTypeOf('function')
     expect(b.retain).not.toHaveBeenCalled()
     expect(b.selectPanel).not.toHaveBeenCalled()
@@ -720,7 +720,7 @@ describe('ui-workspace apply', () => {
 
       const [request] = b.fork.mock.calls[0]!
       const { onCreated, ...payload } = request
-      expect(payload).toEqual({ sessionId: 'source', increaseTitle: true, allowMigration: false })
+      expect(payload).toEqual({ sessionId: 'source', increaseTitle: true, allowMigration: false, entry: 'menu' })
       expect(onCreated).toBeTypeOf('function')
       expect(toast.hooks.toast.getSnapshot()).toBeNull()
       expect(b.retain).not.toHaveBeenCalled()
@@ -809,7 +809,7 @@ describe('ui-workspace apply', () => {
 
     const [request] = b.fork.mock.calls[0]!
     const { onCreated, ...payload } = request
-    expect(payload).toEqual({ sessionId: 'source', increaseTitle: true, allowMigration: false })
+    expect(payload).toEqual({ sessionId: 'source', increaseTitle: true, allowMigration: false, entry: 'menu' })
     expect(onCreated).toBeTypeOf('function')
     expect(toast.hooks.toast.getSnapshot()).toBeNull()
     expect(b.retain).not.toHaveBeenCalled()

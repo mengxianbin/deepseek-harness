@@ -333,6 +333,19 @@ export interface SessionForkRequest {
   readonly atSeq?: number
   /** False asks the Host to check for required migration before forking. Defaults to true. */
   readonly allowMigration?: boolean
+  /**
+   * Which UI entry asked for this fork, when the caller knows one: `'menu'`
+   * (session row menu), `'shortcut'` (the session.fork keybinding), or
+   * `'footer'` (the turn-tail branch action). Callers that do not tag one
+   * (third-party plugins driving the same client service, remote-bridge
+   * forwards) leave it absent; the Host records `'unknown'` — or a
+   * best-effort `'remote'` derived in-process — into the fork audit ledger
+   * (`~/.dsh/fork-audit/fork-ledger.json`), so every fork stays attributable
+   * within one scheduling tick.
+   */
+  readonly entry?: string
+  /** Client identity when the transport exposes one (e.g. a remote peer); recorded alongside `entry`. */
+  readonly client?: string
 }
 
 /** Identity of a newly forked Session. */
