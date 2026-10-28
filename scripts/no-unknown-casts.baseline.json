@@ -2062,6 +2062,10 @@
   "packages/web/web-fetch-http/tests/fetch-http.spec.ts": {
     "366f13ff1ff2522ad824a1d4333085e2c771c0b7ca22783aa41ca2e23233b259": 1
   },
+  "packages/web/web-search-brave/tests/brave.spec.ts": {
+    "37c9617ff75d6a383f58dd63f939a88803e4ff5e1676bfe7e1c0cc340fc65014": 1,
+    "598014dcfe77101781e3c6a02709097e3b0151a335e909c44719fac08fdea433": 2
+  },
   "packages/web/web-search-deepseek/tests/deepseek.spec.ts": {
     "37c9617ff75d6a383f58dd63f939a88803e4ff5e1676bfe7e1c0cc340fc65014": 5,
     "598014dcfe77101781e3c6a02709097e3b0151a335e909c44719fac08fdea433": 2

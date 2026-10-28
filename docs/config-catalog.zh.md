@@ -4356,6 +4356,26 @@ export type ApprovalPolicy = 'ask' | 'never'
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-user-approval -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-user-questions -->
+<a id="deepseek-aidsh-user-questions"></a>
+
+## `@deepseek-ai/dsh-user-questions`
+
+- `source`: [`packages/interaction/user-questions/src/index.ts:95`](../packages/interaction/user-questions/src/index.ts)
+
+```ts config-catalog
+/** Deployment knobs for folding over-long question text out of the card. */
+export interface Config {
+  /** Per-field character budget for text rendered inline on the card; a longer field folds into an attachment. */
+  readonly maxInlineChars: number
+  /** Characters of a folded field kept inline as its summary. */
+  readonly summaryChars: number
+  /** Directory folded report files land in; defaults to `<dsh home>/ask-reports`. */
+  readonly reportDir?: string
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-user-questions -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-web -->
 <a id="deepseek-aidsh-web"></a>
 
@@ -4464,6 +4484,30 @@ export interface Config {
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-web-fetch-http -->
+
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-web-search-brave -->
+<a id="deepseek-aidsh-web-search-brave"></a>
+
+## `@deepseek-ai/dsh-web-search-brave`
+
+- `inject`: `web`
+- `refs`: `Volatile` (`@deepseek-ai/cordis`)
+- `source`: [`packages/web/web-search-brave/src/index.ts:41`](../packages/web/web-search-brave/src/index.ts)
+
+```ts config-catalog
+/** Settings read by the next search without re-registering the provider. */
+export interface Config {
+  /** Literal Brave API key; prefer {@link apiKeyEnv} so no secret enters configuration files. */
+  apiKey: Volatile<string | undefined>
+  /** Credential reference resolved for each search; defaults to `BRAVE_API_KEY`. */
+  apiKeyEnv: Volatile<string>
+  /** API base including its `/res` prefix; `/v1/web/search` is appended. */
+  baseURL: Volatile<string>
+  /** Results per search, from 1 through 20; a smaller request bound wins. Defaults to 10. */
+  count: Volatile<number>
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-web-search-brave -->
 
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-web-search-deepseek -->
 <a id="deepseek-aidsh-web-search-deepseek"></a>
@@ -4749,7 +4793,6 @@ export interface Config {
 | `@deepseek-ai/dsh-tool-schedule` | `tools` | [`packages/schedule/tool-schedule/src/index.ts`](../packages/schedule/tool-schedule/src/index.ts) |
 | `@deepseek-ai/dsh-tool-subagent-control` | `tools` · `subagents` | [`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts) |
 | `@deepseek-ai/dsh-tool-working-directory` | `tools` · `workingDirectory` | [`packages/session/tool-working-directory/src/index.ts`](../packages/session/tool-working-directory/src/index.ts) |
-| `@deepseek-ai/dsh-user-questions` | — | [`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts) |
 | `@deepseek-ai/dsh-webhook` | `agents` · `agentDefaultModel` · `agentPresets` · `permissionPresets` · `sessionTitle` · `workspaceRegistry` | [`packages/experimental/webhook/src/index.ts`](../packages/experimental/webhook/src/index.ts) |
 | `@deepseek-ai/dsh-workspace` | `storageDomain` · `sessionPersistence` | [`packages/workspace/workspace/src/index.ts`](../packages/workspace/workspace/src/index.ts) |
 <!-- END GENERATED config-catalog:no-config -->

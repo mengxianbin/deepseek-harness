@@ -165,14 +165,14 @@ describe('BraveSearchProvider credential resolution', () => {
   })
 
   it('resolves the key per search, so a rotated key applies without re-registration', async () => {
-    const fetchMock = vi.fn(async () => jsonResponse({ web: { results: [] } }))
+    const fetchMock = vi.fn(async (_url?: unknown, _init?: RequestInit) => jsonResponse({ web: { results: [] } }))
     vi.stubGlobal('fetch', fetchMock)
     let key = 'stored-key'
     const provider = new BraveSearchProvider(() => ({ ...options, apiKey: '', apiKeyEnv: 'BRAVE_API_KEY', resolveApiKey: async () => key }))
     await provider.search({ query: 'q' })
     key = 'rotated-key'
     await provider.search({ query: 'q' })
-    const tokens = fetchMock.mock.calls.map(([, init]) => new Headers((init as RequestInit | undefined)?.headers).get('x-subscription-token'))
+    const tokens = fetchMock.mock.calls.map(([, init]) => new Headers(init?.headers).get('x-subscription-token'))
     expect(tokens).toEqual(['stored-key', 'rotated-key'])
   })
 
