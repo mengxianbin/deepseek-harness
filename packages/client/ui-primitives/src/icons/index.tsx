@@ -1075,6 +1075,25 @@ export const IconClockOutlineMedium = (props: IconProps) => (
   <IconClockOutlineArtwork {...props} strokeWidth={ICON_MEDIUM_STROKE} />
 )
 
+/** Regular IconSleepOutline artwork: three ascending Z strokes (the wake-up/待唤醒 glyph). */
+const IconSleepOutlineArtwork = ({ size = 16, className, strokeWidth }: WeightedIconProps) => (
+  <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" strokeWidth={strokeWidth}>
+    <path d="M2 10.5H5L2 13.5H5" stroke="currentColor" />
+    <path d="M5.75 6.25H9.75L5.75 10.25H9.75" stroke="currentColor" />
+    <path d="M9.5 2H15L9.5 7.5H15" stroke="currentColor" />
+  </svg>
+)
+
+/** Regular one-pixel IconSleepOutline artwork. */
+export const IconSleepOutlineRegular = (props: IconProps) => (
+  <IconSleepOutlineArtwork {...props} strokeWidth={ICON_REGULAR_STROKE} />
+)
+
+/** Medium IconSleepOutline artwork with a 1.3px stroke. */
+export const IconSleepOutlineMedium = (props: IconProps) => (
+  <IconSleepOutlineArtwork {...props} strokeWidth={ICON_MEDIUM_STROKE} />
+)
+
 const IconGaugeOutlineArtwork = ({ size = 16, className, strokeWidth }: WeightedIconProps) => (
   <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" strokeWidth={strokeWidth}>
     <path d="M3.4041 13.096C2.49514 12.187 1.87614 11.0288 1.62537 9.76798C1.37459 8.50716 1.50331 7.20028 1.99525 6.01261C2.48719 4.82494 3.32025 3.80981 4.3891 3.09557C5.45795 2.38134 6.71458 2.00008 8.0001 2C9.28563 2.00008 10.5423 2.38134 11.6111 3.09557C12.68 3.80981 13.513 4.82494 14.005 6.01261C14.4969 7.20028 14.6256 8.50716 14.3748 9.76798C14.1241 11.0288 13.5051 12.187 12.5961 13.096" stroke="currentColor" />

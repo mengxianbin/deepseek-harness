@@ -31,6 +31,19 @@
   color: var(--dsw-alias-state-idle-primary);
 }
 
+/* Stale keeps the 10px slot but paints a gray dashed ring instead of the
+ * filled core: the subject exists, yet its status could not be read right now
+ * (offline connection or a stale snapshot) — "we don't know", not "nothing". */
+.dot[data-state='stale'] {
+  color: var(--dsw-alias-state-idle-primary);
+}
+
+.dot[data-state='stale']::after {
+  inset: 12%;
+  background: none;
+  border: 1px dashed currentColor;
+}
+
 /* Ongoing is the sole non-dot state: a quiet full ring sits behind a centered
  * breathing arc while the complete glyph rotates continuously. Both animations
  * share one 1.5s period so pinning their start times aligns them together. */

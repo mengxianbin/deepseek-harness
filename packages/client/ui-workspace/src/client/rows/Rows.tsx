@@ -17,7 +17,8 @@ import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   HoverCard, IconArchiveOutlineRegular, IconEditOutlineRegular,
   IconEllipsisOutlineRegular, IconFolderCloseRegular, IconFolderOpenRegular,
-  IconNewChatOutlineRegular, IconPinFillRegular, IconTrashOutlineRegular,
+  IconNewChatOutlineRegular, IconPinFillRegular, IconSettingsOutlineRegular,
+  IconSleepOutlineRegular, IconTrashOutlineRegular,
   IconTriangleRightFillRegular, IconUnarchiveOutlineRegular, Menu, relativeTime, StateDot, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ShortcutCatalogEntry } from '@deepseek-ai/dsh-client-shortcuts/client'
@@ -29,6 +30,9 @@ import css from './Rows.module.css'
 
 /** The standard locale seat, prop-passed from the browser root. */
 type RowTranslate = WorkspaceBrowserProps['t']
+
+/** The row-level background-job roster watcher, prop-passed from the browser root as a global standard prop. */
+type RowJobWatcher = WorkspaceBrowserProps['watchSessionJobs']
 
 /**
  * Child-seat renderer threaded from the browser root: the row's action lists,
@@ -334,20 +338,34 @@ function assertNever(value: never): never {
   throw new Error(`unknown pending interaction: ${String(value)}`)
 }
 
+/** One row-cell glyph drawn where the dot would go; secondary statuses never carry one. */
+type StatusGlyph = { kind: 'jobs'; count: number } | { kind: 'wakeup' }
+
 interface SessionStatus {
   state: StateDotState
   label: string
   /** Compact text that replaces the Session row's update time. */
   trailingLabel?: string
+  /** Glyph drawn in place of the dot on the row's leading cell. */
+  glyph?: StatusGlyph
+}
+
+/** Whether this status owns the row's leading cell (dot or glyph) instead of offering it to the seat. */
+function ownsLeadingCell(status: SessionStatus): boolean {
+  return status.state !== 'idle' || status.glyph !== undefined
 }
 
 /**
  * Session status presentation; pending interaction is primary and live activity
- * outranks completion reminders, with a failed stop reminding in error red.
+ * outranks completion reminders, with a failed stop reminding in error red. The
+ * ②-tier arrangements — subagents, a live background-job roster, and a goal
+ * waiting to wake — all outrank the unread-completion reminder below them
+ * (四档序：② 档高于 ③ 档), and every arrangement that loses its primary seat
+ * rides into the hover card as a secondary line.
  */
 function sessionStatuses(
   node: Pick<SessionNode, 'pendingInteraction' | 'running' | 'runningSubagentCount'
-    | 'completed' | 'completionOutcome'>,
+    | 'completed' | 'completionOutcome' | 'activeJobCount' | 'pendingWakeup' | 'statusStale'>,
   t: RowTranslate,
 ): readonly [SessionStatus, ...SessionStatus[]] {
   const subagents: SessionStatus | undefined = node.runningSubagentCount === 0
@@ -361,6 +379,19 @@ function sessionStatuses(
         { n: node.runningSubagentCount },
       ),
     }
+  const jobs: SessionStatus | undefined = node.activeJobCount === undefined
+    ? undefined
+    : {
+      state: 'ongoing',
+      glyph: { kind: 'jobs', count: node.activeJobCount },
+      label: t(
+        node.activeJobCount === 1 ? 'status.jobsRunning.one' : 'status.jobsRunning.other',
+        { n: node.activeJobCount },
+      ),
+    }
+  const wakeup: SessionStatus | undefined = node.pendingWakeup === undefined
+    ? undefined
+    : { state: 'idle', glyph: { kind: 'wakeup' }, label: t('status.pendingWakeup') }
   let pending: SessionStatus | undefined
   switch (node.pendingInteraction) {
     case 'approval':
@@ -388,24 +419,60 @@ function sessionStatuses(
     /* v8 ignore next -- closed PendingInteractionStatus union */
     default: return assertNever(node.pendingInteraction)
   }
-  if (pending !== undefined) return subagents === undefined ? [pending] : [pending, subagents]
-  if (node.running) {
-    const primary: SessionStatus = { state: 'ongoing', label: t('status.running') }
-    return subagents === undefined ? [primary] : [primary, subagents]
-  }
-  if (subagents !== undefined) return [subagents]
+  /** Rank one primary against its ordered optional secondaries, each present one riding the hover card. */
+  const ranked = (
+    primary: SessionStatus,
+    ...rest: readonly (SessionStatus | undefined)[]
+  ): [SessionStatus, ...SessionStatus[]] => [
+    primary,
+    ...rest.filter((status): status is SessionStatus => status !== undefined),
+  ]
+  if (pending !== undefined) return ranked(pending, subagents, jobs, wakeup)
+  if (node.running) return ranked({ state: 'ongoing', label: t('status.running') }, subagents, jobs, wakeup)
+  if (subagents !== undefined) return ranked(subagents, jobs, wakeup)
+  if (jobs !== undefined) return ranked(jobs, wakeup)
+  if (wakeup !== undefined) return ranked(wakeup)
   if (node.completed) return [{
     state: node.completionOutcome === 'failed' ? 'error' : 'done',
     label: node.completionOutcome === 'failed' ? t('status.turnFailed') : t('status.completed'),
   }]
+  // ④ splits: a confirmed nothing stays blank; a status the connection cannot
+  // confirm wears the gray dashed ring instead (真无事 = 空白 / 读不到 = 虚线圈).
+  if (node.statusStale !== undefined) return [{ state: 'stale', label: t('status.notSynced') }]
   return [{ state: 'idle', label: t('status.idle') }]
 }
 
-/** Primary status dot plus every status's screen-reader label, shared by the search and session rows. */
+/**
+ * The row-cell glyph standing where the dot would go: the background-job gear
+ * carrying its live count as a superscript, or the wake-up sleep mark. Like the
+ * dot it stays aria-hidden — the label rows beside it carry the meaning.
+ * @param props.glyph - which glyph to draw.
+ * @returns the glyph element.
+ */
+function StatusGlyphMark({ glyph }: { glyph: StatusGlyph }) {
+  if (glyph.kind === 'jobs') {
+    return (
+      <span className={css.statusGlyph} data-status-glyph="jobs" aria-hidden="true">
+        <IconSettingsOutlineRegular size={11} />
+        <sup className={css.statusGlyphCount}>{glyph.count}</sup>
+      </span>
+    )
+  }
+  return (
+    <span className={css.statusGlyph} data-status-glyph="wakeup" aria-hidden="true">
+      <IconSleepOutlineRegular size={14} />
+    </span>
+  )
+}
+
+/** Primary status dot (or glyph) plus every status's screen-reader label, shared by the search and session rows. */
 function SessionStatusDots({ statuses }: { statuses: readonly [SessionStatus, ...SessionStatus[]] }) {
+  const glyph = statuses[0].glyph
   return (
     <>
-      <StateDot state={statuses[0].state} />
+      {glyph === undefined
+        ? <StateDot state={statuses[0].state} />
+        : <StatusGlyphMark glyph={glyph} />}
       {statuses.map(status => (
         <span className={css.visuallyHidden} key={status.label}>{status.label}</span>
       ))}
@@ -472,16 +539,23 @@ function SessionHoverContent({ node, now, renderSlot, t }: {
  * @param props.onOpen - open the selected session.
  * @param props.onUnarchive - unarchive an archived result row.
  * @param props.t - Workspace-browser translation seat.
+ * @param props.watchSessionJobs - keep this row's job roster current while it renders, or nothing in a composition without jobs.
  * @returns the result row.
  */
-export function SearchResultItem({ result, currentId, onOpen, onUnarchive, t }: {
+export function SearchResultItem({ result, currentId, onOpen, onUnarchive, t, watchSessionJobs }: {
   result: SearchResultNode
   currentId: string | undefined
   onOpen: (id: SearchResultNode['id']) => void
   onUnarchive: (id: SearchResultNode['id']) => void
   t: RowTranslate
+  /** Roster watcher for the row's Session; absent in direct-render tests and jobs-less compositions. */
+  watchSessionJobs?: RowJobWatcher | undefined
 }) {
   const selected = result.id === currentId
+  useEffect(() => {
+    if (watchSessionJobs === undefined) return
+    return watchSessionJobs(result.id)
+  }, [result.id, watchSessionJobs])
   const statuses = sessionStatuses(result, t)
   const primaryStatus = statuses[0]
   return (
@@ -497,7 +571,7 @@ export function SearchResultItem({ result, currentId, onOpen, onUnarchive, t }: 
             archived rows it stays blank — the grayed row carries the
             archived look. */}
         <span className={css.slot}>
-          {!result.archived && primaryStatus.state !== 'idle' && (
+          {!result.archived && ownsLeadingCell(primaryStatus) && (
             <SessionStatusDots statuses={statuses} />
           )}
         </span>
@@ -545,10 +619,11 @@ export function SearchResultItem({ result, currentId, onOpen, onUnarchive, t }: 
  * @param props.onReveal - scroll this row into view after search navigation, then acknowledge it.
  * @param props.drag - optional row-drag target wiring; blank rows cannot start a drag.
  * @param props.t - the browser root's locale seat.
+ * @param props.watchSessionJobs - keep this row's job roster current while it renders, or nothing in a composition without jobs.
  * @returns the session row.
  */
 export function SessionNodeItem({
-  node, currentId, now, onOpen, onRenameRequest, renderSlot, onReveal, drag, t,
+  node, currentId, now, onOpen, onRenameRequest, renderSlot, onReveal, drag, watchSessionJobs, t,
 }: {
   node: SessionNode
   currentId: string | undefined
@@ -560,6 +635,8 @@ export function SessionNodeItem({
   onReveal?: (() => void) | undefined
   /** Present on reorderable-list rows so every row can remain a drop target. */
   drag?: RowDragProps | undefined
+  /** Roster watcher for the row's Session; absent in direct-render tests and jobs-less compositions. */
+  watchSessionJobs?: RowJobWatcher | undefined
   t: RowTranslate
 } & PropsRenderSlots<
   | 'sidebar.workspaces.session.menu.item'
@@ -572,7 +649,7 @@ export function SessionNodeItem({
   const selected = node.id === currentId
   const statuses = sessionStatuses(node, t)
   const primaryStatus = statuses[0]
-  const showStatus = primaryStatus.state !== 'idle'
+  const showStatus = ownsLeadingCell(primaryStatus)
   // Archived rows hold their in-place grayed slot, so manual reorder cannot
   // move them. Pinned rows drag within the pinned block: the browser gates
   // their drop targets to fellow pinned rows.
@@ -588,6 +665,12 @@ export function SessionNodeItem({
     rowRef.current?.scrollIntoView({ block: 'nearest' })
     onReveal()
   }, [onReveal])
+  // Mounted rows keep their own job roster current (ref-counted at the source);
+  // unmounting drops it and any count the roster carried.
+  useEffect(() => {
+    if (watchSessionJobs === undefined) return
+    return watchSessionJobs(node.id)
+  }, [node.id, watchSessionJobs])
   // Figma session cell: pad 8, status slot 16, then a 4px title gap.
   const ownRow = (
     <div

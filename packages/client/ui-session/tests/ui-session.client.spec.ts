@@ -9,6 +9,9 @@ import type {
   SessionSnapshot,
 } from '@deepseek-ai/dsh-api-session-controller/client'
 import { MutableSessionEventSource } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { IJobs, JobView } from '@deepseek-ai/dsh-api-job-controller/client'
+import type { ConnectionState, ConnectionStateSource } from '@deepseek-ai/dsh-client-connection/client'
+import type { GoalProjection } from '@deepseek-ai/dsh-goal/client'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { HostObservable, RootStandardSourceContribution } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
@@ -30,7 +33,7 @@ interface SessionsBench {
   reference(binding: SessionBinding): SessionReference
   setMainView(id: SessionId, count: number): void
   setRetainInfo(id: SessionId, count: number): void
-  emitStatus(id: SessionId, running: boolean): void
+  emitStatus(id: SessionId, running: boolean, attention?: 'question'): void
   emitError(id: SessionId, message: string): void
   release(id: SessionId): Promise<void>
 }
@@ -41,9 +44,9 @@ const roots: Context[] = []
 
 function createSessionsBench(ctx: Context): SessionsBench {
   roots.push(ctx)
-  const listeners = new Map<string, (id: SessionId, value: boolean | string) => void>()
+  const listeners = new Map<string, (id: SessionId, value: boolean | string, attention?: 'question') => void>()
   ctx.provide('remote', {
-    $on: (event: string, listener: (id: SessionId, value: boolean | string) => void) => {
+    $on: (event: string, listener: (id: SessionId, value: boolean | string, attention?: 'question') => void) => {
       listeners.set(event, listener)
       return () => {
         if (listeners.get(event) === listener) listeners.delete(event)
@@ -176,8 +179,8 @@ function createSessionsBench(ctx: Context): SessionsBench {
         retainedBy: count === 0 ? {} : { mainView: count },
       })
     },
-    emitStatus(id, running) {
-      remoteListener('api-session/status')(id, running)
+    emitStatus(id, running, attention) {
+      remoteListener('api-session/status')(id, running, attention)
     },
     emitError(id, message) {
       remoteListener('api-session/error')(id, message)
@@ -194,6 +197,84 @@ function createSessionsBench(ctx: Context): SessionsBench {
 function createUiSession(ctx: Context, bench: SessionsBench): UiSession {
   ctx.provide('slots', { bindStoreScope: vi.fn() } as never)
   return new UiSession(ctx, bench.sessions)
+}
+
+/** One live owned job with nothing retained yet; ownership marks it this Session's own work. */
+function statusJob(over: Partial<JobView> = {}): JobView {
+  return {
+    id: 'bash-1' as JobView['id'],
+    kind: 'bash',
+    label: 'heavy test',
+    status: 'running',
+    startedAt: 1_700_000_000_000,
+    output: { total: 0, earliest: 0 },
+    ...over,
+  }
+}
+
+/** Minimal jobs-service double: one roster table, change notifications, and a watchRows log. */
+function createJobsBench() {
+  const rows: Record<string, readonly JobView[]> = {}
+  const listeners = new Set<() => void>()
+  const watched: SessionId[] = []
+  const released: (() => void)[] = []
+  const jobs = {
+    state: {
+      getSnapshot: () => ({ rows, observed: {} }),
+      subscribe: (listener: () => void) => {
+        listeners.add(listener)
+        return () => { listeners.delete(listener) }
+      },
+    },
+    watchRows: (sessionId: SessionId) => {
+      watched.push(sessionId)
+      const release = vi.fn()
+      released.push(() => { release() })
+      return release
+    },
+    observe: () => () => {},
+    kill: async () => ({ ok: true }),
+  } as unknown as IJobs
+  const setRows = (sessionId: SessionId, roster: readonly JobView[]): void => {
+    if (roster.length === 0) Reflect.deleteProperty(rows, String(sessionId))
+    else rows[String(sessionId)] = roster
+    for (const listener of listeners) listener()
+  }
+  return { jobs, setRows, watched, released }
+}
+
+/** Connection-state double: one mutable snapshot plus subscribers. */
+function createConnectionBench() {
+  let value: ConnectionState | undefined = 'connected'
+  const listeners = new Set<() => void>()
+  const source: ConnectionStateSource = {
+    getSnapshot: () => value,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+  }
+  const set = (next: ConnectionState | undefined): void => {
+    value = next
+    for (const listener of listeners) listener()
+  }
+  return { source, set }
+}
+
+/** A durable active-goal projection as a list row carries it. */
+function goalProjection(): GoalProjection {
+  return {
+    goal: {
+      id: 'goal-1' as GoalProjection['goal']['id'],
+      revision: 1,
+      objective: 'ship the status dots',
+      phase: 'active',
+      maxGoalRounds: 5,
+    },
+    roundsStarted: 0,
+    createdAt: 1,
+    updatedAt: 1,
+  }
 }
 
 afterEach(async () => {
@@ -649,6 +730,109 @@ describe('UiSession status', () => {
   })
 })
 
+describe('UiSession wake-up, job-count, and stale status sources', () => {
+  it('folds own live job counts in, drops them when the roster settles, and delegates the row watch', () => {
+    const ctx = new Context()
+    const bench = createSessionsBench(ctx)
+    const id = sessionId('jobs')
+    bench.binding(id)
+    const jobsBench = createJobsBench()
+    ctx.provide('slots', { bindStoreScope: vi.fn() } as never)
+    const service = new UiSession(ctx, bench.sessions, jobsBench.jobs)
+    const changed = vi.fn()
+    service.sessionStatus.subscribe(changed)
+
+    expect(service.sessionStatus.getSnapshot().get(id)?.activeJobCount).toBeUndefined()
+    jobsBench.setRows(id, [
+      statusJob({ owner: id }),
+      statusJob({ id: 'bash-2' as JobView['id'], owner: id, status: 'stopping' }),
+      // A roster also carries every unowned job; those belong to no row's work.
+      statusJob({ id: 'bash-3' as JobView['id'] }),
+      statusJob({ id: 'bash-4' as JobView['id'], owner: id, status: 'completed' }),
+    ])
+    expect(service.sessionStatus.getSnapshot().get(id)?.activeJobCount).toBe(2)
+    expect(changed).toHaveBeenCalled()
+
+    // Settlement leaves the roster without a live own job: the count goes with it.
+    jobsBench.setRows(id, [statusJob({ owner: id, status: 'completed' })])
+    expect(service.sessionStatus.getSnapshot().get(id)?.activeJobCount).toBeUndefined()
+
+    // The row's watch delegates to the reference-counted client service.
+    const release = service.watchSessionJobs(id)
+    expect(jobsBench.watched).toEqual([id])
+    release()
+    expect(jobsBench.released[0]).toBeDefined()
+  })
+
+  it('offers a no-op watch and never a count when the assembly carries no jobs service', () => {
+    const ctx = new Context()
+    const bench = createSessionsBench(ctx)
+    const id = sessionId('no-jobs')
+    bench.binding(id)
+    const service = createUiSession(ctx, bench)
+    expect(service.sessionStatus.getSnapshot().get(id)?.activeJobCount).toBeUndefined()
+    const release = service.watchSessionJobs(id)
+    expect(typeof release).toBe('function')
+    release()
+  })
+
+  it('marks a goal-on-book stopped Session as pending wake-up until it runs, clears, or leaves', () => {
+    const ctx = new Context()
+    const bench = createSessionsBench(ctx)
+    const id = sessionId('wake')
+    bench.binding(id)
+    const service = createUiSession(ctx, bench)
+    const changed = vi.fn()
+    service.sessionStatus.subscribe(changed)
+
+    expect(service.sessionStatus.getSnapshot().get(id)?.pendingWakeup).toBeUndefined()
+    bench.list.update((draft) => { draft.byId[id]!.projectionValues = { goal: goalProjection() } })
+    expect(service.sessionStatus.getSnapshot().get(id)?.pendingWakeup).toBe(true)
+    expect(changed).toHaveBeenCalled()
+
+    // A running Session needs no wake-up while the goal stays on the books…
+    bench.emitStatus(id, true)
+    expect(service.sessionStatus.getSnapshot().get(id)?.pendingWakeup).toBeUndefined()
+    // …and its stop hands the mark straight back (the goal is still waiting).
+    bench.emitStatus(id, false)
+    expect(service.sessionStatus.getSnapshot().get(id)?.pendingWakeup).toBe(true)
+
+    // Clearing the goal takes the mark with it.
+    bench.list.update((draft) => { draft.byId[id]!.projectionValues = {} })
+    expect(service.sessionStatus.getSnapshot().get(id)?.pendingWakeup).toBeUndefined()
+
+    // Removal retires the status entry itself.
+    bench.list.update((draft) => {
+      draft.ids = draft.ids.filter(candidate => candidate !== id)
+      Reflect.deleteProperty(draft.byId, id)
+    })
+    expect(service.sessionStatus.getSnapshot().has(id)).toBe(false)
+  })
+
+  it('reports status stale only while the connection withholds confirmation', () => {
+    const ctx = new Context()
+    const bench = createSessionsBench(ctx)
+    const id = sessionId('stale')
+    bench.binding(id)
+    const connection = createConnectionBench()
+    ctx.provide('slots', { bindStoreScope: vi.fn() } as never)
+    const service = new UiSession(ctx, bench.sessions, undefined, connection.source)
+    const changed = vi.fn()
+    service.sessionStatus.subscribe(changed)
+
+    expect(service.sessionStatus.getSnapshot().get(id)?.statusStale).toBeUndefined()
+    connection.set('connecting')
+    expect(service.sessionStatus.getSnapshot().get(id)?.statusStale).toBe(true)
+    expect(changed).toHaveBeenCalled()
+    connection.set('disconnected')
+    expect(service.sessionStatus.getSnapshot().get(id)?.statusStale).toBe(true)
+    connection.set('connected')
+    expect(service.sessionStatus.getSnapshot().get(id)?.statusStale).toBeUndefined()
+    connection.set(undefined)
+    expect(service.sessionStatus.getSnapshot().get(id)?.statusStale).toBeUndefined()
+  })
+})
+
 describe('UiSession pending interactions', () => {
   it('publishes the highest-precedence exact object and removes each source independently', async () => {
     const ctx = new Context()
@@ -696,6 +880,44 @@ describe('UiSession pending interactions', () => {
     removeApproval()
     expect(service.sessionStatus.getSnapshot().has(id)).toBe(false)
     off()
+    await ctx.fiber.dispose()
+  })
+
+  it('fills the host objective attention in and out under any live card domain', async () => {
+    const ctx = new Context()
+    const bench = createSessionsBench(ctx)
+    const service = createUiSession(ctx, bench)
+    const id = sessionId('s1')
+
+    // No card and no watching tab: the host fact alone carries the amber state.
+    bench.emitStatus(id, true, 'question')
+    expect(service.sessionStatus.getSnapshot().get(id)?.pendingInteraction).toMatchObject({
+      kind: 'question', sessionId: id,
+    })
+
+    // Settled: the next status without attention clears it.
+    bench.emitStatus(id, true)
+    expect(service.sessionStatus.getSnapshot().get(id)?.pendingInteraction).toBeUndefined()
+
+    // A live card domain wins while it holds the session; the objective fill
+    // takes the session over the moment the card releases.
+    bench.emitStatus(id, true, 'question')
+    const registerQuestion = service.registerPendingInteraction<SessionPendingInteractionBase>(() => 1)
+    const card = { key: 'question:card', kind: 'question', sessionId: id }
+    const removeCard = registerQuestion(card, () => Promise.resolve())
+    expect(service.sessionStatus.getSnapshot().get(id)?.pendingInteraction).toBe(card)
+    removeCard()
+    expect(service.sessionStatus.getSnapshot().get(id)?.pendingInteraction).toMatchObject({
+      kind: 'question', sessionId: id,
+    })
+
+    // Read receipts never ride attention: unread green and pending amber coexist,
+    // and the stop acknowledgment clears only its own fact.
+    bench.emitStatus(id, false)
+    bench.emitStatus(id, false, 'question')
+    const status = service.sessionStatus.getSnapshot().get(id)
+    expect(status?.pendingInteraction?.kind).toBe('question')
+    expect(status?.completionUnread).toBe(true)
     await ctx.fiber.dispose()
   })
 
@@ -783,12 +1005,14 @@ describe('ui-session apply', () => {
     expect(ctx.uiSession).toBeInstanceOf(UiSession)
     const retainInfoMatcher: unknown = expect.any(Function)
     const sessionAccessMatcher: unknown = expect.any(Function)
+    const watcherMatcher: unknown = expect.any(Function)
     expect(slots.provideRoot).toHaveBeenCalledWith({
       hooks: {
         sessions: bench.sessions.list,
         sessionStatus: ctx.uiSession.sessionStatus,
       },
       keyedHooks: { sessionRetainInfo: retainInfoMatcher, sessionAccess: sessionAccessMatcher },
+      props: { watchSessionJobs: watcherMatcher },
     })
     expect(slots.installScope).toHaveBeenCalledWith('session', ctx.uiSession.adapter)
     const root = slots.provideRoot.mock.calls[0]![0] as RootStandardSourceContribution
@@ -798,6 +1022,11 @@ describe('ui-session apply', () => {
     expect(root.keyedHooks?.sessionAccess?.(sessionId('s1'), 'session/fork'))
       .toBe(remoteAccess.source('session', sessionId('s1'), 'session/fork'))
     expect(root.keyedHooks?.sessionAccess?.(sessionId('s1'))).toBeUndefined()
+    // The row-level roster watcher ships as a plain stable prop; with no jobs
+    // service behind it every call still returns its release.
+    const watcher = root.props?.['watchSessionJobs'] as (id: SessionId) => () => void
+    expect(typeof watcher).toBe('function')
+    expect(typeof watcher(sessionId('s1'))).toBe('function')
 
     // The Session scope's `useAccess(action)` reads the bound Session's answer from the same source.
     const binding = bench.binding(sessionId('s2'))

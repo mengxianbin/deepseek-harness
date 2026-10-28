@@ -269,7 +269,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-api-session-controller`
 
 - `inject`: `agentDefaultModel` · `agents` · `attachments` · `fileUploads` · `fs` · `llm` · `remoteAccess` · `sessions` · `sessionProjections` · `sessionQuery` · `typert` · `workspaceRegistry`
-- `source`: [`packages/api/session-controller/src/index.ts:94`](../packages/api/session-controller/src/index.ts)
+- `source`: [`packages/api/session-controller/src/index.ts:95`](../packages/api/session-controller/src/index.ts)
 
 ```ts config-catalog
 /** Session Controller deployment policy. */
@@ -4322,6 +4322,56 @@ export interface Config {
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-typert-loader -->
+
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-unit-scheduler -->
+<a id="deepseek-aidsh-unit-scheduler"></a>
+
+## `@deepseek-ai/dsh-unit-scheduler`
+
+- `inject`: `tools`
+- `source`: [`packages/guard/unit-scheduler/src/index.ts:64`](../packages/guard/unit-scheduler/src/index.ts)
+
+```ts config-catalog
+/**
+ * Plugin configuration. Every field is optional; the schema supplies the
+ * static defaults and `maxSlots` is derived from the machine when omitted
+ * (see {@link defaultMaxSlots}). Misconfiguration fails loud at plugin load
+ * — the checks in `apply` throw instead of silently falling back.
+ */
+export interface Config {
+  /**
+   * Host-global slot budget across all sessions. Default: the value returned
+   * by {@link defaultMaxSlots} — `max(1, availableParallelism() - 4)` —
+   * computed when the plugin loads, so the machine keeps core headroom.
+   */
+  maxSlots?: number
+  /**
+   * Per-session held-slot cap: the most slots ONE session may hold at once,
+   * no matter how many calls it dispatches in parallel. Default: 2 (a session
+   * can run a couple of local operations but cannot starve the other
+   * sessions; extra calls wait in the shared FIFO queue).
+   */
+  maxSlotsPerSession?: number
+  /**
+   * Bounded wait for a slot before the fail-open release, in milliseconds.
+   * Default: 60000. When the wait outlives this budget the call is released
+   * WITHOUT a slot and the release is logged — the session makes progress
+   * instead of hanging. Set to 0 to release immediately whenever all slots
+   * (or this session's slots) are taken.
+   */
+  waitTimeoutMs?: number
+  /**
+   * Extra pass-through tool-name patterns layered over
+   * {@link DEFAULT_PASS_THROUGH_TOOLS} (each pattern is an exact name or a
+   * `*` wildcard such as `browser_*`). Pass-through tools wait on someone
+   * else — a human, the network, a background job, a derived session — so
+   * they never occupy a slot. Names NOT matched here (including tool names
+   * this plugin has never heard of) hold a slot: fail-closed by design.
+   */
+  passThroughTools?: string[]
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-unit-scheduler -->
 
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-user-approval -->
 <a id="deepseek-aidsh-user-approval"></a>

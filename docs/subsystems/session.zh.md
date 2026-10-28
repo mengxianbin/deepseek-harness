@@ -249,6 +249,18 @@ type OptionalSessionSeq = SessionSeq | null
 
 `SessionSeq(value)` 与 `SessionLogOffset(value)` 只接纳非负安全整数，并拒绝负零。它们仅添加编译期品牌，不改变序列化后的数值；算术会返回普通 `number`，调用方必须按结果的预期角色通过对应构造器重新接纳。
 
+`api-session/status` 的第三个参数携带会话客观的「阻塞于你」种类（`question` = 有一条未回答的持久 ask）——它是会话自身的事实，与任何客户端卡片或已读状态无关。
+
+```ts type-equiv
+/**
+ * Objective "blocked on the user" kind carried by session status: a fact of
+ * the Session itself, independent of any client card or read receipt. Today
+ * only the durable userQuestions fold supplies one; the union grows as other
+ * blocking folds (approvals, plan reviews) join the same channel.
+ */
+type SessionAttentionKind = 'question'
+```
+
 ```ts type-equiv
 /**
  * One immutable entry in the session log.
@@ -1232,16 +1244,19 @@ Source: [`packages/api/session-controller/src/types.ts`](../../packages/api/sess
 
 #### `api-session/status` — emit
 
-One Agent changed running state.
+One Agent changed running state, or a Session's objective attention fold refreshed.
 
 ```ts cordis-catalog
 /**
- * One Agent changed running state.
+ * One Agent changed running state, or a Session's objective attention fold refreshed.
  * @mode emit
  * @param sessionId - Agent and Session identity.
  * @param running - whether the Agent is running.
+ * @param attention - the Session's objective blocked-on-the-user kind while one is
+ *   active ('question' = an unanswered durable ask); absent otherwise. Card-free:
+ *   every connected client renders it the same way regardless of which view is open.
  */
-'api-session/status'(sessionId: SessionId, running: boolean): void
+'api-session/status'(sessionId: SessionId, running: boolean, attention?: SessionAttentionKind): void
 ```
 
 Types: [SessionId](core.zh.md)

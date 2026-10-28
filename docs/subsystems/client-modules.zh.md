@@ -172,7 +172,10 @@ artifactBaseline(id: string): ClientArtifactBaseline | undefined
 /**
  * Publish one completed bundle generation (the HMR watch's registration
  * hook — the only entry point through which build changes reach the graph).
- * Unchanged mtime, ctime and size preserve the graph without reading the bundle.
+ * Filesystem metadata only gates the re-read: the rev is content-addressed
+ * ({@link artifactRevision}), so a rebuild that regenerates byte-identical
+ * artifacts keeps the graph — and every page plugin fiber — without
+ * notifying anyone.
  * @param id - entry id (package name).
  * @returns the current artifact rev, or undefined for an unknown id.
  */

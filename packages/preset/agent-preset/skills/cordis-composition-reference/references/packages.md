@@ -260,6 +260,7 @@ Every package below exports a Cordis plugin that a bundle patch can name in a Lo
 |---|---|---|
 | `@deepseek-ai/dsh-repeat-tool-reminder` | yes | Repeat-tool-call guard plugin: advisory reminders when an agent loops on identical tool calls |
 | `@deepseek-ai/dsh-tool-call-timeout-policy` | no | Tool-call timeout policy: a tools/execute wrapper that arms a per-tool deadline on exec.signal and returns TOOL_TIMEOUT when it wins |
+| `@deepseek-ai/dsh-unit-scheduler` | yes | Cross-session unit-operation scheduling gate: a tools/execute wrapper that queues slot-holding tool calls on one host-global semaphore with a per-session cap, FIFO waiting, and bounded fail-open |
 
 ## host
 

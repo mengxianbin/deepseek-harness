@@ -243,6 +243,10 @@ export const EVENT_SCOPE_PAGE: Record<string, string> = {
   'permission-presets': 'permission-presets.md',
   'session': 'session.md',
   'settings': 'settings.md',
+  // The restart-signal event is emitted by the settings-general stamp host; the
+  // settings subsystem page owns it (drive-by: the scope was left unmapped,
+  // which kept the whole catalog stale).
+  'restart-signal': 'settings.md',
   'skills': 'skills.md',
   'subagent': 'subagent.md',
   'system-prompt': 'system-prompt.md',
@@ -405,6 +409,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   SessionReferenceInput: 'session-reference.md',
   SessionAttachmentRequest: 'session.md',
   SessionAttachmentValue: 'session.md',
+  SessionAttentionKind: 'session.md',
   SessionCancelRequest: 'session.md',
   SessionCancelValue: 'session.md',
   SessionControlFrame: 'session.md',

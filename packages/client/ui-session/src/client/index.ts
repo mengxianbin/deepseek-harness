@@ -11,6 +11,10 @@ import type {
   UseProjection,
 } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { IJobs, JobView } from '@deepseek-ai/dsh-api-job-controller/client'
+import type { ConnectionHandle, ConnectionStateSource } from '@deepseek-ai/dsh-client-connection/client'
+// Type-only: pulls the `goal` SessionProjectionMap key merge the wake-up read names.
+import type {} from '@deepseek-ai/dsh-goal/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type { RemoteEndpoint } from '@deepseek-ai/dsh-api-remote-access/client'
 import { notifySubscribers } from '@deepseek-ai/dsh-client-store'
@@ -59,6 +63,18 @@ export type SessionPendingInteraction =
 /** How an observed stop ended: a failed run acknowledges differently from a clean one. */
 export type SessionCompletionOutcome = 'completed' | 'failed'
 
+/** Whether one roster row counts toward a Session's active-job mark: its own live job (`running`/`stopping`). */
+function countsAsActiveOwnJob(job: JobView, sessionId: SessionId): boolean {
+  // A roster also carries every unowned job; those belong to no Session row.
+  // The live-status vocabulary mirrors JobListAction's dot state in ui-jobs.
+  return job.owner === sessionId && (job.status === 'running' || job.status === 'stopping')
+}
+
+/** Whether the connection currently withholds confirmation of row status (outage or reconnect). */
+function isConnectionStale(state: string | undefined): boolean {
+  return state === 'disconnected' || state === 'connecting'
+}
+
 /** Independent UI status facts for one Session identity. */
 export interface SessionStatus {
   /** Latest known running state; absent until a baseline or event establishes it. */
@@ -69,6 +85,24 @@ export interface SessionStatus {
   readonly completionUnread: boolean
   /** Outcome of that unread stop; present exactly while `completionUnread` is true. */
   readonly completionOutcome?: SessionCompletionOutcome
+  /**
+   * Live background jobs this Session owns; present exactly while the count is
+   * positive (a roster the row watches supplies it; no watch, no number).
+   */
+  readonly activeJobCount?: number
+  /**
+   * A durable goal is on the books while the Session is stopped — the wake-up
+   * weak mark. Present exactly while a list row carries a `goal` projection
+   * value and `running` is observed false; clears when the Session runs, the
+   * goal leaves the books, or the Session is removed.
+   */
+  readonly pendingWakeup?: true
+  /**
+   * The status itself could not be confirmed: the connection is down or
+   * reconnecting, so the snapshot on display may be stale. Present for every
+   * row while the connection withholds confirmation, absent otherwise.
+   */
+  readonly statusStale?: true
 }
 
 /** Current UI status indexed by Session identity. */
@@ -166,6 +200,14 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     useSessionRetainInfo: UseSessionRetainInfo
     /** Whether the current Peer may call `action` on one Session resource. */
     useSessionAccess: (sessionId: SessionId, action: RemoteEndpoint) => boolean
+    /**
+     * Keep one Session's background-job roster current while its row renders;
+     * the roster feeds `SessionStatus.activeJobCount`. Rows call it on mount
+     * and release on unmount; reference-counted, a no-op when the bundle
+     * carries no jobs service. Optional: a composition without ui-session's
+     * root props (direct-render tests, minimal assemblies) simply lacks it.
+     */
+    watchSessionJobs?: (sessionId: SessionId) => () => void
   }
 
   interface SessionStandardProps {
@@ -293,6 +335,13 @@ export class UiSession extends Service {
   private readonly current: BindingSource
   private readonly pendingDomains: RuntimePendingDomain[] = []
   private pendingSnapshot: ReadonlyMap<SessionId, SessionPendingInteractionBase> = new Map()
+  /**
+   * The host's objective blocked-on-the-user kinds, carried by status events:
+   * card-free attention facts that fill sessions no pending domain holds, so
+   * an unanswered question stays amber across views, tabs, and read receipts
+   * until it settles (2026-10-28 design ruling: attention never rides read state).
+   */
+  private readonly attention = new Map<SessionId, string>()
   private readonly running = new Map<SessionId, boolean>()
   private readonly unreadStops = new Map<SessionId, SessionCompletionOutcome>()
   private readonly observedFailures = new Set<SessionId>()
@@ -315,10 +364,14 @@ export class UiSession extends Service {
   /**
    * @param ctx - Client root context.
    * @param sessions - Controller-owned Session object layer.
+   * @param jobs - Read-only background-job rosters; absent when the bundle carries no jobs service.
+   * @param connectionState - Connection recovery state; absent outside a connected assembly.
    */
   constructor(
     ctx: Context,
     private readonly sessions: ISessions,
+    private readonly jobs?: IJobs,
+    private readonly connectionState?: ConnectionStateSource,
   ) {
     super(ctx, 'uiSession')
     this.absent = createBindingSource(this.materializeAbsent())
@@ -332,12 +385,17 @@ export class UiSession extends Service {
     ctx.effect(() => {
       const disposeList = sessions.list.subscribe(() => { this.publishMain() })
       const disposeStatus = sessions.list.subscribe(() => { this.reconcileStatus() })
-      const disposeRemoteStatus = ctx.remote.$on('api-session/status', (sessionId, running) => {
+      const disposeRemoteStatus = ctx.remote.$on('api-session/status', (sessionId, running, attention) => {
         this.observeRunning(sessionId, running)
+        this.observeAttention(sessionId, attention)
       })
       const disposeRemoteError = ctx.remote.$on('api-session/error', (sessionId) => {
         this.observeFailure(sessionId)
       })
+      // Optional read-only sources: their snapshot changes re-fold the status
+      // facts that read them (job counts, the stale flag).
+      const disposeJobs = this.jobs?.state.subscribe(() => { this.publishStatus() })
+      const disposeConnection = this.connectionState?.subscribe(() => { this.publishStatus() })
       this.publishMain()
       this.reconcileStatus()
       return () => {
@@ -346,12 +404,26 @@ export class UiSession extends Service {
         disposeStatus()
         disposeRemoteStatus()
         disposeRemoteError()
+        disposeJobs?.()
+        disposeConnection?.()
         this.disposeMainRetain()
         const records = [...this.bindings.values]
         this.bindings.clear()
         for (const record of records) record.release()
       }
     }, 'ui-session: Session binding projection')
+  }
+
+  /**
+   * Keep one Session's background-job roster current for as long as the caller
+   * (a rendered Session row) holds the release. Reference-counted by the
+   * client jobs service, so a row and the open session's header panel share
+   * one stream; without a jobs service this is a no-op and no count appears.
+   * @param sessionId - Session whose owned live jobs feed `activeJobCount`.
+   * @returns the release for this watcher.
+   */
+  watchSessionJobs(sessionId: SessionId): () => void {
+    return this.jobs?.watchRows(sessionId) ?? (() => {})
   }
 
   /**
@@ -489,12 +561,35 @@ export class UiSession extends Service {
         }
       }
     }
+    // The host's objective attention fills sessions no domain holds: the
+    // blocking fact exists whether or not any tab built the answering card.
+    for (const [sessionId, kind] of this.attention) {
+      if (next.has(sessionId)) continue
+      next.set(sessionId, {
+        interaction: { key: `attention:${kind}:${String(sessionId)}`, kind, sessionId },
+        precedence: Number.NEGATIVE_INFINITY,
+      })
+    }
     const projected = new Map(
       [...next].map(([sessionId, value]) => [sessionId, value.interaction] as const),
     )
     if (samePendingInteractions(this.pendingSnapshot, projected)) return
     this.pendingSnapshot = projected
     this.publishStatus()
+  }
+
+  /**
+   * Fold the host's objective blocked-on-the-user fact into the status: it
+   * fills sessions no pending domain holds, never displacing a live card.
+   * @param sessionId - Session whose host-reported attention kind refreshed.
+   * @param attention - the objective kind while one is active; absent otherwise.
+   */
+  private observeAttention(sessionId: SessionId, attention: string | undefined): void {
+    const previous = this.attention.get(sessionId)
+    if (previous === attention) return
+    if (attention === undefined) this.attention.delete(sessionId)
+    else this.attention.set(sessionId, attention)
+    this.publishPendingInteractions()
   }
 
   private observeRunning(sessionId: SessionId, running: boolean): void {
@@ -542,6 +637,7 @@ export class UiSession extends Service {
         this.running.delete(id)
         this.unreadStops.delete(id)
         this.observedFailures.delete(id)
+        this.attention.delete(id)
       }
     }
     this.publishStatus()
@@ -552,20 +648,37 @@ export class UiSession extends Service {
   }
 
   private publishStatus(): void {
+    const list = this.sessions.list.getSnapshot()
     const ids = new Set<SessionId>([
-      ...(Object.keys(this.sessions.list.getSnapshot().byId) as SessionId[]),
+      ...(Object.keys(list.byId) as SessionId[]),
       ...this.running.keys(),
       ...this.pendingSnapshot.keys(),
       ...this.unreadStops.keys(),
+      ...this.attention.keys(),
     ])
+    const statusStale: true | undefined = this.connectionState !== undefined
+      && isConnectionStale(this.connectionState.getSnapshot())
+      ? true
+      : undefined
     const next = new Map<SessionId, SessionStatus>()
     for (const id of ids) {
       const outcome = this.unreadStops.get(id)
+      const roster = this.jobs?.state.getSnapshot().rows[String(id)]
+      const activeJobCount = roster === undefined
+        ? 0
+        : roster.filter(job => countsAsActiveOwnJob(job, id)).length
+      const pendingWakeup: true | undefined = list.byId[id]?.projectionValues?.goal != null
+        && this.running.get(id) === false
+        ? true
+        : undefined
       next.set(id, {
         running: this.running.get(id),
         pendingInteraction: this.pendingSnapshot.get(id),
         completionUnread: outcome !== undefined,
         ...(outcome === undefined ? {} : { completionOutcome: outcome }),
+        ...(activeJobCount === 0 ? {} : { activeJobCount }),
+        ...(pendingWakeup === undefined ? {} : { pendingWakeup }),
+        ...(statusStale === undefined ? {} : { statusStale }),
       })
     }
     if (sameSessionStatus(this.statusSnapshot, next)) return
@@ -704,7 +817,14 @@ export const inject = ['sessions', 'slots', 'remote', 'remoteAccess']
  * @param ctx - Client Cordis context.
  */
 export function apply(ctx: Context): void {
-  const service = new UiSession(ctx, ctx.sessions)
+  // Optional read-only sources: `ctx.get` reports absence rather than failing
+  // the status source, so a bundle without either degrades to "no such signal"
+  // (no job count, no stale flag) instead of breaking every row's status.
+  // The connection cast mirrors ui-settings-general's `ctx.get('connection')`
+  // precedent: that key resolves through the untyped `get` overload.
+  const jobs = ctx.get('jobs')
+  const connection = ctx.get('connection') as ConnectionHandle | undefined
+  const service = new UiSession(ctx, ctx.sessions, jobs, connection?.state)
   ctx.slots.provideRoot({
     hooks: {
       sessions: ctx.sessions.list,
@@ -715,6 +835,11 @@ export function apply(ctx: Context): void {
       sessionAccess: (sessionId, action) => action === undefined
         ? undefined
         : ctx.remoteAccess.source('session', sessionId, action),
+    },
+    props: {
+      // Rows call this while mounted; the roster it keeps current feeds
+      // `activeJobCount`. Stable for the registration's lifetime.
+      watchSessionJobs: (sessionId: SessionId): (() => void) => service.watchSessionJobs(sessionId),
     },
   } satisfies RootStandardSourceContribution)
   ctx.slots.installScope('session', service.adapter)
@@ -734,7 +859,10 @@ function sameSessionStatus(left: SessionStatusSnapshot, right: SessionStatusSnap
       || candidate.running !== status.running
       || candidate.pendingInteraction !== status.pendingInteraction
       || candidate.completionUnread !== status.completionUnread
-      || candidate.completionOutcome !== status.completionOutcome) return false
+      || candidate.completionOutcome !== status.completionOutcome
+      || candidate.activeJobCount !== status.activeJobCount
+      || candidate.pendingWakeup !== status.pendingWakeup
+      || candidate.statusStale !== status.statusStale) return false
   }
   return true
 }

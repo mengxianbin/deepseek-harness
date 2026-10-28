@@ -130,6 +130,34 @@ Host service backing the generated `ctx.remote.settings` namespace. Every remote
 
 Source: [`packages/api/settings-controller/src/index.ts`](../../packages/api/settings-controller/src/index.ts)
 
+<a id="restart-signal-events"></a>
+
+### `restart-signal/*` events
+
+<a id="restart-signalchanged--emit"></a>
+
+#### `restart-signal/changed` — emit
+
+The Host's restart-signal polling sensor recomputed the state machine after a moved source or configuration fingerprint; subscribed pages recheck to publish the fresh judgment (restart-signal design C.5, the host-detect → push leg that closes R3「页面开着不操作角标自现」). Payload-free by design: the judgment itself rides the recheck route, not the event, so the channel cannot drift from the state machine. Declared here rather than in the ui-settings-general owner package: that package consumes this assembly on its Client face, so an owner-side declaration would close a project-reference cycle.
+
+```ts cordis-catalog
+/**
+ * The Host's restart-signal polling sensor recomputed the state machine
+ * after a moved source or configuration fingerprint; subscribed pages
+ * recheck to publish the fresh judgment (restart-signal design C.5, the
+ * host-detect → push leg that closes R3「页面开着不操作角标自现」).
+ * Payload-free by design: the judgment itself rides the recheck route,
+ * not the event, so the channel cannot drift from the state machine.
+ * Declared here rather than in the ui-settings-general owner package:
+ * that package consumes this assembly on its Client face, so an
+ * owner-side declaration would close a project-reference cycle.
+ * @mode emit
+ */
+'restart-signal/changed'(): void
+```
+
+Source: [`packages/api/remotes/src/types.ts`](../../packages/api/remotes/src/types.ts)
+
 <a id="settings-events"></a>
 
 ### `settings/*` events

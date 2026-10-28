@@ -12,6 +12,9 @@
       "path": "../../../vendor/cordis"
     },
     {
+      "path": "../../api/job-controller/tsconfig.client.json"
+    },
+    {
       "path": "../../api/remotes/tsconfig.client.json"
     },
     {
@@ -24,7 +27,13 @@
       "path": "../../core/session"
     },
     {
+      "path": "../../goal/goal"
+    },
+    {
       "path": "../../util/values"
+    },
+    {
+      "path": "../connection/tsconfig.client.json"
     },
     {
       "path": "../store"
