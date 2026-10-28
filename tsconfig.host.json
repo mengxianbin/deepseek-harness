@@ -462,6 +462,7 @@
     { "path": "./packages/spill/spill-local" },
     { "path": "./packages/spill/spill-policy" },
     { "path": "./packages/guard/timeout-policy" },
+    { "path": "./packages/guard/unit-scheduler" },
     { "path": "./packages/test-support/agent-loop-testkit" },
     { "path": "./packages/acp/acp" },
     { "path": "./packages/bundle/acp-app" },

@@ -408,6 +408,13 @@
     - id: timeout-policy
       name: '@deepseek-ai/dsh-tool-call-timeout-policy'
 
+    # Cross-session unit-operation scheduling gate (P0 static): slot-holding
+    # tool calls queue on one host-global semaphore (budget derived from
+    # availableParallelism, per-session cap, bounded wait that fails open).
+    # Defaults live in the plugin; profiles override per config field.
+    - id: unit-scheduler
+      name: '@deepseek-ai/dsh-unit-scheduler'
+
     - id: spill-local
       name: '@deepseek-ai/dsh-spill-local'
 
