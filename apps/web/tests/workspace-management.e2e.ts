@@ -556,7 +556,7 @@ describe('web e2e: workspace management (create / rename / grouping / hover affo
     expect(await copied.isVisible()).toBe(true)
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(rowTitle)
     // Leaving anchor and card together closes it after the grace.
-    await page.getByRole('button', { name: 'Account menu', exact: true }).hover()
+    await page.getByRole('button', { name: 'Settings', exact: true }).hover()
     await expect.poll(() => card.count(), { timeout: 5_000 }).toBe(0)
     expect(tripwire.pageErrors).toEqual([])
   }, 60_000)
@@ -621,7 +621,7 @@ describe('web e2e: workspace management (create / rename / grouping / hover affo
       expect(await card.count()).toBe(0)
       await observe('menu-closed')
 
-      await hoverPage.getByRole('button', { name: 'Account menu', exact: true }).hover()
+      await hoverPage.getByRole('button', { name: 'Settings', exact: true }).hover()
       await title.hover()
       await hoverPage.clock.runFor(799)
       expect(await card.count()).toBe(0)
@@ -665,7 +665,7 @@ describe('web e2e: workspace management (create / rename / grouping / hover affo
       const clockStart = Date.now()
       await hoverPage.clock.install({ time: clockStart })
       await hoverPage.clock.pauseAt(clockStart + 1000)
-      await hoverPage.getByRole('button', { name: 'Account menu', exact: true }).hover()
+      await hoverPage.getByRole('button', { name: 'Settings', exact: true }).hover()
       await hoverPage.clock.runFor(300)
       await first.hover()
       await hoverPage.clock.runFor(799)
@@ -685,7 +685,7 @@ describe('web e2e: workspace management (create / rename / grouping / hover affo
       await record('workspace-to-session-immediate', sessionTitle)
       await first.hover()
       await record('session-to-workspace-immediate', 'gamma-ws')
-      await hoverPage.getByRole('button', { name: 'Account menu', exact: true }).hover()
+      await hoverPage.getByRole('button', { name: 'Settings', exact: true }).hover()
       await hoverPage.clock.runFor(300)
       expect(await card.count()).toBe(0)
       await second.hover()
@@ -771,7 +771,7 @@ describe('web e2e: workspace management (create / rename / grouping / hover affo
           await observe('portal-return-instant')
 
           await secondCard.hover()
-          await ui.getByRole('button', { name: 'Account menu', exact: true }).hover()
+          await ui.getByRole('button', { name: 'Settings', exact: true }).hover()
           await ui.clock.runFor(300)
           await secondCard.waitFor({ state: 'detached' })
           expect(await firstCard.count()).toBe(0)
@@ -822,7 +822,7 @@ describe('web e2e: workspace management (create / rename / grouping / hover affo
     await page.waitForTimeout(POINTER_HOLD_MS)
     expect(await page.getByRole('menuitem', { name: 'Rename' }).count()).toBe(1)
     // Pointer-leave dismissal still applies once the pointer genuinely leaves.
-    await page.getByRole('button', { name: 'Account menu', exact: true }).hover()
+    await page.getByRole('button', { name: 'Settings', exact: true }).hover()
     await expect.poll(() => page.getByRole('menuitem', { name: 'Rename' }).count(), { timeout: 5_000 }).toBe(0)
     expect(tripwire.pageErrors).toEqual([])
   }, 60_000)
@@ -843,7 +843,17 @@ describe('web e2e: workspace management (create / rename / grouping / hover affo
     await expect.poll(() => sessionRow.count(), { timeout: 10_000 }).toBe(1)
     await expect.poll(() => sessionRow.getAttribute('aria-selected'), { timeout: 10_000 }).toBe('true')
     const ungroupedSection = page.getByText('Ungrouped', { exact: true }).locator('..').locator('..').locator('..')
-    await expect.poll(() => ungroupedSection.locator('[role="treeitem"]').count(), { timeout: 10_000 }).toBe(2)
+    // Derived from row structure, not a pinned DOM total: the section's raw
+    // `[role="treeitem"]` count carries the bucket header (a workspace-row
+    // treeitem) plus hidden blank strays this shared describe leaves behind —
+    // the old hard pin of 2 observed 5 on 2026-10-22. The archive claim only
+    // needs the seed to be the LAST VISIBLE session row (selecting it hides
+    // every stray), so count the way `seededSessionRow()` does: on-screen rows
+    // owning the session-actions affordance (CSS keeps that button matched
+    // while hidden until hover).
+    const visibleSessions = ungroupedSection.locator('[role="treeitem"]:visible')
+      .filter({ has: page.locator('button[aria-label^="Session actions for "]') })
+    await expect.poll(() => visibleSessions.count(), { timeout: 10_000 }).toBe(1)
     // Row menu: hover reveals the actions button; Archive session commits
     // without a confirmation dialog (non-destructive: log + accounting stay).
     await clickHoverAction(sessionRow, `Session actions for ${title}`)
@@ -851,7 +861,11 @@ describe('web e2e: workspace management (create / rename / grouping / hover affo
     // The row disappears on the archive-set echo; with no other visible
     // stray, the whole Ungrouped bucket withdraws.
     await expect.poll(() => sessionRow.count(), { timeout: 10_000 }).toBe(0)
-    await expect.poll(() => page.getByText('Ungrouped', { exact: true }).count(), { timeout: 10_000 }).toBe(0)
+    // FORK(replay-residual-1022): 空会话常驻化后，Ungrouped 桶不再因归档
+    // 最后一个具名会话而撤桶——桶内恒剩常驻空会话行。原「Ungrouped 计数→0」是
+    // 旧隐藏式空会话契约的断言，现改为钉住新契约：桶仍在场（1），归档语义由上方
+    // sessionRow→0 与下方 registry/持久化断言承载。
+    await expect.poll(() => page.getByText('Ungrouped', { exact: true }).count(), { timeout: 10_000 }).toBe(1)
     // Durable on the host: the registry-global set carries the id while the
     // session log itself stays in persistence untouched.
     expect([...scaffold.ctx.workspaceRegistry.archivedSessionIds]).toEqual([SessionId(SEED_ID)])
@@ -953,8 +967,12 @@ describe('web e2e: workspace management (create / rename / grouping / hover affo
     }, { timeout: 10_000 }).toBe(true)
     const lastChild = section.getByRole('treeitem', { name: 'project-one', exact: true })
     const targetBounds = (await lastChild.boundingBox())!
-    const sectionBounds = (await section.boundingBox())!
-    expect(targetBounds.y + targetBounds.height / 2).toBeGreaterThan(sectionBounds.y + sectionBounds.height / 2)
+    // FORK(replay-residual-1022): 原「lastChild 中心低于 section 中线」的布局 sanity
+    // 在常驻空会话行入树后失效（section 变高、中线下移越过 lastChild）。改为相对
+    // 兄弟行的排序 sanity：project-one 渲染在 project-two 之下（拖放目标位序不变）。
+    const firstChild = section.getByRole('treeitem', { name: 'project-two', exact: true })
+    const firstChildBounds = (await firstChild.boundingBox())!
+    expect(targetBounds.y + targetBounds.height / 2).toBeGreaterThan(firstChildBounds.y + firstChildBounds.height / 2)
     await dragSource.dragTo(lastChild)
     await expect.poll(() => {
       const ordered = scaffold.ctx.workspaceRegistry.list()
@@ -986,13 +1004,14 @@ describe('web e2e: workspace management (create / rename / grouping / hover affo
     const createdBody = await createdResponse.json() as { result: { ok: boolean; value: { sessionId: string } } }
     expect(createdBody.result.ok).toBe(true)
     const createdSessionId = createdBody.result.value.sessionId
-    expect(previousParentSessionIds).not.toContain(createdSessionId)
+    // The parent Workspace's only member is the blank adopting it created, so New Session returns to it.
+    expect(previousParentSessionIds).toEqual([createdSessionId])
+    expect(createdResponse.request().postDataJSON()).toHaveProperty('payload.args.request.sessionId', createdSessionId)
     await page.locator(`[data-conversation-session="${createdSessionId}"]`).waitFor()
     await expect.poll(() => section.locator('[aria-selected="true"]').evaluate(row =>
       row.closest('[class*="groupSection"]')?.querySelector('[role="treeitem"]')?.textContent,
     ), { timeout: 10_000 }).toBe('folder-group')
-    await expect.poll(() => parentWorkspace.sessionIds).toHaveLength(previousParentSessionIds.length + 1)
-    expect(parentWorkspace.sessionIds).toEqual(expect.arrayContaining([...previousParentSessionIds, createdSessionId]))
+    expect([...parentWorkspace.sessionIds]).toEqual(previousParentSessionIds)
     expect([...childWorkspace.sessionIds]).toEqual(childSessionIds)
     expect(tripwire.pageErrors).toEqual([])
   })
@@ -1006,7 +1025,7 @@ describe('web e2e: workspace management (create / rename / grouping / hover affo
 })
 
 describe('web e2e: New Session after an outdated blank cache', () => {
-  it('opens a fresh conversation instead of reusing the recorded conversation', async () => {
+  it('returns to the startup blank instead of reusing the recorded conversation', async () => {
     const scaffold = await launchWebScaffold({})
     let browser: Browser | undefined
     try {
@@ -1034,6 +1053,8 @@ describe('web e2e: New Session after an outdated blank cache', () => {
       // candidate; the Host declines the started Session and creates a blank one.
       await expect.poll(() => selected.innerText()).toBe('New Session')
       await expect.poll(() => workspace.sessionIds.length).toBe(2)
+      const startupBlank = workspace.sessionIds.find(member => member !== id)
+      expect(startupBlank).toBeDefined()
       // The declined Session's projections are reloaded, so its stale blank row reappears.
       await page.getByRole('treeitem', { name: /^Use the read tool twice/ }).click()
       await page.getByRole('tab', { name: 'Chat', exact: true }).waitFor()
@@ -1041,11 +1062,21 @@ describe('web e2e: New Session after an outdated blank cache', () => {
       const previous = (await selected.innerText()).split('\n')[0]!
       const before = await captureStableAria(page, '[role="tree"]', scaffold.workspaceCwd)
 
-      await page.getByRole('button', { name: 'New session', exact: true }).last().click()
+      // FORK (askq-presentation persistence): the wide sidebar's footer ⋯ menu
+      // owns New Session since the brand-row capsule retired — the old
+      // `New session` capsule button no longer
+      // exists. Open the menu, pick the item (same gesture as
+      // question-composer.e2e.ts).
+      // rc.3 merge: New Session names the blank startup created, not the recorded conversation, and the Host reuses it.
+      const creation = page.waitForResponse('**/api/session/create')
+      await page.getByRole('button', { name: 'More', exact: true }).click()
+      await page.getByRole('menuitem', { name: 'New Session', exact: true }).click()
+      const created = await creation
+      expect(created.request().postDataJSON()).toHaveProperty('payload.args.request.sessionId', startupBlank)
+      expect(await created.json()).toMatchObject({ result: { ok: true, value: { sessionId: startupBlank } } })
       await expect.poll(() => selected.innerText()).toBe('New Session')
       await page.getByRole('tab', { name: 'Chat', exact: true }).waitFor({ state: 'hidden' })
-      // New Session creates a fresh Session; the blank startup created stays a member.
-      await expect.poll(() => workspace.sessionIds.length).toBe(3)
+      expect(workspace.sessionIds).toHaveLength(2)
       expect(workspace.sessionIds).toContain(id)
       await page.getByRole('treeitem').filter({ hasText: previous }).waitFor()
       const after = await captureStableAria(page, '[role="tree"]', scaffold.workspaceCwd)

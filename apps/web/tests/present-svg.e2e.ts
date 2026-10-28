@@ -19,6 +19,9 @@ const FIXTURE = join(DIR, 'session.v3.jsonl')
 const MODE = webSnapshotMode()
 const RECORD_PROMPT = '简单画一个 SVG 表示冯诺依曼架构，保存为 von-neumann.svg，并提供独立文件卡片，方便打开。'
 const FILE = 'von-neumann.svg'
+// FORK(replay-residual-1022): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 修法).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 describe('web e2e: requested SVG is explicitly delivered', () => {
   let scaffold: WebScaffold
@@ -41,7 +44,10 @@ describe('web e2e: requested SVG is explicitly delivered', () => {
     }
     scaffold = await launchWebScaffold({
       compareReplaySession: true,
-      extraOverlayPath: fileURLToPath(new URL('./present-svg.overlay.yml', import.meta.url)),
+      extraOverlayPath: [
+        fileURLToPath(new URL('./present-svg.overlay.yml', import.meta.url)),
+        CATALOG_OVERLAY,
+      ],
       ...(replayOverride === undefined ? {} : { replayFixture: FIXTURE, replayOverride }),
     })
     browser = await chromium.launch()

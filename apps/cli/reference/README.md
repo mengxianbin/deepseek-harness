@@ -52,6 +52,14 @@ dsh --profile web --patch ./extra.yml --dump-config
 
 `--dump-default-config` prints only the bundle layers; `--dump-config` adds the profile's `cordis.patch.yml`, the home-level `$DSH_HOME/cordis.patch.yml`, and `--patch` overlays. Both print comments naming the file that supplied each row and every overlay that changed it; `!!js` expressions remain unevaluated, relative plugin names in inserted rows resolve beside their patch file, and unmatched patch targets are reported on stderr. A dump initializes missing profile files. It never runs app command-line providers, so it shows the composed tree before any app argument is resolved and rejects an invocation that carries app arguments.
 
+Reprint the running web instance's login URL without booting anything:
+
+```sh
+dsh web --print-url
+```
+
+`--print-url` reads the startup line `dsh web: <url>?token=…` that the web instance printed to its stdout log — an explicit `DSH_WEB_LOG` names that log, otherwise the lookup takes `dsh-web.log` beside the launcher first and `$DSH_HOME/dsh-web.log` second — and replays the line's own login exchange before printing: HTTP 303 proves the instance is alive and the launch token is still accepted, so the complete URL (full launch token, never truncated) is written to stdout as one line; a refused connection, an absent log, or HTTP 401 (the log predates the running instance's boot) each print one human-readable line on stderr and exit 1. The flag accepts only the `web` profile, takes no app arguments, cannot combine with the config dump flags, and serves nothing itself: the reprint exists so a local terminal can recover an expired cookie, and no HTTP endpoint ever returns the URL.
+
 <a id="config-schema-dump"></a>
 ### Config schema dump
 

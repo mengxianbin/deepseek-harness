@@ -31,6 +31,9 @@ const PROMPT = `Write a file named notes.txt in the workspace containing exactly
 
 /** Draft used to measure the composer's own text cap: enough lines to pass it. */
 const CAP_PROBE = Array.from({ length: 40 }, (_, index) => `line ${index}`).join('\n')
+// FORK(replay-residual-1022): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 修法).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 describe.each(MODE === 'record' ? ['button'] as const : ['button', 'keyboard'] as const)('web e2e: approval takeover through %s', (method) => {
   let scaffold: WebScaffold
@@ -40,7 +43,9 @@ describe.each(MODE === 'record' ? ['button'] as const : ['button', 'keyboard'] a
   const sessionEvents: SessionEvent[] = []
 
   beforeAll(async () => {
-    scaffold = await launchWebScaffold(MODE === 'record' ? {} : { replayFixture: FIXTURE, paceMs: 15, compareReplaySession: true })
+    scaffold = await launchWebScaffold(MODE === 'record'
+      ? { extraOverlayPath: CATALOG_OVERLAY }
+      : { replayFixture: FIXTURE, paceMs: 15, compareReplaySession: true, extraOverlayPath: CATALOG_OVERLAY })
     scaffold.ctx.on('session/event', (_session, event: SessionEvent) => { sessionEvents.push(event) })
     browser = await chromium.launch()
     page = await newEnglishPage(browser)

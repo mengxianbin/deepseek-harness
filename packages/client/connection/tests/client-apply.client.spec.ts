@@ -17,11 +17,13 @@ import {
 type Win = {
   location?: { hostname: string; origin?: string }
   __DSH_TRANSPORT__?: ClientTransportHooks
+  __DSH_COOKIE_REFRESH__?: unknown
 }
 
 afterEach(() => {
   delete (globalThis as Win).location
   delete (globalThis as Win).__DSH_TRANSPORT__
+  delete (globalThis as Win).__DSH_COOKIE_REFRESH__
   vi.unstubAllGlobals()
   vi.useRealTimers()
 })
@@ -476,6 +478,44 @@ describe('connection client apply', () => {
       method: 'goals/create',
       payload: { args: { agentId: 'agent-1' } },
     })
+  })
+
+  it('starts the cookie-refresh heartbeat for the served page', async () => {
+    ;(globalThis as Win).location = { hostname: 'localhost' }
+    ;(globalThis as Win).__DSH_COOKIE_REFRESH__ = { intervalMs: 3_600_000 }
+    const fetchSpy = vi.fn(async () => ({ status: 204 }))
+    vi.stubGlobal('fetch', fetchSpy)
+    const ctx = new Context()
+    await ctx.plugin({ apply, inject: [] })
+
+    expect(fetchSpy).toHaveBeenCalledExactlyOnceWith('/refresh', { method: 'GET' })
+  })
+
+  it('skips the heartbeat for a transport page, a non-browser runtime, and a malformed declaration', async () => {
+    const fetchSpy = vi.fn(async () => ({ status: 204 }))
+    vi.stubGlobal('fetch', fetchSpy)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+
+    ;(globalThis as Win).location = { hostname: 'localhost' }
+    ;(globalThis as Win).__DSH_COOKIE_REFRESH__ = { intervalMs: 0 }
+    const malformed = new Context()
+    await malformed.plugin({ apply, inject: [] })
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('malformed __DSH_COOKIE_REFRESH__'))
+
+    ;(globalThis as Win).__DSH_COOKIE_REFRESH__ = { intervalMs: 3_600_000 }
+    ;(globalThis as Win).__DSH_TRANSPORT__ = { rpc: {} as ClientConnectionRpc }
+    const transported = new Context()
+    await transported.plugin({ apply, inject: [] })
+    expect(fetchSpy).not.toHaveBeenCalled()
+
+    delete (globalThis as Win).__DSH_TRANSPORT__
+    delete (globalThis as Win).location
+    const headless = new Context()
+    await headless.plugin({ apply, inject: [] })
+    expect(fetchSpy).not.toHaveBeenCalled()
+
+    warnSpy.mockRestore()
   })
 
   it('uses an already decoded rpc carrier from the transport hooks instead of the HTTP caller', async () => {

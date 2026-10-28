@@ -56,6 +56,9 @@ export type SessionPendingInteraction =
     ? SessionPendingInteractionBase
     : SessionPendingInteractionMap[keyof SessionPendingInteractionMap]
 
+/** How an observed stop ended: a failed run acknowledges differently from a clean one. */
+export type SessionCompletionOutcome = 'completed' | 'failed'
+
 /** Independent UI status facts for one Session identity. */
 export interface SessionStatus {
   /** Latest known running state; absent until a baseline or event establishes it. */
@@ -64,6 +67,8 @@ export interface SessionStatus {
   readonly pendingInteraction: SessionPendingInteraction | undefined
   /** Whether an observed stop outside the main view still needs acknowledgement. */
   readonly completionUnread: boolean
+  /** Outcome of that unread stop; present exactly while `completionUnread` is true. */
+  readonly completionOutcome?: SessionCompletionOutcome
 }
 
 /** Current UI status indexed by Session identity. */
@@ -289,7 +294,8 @@ export class UiSession extends Service {
   private readonly pendingDomains: RuntimePendingDomain[] = []
   private pendingSnapshot: ReadonlyMap<SessionId, SessionPendingInteractionBase> = new Map()
   private readonly running = new Map<SessionId, boolean>()
-  private readonly completionUnread = new Set<SessionId>()
+  private readonly unreadStops = new Map<SessionId, SessionCompletionOutcome>()
+  private readonly observedFailures = new Set<SessionId>()
   private statusSnapshot: SessionStatusSnapshot = new Map()
   private readonly statusListeners = new Set<() => void>()
   private mainRetainId: SessionId | undefined
@@ -329,6 +335,9 @@ export class UiSession extends Service {
       const disposeRemoteStatus = ctx.remote.$on('api-session/status', (sessionId, running) => {
         this.observeRunning(sessionId, running)
       })
+      const disposeRemoteError = ctx.remote.$on('api-session/error', (sessionId) => {
+        this.observeFailure(sessionId)
+      })
       this.publishMain()
       this.reconcileStatus()
       return () => {
@@ -336,6 +345,7 @@ export class UiSession extends Service {
         disposeList()
         disposeStatus()
         disposeRemoteStatus()
+        disposeRemoteError()
         this.disposeMainRetain()
         const records = [...this.bindings.values]
         this.bindings.clear()
@@ -491,10 +501,26 @@ export class UiSession extends Service {
     const previous = this.running.get(sessionId)
     const beforeBaseline = this.sessions.list.getSnapshot().phase === 'pending'
     this.running.set(sessionId, running)
-    if (running) this.completionUnread.delete(sessionId)
-    else if ((previous === true || (previous === undefined && beforeBaseline))
-      && !this.isMain(sessionId)) this.completionUnread.add(sessionId)
+    if (running) {
+      this.unreadStops.delete(sessionId)
+      this.observedFailures.delete(sessionId)
+    } else {
+      const stopped = previous === true || (previous === undefined && beforeBaseline)
+      // The failure report arrives before the stop it ends, so the stop reads it here.
+      const failed = this.observedFailures.delete(sessionId)
+      if (stopped && !this.isMain(sessionId)) {
+        this.unreadStops.set(sessionId, failed ? 'failed' : 'completed')
+      }
+    }
     this.publishStatus()
+  }
+
+  /**
+   * Record one Host-reported failure so the stop it ends acknowledges as failed.
+   * @param sessionId - Session whose Agent reported the failure.
+   */
+  private observeFailure(sessionId: SessionId): void {
+    this.observedFailures.add(sessionId)
   }
 
   private reconcileStatus(): void {
@@ -508,13 +534,14 @@ export class UiSession extends Service {
       else if (previous !== row.running) this.observeRunning(id, row.running)
     }
     for (const id of present) {
-      if (this.isMain(id)) this.completionUnread.delete(id)
+      if (this.isMain(id)) this.unreadStops.delete(id)
     }
     if (list.phase === 'ready') {
       for (const id of this.running.keys()) {
         if (present.has(id)) continue
         this.running.delete(id)
-        this.completionUnread.delete(id)
+        this.unreadStops.delete(id)
+        this.observedFailures.delete(id)
       }
     }
     this.publishStatus()
@@ -529,14 +556,16 @@ export class UiSession extends Service {
       ...(Object.keys(this.sessions.list.getSnapshot().byId) as SessionId[]),
       ...this.running.keys(),
       ...this.pendingSnapshot.keys(),
-      ...this.completionUnread,
+      ...this.unreadStops.keys(),
     ])
     const next = new Map<SessionId, SessionStatus>()
     for (const id of ids) {
+      const outcome = this.unreadStops.get(id)
       next.set(id, {
         running: this.running.get(id),
         pendingInteraction: this.pendingSnapshot.get(id),
-        completionUnread: this.completionUnread.has(id),
+        completionUnread: outcome !== undefined,
+        ...(outcome === undefined ? {} : { completionOutcome: outcome }),
       })
     }
     if (sameSessionStatus(this.statusSnapshot, next)) return
@@ -704,7 +733,8 @@ function sameSessionStatus(left: SessionStatusSnapshot, right: SessionStatusSnap
     if (candidate === undefined
       || candidate.running !== status.running
       || candidate.pendingInteraction !== status.pendingInteraction
-      || candidate.completionUnread !== status.completionUnread) return false
+      || candidate.completionUnread !== status.completionUnread
+      || candidate.completionOutcome !== status.completionOutcome) return false
   }
   return true
 }

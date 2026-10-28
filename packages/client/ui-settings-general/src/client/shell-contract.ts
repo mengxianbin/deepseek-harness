@@ -19,6 +19,7 @@ import type { PropsStore } from '@deepseek-ai/dsh-client-store'
 import type { createSettingsShellStore } from './shell-store.ts'
 import type { ShortcutCatalogEntry } from '@deepseek-ai/dsh-client-shortcuts/client'
 import type { DesktopUpdateView } from '../types.ts'
+import type { RestartSignalView } from '../restart.ts'
 
 /** One nav row projected from a settings.section registration's options. */
 export interface SettingsSectionRow {
@@ -54,6 +55,12 @@ export type SettingsRootInjected = {
     sections: HostObservable<readonly SettingsSectionRow[]>
     /** settings.onboarding ledger projected into coordinator order. */
     onboardingSteps: HostObservable<readonly SettingsOnboardingStep[]>
+    /** Whether the Host configured a restart command for this page; false hides the button. */
+    restartConfigured: HostObservable<boolean>
+    /** Sessions currently running, named in the restart confirmation copy. */
+    restartRunningSessions: HostObservable<number>
+    /** Latest restart-signal judgment; undefined before the first delivery. */
+    restartSignal: HostObservable<RestartSignalView | undefined>
   }
 }
 

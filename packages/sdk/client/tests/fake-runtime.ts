@@ -13,6 +13,7 @@
  * - `FAKE_STATUS`: the `session.finished` status (default `ok`).
  * - `FAKE_REASON_KIND`: the `session.finished` reason kind (default `completed`; `none` omits the reason).
  * - `FAKE_ABORT_REASON_KIND`: nested cause for an `aborted` turn (default `user`).
+ * - `FAKE_ABORT_ENTRY`: optional `entry` field added to a non-hook abort cause (R2 probe).
  * - `FAKE_SUBAGENT`: also emit a child session (subagent.started + child event + subagent.finished).
  * - `FAKE_ECHO_CWD`: prefix the assistant text with the process cwd.
  * - `FAKE_ECHO_ENV`: comma-separated env names to echo as `name=value` lines in the assistant text.
@@ -203,7 +204,9 @@ function runTurn(sessionId: string): void {
                 kind: 'aborted',
                 reason: env.FAKE_ABORT_REASON_KIND === 'hook'
                   ? { kind: 'hook', reason: 'scripted hook abort' }
-                  : { kind: env.FAKE_ABORT_REASON_KIND ?? 'user' },
+                  : env.FAKE_ABORT_ENTRY === undefined
+                    ? { kind: env.FAKE_ABORT_REASON_KIND ?? 'user' }
+                    : { kind: env.FAKE_ABORT_REASON_KIND ?? 'user', entry: env.FAKE_ABORT_ENTRY },
               }
               : reasonKind === 'error'
                 ? { kind: 'error', error: { message: 'scripted child error', code: 'UNKNOWN' } }

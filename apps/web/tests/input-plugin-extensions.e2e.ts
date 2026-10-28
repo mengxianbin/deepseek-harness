@@ -5,7 +5,7 @@ import { expect, it, onTestFinished } from 'vitest'
 import {
   captureStableAria, compareOrRefreshGolden, launchWebScaffold, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { connectFreshWorkspace, newEnglishPage } from './support.ts'
+import { connectFreshWorkspace, newEnglishPage, selectGlobalPanel } from './support.ts'
 
 const bundle = fileURLToPath(new URL('./fixtures/plugins/fixture-input-extension', import.meta.url))
 const expected = fileURLToPath(new URL('./expected/input-plugin-extensions.expected.md', import.meta.url))
@@ -62,7 +62,8 @@ it('expands an input activity and inserts one undoable result without overwritin
 
 it('offers bundle guidance only after explicit activation and navigates to its configuration', async () => {
   const { page, tripwire } = await fixture(false)
-  await page.getByRole('button', { name: 'Plugins', exact: true }).click()
+  // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
+  await selectGlobalPanel(page, 'Plugins')
   const toggle = page.getByRole('switch', { name: 'Enable @fixture/input-extension', exact: true })
   await toggle.waitFor()
   const dialog = page.getByRole('dialog', { name: 'Input plugin setup', exact: true })

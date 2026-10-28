@@ -21,6 +21,9 @@ const DIR = fileURLToPath(new URL('../../../snapshots/web/changed-files-turn', i
 const FIXTURE = join(DIR, 'session.v3.jsonl')
 const MODE = webSnapshotMode()
 const PROMPT = '不用先查看目录，直接做四件事：把 intro.md 里的标题「示例项目」改成「项目说明」，新建 src/util.ts 导出一个两数相加的 add 函数，新建 app.local 写一行 mode=demo，最后用 bash 在 notes.txt 末尾追加一行 done。'
+// FORK(replay-residual-1022): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 修法).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 /** Seed a committed repository so the turn's own edits are the only difference between its snapshots; `*.local` stays ignored. */
 async function seedRepository(cwd: string): Promise<void> {
@@ -78,7 +81,10 @@ describe('web e2e: a git workspace turn ends with its changed files', () => {
     scaffold = await launchWebScaffold({
       developerTools: false,
       compareReplaySession: MODE === 'refresh' ? true : 'read-only',
-      extraOverlayPath: fileURLToPath(new URL('./changed-files-turn.overlay.yml', import.meta.url)),
+      extraOverlayPath: [
+        fileURLToPath(new URL('./changed-files-turn.overlay.yml', import.meta.url)),
+        CATALOG_OVERLAY,
+      ],
       ...(replayOverride === undefined ? {} : { replayFixture: FIXTURE, replayOverride }),
     })
     await seedRepository(join(scaffold.workspaceCwd, 'workspace'))

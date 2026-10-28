@@ -124,9 +124,10 @@ export type ModelRetryNode = LlmRetryEventData & {
 }
 
 /**
- * Durable terminal notice for a turn that ended with an error, a sign-out
- * cancellation, or an interruption by a DSH stop; the turn's settled retry
- * chain renders separately and never replaces this node.
+ * Durable terminal notice for a turn that ended with an error, a user
+ * cancellation, a sign-out cancellation, or an interruption by a DSH stop;
+ * the turn's settled retry chain renders separately and never replaces this
+ * node.
  */
 export interface TurnErrorNode {
   kind: 'turn-error'
@@ -140,8 +141,8 @@ export interface TurnErrorNode {
   message: string
   /**
    * Stable provider failure code when recorded, or a Client display code:
-   * `ACCOUNT_SIGNED_OUT` for a sign-out cancellation, `INTERRUPTED` for a
-   * turn closed after DSH stopped.
+   * `USER_STOPPED` for a user cancellation, `ACCOUNT_SIGNED_OUT` for a
+   * sign-out cancellation, `INTERRUPTED` for a turn closed after DSH stopped.
    */
   code?: string
 }

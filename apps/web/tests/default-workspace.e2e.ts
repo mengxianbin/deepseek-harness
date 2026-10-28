@@ -14,6 +14,9 @@ const FIXTURE = fileURLToPath(new URL('../../../snapshots/web/fresh-round-trip/s
 const EXPECTED = fileURLToPath(new URL('../../../snapshots/web/default-workspace/ui.expected.md', import.meta.url))
 const FAILURE_EXPECTED = fileURLToPath(new URL('./expected/default-workspace/failure.expected.md', import.meta.url))
 const MODE = webSnapshotMode()
+// FORK(replay-residual-1022): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 修法).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 describe.skipIf(MODE === 'record')('web e2e: default Workspace', () => {
   it('prepares a blank Session on startup, reuses it after reload, and sends through the ordinary composer', async () => {
@@ -24,6 +27,7 @@ describe.skipIf(MODE === 'record')('web e2e: default Workspace', () => {
       // The shared recording remains read-only; replay compares the complete persisted Session.
       compareReplaySession: MODE === 'replay',
       paceMs: 5,
+      extraOverlayPath: CATALOG_OVERLAY,
     })
     onTestFinished(() => scaffold.close())
     const browser = await chromium.launch()
@@ -71,7 +75,7 @@ describe.skipIf(MODE === 'record')('web e2e: default Workspace', () => {
   })
 
   it('reports a startup directory conflict and opens the composed folder picker for recovery', async () => {
-    const scaffold = await launchWebScaffold({ firstUse: true })
+    const scaffold = await launchWebScaffold({ firstUse: true, extraOverlayPath: CATALOG_OVERLAY })
     onTestFinished(() => scaffold.close())
     const parent = join(scaffold.workspaceCwd, 'Documents', 'deepseek-harness')
     await mkdir(parent, { recursive: true })
@@ -120,7 +124,7 @@ describe.skipIf(MODE === 'record')('web e2e: default Workspace', () => {
   })
 
   it('keeps an explicitly deleted default absent on startup', async () => {
-    const scaffold = await launchWebScaffold()
+    const scaffold = await launchWebScaffold({ extraOverlayPath: CATALOG_OVERLAY })
     onTestFinished(() => scaffold.close())
     const browser = await chromium.launch()
     try {

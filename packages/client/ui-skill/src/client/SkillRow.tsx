@@ -25,6 +25,13 @@ function firstLine(text: string): string {
   return newline === -1 ? text : text.slice(0, newline)
 }
 
+/** Locale-neutral char count for the collapsed payload hint (7288 → "7.3k"). */
+function sizeHint(text: string | null): string | null {
+  if (text === null) return null
+  const n = text.length
+  return n < 1000 ? String(n) : `${(n / 1000).toFixed(1)}k`
+}
+
 /** Skill names are the only call argument the compact row presents. */
 function skillName(argsRaw: string, callId: string): string {
   try {
@@ -134,6 +141,10 @@ function StartedSkillRow({ block, inspect, t }: Exclude<SkillRowProps, { phase: 
     onKeyDown: toggleFromKeyboard,
   } : {}
   const leading = disclosureLeading(open, expandable)
+  // Payload-size hint so a collapsed row still signals that instructions exist
+  // (visibility ruling 2026-10-24, option B); aria-hidden keeps the row's
+  // accessible name stable for the disclosure semantics.
+  const hint = model.state === 'ok' && !open ? sizeHint(model.output) : null
   return (
     <div className={css.card} data-tool="skill" data-state={model.state}>
       <div
@@ -153,6 +164,14 @@ function StartedSkillRow({ block, inspect, t }: Exclude<SkillRowProps, { phase: 
             <TextShimmer>{summary}</TextShimmer>
           </span>
         </TextShimmer>
+        {hint !== null ? (
+          <span className={css.sizeHint} aria-hidden>{`${t('row.instructions')} ${hint}`}</span>
+        ) : null}
+        {expandable ? (
+          <span className={css.trailing} data-open={open || undefined} aria-hidden>
+            <IconChevronDownOutlineRegular />
+          </span>
+        ) : null}
       </div>
       {open ? (
         <div className={css.bodyWrap}>

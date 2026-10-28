@@ -17,3 +17,21 @@ export type ApiRemoteForwardedEvent = typeof API_REMOTE_FORWARDED_EVENTS[number]
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteEventSelection extends Record<ApiRemoteForwardedEvent, true> {}
 }
+
+declare module '@deepseek-ai/cordis' {
+  interface Events {
+    /**
+     * The Host's restart-signal polling sensor recomputed the state machine
+     * after a moved source or configuration fingerprint; subscribed pages
+     * recheck to publish the fresh judgment (restart-signal design C.5, the
+     * host-detect → push leg that closes R3「页面开着不操作角标自现」).
+     * Payload-free by design: the judgment itself rides the recheck route,
+     * not the event, so the channel cannot drift from the state machine.
+     * Declared here rather than in the ui-settings-general owner package:
+     * that package consumes this assembly on its Client face, so an
+     * owner-side declaration would close a project-reference cycle.
+     * @mode emit
+     */
+    'restart-signal/changed'(): void
+  }
+}

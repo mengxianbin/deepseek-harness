@@ -483,7 +483,7 @@
   flex: none;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   margin-bottom: 8px;
 }
 
@@ -519,6 +519,21 @@
 .panelRow:focus-visible {
   outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
   outline-offset: -2px;
+}
+
+/* The More launcher keeps the panel rows' geometry inside the menu's anchor wrapper. */
+.moreAnchor {
+  display: flex;
+  flex-direction: column;
+}
+
+.panelRow[aria-expanded='true'] {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.moreMenu {
+  width: 288px;
+  max-width: calc(100vw - 24px);
 }
 
 .panelGlyph {
@@ -589,10 +604,11 @@
 }
 
 /* FORK dsh-local (sidebar-layout round 3): the wide foot is ONE row —
-   Settings, the ⋯ menu, then the footer actions (user ruling order) — while
-   the width:100% seats above keep the rail's stack. The dsh-usage glance card
-   is REMOVED (usage-glance ruling, 2026-10-15): its content moved to the
-   logo-row plan glance beside the whale mark, so nothing rides above this row. */
+   Settings, the footer actions, then the ⋯ menu (user ruling order,
+   sidebar-footer-ui-1026) — while the width:100% seats above keep the rail's
+   stack. The dsh-usage glance card is REMOVED (usage-glance ruling,
+   2026-10-15): its content moved to the logo-row plan glance beside the whale
+   mark, so nothing rides above this row. */
 .footRow {
   display: flex;
   align-items: center;
@@ -611,21 +627,86 @@
 
 /* FORK dsh-local (sidebar-layout round 3b): dsh-web-all's shipped CSS orders
    [class*=settingsArea] (order:3) inside its own foot scheme; pin the row to
-   the ruled order — Settings (3, plugin) → ⋯ (4) → footer actions (5).
-   Without the plugin every order falls back to 0 = DOM order, same result. */
+   the ruled order. FORK dsh-local (sidebar-footer-ui-1026): the ruling order
+   is Settings (3, plugin) → footer actions (4) → ⋯ menu (5) — the ⋯ menu sits
+   RIGHT OF the update badge, and the phone-pairing / remote-access actions
+   left the foot row for inside the menu. Without the plugin every order falls
+   back to 0 = DOM order, same result. */
 /* FORK dsh-local (sidebar-layout round 3c): the ⋯ button sits inside the
    Menu primitive's anchor SPAN — the span is the flex item, so the ruled row
    order rides this class (via Menu's className), not the button. */
 .footRow .panelMoreSlot {
-  order: 4;
+  order: 5;
 }
 
 .footRow .footerActions {
-  order: 5;
+  order: 4;
 }
 
 .panelMore {
   flex: none;
+}
+
+/* FORK dsh-local (sidebar-footer-ui-1026): the ⋯-menu action seat renders
+   third-party foot triggers (compact icon pills sized for the foot) as
+   full-width menu rows — the row label rides the trigger's own localized
+   aria-label, so no copy is owned here. Specificity note: the nested
+   [data-slot] anchor is display:contents, so the ROW geometry belongs to the
+   trigger button itself. */
+.moreActions {
+  display: flex;
+  flex-direction: column;
+}
+
+.moreActions [data-slot] button {
+  display: flex;
+  align-items: center;
+  /* FORK dsh-local (sidebar-foot-1027 layout fix, 2026-10-27): a trigger that
+     still carries its FOOT-seat CSS brings an unscoped justify-content (the
+     remote-bridge pairing row centers its lone in-flow icon over the label);
+     the shared rule owns the row's alignment, so pin the start edge — default
+     for the rows written against this contract, a correction for the ones
+     that predate it. */
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  line-height: 18px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.moreActions [data-slot] button::after {
+  content: attr(aria-label);
+  /* FORK dsh-local (sidebar-foot-1027 layout fix, 2026-10-27): this pseudo
+     doubles as a trigger's own ::after (remote-bridge draws its enlarged hit
+     area there as an absolutely positioned box). Only the content was won
+     above, so the label rode that absolute geometry — out of flow, flush past
+     the card's left edge (first glyph clipped) while the icon sat centered.
+     The label box belongs to this rule too: keep it a normal in-flow flex
+     item so it trims with the ellipsis below. */
+  position: static;
+  inset: auto;
+  border-radius: 0;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.moreActions [data-slot] button:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.moreActions [data-slot] button:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-info-primary, currentColor);
+  outline-offset: -2px;
 }
 
 .collapsed .footArea {
@@ -640,11 +721,15 @@
 }
 
 /* FORK dsh-local (usage glance v2, 2026-10-15): the wide logo row carries only
-   the usage glance and the panel toggle — no brand / New Session button. The
-   glance body is the two bars' column plus today's compact token total in its
-   own column to the right; both tracks keep the same fixed width and sit
-   left-aligned, each with its numerator/denominator read-out immediately to
-   the right of the track. */
+   the usage glance and the panel toggle — no brand / New Session button.
+   FORK dsh-local (usage glance v2.4, 2026-10-22): the glance body is the
+   quota-window rows' column (one row per on-screen window — short label,
+   track with the usage fill and time tick, merged read-out) plus the
+   今日/周期 token rows in their own column to the right; every track keeps
+   the same fixed width and sits left-aligned. Rows stack GAPLESS — each
+   12px line box carries its 6px track with 3px lead, so three rows plus the
+   button's 4px padding total exactly 40px, the height the Windows titlebar
+   logo row allows (60px web / 40px titlebar, see .logoRow). */
 .usageGlance {
   flex: 1;
   min-width: 0;
@@ -655,6 +740,9 @@
 .glanceButton {
   display: inline-flex;
   align-items: center;
+  /* FORK (usage glance v2.4.3): the button stretches with the sidebar so the
+     elastic chain (button → body → rows → track) can consume the whole width. */
+  flex: 1 1 auto;
   min-width: 0;
   max-width: 100%;
   /* FORK (usage glance v2.1): no left inset — the bars start flush with the
@@ -674,31 +762,63 @@
 .glanceBody {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  /* FORK (usage glance v2.4.3): the stats column stands clear of the readouts
+     — with figure-space padded columns the percent↔pair gutter is a constant
+     ~5px, and this gap must visibly read as the wider one (用户：天数列应与
+     百分比列更紧凑，而不是与今日列更紧凑). */
+  gap: 12px;
+  flex: 1 1 auto;
   min-width: 0;
   max-width: 100%;
 }
 
+/* FORK (usage glance v2.4): gapless stacking — the 12px line boxes already
+   space the 6px tracks 6px apart, and the third row would blow the 40px
+   titlebar cap with any real gap. */
 .glanceRows {
   display: inline-flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 0;
   min-width: 0;
+  /* FORK (usage glance v2.4.2, 2026-10-22): overflow safety — a squeezed row
+     box clips its fixed-width columns instead of spilling them over the stats
+     column (the text-overlap failure the two-column split exposed on narrow
+     sidebars). v2.4.3: rows also grow (flex 1) so the tracks can fill a wide
+     sidebar — the track absorbs every spare px first (.glanceTrack). */
+  overflow: hidden;
+  flex: 1 1 auto;
 }
 
+/* FORK (usage glance v2.4.2): inner gaps 6→4px — every px goes to the
+   narrow-sidebar budget. */
 .glanceRow {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
   max-width: 100%;
+}
+
+/* FORK (usage glance v2.4): the per-row window short label (月 / 周 / 5h),
+   pinned to a 14px column so all tracks start at the same x in a locale. */
+.glanceLabel {
+  flex: none;
+  min-width: 14px;
+  font-size: 10px;
+  line-height: 12px;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--dsw-alias-label-secondary);
 }
 
 .glanceTrack {
   position: relative;
-  flex: 0 1 88px;
+  /* FORK (usage glance v2.4.3): the ONLY elastic element BOTH ways — it grows
+     to fill a wide sidebar (max dynamic length, 2026-10-22 用户反馈) and
+     shrinks down to a 24px sliver before any fixed column would clip. */
+  flex: 1 1 88px;
   width: 88px;
-  min-width: 44px;
+  min-width: 24px;
   height: 6px;
   border-radius: var(--dsw-radius-sm);
   background: var(--dsw-alias-border-l2);
@@ -716,25 +836,105 @@
   transition: width 300ms ease;
 }
 
-.glanceValue {
+/* FORK (usage glance v2.4): an over-pace fill splits at the tick —
+   `--glance-split` is the tick position converted to a share OF THE FILL
+   (`tick / percent`, since the gradient box is the fill, not the track); the
+   primary color covers the on-pace part and the warn color takes the overrun
+   (usage past the clock). v2.4.2 fixed the base: the boundary now lands
+   exactly under the tick (2026-10-22 用户实测交界与刻度相离 → 修正). */
+.glanceFillOver {
+  background: linear-gradient(
+    to right,
+    var(--dsw-alias-state-business-primary) var(--glance-split, 0%),
+    var(--dsw-alias-state-warn-primary) var(--glance-split, 0%)
+  );
+}
+
+/* FORK (usage glance v2.4): the time-progress tick — a 1px rule at the
+   window's continuous elapsed share, painted over the fill; on an over-pace
+   row it is also the boundary where the fill's gradient flips from the
+   primary color to the warn color (the overrun segment). */
+.glanceTick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--dsw-alias-label-primary);
+}
+
+/* FORK (usage glance v2.4.1, 2026-10-22 用户指示): the percent column — fixed
+   width, right-aligned so the figures stack into one readable column beside
+   the track (100% at 10px tabular fits the 28px). */
+.glancePercent {
   flex: none;
-  min-width: 52px;
+  width: 28px;
   font-size: 10px;
   line-height: 12px;
   letter-spacing: 0;
   font-variant-numeric: tabular-nums;
+  text-align: right;
   color: var(--dsw-alias-label-secondary);
 }
 
-/* FORK dsh-local (usage glance v2.2, 2026-10-15): the today column stacks — the
-   compact token total sits above a small data-refresh stamp (`26.10.15 21:30`),
-   both left-aligned in their own sub-column to the right of the two bars. */
-.glanceToday {
+/* FORK (usage glance v2.4.1 → v2.4.3): the time-pair column — right-aligned,
+   width fitting the figure-space padded 6-char widest pair (`31/31d`, 36px);
+   a row without a span renders an em dash. */
+.glancePair {
+  flex: none;
+  width: 36px;
+  font-size: 10px;
+  line-height: 12px;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* FORK (usage glance v3, 2026-10-24): the >=85% switch-trigger row (the
+   water line at the A-plan threshold, go-plan 2026-10-22 §5) — the percent
+   figure paints in the error red on every marked row. */
+.glancePercentTrigger {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+/* FORK (usage glance v3): the week/month rows' fill goes solid error red
+   while the trigger holds — declared after .glanceFillOver so it wins the
+   same-specificity race and covers the over-pace split (the alarm outranks
+   the pace split; the tick still marks the pace). */
+.glanceFillTrigger {
+  background: var(--dsw-alias-state-error-primary);
+}
+
+/* FORK dsh-local (usage glance v2.3, 2026-10-22): the stats column stacks two
+   labeled rows — a muted 10px locale label (今日 / 周期) beside a 12px compact
+   total — in their own sub-column to the right of the window rows; the cycle
+   row rides pickWindow's main window (month preferred — the window row it
+   aliases; re-affirmed when v2.4 split the bars per window). The v2.2
+   refresh-stamp line moved into this column's tooltip, so no third line exists
+   and the column stays inside the rows' height. */
+.glanceStats {
   flex: none;
   display: inline-flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 1px;
+}
+
+.glanceStat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.glanceStatLabel {
+  flex: none;
+  font-size: 10px;
+  line-height: 13px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.glanceStatValue {
   font-size: 12px;
   line-height: 14px;
   font-weight: 600;
@@ -743,15 +943,12 @@
   color: var(--dsw-alias-label-primary);
 }
 
-.glanceTodayTokens {
-  display: block;
-}
-
-.glanceStamp {
-  display: block;
-  font-size: 9px;
-  line-height: 11px;
-  font-weight: 400;
+/*
+ * A stale-carried balance figure (FORK usage-glance-stale-fact-ttl): the
+ * probe half reports an error while the row still carries the last success,
+ * so the number reads dimmed behind its asterisk instead of as a live value.
+ */
+.glanceStatValueStale {
   color: var(--dsw-alias-label-secondary);
 }
 

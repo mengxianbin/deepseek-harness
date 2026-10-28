@@ -55,7 +55,7 @@ function hook<T>(snapshot: T) {
 const idSet = (...ids: string[]): ReadonlySet<SessionId> => new Set(ids.map(sid))
 
 /** The row every action is rendered for: its owner share as the browser passes it. */
-const ROW = { sessionId: sid('one'), displayTitle: 'Session title' }
+const ROW = { sessionId: sid('one'), displayTitle: 'Session title', blank: false }
 const one: SessionSummary = {
   id: ROW.sessionId, displayTitle: ROW.displayTitle, running: false, blank: false, updatedAt: 1, retainedBy: {},
 }
@@ -180,6 +180,14 @@ describe('pin action', () => {
     expect(button.container.childElementCount).toBe(0)
     expect(screen.queryByRole('button')).toBeNull()
   })
+
+  it('row button offers nothing on a blank placeholder row (FORK blank-row-archive-1026)', () => {
+    const pin = pinShare()
+    const view = render(<PinSessionRowButton {...actionRow} {...pin} blank />)
+    expect(view.container.childElementCount).toBe(0)
+    expect(screen.queryByRole('button')).toBeNull()
+    expect(pin.pinSession).not.toHaveBeenCalled()
+  })
 })
 
 describe('archive action', () => {
@@ -224,6 +232,13 @@ describe('archive action', () => {
     fireEvent.click(screen.getByRole('button', { name: '取消归档' }))
     expect(archive.unarchiveSession).toHaveBeenCalledWith(sid('one'))
     expect(archive.archiveSession).toHaveBeenCalledOnce()
+  })
+
+  it('row button still archives a blank placeholder row (FORK blank-row-archive-1026)', () => {
+    const archive = archiveShare()
+    render(<ArchiveSessionRowButton {...actionRow} {...archive} blank />)
+    fireEvent.click(screen.getByRole('button', { name: '归档会话' }))
+    expect(archive.archiveSession).toHaveBeenCalledWith(sid('one'))
   })
 })
 

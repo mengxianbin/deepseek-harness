@@ -6,6 +6,8 @@ Tokens prefixed with @ are paths the user explicitly referenced. Relative paths 
 
 Check the [exit code: N] marker on every bash result; investigate failures before moving on.
 
+Non-zero exits are reported as `[exit code: N]` markers; investigate failures before moving on. On Windows a killed process settles as `[exit code: 1]` without a signal marker; treat a bare exit 1 after an interruption as a termination, not a command failure.
+
 Use the read tool — not shell commands like cat — to inspect text files. Use offset and limit to continue reading large files.
 
 Read an existing file before overwriting it with write (the default fs-observation-policy requires it) and prefer edit for targeted changes.

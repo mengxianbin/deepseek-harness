@@ -43,7 +43,7 @@ export interface SessionSummary {
   /**
    * New Session presentation and reuse eligibility, derived from the Host
    * summary, `sessionListMetadata`, and client acceptance/running observations.
-   * Workspace reconnection may reuse a blank in the same workspace. Filtering
+   * New Session and Workspace reconnection may reuse a blank in the same workspace. Filtering
    * stays with the consumer: the store carries every row, while the Workspace
    * browser shows only the selected blank entry.
    */
@@ -61,6 +61,16 @@ export interface SessionListState {
   byId: Record<SessionId, SessionSummary>
   /** Arrival lifecycle projected 1:1 from the manager snapshot (see SessionListPhase): empty-with-ready means "truly no sessions". */
   phase: SessionListPhase
+  /**
+   * FORK dsh-local (f5-list-states): pull-activity axis projected 1:1 from the
+   * manager snapshot — `error` while a `session.list` pull failed (`phase`
+   * stays the arrival axis; the sidebar's error surface reads this). The
+   * controller store always projects it; hand-built fixtures may omit it,
+   * which reads as "no pull activity".
+   */
+  state?: 'idle' | 'loading' | 'error'
+  /** The last pull's failure while `state` is `error`; null otherwise. */
+  error?: RemoteFailure | null
   /** Shared projection values and explicit-read state, including unopened Sessions. */
   projectionsBySession: Readonly<Record<SessionId, SessionProjectionSnapshot>>
 }
@@ -259,7 +269,7 @@ export class ClientSessions implements ISessions {
   ) {
     this.manager = new SessionManager(remote)
     this.list = createSnapshotStore<SessionListState>({
-      ids: [], byId: {}, phase: 'pending', projectionsBySession: {},
+      ids: [], byId: {}, phase: 'pending', state: 'idle', error: null, projectionsBySession: {},
     })
     const disposeManagerProjection = this.manager.subscribe(() => { this.projectList() })
     rootCtx.effect(() => async () => {
@@ -283,10 +293,10 @@ export class ClientSessions implements ISessions {
   }
 
   retain(target: SessionTarget, options: SessionRetainOptions): SessionReference {
-    const { source, signal } = options
+    const { source, signal, persistedSelection } = options
     signal?.throwIfAborted()
     if (this.closed) throw new Error('Session Controller is disposed')
-    const id = this.manager.resolveTarget(target)
+    const id = this.manager.resolveTarget(target, persistedSelection === true)
     const reference = this.retainScope(id, source)
     try {
       reference.attachOpening(this.manager.get(id).open(), signal)
@@ -462,6 +472,7 @@ export class ClientSessions implements ISessions {
     increaseTitle?: boolean
     onCreated?: (childId: SessionId) => void
     allowMigration?: boolean
+    entry?: string
   }): Promise<SessionId> {
     const sourceTitle = opts.increaseTitle
       ? this.list.getSnapshot().byId[opts.sessionId]?.title
@@ -470,6 +481,7 @@ export class ClientSessions implements ISessions {
       sessionId: opts.sessionId,
       ...(opts.atSeq === undefined ? {} : { atSeq: SessionSeq(opts.atSeq) }),
       ...(opts.allowMigration === undefined ? {} : { allowMigration: opts.allowMigration }),
+      ...(opts.entry === undefined ? {} : { entry: opts.entry }),
     })
     if (!result.ok) throw new SessionForkError(result.error, opts.sessionId)
     this.projectList()
@@ -558,7 +570,10 @@ export class ClientSessions implements ISessions {
       if (count === 0) this.retireScope(id, record)
       else this.publishRetention(id)
     })
-    if (this.list.getSnapshot().byId[id] === undefined && this.manager.subagentAddress(id) !== undefined) {
+    // FORK dsh-local (f5-list-states): an unlisted identity retained as the
+    // main view (or as an address) projects its fallback row immediately.
+    if (this.list.getSnapshot().byId[id] === undefined
+      && (this.manager.subagentAddress(id) !== undefined || source === 'mainView')) {
       this.projectList()
     }
     this.publishRetention(id)
@@ -619,7 +634,7 @@ export class ClientSessions implements ISessions {
   private projectList(): void {
     const previousById = this.list.getSnapshot().byId
     const {
-      items, phase, projectionsBySession,
+      items, phase, state, error, projectionsBySession,
     } = this.manager.getListSnapshot()
     const ids: SessionId[] = []
     const byId: Record<SessionId, SessionSummary> = {}
@@ -671,7 +686,15 @@ export class ClientSessions implements ISessions {
     for (const [id, record] of this.scopes) {
       if (byId[id] !== undefined) continue
       const address = this.manager.subagentAddress(id)
-      if (address === undefined) continue
+      // FORK dsh-local (f5-list-states): a mainView-retained identity also gets
+      // a fallback row before session.list lands — ui-session's main-binding
+      // scan (and every current-session reader) resolves through byId, so
+      // without this row the conversation seat stays absent until the full
+      // catalog arrives. A pre-list mainView retain is a non-blank selection
+      // restore (blank selections ride the catalog path), so blank reads false.
+      const mainViewRetained = address === undefined
+        && (record.retention.retainedBy.mainView ?? 0) > 0
+      if (address === undefined && !mainViewRetained) continue
       const previous = previousById[id]
       const snapshot = record.session.getSnapshot()
       const projectionValues = this.manager.projectionValues(id)
@@ -681,14 +704,15 @@ export class ClientSessions implements ISessions {
         ...(previous ?? { id, displayTitle: id, updatedAt: 0 }),
         running: snapshot.running,
         retainedBy: record.retention.retainedBy,
-        blank: snapshot.blank,
-        parentId: address.parentSessionId,
-        origin: 'subagent',
+        blank: address === undefined ? false : snapshot.blank,
+        ...(address === undefined
+          ? {}
+          : { parentId: address.parentSessionId, origin: 'subagent' }),
         ...(projectionValues === undefined ? {} : { projectionValues }),
         ...(title === undefined ? {} : { title, displayTitle: title }),
       }
     }
-    this.list.set({ ids, byId, phase, projectionsBySession })
+    this.list.set({ ids, byId, phase, state, error, projectionsBySession })
   }
 
   private startScopeDrop(

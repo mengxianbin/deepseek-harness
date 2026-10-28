@@ -100,6 +100,35 @@
   color: var(--dsw-alias-state-warn-label);
 }
 
+/* Collapsed payload hint (visibility ruling 2026-10-24, option B). */
+.sizeHint {
+  flex: none;
+  margin-left: 8px;
+  font-size: 11px;
+  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
+  color: var(--dsw-alias-label-caption);
+}
+
+/* Always-visible disclosure chevron; rotates with the expanded state. */
+.trailing {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  color: var(--dsw-alias-label-caption);
+  transform: rotate(-90deg);
+  transition: transform 100ms ease;
+}
+
+.trailing svg {
+  width: calc(12px + var(--dsh-content-font-delta, 0px));
+  height: calc(12px + var(--dsh-content-font-delta, 0px));
+}
+
+.trailing[data-open] {
+  transform: rotate(0deg);
+}
+
 .bodyWrap {
   display: flex;
   flex-direction: column;
@@ -196,6 +225,7 @@
   .row,
   .iconIdle,
   .chevronHover,
+  .trailing,
   .inspectButton {
     transition: none;
   }

@@ -14,6 +14,9 @@ import type { ClientConnectionRpc } from '../rpc.ts'
 import { resolveConnectionConfig } from '../recovery-config.ts'
 import type { ConnectionInteractions } from '../connect-protocol.ts'
 import { openConnectionWebSocket, type ConnectionWebSocket, type ConnectionWebSocketFactory } from './socket.ts'
+import { resolveCookieRefresh, startCookieRefresh, type CookieRefreshConfig } from './cookie-refresh.ts'
+
+export type { CookieRefreshConfig } from './cookie-refresh.ts'
 
 export type { ConnectionInteractions } from '../connect-protocol.ts'
 export type { ConnectionWebSocket, ConnectionWebSocketFactory } from './socket.ts'
@@ -117,6 +120,7 @@ export interface ClientTransportHooks {
 interface ClientTransportGlobal {
   __DSH_TRANSPORT__?: ClientTransportHooks
   __DSH_CONNECTION_RECOVERY__?: unknown
+  __DSH_COOKIE_REFRESH__?: unknown
 }
 
 /** Browser location fields used to classify loopback authority. */
@@ -132,6 +136,11 @@ export interface ConnectionInstallOptions {
   readonly transport?: ClientTransportHooks
   /** Reconnect timing overrides; omitted fields use controller defaults. */
   readonly recovery?: ConnectionRecoveryConfig
+  /**
+   * Cookie-refresh heartbeat cadence for the served web app: pages using the
+   * browser cookie carrier only. Omission, or any explicit transport, disables it.
+   */
+  readonly cookieRefresh?: CookieRefreshConfig
   /** Page location; omit for a non-browser composition. */
   readonly location?: ConnectionLocation
 }
@@ -327,6 +336,10 @@ export function installConnection(ctx: Context, options: ConnectionInstallOption
       }
     },
   }
+  if (options.cookieRefresh !== undefined) {
+    const cookieRefresh = options.cookieRefresh
+    ctx.effect(() => startCookieRefresh(cookieRefresh), 'client-connection: cookie refresh')
+  }
   ctx.provide('connection', handle)
 }
 
@@ -338,9 +351,17 @@ export function apply(ctx: Context): void {
   const globals = globalThis as ClientTransportGlobal
   const pageLocation = typeof location === 'undefined' ? undefined : location
   const transport = globals.__DSH_TRANSPORT__
+  const rawRefresh = globals.__DSH_COOKIE_REFRESH__
+  const cookieRefresh = resolveCookieRefresh(rawRefresh)
+  if (rawRefresh !== undefined && cookieRefresh === undefined) {
+    console.warn('[connection] ignoring malformed __DSH_COOKIE_REFRESH__ declaration')
+  }
   installConnection(ctx, {
     ...(transport === undefined ? {} : { transport }),
     recovery: resolveConnectionConfig(globals.__DSH_CONNECTION_RECOVERY__),
+    // The heartbeat exchanges the browser cookie; only the served page without
+    // an explicit transport uses that cookie carrier.
+    ...(transport === undefined && pageLocation !== undefined && cookieRefresh !== undefined ? { cookieRefresh } : {}),
     ...(pageLocation === undefined ? {} : { location: pageLocation }),
   })
 }

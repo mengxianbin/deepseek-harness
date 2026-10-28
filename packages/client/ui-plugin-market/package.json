@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-client-ui-plugin-market",
   "description": "Discover tab of the dsh web Plugins page: browse configured plugin market indexes and install their bundles",
-  "version": "0.2.1-rc.2",
+  "version": "0.2.1-rc.3",
   "publishConfig": {
     "access": "public"
   },
@@ -36,7 +36,7 @@
     }
   },
   "scripts": {
-    "bundle": "tsdown",
+    "bundle": "tsx ../../scripts/restart-signal/build-stamp.ts run --faces auto -- tsdown",
     "watch": "tsdown --watch"
   },
   "license": "MIT",

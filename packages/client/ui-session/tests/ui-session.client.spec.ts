@@ -31,6 +31,7 @@ interface SessionsBench {
   setMainView(id: SessionId, count: number): void
   setRetainInfo(id: SessionId, count: number): void
   emitStatus(id: SessionId, running: boolean): void
+  emitError(id: SessionId, message: string): void
   release(id: SessionId): Promise<void>
 }
 
@@ -40,15 +41,20 @@ const roots: Context[] = []
 
 function createSessionsBench(ctx: Context): SessionsBench {
   roots.push(ctx)
-  let statusListener: ((id: SessionId, running: boolean) => void) | undefined
+  const listeners = new Map<string, (id: SessionId, value: boolean | string) => void>()
   ctx.provide('remote', {
-    $on: (_event: string, listener: (id: SessionId, running: boolean) => void) => {
-      statusListener = listener
+    $on: (event: string, listener: (id: SessionId, value: boolean | string) => void) => {
+      listeners.set(event, listener)
       return () => {
-        if (statusListener === listener) statusListener = undefined
+        if (listeners.get(event) === listener) listeners.delete(event)
       }
     },
   } as never)
+  const remoteListener = (event: string) => {
+    const listener = listeners.get(event)
+    if (listener === undefined) throw new Error(`${event} is not subscribed`)
+    return listener
+  }
   const list = createSnapshotStore<SessionListState>({
     ids: [],
     byId: {},
@@ -171,8 +177,10 @@ function createSessionsBench(ctx: Context): SessionsBench {
       })
     },
     emitStatus(id, running) {
-      if (statusListener === undefined) throw new Error('api-session/status is not subscribed')
-      statusListener(id, running)
+      remoteListener('api-session/status')(id, running)
+    },
+    emitError(id, message) {
+      remoteListener('api-session/error')(id, message)
     },
     async release(id) {
       bindings.delete(id)
@@ -560,6 +568,7 @@ describe('UiSession status', () => {
     expect(service.sessionStatus.getSnapshot().get(id)?.running).toBe(true)
     bench.list.update((draft) => { draft.byId[id]!.running = false })
     expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(true)
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('completed')
     bench.setMainView(id, 1)
     expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(false)
     bench.setMainView(id, 0)
@@ -586,6 +595,41 @@ describe('UiSession status', () => {
     off()
   })
 
+  it('marks a stop whose run reported a failure as failed until the Session opens or reruns', () => {
+    const ctx = new Context()
+    const bench = createSessionsBench(ctx)
+    const id = sessionId('f1')
+    bench.binding(id)
+    const service = createUiSession(ctx, bench)
+
+    // The failure report arrives while the run is still open, before its stop.
+    bench.emitStatus(id, true)
+    bench.emitError(id, 'Connection error')
+    bench.emitStatus(id, false)
+    expect(service.sessionStatus.getSnapshot().get(id)).toEqual({
+      running: false,
+      pendingInteraction: undefined,
+      completionUnread: true,
+      completionOutcome: 'failed',
+    })
+
+    // Opening the Session acknowledges the failure reminder.
+    bench.setMainView(id, 1)
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(false)
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBeUndefined()
+    bench.setMainView(id, 0)
+
+    // A failure observed only mid-run cannot outlive that run's clean stop.
+    bench.emitError(id, 'stale failure without its stop')
+    bench.emitStatus(id, false)
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(false)
+    bench.emitStatus(id, true)
+    bench.emitError(id, 'Connection error')
+    bench.emitStatus(id, true)
+    bench.emitStatus(id, false)
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('completed')
+  })
+
   it('records an idle event before the initial catalog baseline and retires absent status later', () => {
     const ctx = new Context()
     const bench = createSessionsBench(ctx)
@@ -598,6 +642,7 @@ describe('UiSession status', () => {
       running: false,
       pendingInteraction: undefined,
       completionUnread: true,
+      completionOutcome: 'completed',
     })
     bench.list.update((draft) => { draft.phase = 'ready' })
     expect(service.sessionStatus.getSnapshot().has(id)).toBe(false)

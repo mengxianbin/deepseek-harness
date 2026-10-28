@@ -48,10 +48,19 @@ it('preserves unlisted child status through metadata updates and main view ackno
   expect(sessions.list.getSnapshot().byId[parentId]?.updatedAt).toBe(2)
   expect(ui.sessionStatus.getSnapshot().get(childId)).toMatchObject({ running: true, completionUnread: false })
 
+  // The Host failure report reaches the UI before the stop it ends, so the
+  // stop acknowledges as failed instead of completed.
+  mock.streams.push('$events', { type: 'emit', event: 'api-session/error', args: [childId, 'Connection error'] })
+  await mock.streams.drained('$events')
+  await client.flush()
+  expect(ui.sessionStatus.getSnapshot().get(childId)).toMatchObject({ running: true, completionUnread: false })
+
   mock.streams.push('$events', { type: 'emit', event: 'api-session/status', args: [childId, false] })
   await mock.streams.drained('$events')
   await client.flush()
-  expect(ui.sessionStatus.getSnapshot().get(childId)).toMatchObject({ running: false, completionUnread: true })
+  expect(ui.sessionStatus.getSnapshot().get(childId)).toMatchObject({
+    running: false, completionUnread: true, completionOutcome: 'failed',
+  })
 
   using reference = sessions.retain(childId, { source: 'mainView' })
   await reference.ready

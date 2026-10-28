@@ -28,6 +28,9 @@ const FIXTURE = join(SNAPSHOT_DIR, 'session.v3.jsonl')
 const MID_EXPECTED = join(SNAPSHOT_DIR, 'mid-steer.expected.md')
 const SETTLED_EXPECTED = join(SNAPSHOT_DIR, 'settled.expected.md')
 const SETTLED_EXPANDED_EXPECTED = join(SNAPSHOT_DIR, 'settled-expanded.expected.md')
+// FORK(testweb-fixture-pollution): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 guard).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 const MODE = webSnapshotMode()
 // The question composer replaces the textarea, so fill → Queue row → Steer
 // starts only after request/context and must finish before the first replay
@@ -81,8 +84,8 @@ describe('web e2e: mid-turn steering lands durably and visibly', () => {
     // renders the same message with a date prefix.
     hostClock = pinHostClock()
     scaffold = await launchWebScaffold(MODE === 'record'
-      ? {}
-      : { replayFixture: FIXTURE, paceMs: REPLAY_PACE_MS, compareReplaySession: true })
+      ? { extraOverlayPath: CATALOG_OVERLAY }
+      : { replayFixture: FIXTURE, extraOverlayPath: CATALOG_OVERLAY, paceMs: REPLAY_PACE_MS, compareReplaySession: true })
     scaffold.ctx.on('session/event', (_session, event) => { sessionEvents.push(event) })
     browser = await chromium.launch()
     page = await newEnglishPage(browser)

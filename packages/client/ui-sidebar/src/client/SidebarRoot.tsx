@@ -10,6 +10,9 @@
  * global panel rows and the foot is the `sidebar.workspaces` registrant's,
  * and the foot holds `sidebar.settings` plus `sidebar.footer.action`; the shell
  * hands them the wide flag (plus an expand request callback for the browser).
+ * Low-frequency actions fold into the footer ⋯ menu through
+ * `sidebar.more.action` (user ruling sidebar-footer-ui-1026); the collapsed
+ * rail — which has no ⋯ menu — keeps them in the foot.
  *
  * The column also owns whether the scroll regions nested in it draw a
  * scrollbar at all: the shell tracks the pointer and rebinds ui-theme's
@@ -28,6 +31,7 @@ import type {
   SidebarPanelMetadata, SidebarRootComponentProps, SidebarRootInjected, SidebarSectionOwnerProps,
 } from './contract/slots.ts'
 import { UsageGlance } from './UsageGlance.tsx'
+import { FIXED_PANEL_ID } from './panel-pins.ts'
 import css from './SidebarRoot.module.css'
 
 /** Wide-content unmount delay; matches the 150ms wide-content fade-out. */
@@ -45,11 +49,17 @@ type PanelRowProps =
   Pick<SidebarPanelMetadata, 'id' | 'label'>
   & Pick<SidebarSectionOwnerProps, 'wide'>
   & Pick<PropsRuntime<'sidebar'>, 'usePanelInfo'>
-  & Pick<InjectFace<SidebarRootInjected>, 'selectPanel'>
+  & Pick<InjectFace<SidebarRootInjected>, 'selectPanel' | 'trackEntryClick'>
   & PropsRenderSlots<'sidebar.panellist'>
 
+/** Analytics category of an official panel; other panels are never reported. */
+function officialEntry(id: string): 'plugin' | 'cron' | undefined {
+  if (id === 'plugins') return 'plugin'
+  return id === 'schedules' ? 'cron' : undefined
+}
+
 /** Each panel row subscribes only to its own selection state. */
-function PanelRow({ id, label, wide, usePanelInfo, selectPanel, renderSlot }: PanelRowProps) {
+function PanelRow({ id, label, wide, usePanelInfo, selectPanel, trackEntryClick, renderSlot }: PanelRowProps) {
   const active = usePanelInfo(info => info.activePanelId === id)
   return (
     <Tooltip label={label} delayMs={500} disabled={wide}>
@@ -58,7 +68,11 @@ function PanelRow({ id, label, wide, usePanelInfo, selectPanel, renderSlot }: Pa
         className={clsx(css.panelRow, active && css.panelActive)}
         aria-label={label}
         aria-current={active ? 'page' : undefined}
-        onClick={() => { selectPanel(id) }}
+        onClick={() => {
+          const entry = officialEntry(id)
+          if (entry !== undefined) trackEntryClick({ menu_name: entry, position: 'sidebar' })
+          selectPanel(id)
+        }}
       >
         <span className={css.panelGlyph} aria-hidden="true">
           {renderSlot('sidebar.panellist', { size: wide ? 16 : 18, active }, { only: id })}
@@ -75,9 +89,15 @@ function PanelRow({ id, label, wide, usePanelInfo, selectPanel, renderSlot }: Pa
 
 type PanelMoreProps =
   Pick<SidebarRootComponentProps, 'usePanelInfo' | 't'>
-  & Pick<InjectFace<SidebarRootInjected>, 'selectPanel' | 'startSession'>
-  & Pick<PropsRenderSlots<'sidebar.panellist'>, 'renderSlot'>
+  & Pick<InjectFace<SidebarRootInjected>, 'selectPanel' | 'startSession' | 'trackEntryClick' | 'setPinned'>
+  & Pick<PropsRenderSlots<'sidebar.panellist' | 'sidebar.panellist.actions' | 'sidebar.more.action'>, 'renderSlot'>
   & { readonly panels: readonly SidebarPanelMetadata[] }
+  & { readonly unpinned: readonly string[] }
+  & { readonly hasEntryActions: boolean }
+  & {
+    /** Whether the ⋯-menu action seat has registrants (draws the group separator). */
+    readonly hasMoreActions: boolean
+  }
 
 /** The New Session row's menu id (an action, not a registered main panel). */
 const NEW_SESSION_ITEM = 'new-session'
@@ -92,16 +112,27 @@ const NEW_SESSION_ITEM = 'new-session'
  * collapsed rail keeps both its New Session icon and its per-panel icon
  * column, so rail reachability is unchanged. Panel glyphs still come from
  * each entry's own `sidebar.panellist` registration.
+ *
+ * rc.3 merge (2026-10-24): upstream's navigation-entry customization lands
+ * here instead of a nav-row More launcher — the menu keeps FULL panel
+ * reachability (pins filter the rail launchers, never the overflow menu:
+ * hiding a panel from the only wide entry point would remove access
+ * entirely), reports official-entry clicks as `sidebar_more`, and renders
+ * the `sidebar.panellist.actions` registrations (entry-customization's
+ * Install/Create plugin rows) after the data rows when any exist.
  * @param props - panel metadata plus the shell's action/render shares.
  * @returns the ⋯ anchor with its menu.
  */
-function PanelMore({ panels, usePanelInfo, selectPanel, startSession, renderSlot, t }: PanelMoreProps) {
+function PanelMore({
+  panels, unpinned, hasEntryActions, hasMoreActions, usePanelInfo, selectPanel, startSession, setPinned, trackEntryClick, renderSlot, t,
+}: PanelMoreProps) {
   const [open, setOpen] = useState(false)
   const activePanelId = usePanelInfo(info => info.activePanelId)
+  const onDismiss = (): void => { setOpen(false) }
   return (
     <Menu
       open={open}
-      onClose={() => { setOpen(false) }}
+      onClose={onDismiss}
       items={[
         { id: NEW_SESSION_ITEM, label: t('session.new'), icon: <IconNewChatOutlineMedium size={16} /> },
         ...(panels.length > 0
@@ -114,14 +145,27 @@ function PanelMore({ panels, usePanelInfo, selectPanel, startSession, renderSlot
             })),
           ]
           : []),
+        // FORK dsh-local (sidebar-footer-ui-1026): low-frequency foot actions
+        // (phone pairing, remote access) fold into this menu as component
+        // rows after the data items; the separator only draws while the seat
+        // actually has registrants.
+        ...(hasMoreActions
+          ? [{ type: 'separator' as const, id: 'more-action-separator' }]
+          : []),
       ]}
       selectedIds={activePanelId === null ? [] : [activePanelId]}
       // Icon-labelled rows: the active marker rides the hover fill, a trailing
       // check would crowd the cell beside the glyph.
       selection="fill"
       onSelect={(id) => {
-        if (id === NEW_SESSION_ITEM) startSession()
-        else selectPanel(id as MainPanelId)
+        if (id === NEW_SESSION_ITEM) {
+          trackEntryClick({ menu_name: 'new_session', position: 'sidebar' })
+          startSession()
+        } else {
+          const entry = officialEntry(id)
+          if (entry !== undefined) trackEntryClick({ menu_name: entry, position: 'sidebar_more' })
+          selectPanel(id as MainPanelId)
+        }
         setOpen(false)
       }}
       align="start"
@@ -138,13 +182,35 @@ function PanelMore({ panels, usePanelInfo, selectPanel, startSession, renderSlot
             aria-label={t('panels.more')}
             aria-haspopup="menu"
             aria-expanded={open}
-            onClick={() => { setOpen(v => !v) }}
+            onClick={() => {
+              trackEntryClick({ menu_name: 'more', position: 'sidebar' })
+              setOpen(v => !v)
+            }}
           >
             <IconEllipsisOutlineRegular />
           </button>
         </Tooltip>
       )}
-    />
+    >
+      {hasEntryActions && renderSlot('sidebar.panellist.actions', {
+        entries: panels.filter(({ id }) => id !== FIXED_PANEL_ID)
+          .map(({ id, label }) => ({ id, label, pinned: !unpinned.includes(id), active: id === activePanelId })),
+        onOpen: (id) => {
+          const entry = officialEntry(id)
+          if (entry !== undefined) trackEntryClick({ menu_name: entry, position: 'sidebar_more' })
+          const panel = panels.find(candidate => candidate.id === id)
+          if (panel !== undefined) selectPanel(panel.id)
+          setOpen(false)
+        },
+        onPinnedChange: setPinned,
+        onDismiss,
+      })}
+      {hasMoreActions && (
+        <div className={css.moreActions}>
+          {renderSlot('sidebar.more.action', { wide: true })}
+        </div>
+      )}
+    </Menu>
   )
 }
 
@@ -159,13 +225,21 @@ export function SidebarRoot({
   startSession,
   toggleSidebar,
   selectPanel,
+  setPinned,
+  trackEntryClick,
   usePanels,
+  useEntryPins,
+  useEntryActions,
+  useMoreActions,
   useShortcuts,
   usePanelInfo,
   t,
   renderSlot,
 }: SidebarRootComponentProps) {
   const panels = usePanels(snapshot => snapshot)
+  const unpinned = useEntryPins(ids => ids)
+  const hasEntryActions = useEntryActions(registered => registered)
+  const moreActions = useMoreActions(snapshot => snapshot)
   const shortcut = useShortcuts(rows => rows.find(row => row.id === 'sidebar.left.toggle'))
   const newShortcut = useShortcuts(rows => rows.find(row => row.id === 'session.new'))
   const toggleLabel = collapsed ? t('toggle.open') : t('toggle.collapse')
@@ -179,6 +253,12 @@ export function SidebarRoot({
   }, [collapsed])
   const windowsTitlebar = document.documentElement.hasAttribute('data-windows-titlebar')
   const wide = windowsTitlebar ? !collapsed : !collapsed || !settled
+  // New Session reports a sidebar click first; the collapsed rail icon is the
+  // only starter outside the Windows caption.
+  const openNewSession = (): void => {
+    trackEntryClick({ menu_name: 'new_session', position: 'sidebar' })
+    startSession()
+  }
   // The Windows caption menus occupy the strip to the right of these controls
   // (that is what --dsh-windows-menu-start reserves), so a right-side bubble
   // lands under their text. Below the caption is the only clear side.
@@ -313,7 +393,7 @@ export function SidebarRoot({
             className={css.newSession}
             aria-label={t('session.new.label')}
             aria-keyshortcuts={newShortcut?.aria}
-            onClick={() => { startSession() }}
+            onClick={openNewSession}
           >
             <span className={css.newSessionLabelMask}><span className={css.newSessionContent}>
               {wide
@@ -329,10 +409,12 @@ export function SidebarRoot({
       )}
       {/* FORK dsh-local (sidebar-layout): wide renders no top panel rows —
           the region below owns the reclaimed height; the rail keeps its
-          per-panel icon column, entered at collapse settle as before. */}
+          per-panel icon column, entered at collapse settle as before.
+          rc.3 merge: the rail column honors entry pins (plugins is fixed),
+          mirroring upstream's launcher filtering. */}
       {!wide && panels.length > 0 && (
         <nav className={css.panelList} aria-label={t('panels.label')}>
-          {panels.map(({ id, label }) => (
+          {panels.filter(({ id }) => id === FIXED_PANEL_ID || !unpinned.includes(id)).map(({ id, label }) => (
             <PanelRow
               key={id}
               id={id}
@@ -340,6 +422,7 @@ export function SidebarRoot({
               wide={wide}
               usePanelInfo={usePanelInfo}
               selectPanel={selectPanel}
+              trackEntryClick={trackEntryClick}
               renderSlot={renderSlot}
             />
           ))}
@@ -356,11 +439,13 @@ export function SidebarRoot({
       </div>
 
       {/* FORK dsh-local (sidebar-layout round 3): the wide foot is ONE row —
-          Settings, the ⋯ menu, then the footer actions (user ruling order).
-          The dsh-usage glance card is removed (usage-glance ruling,
-          2026-10-15): the plan cycle pair now lives in the logo row beside
-          the whale mark (UsageGlance), so nothing injects above this row.
-          The rail keeps its original stack. */}
+          Settings, the footer actions, then the ⋯ menu (user ruling order,
+          sidebar-footer-ui-1026: ⋯ sits right of the update badge; phone
+          pairing + remote access moved INTO the ⋯ menu). The dsh-usage glance
+          card is removed (usage-glance ruling, 2026-10-15): the plan cycle
+          pair now lives in the logo row beside the whale mark (UsageGlance),
+          so nothing injects above this row. The rail keeps its original stack
+          and folds the ⋯-menu actions into the foot (no ⋯ menu on the rail). */}
       <div className={css.footArea}>
         {wide
           ? (
@@ -368,22 +453,28 @@ export function SidebarRoot({
               <div className={css.settingsArea}>
                 {renderSlot('sidebar.settings', { wide })}
               </div>
-              <PanelMore
-                panels={panels}
-                usePanelInfo={usePanelInfo}
-                selectPanel={selectPanel}
-                startSession={startSession}
-                renderSlot={renderSlot}
-                t={t}
-              />
               <div className={css.footerActions}>
                 {renderSlot('sidebar.footer.action', { wide })}
               </div>
+              <PanelMore
+                panels={panels}
+                unpinned={unpinned}
+                hasEntryActions={hasEntryActions}
+                hasMoreActions={moreActions.length > 0}
+                usePanelInfo={usePanelInfo}
+                selectPanel={selectPanel}
+                startSession={startSession}
+                setPinned={setPinned}
+                trackEntryClick={trackEntryClick}
+                renderSlot={renderSlot}
+                t={t}
+              />
             </div>
           )
           : (
             <>
               <div className={css.footerActions}>
+                {renderSlot('sidebar.more.action', { wide })}
                 {renderSlot('sidebar.footer.action', { wide })}
               </div>
               <div className={css.settingsArea}>

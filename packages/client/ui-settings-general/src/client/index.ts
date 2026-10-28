@@ -14,6 +14,7 @@ import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 // Type-only: pulls the ctx.modules merge.
 import type {} from '@deepseek-ai/dsh-client-modules/client'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 import { closeTopModal } from '@deepseek-ai/dsh-client-ui-primitives'
 // Type-only: the settings slot declarations plus the ctx.configForms Context
@@ -24,6 +25,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
+import type {} from '@deepseek-ai/dsh-client-product-analytics/client'
 import type {
   SettingsOnboardingStep, SettingsRootInjected, SettingsSectionRow,
 } from './shell-contract.ts'
@@ -40,8 +42,13 @@ import { DeveloperToolsRow, type DeveloperToolsRowInjected } from './DeveloperTo
 import { SettingsDocumentAction } from './SettingsDocumentAction.tsx'
 import type { SettingsDocumentActionInjected } from './SettingsDocumentAction.tsx'
 import { SettingsDocumentStore } from './settings-document-store.ts'
+import { AuthExpiredOverlay, type AuthExpiredOverlayInjected } from './AuthExpiredOverlay.tsx'
+import { AUTH_EXPIRED_EVENT } from './auth-expired.ts'
 import { HostReleasePrompt, type HostReleasePromptInjected } from './HostReleasePrompt.tsx'
+import { countRunningSessions } from './restart-count.ts'
+import { startRestartSignalFlow } from './restart-signal-flow.ts'
 import { en, zh, type SettingsKey } from './locales.ts'
+import { RESTART_GLOBAL, resolveRestartCapability, type RestartSignalView } from '../restart.ts'
 
 export type {
   CloseLabelProps, HeaderContentProps, TriggerContentProps,
@@ -68,8 +75,9 @@ const NS = 'settings'
  * Required services (cordis fiber inject). The target slots are declared by
  * ui-settings' apply, whose activation order relative to this one is NOT
  * constrained; registrations depend on their slots through `slots.inject()`.
+ * `uiSession` feeds the restart confirmation's running-Session count.
  */
-export const inject = ['slots', 'locale', 'connection', 'remote', 'remote.settings', 'configForms', 'shortcuts', 'modules']
+export const inject = ['slots', 'locale', 'connection', 'remote', 'remote.settings', 'configForms', 'shortcuts', 'modules', 'uiSession']
 
 /**
  * Register the `settings` dictionaries, the chrome content, and the General
@@ -81,7 +89,15 @@ export function apply(ctx: ClientContext): void {
     name: 'settings.general.item', id: 'developer-tools', order: 15, locale: NS,
     inject: (): DeveloperToolsRowInjected => ({
       hooks: { developerTools: ctx.configForms.developerTools.enabled },
-      setEnabled: enabled => ctx.configForms.developerTools.setEnabled(enabled),
+      setEnabled: async (enabled) => {
+        const settings = ctx.configForms.get<{ enabled: boolean }>('ui-settings')
+        const previous = settings.getSnapshot().value?.enabled
+        const timestamp = Date.now()
+        await ctx.configForms.developerTools.setEnabled(enabled)
+        if (previous !== undefined && previous !== enabled && settings.getSnapshot().value?.enabled === enabled) {
+          ctx.get('productAnalytics')?.track('code_work_view_toggle', { is_enabled: enabled }, timestamp)
+        }
+      },
     }),
   }, DeveloperToolsRow))
   // Version information follows the core preferences.
@@ -123,6 +139,50 @@ export function apply(ctx: ClientContext): void {
   let rows: readonly SettingsSectionRow[] = []
   let onboardingVersion = -1
   let onboardingSteps: readonly SettingsOnboardingStep[] = []
+  // The restart capability is baked into the served page: read once at apply
+  // (defensive read — an absent or malformed global simply disables the button),
+  // and the confirmation copy counts running Sessions from the status source
+  // through its own snapshot store, so the shell sees both as ordinary hooks.
+  const pageGlobals = globalThis as Partial<Record<typeof RESTART_GLOBAL, unknown>>
+  const restartConfigured = createSnapshotStore(resolveRestartCapability(pageGlobals[RESTART_GLOBAL]))
+  const restartRunningSessions = createSnapshotStore(0)
+  const recountRunningSessions = (): void => {
+    restartRunningSessions.set(countRunningSessions(ctx.uiSession.sessionStatus.getSnapshot()))
+  }
+  recountRunningSessions()
+  ctx.effect(() => ctx.uiSession.sessionStatus.subscribe(recountRunningSessions),
+    'ui-settings-general: restart running sessions')
+  // The restart-signal badge: one recheck flow (boot + return-to-visibility,
+  // design trigger ③) publishes Host judgments into a snapshot store, and the
+  // connected transition after a disconnect rechecks too, so the灯自灭 chain
+  // (R6: reconnect → recompute → delivery) clears the badge without user action.
+  const restartSignal = createSnapshotStore<RestartSignalView | undefined>(undefined)
+  // The flow reports this page's own running-Session count with every recheck
+  // (P3 attestation): the store above is the same number the restart
+  // confirmation names, so the host fork compares its reading against the
+  // exact value this page would show.
+  const restartSignalFlow = startRestartSignalFlow((view) => { restartSignal.set(view) }, {
+    runningCount: () => restartRunningSessions.getSnapshot(),
+  })
+  ctx.effect(() => () => { restartSignalFlow.dispose() }, 'ui-settings-general: restart-signal flow')
+  let previousConnectionState = connection.state.getSnapshot()
+  ctx.effect(() => connection.state.subscribe(() => {
+    const next = connection.state.getSnapshot()
+    const reconnected = next === 'connected'
+      && (previousConnectionState === 'disconnected' || previousConnectionState === 'connecting')
+    previousConnectionState = next
+    if (reconnected) restartSignalFlow.recheck()
+  }), 'ui-settings-general: restart-signal reconnect')
+  // The Host push leg (design C.5): the poller emits this allowlisted event
+  // after its moved-fingerprint recheck lands, so an open, untouched page
+  // pulls the fresh judgment on its own (R3「页面开着不操作角标自现」).
+  // Payload-free by design — the judgment itself rides the recheck route —
+  // and the handler is the flow's own recheck command, shared with the
+  // boot/visibility/reconnect triggers.
+  ctx.effect(
+    () => ctx.remote.$on('restart-signal/changed', () => { restartSignalFlow.recheck() }),
+    'ui-settings-general: restart-signal push',
+  )
   const shellInjected = (): SettingsRootInjected => ({
     openDesktopUpdate: () => { desktopUpdate.open() },
     reconnect: () => { connection.reconnect() },
@@ -130,6 +190,9 @@ export function apply(ctx: ClientContext): void {
       shortcuts: ctx.shortcuts.catalog,
       desktopUpdate: desktopUpdate.store,
       connectionState: connection.state,
+      restartConfigured,
+      restartRunningSessions,
+      restartSignal,
       sections: {
         getSnapshot: () => {
           const version = ctx.slots.getVersion('settings.section')
@@ -240,6 +303,21 @@ export function apply(ctx: ClientContext): void {
     locale: NS,
     children: { 'settings.general.item': { kind: 'list', scope: 'root' } },
   }, GeneralSection))
+  // A dead browser cookie is terminal: the connection heartbeat broadcasts the
+  // expiry once per page (its own expired flag), this listener latches it
+  // false → true, and the shell overlay covers the app instead of letting its
+  // reconnect spinner imply recovery. The latch rides the inject hooks
+  // compartment, so the component subscribes through the standard `use` seat.
+  const authExpired = createSnapshotStore(false)
+  ctx.effect(() => {
+    const onExpired = (): void => { authExpired.set(true) }
+    window.addEventListener(AUTH_EXPIRED_EVENT, onExpired)
+    return () => { window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired) }
+  }, 'ui-settings-general: auth expiry listener')
+  ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+    name: 'shell.overlay', id: 'auth-expired', locale: NS,
+    inject: (): AuthExpiredOverlayInjected => ({ hooks: { authExpired } }),
+  }, AuthExpiredOverlay))
   // The page's module system applies no plugin update from another Host release; this dialog offers the reload.
   const releasePromptInjected = (): HostReleasePromptInjected => ({
     dismissRelease: () => { ctx.modules.entries.dismissRelease() },

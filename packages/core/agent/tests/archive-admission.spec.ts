@@ -59,7 +59,7 @@ describe('Turn archive admission', () => {
     expect(await ask(ctx, agent.id)).toEqual([{ kind: 'probe' }])
   })
 
-  it('cancels a running turn with the user cause and without keeping the inbox, and leaves the rest alone', async () => {
+  it('cancels a running turn with the user cause marked entry=archive and without keeping the inbox, and leaves the rest alone', async () => {
     const ctx = new Context()
     await ctx.plugin(AgentRegistry)
     const running = await liveAgent(ctx, 'stop-me', 'running')
@@ -68,7 +68,7 @@ describe('Turn archive admission', () => {
     await stop(ctx, running.id)
     await stop(ctx, idle.id)
     await stop(ctx, SessionId('nobody'))
-    expect(running.cancels).toEqual([[{ kind: 'user' }, undefined]])
+    expect(running.cancels).toEqual([[{ kind: 'user', entry: 'archive' }, undefined]])
     expect(idle.cancels).toEqual([])
   })
 

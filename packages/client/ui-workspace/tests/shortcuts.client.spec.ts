@@ -170,7 +170,7 @@ describe('workspace shortcut ownership', () => {
     expect(b.registry.dispatch(key('KeyF', { alt: true }), context, vi.fn()).status).toBe('handled')
     await Promise.resolve()
     expect(b.loadOlder).not.toHaveBeenCalled()
-    expect(b.navigation.forkSession).toHaveBeenCalledWith('a')
+    expect(b.navigation.forkSession).toHaveBeenCalledWith('a', undefined, { entry: 'shortcut' })
   })
 
   it('captures the source Session and lets the Host choose its last completed turn', async () => {
@@ -179,7 +179,7 @@ describe('workspace shortcut ownership', () => {
     b.select('b')
     if (resolution.status !== 'handled') throw new Error('nonblank Session was unavailable')
     resolution.run()
-    expect(b.navigation.forkSession).toHaveBeenCalledWith('a')
+    expect(b.navigation.forkSession).toHaveBeenCalledWith('a', undefined, { entry: 'shortcut' })
   })
 
   it('blocks absent or blank Sessions and permits retry while running after the Host refuses a fork', async () => {

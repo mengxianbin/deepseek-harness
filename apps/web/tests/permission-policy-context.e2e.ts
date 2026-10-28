@@ -32,6 +32,9 @@ const PROMPTS = [
 ] as const
 
 const PRESET_LABELS = ['Read Only', 'Full access', 'Workspace Write'] as const
+// FORK(replay-residual-1022): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 修法).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 function systemPrompts(events: readonly SessionEvent[]): string[] {
   return events.flatMap((event) => {
@@ -74,9 +77,10 @@ describe('web e2e: current sandbox policy reaches the model before tools', () =>
   beforeAll(async () => {
     scaffold = await launchWebScaffold({
       ...MODE === 'record' ? {} : { replayFixture: FIXTURE, compareReplaySession: true },
-      ...process.platform === 'win32' ? {} : {
-        extraOverlayPath: fileURLToPath(new URL('./fixtures/sidebar-terminal.patch.yml', import.meta.url)),
-      },
+      extraOverlayPath: [
+        ...process.platform === 'win32' ? [] : [fileURLToPath(new URL('./fixtures/sidebar-terminal.patch.yml', import.meta.url))],
+        CATALOG_OVERLAY,
+      ],
     })
     outsideWorkspace = await mkdtemp(join(tmpdir(), 'dsh-user-terminal-'))
     disposeApproval = scaffold.ctx.on('approval/request', () => Promise.resolve('allowed-once'), { prepend: true })

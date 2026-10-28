@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-session-log-export",
   "description": "Web Session-log export command and shared download dialog",
-  "version": "0.2.1-rc.2",
+  "version": "0.2.1-rc.3",
   "publishConfig": {
     "access": "public"
   },
@@ -33,7 +33,7 @@
     "lib/types/**/*.d.ts"
   ],
   "scripts": {
-    "bundle": "tsdown",
+    "bundle": "tsx ../../scripts/restart-signal/build-stamp.ts run --faces auto -- tsdown",
     "watch": "tsdown --watch"
   },
   "license": "MIT",

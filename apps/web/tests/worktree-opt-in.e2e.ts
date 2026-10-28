@@ -10,7 +10,7 @@ import type {} from '@deepseek-ai/dsh-experimental-worktree'
 import { chromium } from 'playwright'
 import { expect, it, onTestFailed, onTestFinished } from 'vitest'
 import { launchWebScaffold, watchConsole } from './scaffold.ts'
-import { connectFreshWorkspace, newEnglishPage, PLUGIN_TOGGLE_SETTLE_MS, saveFailureShot } from './support.ts'
+import { connectFreshWorkspace, newEnglishPage, PLUGIN_TOGGLE_SETTLE_MS, saveFailureShot, selectGlobalPanel } from './support.ts'
 
 const BUNDLE = '@deepseek-ai/dsh-experimental-tool-worktree'
 const exec = promisify(execFile)
@@ -62,7 +62,8 @@ it('persists the Git Worktrees switch and removes its capability while retaining
     return manifest.dsh.profile.bundles
   }
   const openPlugins = async () => {
-    await page.getByRole('navigation', { name: 'Global panels' }).getByRole('button', { name: 'Plugins', exact: true }).click()
+    // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
+    await selectGlobalPanel(page, 'Plugins')
     const panel = page.locator('[data-plugin-panel]')
     await panel.getByRole('heading', { name: 'Plugins', exact: true }).waitFor()
     await panel.getByRole('button', { name: 'More', exact: true }).click()

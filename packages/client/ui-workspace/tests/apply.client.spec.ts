@@ -236,6 +236,16 @@ describe('ui-workspace apply', () => {
   })
 
   it('reports a default Workspace creation failure through the shared notice overlay', async () => {
+    // FORK dsh-local (blank-restore-lazy-a): the selectionless startup keeps
+    // the empty state; the stale-selection fallthrough is what still probes
+    // the default directory, so the notice rides that path.
+    const backing = new Map([['dsh.sessions.current', JSON.stringify({ sessionId: 'gone' })]])
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => backing.get(key) ?? null,
+      setItem: (key: string, value: string) => { backing.set(key, value) },
+      removeItem: (key: string) => { backing.delete(key) },
+    })
+    onTestFinished(() => { vi.unstubAllGlobals() })
     const b = await bench()
     onTestFinished(() => b.ctx.fiber.dispose())
     b.initializeDefault.mockRejectedValueOnce(new Error('denied'))
@@ -373,7 +383,7 @@ describe('ui-workspace apply', () => {
     await vi.waitFor(() => {
       expect(toast.hooks.toast.getSnapshot()).toMatchObject({ kind: 'shortcutForkFailed', reason: 'unavailable' })
     })
-    expect(b.fork).toHaveBeenCalledExactlyOnceWith({ sessionId: sid('source'), increaseTitle: true })
+    expect(b.fork).toHaveBeenCalledExactlyOnceWith({ sessionId: sid('source'), increaseTitle: true, entry: 'shortcut' })
     expect(warning).not.toHaveBeenCalled()
     const unavailable = toast.hooks.toast.getSnapshot()
     b.fork.mockRejectedValueOnce(new Error('connection closed'))
@@ -603,6 +613,9 @@ describe('ui-workspace apply', () => {
     const b = await bench()
     declare(b.slots, 'sidebar.workspaces', 'shell.overlay')
     await b.ctx.plugin({ inject: [...inject], apply }).await()
+    // The selectionless startup cleared the main panel once; this spec pins
+    // the fork/rename actions' own panel behavior.
+    b.selectPanel.mockClear()
     const unarchiveSession = vi.spyOn(b.ctx.uiWorkspace, 'unarchiveSession').mockResolvedValue(undefined)
 
     // Fork goes through the navigation service, which leaves the child unselected.
@@ -615,7 +628,7 @@ describe('ui-workspace apply', () => {
     await forkSession.mock.results[0]!.value
     const [request] = b.fork.mock.calls[0]!
     const { onCreated, ...payload } = request
-    expect(payload).toEqual({ sessionId: 'session', increaseTitle: true, allowMigration: false })
+    expect(payload).toEqual({ sessionId: 'session', increaseTitle: true, allowMigration: false, entry: 'menu' })
     expect(onCreated).toBeTypeOf('function')
     expect(b.retain).not.toHaveBeenCalled()
     expect(b.selectPanel).not.toHaveBeenCalled()
@@ -690,6 +703,7 @@ describe('ui-workspace apply', () => {
       onTestFinished(() => b.ctx.fiber.dispose())
       declare(b.slots, 'sidebar.workspaces', 'shell.overlay')
       await b.ctx.plugin({ inject: [...inject], apply }).await()
+      b.selectPanel.mockClear()
       if (state !== 'absent') {
         const source = b.ctx.sessions.retain(sid('source'), { source: 'controllerOperation' })
         onTestFinished(() => { source.release() })
@@ -706,7 +720,7 @@ describe('ui-workspace apply', () => {
 
       const [request] = b.fork.mock.calls[0]!
       const { onCreated, ...payload } = request
-      expect(payload).toEqual({ sessionId: 'source', increaseTitle: true, allowMigration: false })
+      expect(payload).toEqual({ sessionId: 'source', increaseTitle: true, allowMigration: false, entry: 'menu' })
       expect(onCreated).toBeTypeOf('function')
       expect(toast.hooks.toast.getSnapshot()).toBeNull()
       expect(b.retain).not.toHaveBeenCalled()
@@ -719,6 +733,7 @@ describe('ui-workspace apply', () => {
     onTestFinished(() => b.ctx.fiber.dispose())
     declare(b.slots, 'sidebar.workspaces', 'shell.overlay')
     await b.ctx.plugin({ inject: [...inject], apply }).await()
+    b.selectPanel.mockClear()
     b.fork.mockRejectedValueOnce(new SessionForkError(
       new RemoteError('session/migration-required', 'migration required', { sessionId: sid('source') }),
       sid('source'),
@@ -750,6 +765,7 @@ describe('ui-workspace apply', () => {
       if (timing === 'before the notice') b.setWorkspaces(workspaceState([], [sid('source')]))
       declare(b.slots, 'sidebar.workspaces', 'shell.overlay')
       await b.ctx.plugin({ inject: [...inject], apply }).await()
+      b.selectPanel.mockClear()
       b.fork.mockRejectedValueOnce(new SessionForkError(
         new RemoteError('session/migration-required', 'migration required', { sessionId: sid('source') }),
         sid('source'),
@@ -778,6 +794,7 @@ describe('ui-workspace apply', () => {
     onTestFinished(() => b.ctx.fiber.dispose())
     declare(b.slots, 'sidebar.workspaces', 'shell.overlay')
     await b.ctx.plugin({ inject: [...inject], apply }).await()
+    b.selectPanel.mockClear()
     using source = b.ctx.sessions.retain(sid('source'), { source: 'controllerOperation' })
     await source.ready
     b.history.set({ openState: 'open', subagent: {
@@ -792,7 +809,7 @@ describe('ui-workspace apply', () => {
 
     const [request] = b.fork.mock.calls[0]!
     const { onCreated, ...payload } = request
-    expect(payload).toEqual({ sessionId: 'source', increaseTitle: true, allowMigration: false })
+    expect(payload).toEqual({ sessionId: 'source', increaseTitle: true, allowMigration: false, entry: 'menu' })
     expect(onCreated).toBeTypeOf('function')
     expect(toast.hooks.toast.getSnapshot()).toBeNull()
     expect(b.retain).not.toHaveBeenCalled()
@@ -804,6 +821,7 @@ describe('ui-workspace apply', () => {
     onTestFinished(() => b.ctx.fiber.dispose())
     declare(b.slots, 'sidebar.workspaces', 'shell.overlay')
     await b.ctx.plugin({ inject: [...inject], apply }).await()
+    b.selectPanel.mockClear()
     using source = b.ctx.sessions.retain(sid('source'), { source: 'controllerOperation' })
     await source.ready
     b.retain.mockClear()

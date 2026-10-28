@@ -34,6 +34,18 @@ export type AskUserQuestionIntent = {
   callId?: ToolCallId
 }
 
+/**
+ * Full content of question text fields that exceeded the inline budget and
+ * were folded out of the card into a file. The card keeps a short summary and
+ * renders the file's path as an open-in-preview attachment.
+ */
+export interface AskUserQuestionAttachment {
+  /** Absolute path of the file holding the complete folded text. */
+  path: string
+  /** Character count of the complete folded text. */
+  chars: number
+}
+
 /** One question in a user-questions request. */
 export interface AskUserQuestionItem {
   /** Stable caller-provided question id, echoed in the answer. */
@@ -42,6 +54,8 @@ export interface AskUserQuestionItem {
   question: string
   /** Optional supporting detail rendered with the question but kept out of option labels. */
   detail?: string
+  /** Present when over-long text fields were folded out of the card; names the file holding their complete content. */
+  attachment?: AskUserQuestionAttachment
   /** Optional short heading/group label. */
   header?: string
   /** Optional choices the UI can render as a menu. */

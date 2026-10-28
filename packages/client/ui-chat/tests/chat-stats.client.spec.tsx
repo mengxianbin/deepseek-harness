@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import type {
-  AssistantMessageNode, ChatSnapshot, LegacyConversationSlice, ToolResultNode,
+  AssistantMessageNode, ChatSnapshot, LegacyConversationSlice, ModelRetryNode, ToolResultNode,
 } from '@deepseek-ai/dsh-client-ui-chat/client'
 import { bindSnapshotSelector, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
@@ -70,10 +70,25 @@ describe('deriveStats', () => {
     // the sessionStats projection; the paged window is not an accounting
     // source either, so the fold exposes no billing fields (billing rides the
     // tokenUsage projection); decodeTokens is a throughput input, not a
-    // billed total.
+    // billed total. retries/retriesByProvider mirror the projection's R5
+    // retry-distribution fields (window-scoped in this fallback).
     expect(Object.keys(stats).sort()).toEqual(
-      ['decodeMs', 'decodeTokens', 'llmMs', 'steps', 'toolMs', 'ttftMs', 'ttftSteps', 'turns'],
+      ['decodeMs', 'decodeTokens', 'llmMs', 'retries', 'retriesByProvider', 'steps', 'toolMs', 'ttftMs', 'ttftSteps', 'turns'],
     )
+    expect(stats.retries).toBe(0)
+    expect(stats.retriesByProvider).toEqual({})
+  })
+
+  it('buckets model-retry nodes by provider for the retry distribution', () => {
+    const retry = (seq: number, provider: string): ModelRetryNode => ({
+      kind: 'model-retry', seq, time: seq * 1_000, turn: 1, step: 1, retryState: 'started',
+      retryId: `r${seq}` as ModelRetryNode['retryId'],
+      provider, mode: 'normal', policyKey: 'p', retry: 1, maxRetries: 3, delayMs: 10,
+      failure: { code: 'TRANSPORT', message: 'reset' },
+    })
+    const stats = deriveStats([assistant(1, 1), retry(2, 'deepseek'), retry(3, 'deepseek'), retry(4, 'fallback')])
+    expect(stats.retries).toBe(3)
+    expect(stats.retriesByProvider).toEqual({ deepseek: 2, fallback: 1 })
   })
 
   it('ignores tool results with no call time', () => {
@@ -145,6 +160,7 @@ describe('composer stats pills', () => {
   function sessionStats(overrides: Record<string, number>): Record<string, number> {
     return {
       turns: 0, steps: 0, llmMs: 0, toolMs: 0, ttftMs: 0, ttftSteps: 0, decodeMs: 0, decodeTokens: 0,
+      retries: 0,
       ...overrides,
     }
   }
@@ -276,8 +292,26 @@ describe('composer stats pills', () => {
     expect(details.textContent).not.toContain('Tool time')
     expect(details.textContent).toContain('Avg time to first token (TTFT)0.8s')
     expect(details.textContent).toContain('Tokens per second (TPS)20 tok/s')
+    // No retry in this session: the R5 dashboard rows stay absent, not zeroed.
+    expect(details.textContent).not.toContain('Model retries')
     // Token accounting lives on the usage pill's own dialog, not here.
     expect(dialog.textContent).not.toContain('Token usage')
+  })
+
+  it('shows the whole-log retry distribution by provider in the statistics dialog (R5)', () => {
+    const { source } = makeSource({ nodes: [timedStep()] })
+    const view = render(<StatsPills {...props(source, {
+      tokenUsage: USAGE,
+      sessionStats: {
+        ...sessionStats({ turns: 4, steps: 12, retries: 3 }),
+        retriesByProvider: { deepseek: 2, fallback: 1 },
+      },
+    })} />)
+    fireEvent.click(view.getAllByRole('button')[0]!)
+    const details = view.getByRole('dialog').querySelector('[data-session-stats-details]') as HTMLElement
+    expect(details.textContent).toContain('Model retries3')
+    expect(details.textContent).toContain('deepseek2')
+    expect(details.textContent).toContain('fallback1')
   })
 
   it('click-opens the token-usage dialog carrying the headline total and exact buckets', () => {

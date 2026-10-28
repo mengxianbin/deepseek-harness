@@ -3,7 +3,8 @@
  * piece of mutable interaction state — the authoritative trigger hit (span
  * included; it outlives menu close for space adjudication), the menu store,
  * and the candidate-fetch lifecycle — and executes pick outcomes by
- * dispatching the scoped input-mutation events. The root InputTriggerService keeps
+ * dispatching the scoped input-mutation events, or on the answer surface
+ * through the attached answer-field insert target. The root InputTriggerService keeps
  * only the source roster. One controller per session scope; the service
  * disposes it with the scope fiber.
  */
@@ -18,7 +19,7 @@ import { MENU_CLOSED, menuReduce, seedGroups } from '../core/menu.ts'
 import type { MenuEvent, MenuState, TriggerHit } from '../core/contract.ts'
 import type {
   ClientSessionContext, InputTriggerCandidate, InputTriggerCrumb, InputTriggerSource, PickAction,
-  SubmitEnvelope, TriggerChar, TriggerGuard,
+  SubmitEnvelope, TokenSpan, TriggerChar, TriggerGuard, TriggerSurface,
 } from '../types.ts'
 
 /** Token identity a dismissal sticks to: the same trigger, query, and span bounds. */
@@ -51,6 +52,15 @@ export interface InputTriggerControllerDeps {
   /** Root-service roster view. */
   roster: SourceRoster
 }
+
+/**
+ * The answer surface's text-insert target: replaces `[span.start, span.end)`
+ * of the mounted answer field's draft with `text` and reports whether the
+ * edit applied (its own revision CAS included). `keep` forwards the source's
+ * `continue` flag; an answer field has no chained completion to continue, so
+ * it accepts the flag and ignores it.
+ */
+export type AnswerSurfaceInsert = (text: string, span: TokenSpan, keep: boolean) => boolean
 
 /**
  * Per-session trigger pipeline state and orchestration. All mutation stays
@@ -100,6 +110,13 @@ export class InputTriggerController {
   private drilled = false
   private fetch: AbortController | null = null
   private disposed = false
+  /**
+   * The answer surface's insert target while a question-composer takeover
+   * owns the seat; null = draft surface. Its presence IS the surface lease:
+   * the other surface's track calls are ignored instead of mutating the live
+   * menu (that surface's menu view is unmounted or hidden).
+   */
+  private answer: AnswerSurfaceInsert | null = null
   /** Per-source lexicon unsubscribers (sources without the hook never enter). */
   private readonly lexiconOffs = new Map<InputTriggerSource, () => void>()
 
@@ -122,9 +139,14 @@ export class InputTriggerController {
    * @param guard - availability tier derived from the input phase.
    * @param draftRev - the input machine's current draft revision, stamped
    * into the hit span for pick-time CAS.
+   * @param surface - the calling composer surface; defaults to `draft`. A
+   * track from the surface that does not currently own the pipeline (its
+   * view is hidden or unmounted) is ignored, so a hidden InputBar commit
+   * can never mutate the answer menu or vice versa.
    */
-  track(draft: string, caret: number, guard: TriggerGuard, draftRev: number): void {
+  track(draft: string, caret: number, guard: TriggerGuard, draftRev: number, surface: TriggerSurface = 'draft'): void {
     if (this.disposed) return
+    if (surface !== this.surface()) return
     const launched = this.launcher.getSnapshot() !== null
     this.clearLauncher()
     const raw = detectTrigger(draft, caret, guard)
@@ -162,7 +184,7 @@ export class InputTriggerController {
       && prev.hit.span.start === hit.span.start && prev.hit.span.end === hit.span.end
     this.hit = hit
     if (same) return
-    const roster = this.deps.roster.sources(hit.trigger)
+    const roster = this.rosterFor(hit.trigger)
     if (roster.length === 0) {
       this.stopFetch()
       this.reduce({ type: 'close' })
@@ -190,7 +212,7 @@ export class InputTriggerController {
       this.dismiss()
       return
     }
-    const match = this.deps.roster.sources(hit.trigger).find(item => item.name === source)
+    const match = this.rosterFor(hit.trigger).find(item => item.name === source)
     if (match === undefined) {
       this.dismiss()
       return
@@ -323,7 +345,7 @@ export class InputTriggerController {
     if (this.disposed || hit === null || hit.position !== 'leading') return false
     const token = hit.trigger + hit.query
     const projection = this.project()
-    for (const src of this.deps.roster.sources(hit.trigger)) {
+    for (const src of this.rosterFor(hit.trigger)) {
       if (src.matchSpace === undefined) continue
       const outcome = src.matchSpace(projection, token)
       if (outcome === undefined) continue
@@ -446,6 +468,30 @@ export class InputTriggerController {
     this.refreshLexicon()
   }
 
+  /**
+   * Attach the answer surface's text-insert target: one mounted question
+   * composer answer field claims the pipeline for as long as it is attached.
+   * While attached, draft-surface tracks are ignored, '/' menus list only
+   * sources opting into `answer`, and text pick outcomes execute against
+   * `insert` instead of the scoped input events (claims and structured
+   * references are declined — they belong to the draft composer). Attaching
+   * and detaching each close any open menu: the other surface's menu view is
+   * unmounted or hidden, and its hit must not leak across the switch.
+   * @param insert - target applying a plain-text pick to the answer draft.
+   * @returns idempotent detacher (field unmount / takeover collapse); a
+   * detacher whose target was already replaced or released is a no-op.
+   */
+  attachAnswer(insert: AnswerSurfaceInsert): () => void {
+    if (this.disposed) return () => undefined
+    this.answer = insert
+    this.resetSurface()
+    return () => {
+      if (this.answer !== insert) return
+      this.answer = null
+      this.resetSurface()
+    }
+  }
+
   /** External dismiss (e.g. pointer outside the composer area). */
   dismiss(): void {
     if (this.disposed) return
@@ -458,7 +504,7 @@ export class InputTriggerController {
   refreshOpenMenu(): void {
     if (this.disposed || !this.menu.getSnapshot().open || this.hit === null) return
     const launched = this.launcher.getSnapshot()
-    const roster = this.deps.roster.sources(this.hit.trigger)
+    const roster = this.rosterFor(this.hit.trigger)
       .filter(source => launched === null || source.name === launched)
     if (roster.length === 0) return
     this.fetchCandidates(this.hit, roster)
@@ -467,6 +513,7 @@ export class InputTriggerController {
   /** Scope teardown: close and abort (the service deletes the map entry). */
   dispose(): void {
     this.disposed = true
+    this.answer = null
     this.stopFetch()
     this.reduce({ type: 'close' })
     this.hit = null
@@ -479,10 +526,47 @@ export class InputTriggerController {
     return { sessionId: this.deps.sessionId }
   }
 
-  /** Execute a claim/insert/text outcome via the scoped input events (actx as dispatch subject); true = the input applied it. */
-  private execute(outcome: PickOutcome, span: import('../types.ts').TokenSpan): boolean {
+  /**
+   * The surface the pipeline currently runs on: the attached answer target
+   * switches the whole pipeline; without one the resident InputBar owns it.
+   * @returns the surface every surface-tagged operation filters against.
+   */
+  private surface(): TriggerSurface {
+    return this.answer === null ? 'draft' : 'answer'
+  }
+
+  /** Close the open menu and drop the hit bookkeeping: a surface switch or teardown carries no state across. */
+  private resetSurface(): void {
+    this.stopFetch()
+    this.hit = null
+    this.dismissed = null
+    this.reduce({ type: 'close' })
+  }
+
+  /**
+   * The active surface's roster: sources opt into a surface through
+   * {@link InputTriggerSource.surfaces} (default: draft only).
+   * @param trigger - trigger char whose registered sources to filter.
+   * @returns the sources whose groups may appear on the active surface.
+   */
+  private rosterFor(trigger: string): readonly InputTriggerSource[] {
+    const surface = this.surface()
+    return this.deps.roster.sources(trigger).filter(src => (src.surfaces ?? ['draft']).includes(surface))
+  }
+
+  /**
+   * Execute a claim/insert/text outcome: on the draft surface through the
+   * scoped input events (actx as dispatch subject), on the answer surface
+   * through the attached insert target (text outcomes only). True = applied.
+   */
+  private execute(outcome: PickOutcome, span: TokenSpan): boolean {
     const { actx } = this.deps
     if (outcome === undefined || outcome === 'handled') return false
+    if (this.surface() === 'answer') {
+      return 'text' in outcome
+        ? this.answer?.(outcome.text, span, outcome.continue === true) ?? false
+        : false
+    }
     if ('claim' in outcome) {
       return actx.bail(actx, 'slash/input-begin-command', { claim: outcome.claim, span }) === true
     }
@@ -530,7 +614,7 @@ export class InputTriggerController {
       // open menu, so one source cannot contribute its previous catalog.
       void Promise.resolve().then(() => {
         if (this.disposed || this.hit !== hit || !this.menu.getSnapshot().open) return
-        this.fetchCandidates(hit, this.deps.roster.sources(hit.trigger))
+        this.fetchCandidates(hit, this.rosterFor(hit.trigger))
       })
     }))
   }

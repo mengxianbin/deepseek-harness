@@ -7,6 +7,7 @@
   },
   "include": [
     "src/client",
+    "src/restart.ts",
     "src/types.ts",
     "src/css-modules.d.ts"
   ],
@@ -25,6 +26,7 @@
     { "path": "../ui-sidebar" },
     { "path": "../shortcuts/tsconfig.client.json" },
     { "path": "../modules" },
+    { "path": "../product-analytics/tsconfig.client.json" },
     { "path": "../ui-layout" }
   ]
 }

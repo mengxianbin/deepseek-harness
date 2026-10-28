@@ -13,6 +13,9 @@ import { connectFreshWorkspaceZh, saveFailureShot, ZH_BROWSER_LOCALE } from './s
 const SNAPSHOT_DIR = fileURLToPath(new URL('../../../snapshots/web/deepseek-messages-chat', import.meta.url))
 const FIXTURE = join(SNAPSHOT_DIR, 'session.v3.jsonl')
 const MODE = webSnapshotMode()
+// FORK(replay-residual-1022): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 修法).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 describe.skipIf(MODE === 'record')('web e2e: DeepSeek Messages conversation', () => {
   let scaffold: WebScaffold
@@ -26,6 +29,7 @@ describe.skipIf(MODE === 'record')('web e2e: DeepSeek Messages conversation', ()
     scaffold = await launchWebScaffold({
       replayFixture,
       paceMs: 5,
+      extraOverlayPath: CATALOG_OVERLAY,
       replayProviders: [{
         id: 'deepseek-messages', name: 'DeepSeek',
         models: [{

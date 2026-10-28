@@ -19,11 +19,17 @@ async function bench() {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry).await()
   const slots = ctx.get('slots') as SlotRegistry
-  // Stand-in for the ui-conversation composer entry: declare the overlay
-  // slot without providing ConversationController, which is not its lifecycle
-  // signal.
+  // Stand-in for the ui-conversation composer entries: declare both overlay
+  // slots without providing ConversationController, which is not their
+  // lifecycle signal.
   slots.register(
-    { name: 'root', children: { 'conversation.input.overlay': { kind: 'list', scope: 'session' } } } as never,
+    {
+      name: 'root',
+      children: {
+        'conversation.input.overlay': { kind: 'list', scope: 'session' },
+        'conversation.composer.overlay': { kind: 'list', scope: 'session' },
+      },
+    } as never,
     () => null,
   )
   // Sessions face: mint one real scope for session 'a' and resolve it by id.
@@ -111,5 +117,34 @@ describe('apply', () => {
     await fiber.dispose()
     expect(slots.entries('conversation.input.overlay')).toHaveLength(0)
     expect(ctx.get('inputTriggers')).toBeUndefined()
+  })
+
+  it('registers the same MenuView into the composer takeover overlay (question card anchor)', async () => {
+    const { ctx, slots } = await bench()
+    await ctx.plugin({ inject: [...inject], apply }).await()
+    const entries = slots.entries('conversation.composer.overlay')
+    expect(entries).toHaveLength(1)
+    expect(entries[0]!.options.id).toBe('slash-menu')
+    expect(entries[0]!.locale).toBe('slash.menu')
+
+    const inputTriggers = ctx.get('inputTriggers') as InputTriggerService
+    const injectEntry = entries[0]!.inject as unknown as (sessionId: SessionId) => MenuViewInjected
+    const injected = injectEntry(sid('a'))
+    // One controller per session: both anchors drive one menu store.
+    const controller = inputTriggers.sessionOf(ctx.sessions.scope(sid('a'))!)
+    expect(injected.menu).toBe(controller.menu)
+    injected.onDismiss()
+    expect(controller.menu.getSnapshot().open).toBe(false)
+    expect(() => injectEntry(sid('ghost'))).toThrow(/resolved no scope/)
+  })
+
+  it('fiber teardown removes the composer overlay entry too', async () => {
+    const { ctx, slots } = await bench()
+    const fiber = ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+    expect(slots.entries('conversation.composer.overlay')).toHaveLength(1)
+
+    await fiber.dispose()
+    expect(slots.entries('conversation.composer.overlay')).toHaveLength(0)
   })
 })

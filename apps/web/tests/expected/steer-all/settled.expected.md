@@ -6,11 +6,20 @@
   - tablist:
     - tab "Chat" [selected]
     - tab "Trajectory"
+  - button "More conversation views"
 - text: Use the ask_user_question tool to ask me exactly one question with id "checkpoint", question "Ready to continue?", header "Checkpoint", and options labeled "Yes" and "No". After I answer, reply with one short sentence acknowledging my answer and stop. {{clock}}
 - button "Copy"
 - status: Completed
 - button "Completed in {{duration}}" [disabled]
-- button "Asked questions"
+- button "Analysis completed"
+- button "Ask question 1/1 answered" [expanded]
+- term: Ready to continue?
+- definition:
+  - list:
+    - listitem: "Yes"
+    - listitem: "No"
+- definition: "Yes"
+- button "Inspect"
 - text: "Interjection: include the word BANANA in your final reply. {{clock}}"
 - button "Copy"
 - text: "Interjection: include the word ORANGE in your final reply. {{clock}}"

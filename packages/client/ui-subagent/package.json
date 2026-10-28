@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-client-ui-subagent",
   "description": "Subagent conversation catalog, continuation routing UI, and '@' reference source",
-  "version": "0.2.1-rc.2",
+  "version": "0.2.1-rc.3",
   "publishConfig": {
     "access": "public"
   },
@@ -43,7 +43,7 @@
     }
   },
   "scripts": {
-    "bundle": "tsdown",
+    "bundle": "tsx ../../scripts/restart-signal/build-stamp.ts run --faces auto -- tsdown",
     "watch": "tsdown --watch"
   },
   "license": "MIT",

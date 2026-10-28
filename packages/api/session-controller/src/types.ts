@@ -7,7 +7,7 @@ import type {
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { LlmAttemptId, MessageId } from '@deepseek-ai/dsh-llm/brand'
 import type { TextBlock } from '@deepseek-ai/dsh-llm'
-import type { SessionId, SessionSeqCursor } from '@deepseek-ai/dsh-session/types'
+import type { AgentCancelEntry, SessionId, SessionSeqCursor } from '@deepseek-ai/dsh-session/types'
 import type { SessionProjectionMap } from '@deepseek-ai/dsh-session-projection/types'
 import type { Principal } from '@deepseek-ai/dsh-typert-protocol'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
@@ -333,6 +333,19 @@ export interface SessionForkRequest {
   readonly atSeq?: number
   /** False asks the Host to check for required migration before forking. Defaults to true. */
   readonly allowMigration?: boolean
+  /**
+   * Which UI entry asked for this fork, when the caller knows one: `'menu'`
+   * (session row menu), `'shortcut'` (the session.fork keybinding), or
+   * `'footer'` (the turn-tail branch action). Callers that do not tag one
+   * (third-party plugins driving the same client service, remote-bridge
+   * forwards) leave it absent; the Host records `'unknown'` — or a
+   * best-effort `'remote'` derived in-process — into the fork audit ledger
+   * (`~/.dsh/fork-audit/fork-ledger.json`), so every fork stays attributable
+   * within one scheduling tick.
+   */
+  readonly entry?: string
+  /** Client identity when the transport exposes one (e.g. a remote peer); recorded alongside `entry`. */
+  readonly client?: string
 }
 
 /** Identity of a newly forked Session. */
@@ -383,6 +396,8 @@ export interface SessionUpdateQueueValue {
 /** Active-turn cancellation request. */
 export interface SessionCancelRequest {
   readonly sessionId: SessionId
+  /** UI entry that requested the stop; omitted by callers that record no entry (old data default). */
+  readonly entry?: AgentCancelEntry
 }
 
 /** Receipt after cancellation is admitted to the live Agent. */

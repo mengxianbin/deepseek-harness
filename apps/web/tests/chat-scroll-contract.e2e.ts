@@ -6,7 +6,7 @@ import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { Browser, Page, Route } from 'playwright'
+import type { Browser, Locator, Page, Route } from 'playwright'
 import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { StreamChunk } from '@deepseek-ai/dsh-llm'
@@ -154,12 +154,25 @@ function holdTextAfter(world: ScrollWorld, initialDeltas: number): () => void {
 }
 
 function toolStream(): StreamChunk[] {
-  const command = [
-    `: > ${TOOL_READY_FILE}`,
-    `while [ ! -f ${TOOL_RELEASE_FILE} ]; do sleep 0.02; done`,
-    'line=1',
-    `while [ "$line" -le 64 ]; do printf '${LIVE_TOOL_RESULT} line %02d\\n' "$line"; line=$((line + 1)); done`,
-  ].join('; ')
+  // F4 platform branch (dsh-web-e2e-red-triage-1021): the win32 shipped preset
+  // has no `bash` tool, so the live call runs as `pwsh` and needs the PowerShell
+  // spelling of the same contract — create the ready file, poll the release
+  // file every 20ms, then print the same 64 numbered result lines and exit.
+  // POSIX keeps the original bash pipeline verbatim.
+  const command = process.platform === 'win32'
+    ? [
+      `Set-Content -Path '${TOOL_READY_FILE}' -Value '' -NoNewline`,
+      // FORK(replay-residual-1022): 240s 封顶——release 未落也自退，防测试失败后任务与 teardown 互等（2026-10-23 SEG4 卡死复盘）
+      `$deadline=(Get-Date).AddSeconds(240); while (-not (Test-Path -LiteralPath '${TOOL_RELEASE_FILE}')) { if ((Get-Date) -gt $deadline) { break }; Start-Sleep -Milliseconds 20 }`,
+      `1..64 | ForEach-Object { Write-Output ('${LIVE_TOOL_RESULT} line {0:d2}' -f $_) }`,
+    ].join('; ')
+    : [
+      `: > ${TOOL_READY_FILE}`,
+      `while [ ! -f ${TOOL_RELEASE_FILE} ]; do sleep 0.02; done`,
+      'line=1',
+      `while [ "$line" -le 64 ]; do printf '${LIVE_TOOL_RESULT} line %02d\\n' "$line"; line=$((line + 1)); done`,
+    ].join('; ')
+  const name = process.platform === 'win32' ? 'pwsh' : 'bash'
   const args = JSON.stringify({ command, description: LIVE_TOOL_RESULT })
   return [
     { type: 'block-start', index: 0, blockType: 'tool-call' },
@@ -167,17 +180,35 @@ function toolStream(): StreamChunk[] {
       type: 'tool-call-delta',
       index: 0,
       id: LIVE_TOOL_CALL_ID,
-      name: 'bash',
+      name,
       argumentsDelta: args,
     },
     {
       type: 'block-end',
       index: 0,
-      block: { type: 'tool-call', id: LIVE_TOOL_CALL_ID, name: 'bash', arguments: args },
+      block: { type: 'tool-call', id: LIVE_TOOL_CALL_ID, name, arguments: args },
     },
     { type: 'usage', usage: { inputTokens: 256, outputTokens: 48 } },
     { type: 'finish', reason: { kind: 'tool-calls' } },
   ]
+}
+
+/**
+ * F4 platform branch (dsh-web-e2e-red-triage-1021): the live shell row anchor.
+ * The win32 `pwsh` call renders the generic ToolRow (`data-tool` root — ui-tool
+ * registers its sample only under key `bash`); POSIX keeps the bash sample div.
+ */
+const LIVE_SHELL_ROW = process.platform === 'win32' ? '[data-tool="pwsh"]' : '[data-sample="bash"]'
+
+/**
+ * The node carrying `aria-expanded` for the live shell row on this platform:
+ * the bash sample puts it on its root (the row anchor itself), while the win32
+ * generic row keeps it on the inner disclosure row one level down.
+ * @param row - the live shell row locator.
+ * @returns the locator whose aria-expanded tracks the row disclosure.
+ */
+function shellDisclosure(row: Locator): Locator {
+  return process.platform === 'win32' ? row.locator('[data-disclosure-row]') : row
 }
 
 function replayEntry(chunks: StreamChunk[]): ReplayEntry {
@@ -1605,7 +1636,7 @@ describe('web e2e: long Chat scroll contract', () => {
         await composer.fill(LIVE_TOOL_PROMPT)
         await world.page.getByRole('button', { name: 'Send message', exact: true }).click()
         await expect.poll(() => fileExists(readyPath), { timeout: 15_000 }).toBe(true)
-        const liveRow = world.page.locator(`[data-chat-call-id="${LIVE_TOOL_CALL_ID}"] [data-sample="bash"]`)
+        const liveRow = world.page.locator(`[data-chat-call-id="${LIVE_TOOL_CALL_ID}"] ${LIVE_SHELL_ROW}`)
         await expandOwningTurnProcess(world.page, liveRow)
         await liveRow.waitFor({ timeout: 15_000 })
         expect(await liveRow.getAttribute('data-state')).toBe('running')
@@ -1648,7 +1679,7 @@ describe('web e2e: long Chat scroll contract', () => {
       await expectBottom(world.page)
       await expectMarkerAboveComposer(world.page, LIVE_TOOL_DONE)
 
-      const liveRowSelector = `[data-chat-call-id="${LIVE_TOOL_CALL_ID}"] [data-sample="bash"]`
+      const liveRowSelector = `[data-chat-call-id="${LIVE_TOOL_CALL_ID}"] ${LIVE_SHELL_ROW}`
       const liveRow = world.page.locator(liveRowSelector)
       await expandOwningTurnProcess(world.page, liveRow)
       await wheelUntilVisible(world.page, liveRowSelector, -300)
@@ -1664,7 +1695,7 @@ describe('web e2e: long Chat scroll contract', () => {
         }
       })
       await liveRow.click()
-      await expect.poll(() => liveRow.getAttribute('aria-expanded'), { timeout: 10_000 }).toBe('true')
+      await expect.poll(() => shellDisclosure(liveRow).getAttribute('aria-expanded'), { timeout: 10_000 }).toBe('true')
       await expectSameFlowTop(world.page, toolAnchor)
       await wheelToHistoryStart(world.page)
       await world.page.getByRole('button', { name: 'Back to bottom', exact: true }).click()
@@ -1672,7 +1703,7 @@ describe('web e2e: long Chat scroll contract', () => {
       await wheelUntilMounted(world.page, liveRowSelector, -1_100)
       const restoredRow = world.page.locator(liveRowSelector)
       await restoredRow.waitFor({ timeout: 10_000 })
-      expect(await restoredRow.getAttribute('aria-expanded')).toBe('true')
+      expect(await shellDisclosure(restoredRow).getAttribute('aria-expanded')).toBe('true')
       expect(await world.page.getByText(LIVE_TOOL_RESULT, { exact: false }).count()).toBeGreaterThan(0)
       assertClean(world)
     })

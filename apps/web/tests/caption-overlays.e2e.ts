@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
 import { launchWebScaffold, watchConsole } from './scaffold.ts'
-import { openSettings, ZH_BROWSER_LOCALE } from './support.ts'
+import { openSettings, selectGlobalPanel, ZH_BROWSER_LOCALE } from './support.ts'
 
 it('keeps settings and expanded plugin dialogs clear of the Windows caption across fullscreen transitions', async () => {
   const scaffold = await launchWebScaffold({
@@ -48,7 +48,8 @@ it('keeps settings and expanded plugin dialogs clear of the Windows caption acro
       expect(await settings.isVisible()).toBe(true)
       await settings.getByRole('button', { name: '关闭', exact: true }).click()
       if (await reopenSidebar.isVisible()) await reopenSidebar.click()
-      await page.getByRole('navigation', { name: '全局面板' }).getByRole('button', { name: '插件', exact: true }).click()
+      // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
+      await selectGlobalPanel(page, '插件')
       await page.locator('[data-plugin-panel]').getByRole('button', { name: '添加插件', exact: true }).click()
       const plugin = page.getByRole('dialog', { name: '添加插件', exact: true })
       await plugin.getByRole('button', { name: '插件安装引导和示例', exact: true }).click()

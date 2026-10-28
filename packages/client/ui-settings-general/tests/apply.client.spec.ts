@@ -15,6 +15,11 @@ import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 import { LOCALE_SETTINGS_NAMESPACE, LocaleSettingsSchema } from '@deepseek-ai/dsh-client-locale/src/locale-settings.ts'
 import { inject } from '../src/client/index.ts'
 import type { DeveloperToolsRowInjected } from '../src/client/DeveloperToolsRow.tsx'
+import { AuthExpiredOverlay, type AuthExpiredOverlayInjected } from '../src/client/AuthExpiredOverlay.tsx'
+import { AUTH_EXPIRED_EVENT } from '../src/client/auth-expired.ts'
+// Connection owns the dispatch; its browser source is transport, so the page
+// redeclares the name (no static bundle edge) and this spec pins the pair.
+import { AUTH_EXPIRED_EVENT as CONNECTION_EVENT } from '@deepseek-ai/dsh-client-connection/src/client/cookie-refresh.ts'
 import { HostReleasePrompt, type HostReleasePromptInjected } from '../src/client/HostReleasePrompt.tsx'
 import { CloseLabel, HeaderContent, TriggerContent } from '../src/client/chrome.tsx'
 import { GeneralSection } from '../src/client/GeneralSection.tsx'
@@ -73,6 +78,11 @@ function generalLabel(c: TestClient): string | undefined {
   return resolveSlotLabel(generalEntry(c).options.label)
 }
 
+function developerToolsRowOf(c: TestClient): DeveloperToolsRowInjected {
+  const developerRow = c.ctx.slots.entries('settings.general.item').find(row => row.options.id === 'developer-tools')!
+  return (developerRow.inject as unknown as () => DeveloperToolsRowInjected)()
+}
+
 function actionInjectedOf(c: TestClient): SettingsDocumentActionInjected {
   const entry = ownEntries(c, 'settings.action')[0]!
   return (entry.inject as unknown as () => SettingsDocumentActionInjected)()
@@ -91,7 +101,9 @@ function setPageUrl(url: string): void {
 
 describe('ui-settings-general apply', () => {
   it('declares the services it uses', () => {
-    expect(inject).toEqual(['slots', 'locale', 'connection', 'remote', 'remote.settings', 'configForms', 'shortcuts', 'modules'])
+    expect(inject).toEqual([
+      'slots', 'locale', 'connection', 'remote', 'remote.settings', 'configForms', 'shortcuts', 'modules', 'uiSession',
+    ])
   })
 
   it('fills the five seats of the shell it declares, with the locale-following General label', async ({ mock, start }) => {
@@ -106,8 +118,7 @@ describe('ui-settings-general apply', () => {
     // The shared developer-tool control belongs to General; onboarding remains feature-owned.
     expect(c.ctx.slots.entries('settings.general.item').filter(row => row.locale === NS).map(row => row.options.id)).toEqual(['developer-tools', 'current-version'])
     expect(c.ctx.slots.entries('settings.onboarding').filter(row => row.locale === NS)).toEqual([])
-    const developerRow = c.ctx.slots.entries('settings.general.item').find(row => row.options.id === 'developer-tools')!
-    const developer = (developerRow.inject as unknown as () => DeveloperToolsRowInjected)()
+    const developer = developerToolsRowOf(c)
     expect(developer.hooks.developerTools).toBe(c.ctx.configForms.developerTools.enabled)
     expect(developer.hooks.developerTools.getSnapshot()).toBe(false)
     const setEnabled = vi.spyOn(c.ctx.configForms.developerTools, 'setEnabled').mockResolvedValue(undefined)
@@ -121,6 +132,62 @@ describe('ui-settings-general apply', () => {
       expect(c.ctx.slots.entries(name).find(row => row.component === component)!.locale).toBe(NS)
     }
   }, COLD_BOOT_TIMEOUT_MS)
+
+  it('reports a Coding Tools toggle only when a known value changes to the requested one', async ({ mock, start }) => {
+    const { c } = await client(mock, start)
+    const track = vi.fn()
+    c.ctx.provide('productAnalytics', { enabled: true, track } as never)
+    const form = c.ctx.configForms.get<{ enabled: boolean }>('ui-settings')
+    const snapshot = form.getSnapshot()
+    let value: { enabled: boolean } | undefined = { enabled: false }
+    let accepted = true
+    let now = 100
+    const reads = vi.spyOn(form, 'getSnapshot').mockImplementation(() => ({ ...snapshot, value }))
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+    const write = vi.spyOn(c.ctx.configForms.developerTools, 'setEnabled').mockImplementation(async (enabled) => {
+      now += 50
+      if (accepted) value = { enabled }
+    })
+    onTestFinished(() => {
+      reads.mockRestore()
+      clock.mockRestore()
+      write.mockRestore()
+    })
+    const row = developerToolsRowOf(c)
+
+    // The event carries the click time, before the write settles.
+    await row.setEnabled(true)
+    expect(track).toHaveBeenCalledExactlyOnceWith('code_work_view_toggle', { is_enabled: true }, 100)
+
+    // Requesting the current value writes but changes nothing.
+    await row.setEnabled(true)
+    expect(write).toHaveBeenCalledTimes(2)
+    expect(track).toHaveBeenCalledOnce()
+
+    // A write that settles without the requested value is not a toggle.
+    accepted = false
+    await row.setEnabled(false)
+    expect(value).toEqual({ enabled: true })
+    expect(track).toHaveBeenCalledOnce()
+
+    // A rejected write reports its failure and no toggle.
+    accepted = true
+    write.mockRejectedValueOnce(new Error('not accepted'))
+    await expect(row.setEnabled(false)).rejects.toThrow('not accepted')
+    expect(track).toHaveBeenCalledOnce()
+
+    // Without a known previous value the change cannot be attributed.
+    value = undefined
+    await row.setEnabled(false)
+    expect(value).toEqual({ enabled: false })
+    expect(track).toHaveBeenCalledOnce()
+
+    value = { enabled: true }
+    now = 300
+    await row.setEnabled(false)
+    expect(track).toHaveBeenCalledTimes(2)
+    expect(track).toHaveBeenLastCalledWith('code_work_view_toggle', { is_enabled: false }, 300)
+  })
 
   it('registers the zh/en settings dictionaries and frees the seats when its row unloads', async ({ mock, start }) => {
     const { c, settings } = await client(mock, start)
@@ -243,6 +310,23 @@ describe('ui-settings-general apply', () => {
     expect(settings.mutate).not.toHaveBeenCalled()
   })
 
+  it('rechecks on the Host push event restart-signal/changed (design C.5)', async ({ mock, start }) => {
+    // The flow's recheck rides the page's fetch; stub it before boot so the
+    // boot recheck and the push-triggered recheck are both observable. Only
+    // recheck-route calls are counted — other plugins may share the surface.
+    const fetchSpy = vi.fn(async (_input: string, _init?: unknown) => ({ ok: true, status: 200, json: async () => ({ state: 'OK' }) }))
+    vi.stubGlobal('fetch', fetchSpy)
+    onTestFinished(() => { vi.unstubAllGlobals() })
+    const rechecks = () => fetchSpy.mock.calls.filter(call => call[0] === '/api/stamp-recheck')
+    const { c } = await client(mock, start)
+    await vi.waitFor(() => { expect(rechecks().length).toBeGreaterThan(0) })
+    const bootRechecks = rechecks().length
+
+    await c.mock.streams.opened('$events', 1)
+    c.mock.streams.push('$events', { type: 'emit', event: 'restart-signal/changed', args: [] })
+    await vi.waitFor(() => { expect(rechecks().length).toBeGreaterThan(bootRechecks) })
+  })
+
   it('re-registers after a Loader rebuild of the declaring chain (stale disposers must not block)', async ({ mock, start }) => {
     const { c, settings } = await client(mock, start)
     const before = SEATS.map(([name]) => ownEntries(c, name)[0])
@@ -308,5 +392,27 @@ describe('ui-settings-general apply', () => {
     await c.unload(SELF)
     await c.flush()
     expect(overlay()).toBeUndefined()
+  })
+
+  it('latches the heartbeat expiry event into the shell overlay notice and stops listening on unload', async ({ mock, start }) => {
+    const { c } = await client(mock, start)
+    // Contract: the listener key stays the name cookie-refresh dispatches.
+    expect(AUTH_EXPIRED_EVENT).toBe(CONNECTION_EVENT)
+    const overlay = () => c.ctx.slots.entries('shell.overlay').find(row => row.options.id === 'auth-expired')
+    expect(overlay()?.component).toBe(AuthExpiredOverlay)
+    expect(overlay()?.locale).toBe(NS)
+    const face = overlay()!.inject as unknown as () => AuthExpiredOverlayInjected
+    const latch = face().hooks.authExpired
+    expect(latch.getSnapshot()).toBe(false)
+    window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT))
+    expect(latch.getSnapshot()).toBe(true)
+    // The source broadcasts at most once per page; a repeat changes nothing.
+    window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT))
+    expect(latch.getSnapshot()).toBe(true)
+    const remove = vi.spyOn(window, 'removeEventListener')
+    await c.unload(SELF)
+    await c.flush()
+    expect(overlay()).toBeUndefined()
+    expect(remove).toHaveBeenCalledWith(AUTH_EXPIRED_EVENT, expect.any(Function))
   })
 })

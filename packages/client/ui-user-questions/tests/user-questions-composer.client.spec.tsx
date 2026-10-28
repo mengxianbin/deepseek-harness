@@ -8,6 +8,8 @@ import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { AskUserQuestionAnswerItem } from '@deepseek-ai/dsh-user-questions/types'
 import { createWaterfallRequest, PendingQuestion, type QuestionCardSnapshot, type QuestionComposerProps } from '../src/client/contract/slots.ts'
+import type { ArbitrateKey, ArbitrateOutcome } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { AnswerSurfaceInsert } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import { createQuestionDraftStore } from '../src/client/draft-store.ts'
 import { QuestionComposer as Composer, parseRecommendedLabel } from '../src/client/QuestionComposer.tsx'
 import { en, zh } from '../src/client/locales.ts'
@@ -113,6 +115,14 @@ const inputState: InputState = {
  *  plain stubs per the client testing discipline). */
 const kitBase: Omit<QuestionComposerProps, 'matched' | 'useStore' | 'useQuestionCard' | 'actions'> = {
   renderSlot: () => null,
+  // Inert answer-surface face: this spec drives the flow's own handlers; the
+  // wiring asserts itself through per-test overrides (see the answer-surface
+  // describes) and the pipeline side lives in ui-input-trigger's spec.
+  answerTriggers: {
+    attach: () => () => {},
+    track: () => {},
+    arbitrate: () => 'pass',
+  },
   SessionProvider: ({ children }) => children,
   session: undefined,
   sessionId: SID,
@@ -550,6 +560,127 @@ describe('PendingQuestion domain face', () => {
   })
 })
 
+describe('occlusion fold', () => {
+  /** The real seat ancestry: transcript scroller owns the composer seat, so
+   *  the fold sensor's reach test has something to read. jsdom has no layout,
+   *  so the card's share of the viewport is pinned through the frame rect. */
+  function renderInSeatView(card: QuestionComposerProps['matched'], tall = true) {
+    const view = render(
+      <div data-conversation-scroll="">
+        <div data-composer-seat="">
+          <QuestionComposer matched={card} {...kit} />
+        </div>
+      </div>,
+    )
+    const frame = view.container.querySelector('[data-question-key]') as HTMLElement
+    vi.spyOn(frame, 'getBoundingClientRect').mockReturnValue(
+      { height: tall ? 480 : 120, width: 680, top: 0, left: 0, bottom: 0, right: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect,
+    )
+    return { view, frame }
+  }
+
+  it('folds a tall card when a press reaches the transcript, and the strip press unfolds it', () => {
+    const { carrier } = wait()
+    const { frame } = renderInSeatView(carrier)
+    expect(screen.getByRole('radiogroup')).toBeTruthy()
+
+    // The reader presses the conversation to scroll/read: the card yields.
+    fireEvent.pointerDown(document.querySelector('[data-conversation-scroll]')!, { bubbles: true })
+
+    expect(screen.queryByRole('radiogroup')).toBeNull()
+    expect(screen.getByText('选择候选人类型')).toBeTruthy()
+    expect(frame.hasAttribute('data-question-folded')).toBe(true)
+
+    // Pressing the strip brings the card back; the fold flag lifts with it.
+    fireEvent.click(screen.getByText('选择候选人类型'))
+    expect(screen.getByRole('radiogroup')).toBeTruthy()
+    expect(frame.hasAttribute('data-question-folded')).toBe(false)
+  })
+
+  it('leaves a short card alone — only a card that blocks the transcript folds', () => {
+    const { carrier } = wait()
+    renderInSeatView(carrier, false)
+
+    fireEvent.pointerDown(document.querySelector('[data-conversation-scroll]')!, { bubbles: true })
+
+    expect(screen.getByRole('radiogroup')).toBeTruthy()
+  })
+
+  it('ignores presses on composer furniture — the seat is not the transcript', () => {
+    const { carrier } = wait()
+    renderInSeatView(carrier)
+    const seat = document.querySelector('[data-composer-seat]')!
+
+    fireEvent.pointerDown(seat, { bubbles: true })
+
+    expect(screen.getByRole('radiogroup')).toBeTruthy()
+  })
+
+  it('a press inside the card never folds it', () => {
+    const { carrier } = wait()
+    renderInSeatView(carrier)
+
+    fireEvent.pointerDown(screen.getByRole('radiogroup'), { bubbles: true })
+
+    expect(screen.getByRole('radiogroup')).toBeTruthy()
+  })
+
+  it('keeps a manual minimize pinned: transcript presses and strip presses do not lift it, only the toggle does', () => {
+    const { carrier } = wait()
+    const { frame } = renderInSeatView(carrier)
+    fireEvent.click(screen.getByLabelText(zh['nav.minimize']))
+    expect(screen.queryByRole('radiogroup')).toBeNull()
+
+    fireEvent.pointerDown(document.querySelector('[data-conversation-scroll]')!, { bubbles: true })
+    fireEvent.click(screen.getByText('选择候选人类型'))
+
+    // Still collapsed, and not flagged as an auto-fold: the pinned choice is
+    // the only reason the strip is up.
+    expect(screen.queryByRole('radiogroup')).toBeNull()
+    expect(frame.hasAttribute('data-question-folded')).toBe(false)
+
+    fireEvent.click(screen.getByLabelText(zh['nav.maximize']))
+    expect(screen.getByRole('radiogroup')).toBeTruthy()
+  })
+
+  it('the toggle lifts both reasons: an auto-folded card expands through the same chevron', () => {
+    const { carrier } = wait()
+    renderInSeatView(carrier)
+    fireEvent.pointerDown(document.querySelector('[data-conversation-scroll]')!, { bubbles: true })
+    expect(screen.queryByRole('radiogroup')).toBeNull()
+
+    fireEvent.click(screen.getByLabelText(zh['nav.maximize']))
+
+    expect(screen.getByRole('radiogroup')).toBeTruthy()
+    expect(screen.getByLabelText(zh['nav.minimize']).getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('a busy submission keeps its card up even when the transcript is pressed', async () => {
+    const { carrier, answer } = wait([{ id: 'scope', question: '选择范围', options: [{ label: '仅工具' }, { label: '全部' }] }])
+    answer.mockReturnValueOnce(new Promise(() => {}))
+    renderInSeatView(carrier)
+
+    fireEvent.click(screen.getByRole('radio', { name: '仅工具' }))
+    fireEvent.click(screen.getByRole('button', { name: '提交' }))
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '正在提交…' }).disabled).toBe(true)
+
+    fireEvent.pointerDown(document.querySelector('[data-conversation-scroll]')!, { bubbles: true })
+
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '正在提交…' })).toBeTruthy()
+  })
+
+  it('folds when focus reaches the transcript, and focus back into the card unfolds it', () => {
+    const { carrier } = wait()
+    renderInSeatView(carrier)
+
+    fireEvent.focusIn(document.querySelector('[data-conversation-scroll]')!, { bubbles: true })
+    expect(screen.queryByRole('radiogroup')).toBeNull()
+
+    fireEvent.focusIn(screen.getByText('选择候选人类型'), { bubbles: true })
+    expect(screen.getByRole('radiogroup')).toBeTruthy()
+  })
+})
+
 describe('parseRecommendedLabel', () => {
   it('recognizes English and Chinese suffixes without changing ordinary labels', () => {
     expect(parseRecommendedLabel('Fast (Recommended)')).toEqual({ label: 'Fast', recommended: true })
@@ -935,5 +1066,175 @@ describe('review card', () => {
     fireEvent.click(screen.getByLabelText(en['nav.next']))
     fireEvent.click(screen.getByLabelText(en['nav.next']))
     expect(screen.getByText(en['review.skipped'])).toBeTruthy()
+  })
+})
+
+/** Controllable answer-surface face: every pipeline verb is observable. */
+function triggerFace() {
+  const track = vi.fn<(draft: string, caret: number, tier: 'plain' | 'frozen', draftRev: number) => void>()
+  const arbitrate = vi.fn<(key: ArbitrateKey, composing: boolean) => ArbitrateOutcome>(() => 'pass')
+  const detach = vi.fn()
+  let target: AnswerSurfaceInsert | null = null
+  const attach = vi.fn<(insert: AnswerSurfaceInsert) => (() => void)>((insert) => {
+    target = insert
+    return () => {
+      target = null
+      detach()
+    }
+  })
+  return {
+    face: { attach, track, arbitrate } satisfies QuestionComposerProps['answerTriggers'],
+    attach, detach, track, arbitrate,
+    /** The mounted field's insert target, or null while detached. */
+    target: (): AnswerSurfaceInsert | null => target,
+    /** Revision of the most recent track call. */
+    rev: (): number => track.mock.calls.at(-1)?.[3] ?? 0,
+  }
+}
+
+const answerField = (): HTMLTextAreaElement =>
+  screen.getByPlaceholderText<HTMLTextAreaElement>('输入你的答案')
+
+describe('QuestionComposer answer-surface wiring', () => {
+  it('attaches while the field is mounted; collapse and unmount detach through the leased surface', () => {
+    const { carrier } = wait()
+    const harness = triggerFace()
+    const view = render(<QuestionComposer matched={carrier} {...kit} answerTriggers={harness.face} />)
+    expect(harness.attach).toHaveBeenCalledTimes(1)
+    expect(harness.target()).not.toBeNull()
+    // The takeover seats the menu anchor outside the clipping card.
+    expect(view.container.querySelector('[class*="triggerAnchor"]')).toBeTruthy()
+
+    // Collapsing unmounts the field: the surface lease releases with it.
+    fireEvent.click(screen.getByLabelText(zh['nav.minimize']))
+    expect(harness.detach).toHaveBeenCalledTimes(1)
+    expect(harness.target()).toBeNull()
+    expect(view.container.querySelector('[class*="triggerAnchor"]')).toBeNull()
+
+    fireEvent.click(screen.getByLabelText(zh['nav.maximize']))
+    expect(harness.attach).toHaveBeenCalledTimes(2)
+
+    view.unmount()
+    expect(harness.detach).toHaveBeenCalledTimes(2)
+    expect(harness.target()).toBeNull()
+  })
+
+  it('feeds edits to the pipeline with a content revision, and focus re-tracks without bumping it', () => {
+    const { carrier } = wait()
+    const harness = triggerFace()
+    render(<QuestionComposer matched={carrier} {...kit} answerTriggers={harness.face} />)
+    // Mount tracks the empty draft once.
+    expect(harness.track.mock.calls.at(-1)).toEqual(['', expect.any(Number), 'plain', 1])
+
+    const custom = answerField()
+    fireEvent.change(custom, { target: { value: '/g' } })
+    expect(harness.track.mock.calls.at(-1)).toEqual(['/g', expect.any(Number), 'plain', 2])
+
+    // Caret/focus motion re-tracks the same content revision (CAS survives it).
+    fireEvent.focus(custom)
+    const afterFocus = harness.track.mock.calls.at(-1)!
+    expect(afterFocus[0]).toBe('/g')
+    expect(afterFocus[2]).toBe('plain')
+    expect(afterFocus[3]).toBe(2)
+  })
+
+  it('arbitrates menu keys first: claimed keys are prevented, passed keys keep the field behavior', () => {
+    const { carrier, answer } = wait()
+    const harness = triggerFace()
+    harness.arbitrate.mockReturnValue('consumed')
+    render(<QuestionComposer matched={carrier} {...kit} answerTriggers={harness.face} />)
+    const custom = answerField()
+
+    expect(fireEvent.keyDown(custom, { key: 'ArrowDown' })).toBe(false)
+    expect(harness.arbitrate).toHaveBeenLastCalledWith('down', false)
+    fireEvent.keyDown(custom, { key: 'Tab', shiftKey: true })
+    expect(harness.arbitrate).toHaveBeenLastCalledWith('tabBack', false)
+
+    // A highlighted Enter settles the pick through the menu and never advances the flow.
+    harness.arbitrate.mockReturnValue('pick-highlighted')
+    fireEvent.change(custom, { target: { value: '/g' } })
+    expect(fireEvent.keyDown(custom, { key: 'Enter' })).toBe(false)
+    expect(harness.arbitrate).toHaveBeenLastCalledWith('enter', false)
+    expect(answer).not.toHaveBeenCalled()
+
+    // A passing Escape reaches the field untouched (no menu open).
+    harness.arbitrate.mockReturnValue('pass')
+    expect(fireEvent.keyDown(custom, { key: 'Escape' })).toBe(true)
+    expect(harness.arbitrate).toHaveBeenLastCalledWith('escape', false)
+  })
+
+  it('applies a picked text over the pick-time span, restores the caret behind it, and refuses a stale revision', () => {
+    const { carrier } = wait()
+    const harness = triggerFace()
+    render(<QuestionComposer matched={carrier} {...kit} answerTriggers={harness.face} />)
+    const custom = answerField()
+    fireEvent.change(custom, { target: { value: '/g' } })
+    const rev = harness.rev()
+    const insert = harness.target()
+    expect(insert).not.toBeNull()
+
+    let applied = false
+    act(() => {
+      applied = insert!('/go-run ', { start: 0, end: 2, draftRev: rev }, false)
+    })
+    expect(applied).toBe(true)
+    const field = answerField()
+    expect(field.value).toBe('/go-run ')
+    expect(field.selectionStart).toBe('/go-run '.length)
+
+    // Content moved on: the pick-time revision is stale and must be refused.
+    act(() => {
+      applied = insert!('/stale ', { start: 0, end: 3, draftRev: rev }, false)
+    })
+    expect(applied).toBe(false)
+    expect(answerField().value).toBe('/go-run ')
+  })
+
+  it('tracks a locked field frozen so a submission in flight cannot leave a menu open', () => {
+    const { carrier, answer } = wait([{
+      id: 'only', question: '最后一题', options: [{ label: 'Alpha' }],
+    }])
+    const harness = triggerFace()
+    render(<QuestionComposer matched={carrier} {...kit} answerTriggers={harness.face} />)
+    fireEvent.click(screen.getByRole('radio', { name: 'Alpha' }))
+    fireEvent.keyDown(answerField(), { key: 'Enter' })
+
+    expect(answer).toHaveBeenCalledOnce()
+    expect(harness.track).toHaveBeenLastCalledWith(expect.any(String), expect.any(Number), 'frozen', expect.any(Number))
+  })
+})
+
+describe('folded long-content attachment row', () => {
+  const FOLDED: PendingQuestion['questions'] = [{
+    id: 'report',
+    question: '长呈报收到？',
+    detail: '（首屏摘要）以下内容已折叠。',
+    attachment: { path: 'C:/Users/dev/.dsh/ask-reports/s1/report.md', chars: 4_200 },
+    options: [{ label: '收到' }],
+  }]
+
+  it('offers the sidebar preview opener wired by the seat', () => {
+    const { carrier } = wait(FOLDED)
+    const openAttachment = vi.fn()
+    render(<QuestionComposer matched={carrier} {...kit} openAttachment={openAttachment} />)
+
+    expect(screen.getByText(/超长内容已折叠/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '在侧栏预览中打开' }))
+    expect(openAttachment).toHaveBeenCalledWith('C:/Users/dev/.dsh/ask-reports/s1/report.md')
+  })
+
+  it('shows the file path when no opener is reachable', () => {
+    const { carrier } = wait(FOLDED)
+    render(<QuestionComposer matched={carrier} {...kit} />)
+
+    expect(screen.queryByRole('button', { name: '在侧栏预览中打开' })).toBeNull()
+    expect(screen.getByText('C:/Users/dev/.dsh/ask-reports/s1/report.md')).toBeTruthy()
+  })
+
+  it('renders no attachment row for a question without one', () => {
+    const { carrier } = wait()
+    render(<QuestionComposer matched={carrier} {...kit} openAttachment={() => {}} />)
+
+    expect(screen.queryByText(/超长内容已折叠/)).toBeNull()
   })
 })

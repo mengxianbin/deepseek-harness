@@ -200,6 +200,42 @@ describe('parseDshArgs', () => {
     expect(exitCode(['--profile', 'web', ...flags.toReversed()])).toBe(1)
   })
 
+  it('routes the boot-free web URL reprint', () => {
+    expect(parse(['web', '--print-url'])).toEqual({ mode: 'print-url', profile: 'web' })
+    expect(parse(['--profile', 'web', '--print-url'])).toEqual({ mode: 'print-url', profile: 'web' })
+    // The reprint reads no config, so an overlay is accepted and ignored.
+    expect(parse(['web', '--patch', 'a.yml', '--print-url'])).toEqual({ mode: 'print-url', profile: 'web' })
+    // After an app-flag boundary the launcher no longer owns its own name.
+    expect(parse(['web', '--port', '8080', '--print-url']))
+      .toEqual({ mode: 'profile', profile: 'web', patches: [], args: ['--port', '8080', '--print-url'] })
+  })
+
+  it.each([
+    ['tui', '--print-url'],
+    ['web', '--print-url', 'task'],
+    ['web', '--print-url', '--dump-config'],
+    ['web', '--print-url', '--dump-config-schema'],
+    ['desktop', '--print-url'],
+  ])('rejects invalid --print-url inputs %j', (...argv: string[]) => {
+    expect(exitCode(argv)).toBe(1)
+  })
+
+  it('explains a non-web --print-url on one human line', () => {
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    expect(exitCode(['tui', '--print-url'])).toBe(1)
+    const text = stderr.mock.calls.map(([chunk]) => String(chunk)).join('')
+    expect(text).toContain('run: dsh web --print-url')
+    expect(text).not.toContain('Error:')
+  })
+
+  it('explains --print-url carrying app arguments on one human line', () => {
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    expect(exitCode(['web', '--print-url', 'task'])).toBe(1)
+    const text = stderr.mock.calls.map(([chunk]) => String(chunk)).join('')
+    expect(text).toContain('takes no app arguments')
+    expect(text).not.toContain('Error:')
+  })
+
   it.each([
     ['--dump-config-schema'],
     ['desktop', '--dump-config-schema'],

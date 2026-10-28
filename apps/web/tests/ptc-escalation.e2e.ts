@@ -22,6 +22,9 @@ const PROMPT = 'Use run_code with timeoutMs 120000 and direct Node filesystem ac
   + 'In that first program, catch only filesystem errors with code EPERM, EACCES or EROFS and return exactly "EXPECTED_SANDBOX_DENIAL"; rethrow any other error. '
   + 'If the sandbox denies it, explicitly retry the program with sandbox_permissions "workspace-write" and justification "Create the file requested by the user". '
   + 'I will answer the approval prompt. After the file is written, reply DONE and stop.'
+// FORK(replay-residual-1022): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 修法).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 describe('web e2e: PTC program sandbox escalation', () => {
   let scaffold: WebScaffold
@@ -34,6 +37,7 @@ describe('web e2e: PTC program sandbox escalation', () => {
     scaffold = await launchWebScaffold({
       agentPresets: { default: 'ptc' },
       compareReplaySession: true,
+      extraOverlayPath: CATALOG_OVERLAY,
       ...(MODE === 'record' ? {} : { replayFixture: FIXTURE, paceMs: 15 }),
     })
     scaffold.ctx.on('session/event', (_session, event: SessionEvent) => { events.push(event) })

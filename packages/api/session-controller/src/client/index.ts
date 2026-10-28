@@ -82,6 +82,13 @@ export interface SessionReferenceSourceMap {
   controllerOperation: unknown
   /** A Client Gateway invocation's synchronous Context ownership. */
   gateway: unknown
+  /**
+   * FORK dsh-local (f5-list-states): the main conversation view's reference.
+   * ui-session owns the semantics and merges the same key; declaring it at the
+   * object layer too lets list projection key the pre-list mainView fallback
+   * row without depending on a consumer package (identical merged member).
+   */
+  mainView: unknown
 }
 
 /** Declaration-merge-extensible labels carried by independent Client references. */

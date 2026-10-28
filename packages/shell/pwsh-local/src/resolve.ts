@@ -16,9 +16,11 @@ import { join } from 'node:path'
  * first. Explicitly parameterized (env) so resolution is a pure function of
  * its inputs on every platform.
  * @param env - the environment to probe; defaults to the process environment.
+ * @param includeLegacy - whether the Windows PowerShell 5.1 last-resort
+ *   candidate is appended; deployments that must never run 5.1 pass `false`.
  * @returns candidate `pwsh` executable paths in resolution order.
  */
-export function candidatePwshPaths(env: NodeJS.ProcessEnv = process.env): string[] {
+export function candidatePwshPaths(env: NodeJS.ProcessEnv = process.env, includeLegacy = true): string[] {
   const programFiles = env.ProgramFiles ?? 'C:\\Program Files'
   const systemRoot = env.SystemRoot ?? 'C:\\Windows'
   const candidates = [
@@ -31,8 +33,11 @@ export function candidatePwshPaths(env: NodeJS.ProcessEnv = process.env): string
     if (trimmed.length === 0) continue
     candidates.push(join(trimmed, 'pwsh.exe'))
   }
-  // Windows PowerShell 5.1 remains the last-resort fallback on legacy hosts.
-  candidates.push(join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'))
+  // Windows PowerShell 5.1 remains the last-resort fallback on legacy hosts,
+  // opt-out for deployments where its engine bugs outweigh reaching a shell.
+  if (includeLegacy) {
+    candidates.push(join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'))
+  }
   return candidates
 }
 
@@ -65,18 +70,23 @@ export function candidateExists(candidate: string): boolean {
  * @param configured - an explicit `pwshPath` config value, trusted as-is.
  * @param env - the environment to probe on Windows; defaults to the process environment.
  * @param platform - the platform to resolve for; defaults to the process platform.
+ * @param allowLegacyPowerShell - whether resolution may land on Windows
+ *   PowerShell 5.1; when `false` the 5.1 candidate is skipped, so a host
+ *   without PowerShell 7 falls through to the bare `pwsh` PATH fallback and
+ *   fails loudly at spawn instead of silently running 5.1.
  * @returns the first existing well-known location on Windows (PowerShell 7
  *   install, a PATH entry such as the Microsoft Store install, then Windows
- *   PowerShell 5.1), else `pwsh` for PATH resolution.
+ *   PowerShell 5.1 unless excluded), else `pwsh` for PATH resolution.
  */
 export function resolvePwshPath(
   configured?: string,
   env: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,
+  allowLegacyPowerShell = true,
 ): string {
   if (configured !== undefined && configured.length > 0) return configured
   if (platform === 'win32') {
-    for (const candidate of candidatePwshPaths(env)) {
+    for (const candidate of candidatePwshPaths(env, allowLegacyPowerShell)) {
       if (candidateExists(candidate)) return candidate
     }
   }

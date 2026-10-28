@@ -9,6 +9,7 @@ export interface QuestionCardOption {
   selected: boolean
 }
 
+/** One answered question as the transcript card renders it. */
 export interface AnsweredQuestionCardItem {
   id: string
   question: string
@@ -17,6 +18,7 @@ export interface AnsweredQuestionCardItem {
   options: readonly QuestionCardOption[]
 }
 
+/** One question still awaiting an answer on the transcript card. */
 export interface UnansweredQuestionCardItem {
   id: string
   question: string

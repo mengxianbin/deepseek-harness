@@ -6,8 +6,8 @@ import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import LlmRuntime, { createUserMessage } from '@deepseek-ai/dsh-llm'
 import SessionStore, { NonEmptyToolCallIdError, SessionId, type Session } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime from '@deepseek-ai/dsh-tools'
-import { MockAdapter, textResponse } from './mock-adapter.ts'
+import ToolRuntime, { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
+import { MockAdapter, textResponse, toolCallResponse } from './mock-adapter.ts'
 
 async function harness(adapter: MockAdapter): Promise<Context> {
   const ctx = new Context()
@@ -23,23 +23,27 @@ async function harness(adapter: MockAdapter): Promise<Context> {
 }
 
 /**
- * Make the next `assistant/message` appends fail at the append site — the
+ * Make the next appends of one event type fail at the append site — the
  * exact rejection `Session.append` raises for a blank tool-call id — while
  * every other append passes through. `times` bounds the injections:
  * 1 = a single poisoned reply (self-heal case), Infinity = persistent
- * model degradation. The poisoned row never enters the log, which is what
- * makes the loop's single re-issue idempotent.
+ * failure. A poisoned `assistant/message` row never enters the log, which is
+ * what makes the loop's single re-issue idempotent.
  */
-function poisonAssistantMessages(session: Session, error: Error, times: number): void {
+function poisonAppends(session: Session, type: string, error: Error, times: number): void {
   const original = session.append.bind(session) as (...args: unknown[]) => unknown
   let thrown = 0
   ;(session as unknown as { append: (...args: unknown[]) => unknown }).append = (...args: unknown[]) => {
-    if (args[0] === 'assistant/message' && thrown < times) {
+    if (args[0] === type && thrown < times) {
       thrown += 1
       throw error
     }
     return original(...args)
   }
+}
+
+function poisonAssistantMessages(session: Session, error: Error, times: number): void {
+  poisonAppends(session, 'assistant/message', error, times)
 }
 
 function go(): ReturnType<typeof createUserMessage> {
@@ -106,6 +110,42 @@ describe('blank tool-call rejection — one bounded re-issue (2026-10-09)', () =
     // The guard is narrow: only blank tool-call rejections re-issue.
     expect(adapter.requests).toHaveLength(1)
     expect(errors).toBe(1)
+    const turnEnd = agent.session.snapshotEvents().find(event => event.type === 'turn/end')
+    expect(turnEnd).toMatchObject({ data: { reason: { kind: 'error' } } })
+  })
+
+  it('refuses the re-issue when a blank rejection surfaces after the row committed (J1 pin)', async () => {
+    // The assistant/message row commits first; the poisoned `tool/call`
+    // append then fabricates the theoretical post-commit rejection — the
+    // exact double-row hazard the assertion pins (dual-review 2026-10-09 J1).
+    const adapter = new MockAdapter([
+      toolCallResponse('c1', 'echo', { text: 'hi' }),
+      textResponse('must not be requested'),
+    ])
+    const ctx = await harness(adapter)
+    ctx.tools.register(defineContentToolFixture({
+      name: 'echo',
+      description: 'echo back',
+      parameters: { text: { type: 'string' } },
+      async execute(args) {
+        return [{ type: 'text', text: `echo: ${args.text}` }]
+      },
+    }))
+    const agent = await ctx.agentLoop.create(SessionId('blank-retry-post-commit'), { provider: 'mock', model: 'mock' })
+    let errors = 0
+    let failure: unknown
+    ctx.on('agent/error', ({ error }) => { errors += 1; failure = error })
+    poisonAppends(agent.session, 'tool/call', new NonEmptyToolCallIdError('injected post-commit blank id'), Number.POSITIVE_INFINITY)
+
+    agent.followup(go())
+    await agent.whenIdle()
+
+    // The assertion fails the turn instead of re-issuing: no second request
+    // was spent and the committed assistant row was not duplicated.
+    expect(adapter.requests).toHaveLength(1)
+    expect(errors).toBe(1)
+    expect(String(failure)).toContain('blank tool-call rejection after the assistant row committed')
+    expect(agent.session.snapshotEvents().filter(event => event.type === 'assistant/message')).toHaveLength(1)
     const turnEnd = agent.session.snapshotEvents().find(event => event.type === 'turn/end')
     expect(turnEnd).toMatchObject({ data: { reason: { kind: 'error' } } })
   })

@@ -8,10 +8,9 @@ import {
   acknowledgeReloadConnectionLoss, assertFixtureInventory, captureStableAria, compareOrRefreshGolden,
   launchWebScaffold, watchConsole, webSnapshotMode, WELCOME_NOTICE_COPY, type WebScaffold,
 } from './scaffold.ts'
-import { openSettings, ZH_BROWSER_LOCALE, saveFailureShot } from './support.ts'
+import { ZH_BROWSER_LOCALE, saveFailureShot } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('./expected/onboarding-native', import.meta.url))
-const SIGNED_OUT_MENU_EXPECTED = join(SNAPSHOT_DIR, 'signed-out-menu.expected.md')
 const MODE = webSnapshotMode()
 
 describe.skipIf(MODE === 'record').each([false, true])('web e2e: native credential onboarding (desktop marker: %s)', (desktop) => {
@@ -57,37 +56,16 @@ describe.skipIf(MODE === 'record').each([false, true])('web e2e: native credenti
         await page.reload({ waitUntil: 'load' })
         acknowledgeReloadConnectionLoss(tripwire, warningsBefore)
       }
-      const accountMenu = page.getByRole('button', { name: '账号菜单', exact: true })
-      await accountMenu.waitFor()
-      expect(await accountMenu.textContent()).toBe('更多')
-      const triggerBox = (await accountMenu.boundingBox())!
-      expect(Math.abs(triggerBox.height - 32)).toBeLessThan(1)
-      await accountMenu.click()
-      const menu = page.getByRole('menu')
-      await menu.waitFor()
-      expect(await menu.getByRole('menuitem').count()).toBe(3)
-      for (const name of ['设置', '意见反馈', '登录']) {
-        expect(await menu.getByRole('menuitem', { name, exact: true }).count()).toBe(1)
-      }
-      const menuBox = (await menu.boundingBox())!
-      expect(Math.abs(menuBox.width - 124)).toBeLessThan(1)
-      expect(Math.abs(menuBox.height - 128)).toBeLessThan(1)
-      expect(Math.abs(triggerBox.y - (menuBox.y + menuBox.height) - 4)).toBeLessThan(1)
-      for (const row of await menu.getByRole('menuitem').all()) {
-        const rowBox = (await row.boundingBox())!
-        expect(Math.abs(rowBox.height - 40)).toBeLessThan(1)
-        expect(Math.abs(menuBox.width - rowBox.width - 8)).toBeLessThan(1)
-        const glyph = (await row.locator('svg').first().boundingBox())!
-        expect(Math.abs(glyph.width - 16)).toBeLessThan(1)
-        expect(Math.abs(glyph.height - 16)).toBeLessThan(1)
-      }
-      const menuAria = await captureStableAria(page, '[role="menu"]', scaffold.workspaceCwd)
-      await compareOrRefreshGolden(SIGNED_OUT_MENU_EXPECTED, menuAria, MODE)
-      await page.keyboard.press('Escape')
-      await menu.waitFor({ state: 'detached' })
-      expect(await page.getByRole('dialog', { name: '开始使用', exact: true }).count()).toBe(0)
-      await openSettings(page, 'zh')
+      const settingsButton = page.getByRole('button', { name: '设置', exact: true })
+      await settingsButton.waitFor()
+      expect(await settingsButton.textContent()).toBe('设置')
+      const triggerBox = (await settingsButton.boundingBox())!
+      expect(Math.abs(triggerBox.height - 42)).toBeLessThan(1)
+      // One click opens Settings directly: the account menu (and its entries) is gone.
+      await settingsButton.click()
       const settings = page.getByRole('dialog', { name: '设置', exact: true })
+      await settings.waitFor()
+      expect(await page.getByRole('dialog', { name: '开始使用', exact: true }).count()).toBe(0)
       await settings.getByRole('button', { name: '模型', exact: true }).click()
       await settings.getByLabel('API 密钥', { exact: true }).waitFor()
       expect(await page.getByRole('dialog', { name: '添加一个 API Key 开始使用' }).count()).toBe(0)
@@ -99,6 +77,6 @@ describe.skipIf(MODE === 'record').each([false, true])('web e2e: native credenti
     }
     expect(tripwire.warnings).toEqual([])
     expect(tripwire.pageErrors).toEqual([])
-    await assertFixtureInventory(SNAPSHOT_DIR, ['models.expected.md', 'signed-out-menu.expected.md'])
+    await assertFixtureInventory(SNAPSHOT_DIR, ['models.expected.md'])
   })
 })

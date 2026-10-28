@@ -9,7 +9,10 @@
  * lives host-side — the pre-step boundary (`dsh-tool-skill`) recognizes a
  * leading `/name` naming a user-invocable skill and injects the rendered
  * body for every entry point, including `disable-model-invocation` skills the
- * model-side catalog never lists (issue #1470). The RPC rides the plugin's
+ * model-side catalog never lists (issue #1470). The literal-text pick is why
+ * this source opts into both trigger surfaces (`surfaces`): the question
+ * composer's answer field runs the same '/' menu on the answer surface and
+ * applies the same plain-text outcome to its own draft. The RPC rides the plugin's
  * root-context Remote captured at registration — the source never reads
  * services off a per-call argument. Draft chip visuals derive from
  * the lexicon scan; this source implements no reference codec.
@@ -168,6 +171,10 @@ export function apply(ctx: ClientContext): void {
     trigger: '/',
     name: 'skill',
     order: 2,
+    // Skill names are plain text on both surfaces, so the group joins the
+    // question composer's answer-field menu too (answer-surface picks land
+    // the same literal `/name ` there — see the module doc).
+    surfaces: ['draft', 'answer'] as const,
     async candidates(session, { query, signal }) {
       if (sessions.subagentAddress(session.sessionId) !== undefined) return []
       const skills = await fetchCatalog(session.sessionId).promise

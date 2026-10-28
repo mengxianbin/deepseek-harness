@@ -84,6 +84,10 @@ describe('installDegradationNotice()', () => {
     const notices = noticeTexts(decision)
     expect(notices).toHaveLength(1)
     expect(notices[0]).toContain(`${DEGRADATION_NOTICE_THRESHOLD} consecutive malformed tool-call`)
+    // Wording contract (dual-review J2, 2026-10-26): every counted rejection
+    // already absorbed the single-retry guard's automatic re-send, so the
+    // notice must say so instead of under-counting the model's attempts.
+    expect(notices[0]).toContain('one automatic re-send')
     expect(notices[0]).toContain('switching models')
     expect(enteredMessages(decision)).toContainEqual(INPUT)
   })

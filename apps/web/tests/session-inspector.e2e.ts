@@ -15,6 +15,9 @@ const directory = fileURLToPath(new URL('../../../snapshots/web/session-inspecto
 const fixture = fileURLToPath(new URL('../../../snapshots/web/fresh-round-trip/session.v4.jsonl', import.meta.url))
 const bundle = fileURLToPath(new URL('../../../packages/experimental/inspector-profile', import.meta.url))
 const picker = fileURLToPath(new URL('./pin-browse-picker.overlay.yml', import.meta.url))
+// FORK(replay-residual-1022): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 修法).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 it.skipIf(webSnapshotMode() === 'record')('inspects a replayed Session log and Chat groups through the optional bundle', async () => {
   const resources: { browser?: Browser; scaffold?: WebScaffold } = {}
@@ -26,7 +29,7 @@ it.skipIf(webSnapshotMode() === 'record')('inspects a replayed Session log and C
   expect(prompts).toHaveLength(1)
   const scaffold = await launchWebScaffold({
     profile: { packages: [{ dir: bundle, enabled: true }], hmr: false },
-    extraOverlayPath: picker, replayFixture, compareReplaySession: 'read-only', paceMs: 5,
+    extraOverlayPath: [picker, CATALOG_OVERLAY], replayFixture, compareReplaySession: 'read-only', paceMs: 5,
   })
   resources.scaffold = scaffold
   const browser = await chromium.launch()
@@ -90,7 +93,7 @@ it.skipIf(webSnapshotMode() === 'record')('highlights nearby Chat content when t
     try { await resources.browser?.close() } finally { await resources.scaffold?.close() }
   })
   const scaffold = await launchWebScaffold({
-    profile: { packages: [{ dir: bundle, enabled: true }], hmr: false }, extraOverlayPath: picker,
+    profile: { packages: [{ dir: bundle, enabled: true }], hmr: false }, extraOverlayPath: [picker, CATALOG_OVERLAY],
   })
   resources.scaffold = scaffold
   await seedSession(scaffold, await readFile(await selectedSessionFixture(fixture), 'utf8'), 'inspector-navigation')

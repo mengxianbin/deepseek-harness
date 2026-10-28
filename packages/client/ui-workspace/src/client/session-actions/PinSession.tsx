@@ -51,9 +51,11 @@ export function PinSessionMenuItem(props: SessionMenuItemProps<PinSessionInjecte
  * @returns the button, or null for an archived Session.
  */
 export function PinSessionRowButton(props: SessionRowActionProps<PinSessionInjected>) {
-  const { sessionId, pinSession, unpinSession, t } = props
+  const { sessionId, blank, pinSession, unpinSession, t } = props
   const { pinned, archived } = usePinState(props)
-  if (archived) return null
+  // FORK dsh-local (blank-row-archive-1026): the strip renders on a blank
+  // placeholder row too, but pinning a provisional Session means nothing.
+  if (archived || blank) return null
   return (
     <Tooltip label={t(pinned ? 'actions.unpin' : 'actions.pin')} side="bottom" align="end" delayMs={500} portal>
       <button

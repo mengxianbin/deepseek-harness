@@ -731,6 +731,15 @@ describe('wire payload validation', () => {
     expect(end?.data.reason).toEqual({ kind: 'aborted', reason: { kind: 'hook', reason: 'scripted hook abort' } })
   })
 
+  it('accepts a user cancellation cause carrying the stop entry (R2 read path)', async () => {
+    const harness = harnessWith({
+      FAKE_REASON_KIND: 'aborted', FAKE_ABORT_REASON_KIND: 'user', FAKE_ABORT_ENTRY: 'esc-esc',
+    })
+    const result = await harness.run('user-abort-entry')
+    const end = result.events.findLast(event => event.type === 'turn/end')
+    expect(end?.data.reason).toEqual({ kind: 'aborted', reason: { kind: 'user', entry: 'esc-esc' } })
+  })
+
 })
 
 describe('stderr tail bound', () => {

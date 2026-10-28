@@ -53,6 +53,7 @@ function appendEmptyAssistantMessage(session: Session, turn: number, step: numbe
 function totals(overrides: Partial<SessionStatsProjection> = {}): SessionStatsProjection {
   return {
     turns: 0, steps: 0, llmMs: 0, toolMs: 0, ttftMs: 0, ttftSteps: 0, decodeMs: 0, decodeTokens: 0,
+    retries: 0, retriesByProvider: {},
     ...overrides,
   }
 }
@@ -221,12 +222,12 @@ describe('sessionStats wall-time fold (controlled timestamps)', () => {
       attemptAt(2_500, [{
         time: 1_500, chunk: { type: 'text-delta', index: 0, text: 'later' },
       }]),
-      at(2_000, 'llm/retry', { turn: 1, step: 1 }),
+      at(2_000, 'llm/retry', { turn: 1, step: 1, provider: 'mock' }),
       messageAt(5_000, [{
         time: 3_000, chunk: { type: 'text-delta', index: 0, text: 'y' },
       }]),
       at(5_100, 'step/end', { turn: 1, step: 1 }),
-    ])).toEqual(totals({ turns: 1, steps: 1, llmMs: 4_000, ttftMs: 200, ttftSteps: 1 }))
+    ])).toEqual(totals({ turns: 1, steps: 1, llmMs: 4_000, ttftMs: 200, ttftSteps: 1, retries: 1, retriesByProvider: { mock: 1 } }))
   })
 
   it('ignores empty deltas, non-token chunks, and chunks outside the open step', () => {
@@ -358,5 +359,22 @@ describe('sessionStats wall-time fold (controlled timestamps)', () => {
       messageAt(1_000),
       at(2_100, 'step/end', { turn: 1, step: 1 }),
     ])).toEqual(totals({ turns: 1, steps: 1 }))
+  })
+})
+
+describe('sessionStats retry distribution (R5 transport-jitter dashboard)', () => {
+  const retry = (provider: string, seq: number): SessionEvent =>
+    at(seq, 'llm/retry', { turn: 1, step: 1, provider })
+
+  it('totals llm/retry events and buckets them by provider', () => {
+    expect(fold([
+      retry('deepseek', 1),
+      retry('deepseek', 2),
+      retry('fallback', 3),
+    ])).toEqual(totals({ retries: 3, retriesByProvider: { deepseek: 2, fallback: 1 } }))
+  })
+
+  it('keeps an entry-less projection view at zero so a pre-retry log still validates', () => {
+    expect(fold([])).toEqual(totals())
   })
 })

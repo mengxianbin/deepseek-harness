@@ -1,0 +1,27 @@
+/*
+ * The rail form of the Feedback seat (FORK sidebar-foot-1027): the wide
+ * column renders this row inside the ⋯ menu where ui-sidebar's shared
+ * `.moreActions [data-slot] button` rule paints it (icon + aria-label text,
+ * hover, focus) — so the local styles only claim the COLLAPSED rail, which
+ * has no ⋯ menu and no shared rule: a 36px icon button beside the sibling
+ * foot actions. Scoping on data-wide keeps the menu row left-aligned
+ * (justify-content would otherwise fight the shared flex-start).
+ */
+.trigger[data-wide='rail'] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: var(--dsw-radius-md);
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+}
+
+.trigger[data-wide='rail']:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}

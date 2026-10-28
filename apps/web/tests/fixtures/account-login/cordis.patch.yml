@@ -5,7 +5,8 @@
   config:
     platformOrigin: "{{origin}}"
     allowLoopbackHttp: true
-# The scenario signs in from the account menu after initial setup.
+# The scenario boots from a stored grant (FORK dsh-local, settings-launcher: the sidebar
+# menu entry that used to start the browser sign-in is gone), so onboarding stays done.
 - id: ui-settings-account
   config:
     step: done

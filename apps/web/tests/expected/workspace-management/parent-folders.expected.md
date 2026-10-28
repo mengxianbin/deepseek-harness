@@ -3,3 +3,5 @@
   - treeitem "project-two" [expanded]
   - treeitem "New Session" [selected]
   - treeitem "project-one" [expanded]
+  - treeitem "New Session"
+- treeitem "New Session"

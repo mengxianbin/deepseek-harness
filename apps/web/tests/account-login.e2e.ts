@@ -1,9 +1,14 @@
-// Real-composition acceptance for DeepSeek account sign-in from a plain browser. The
-// scaffold boots the shipped Web Loader tree, so the real account provider drives
-// auth_init, the loopback OAuth callback, and auth_exchange against a loopback Platform
-// double, while a real Chromium follows the tab the Web UI preopens.
+// Real-composition acceptance for the DeepSeek account surface in a plain browser. The
+// scaffold boots the shipped Web Loader tree, so the real account provider drives the
+// credential-stored stream, profile/balance reads, and the shared avatar loader against
+// a loopback Platform double. FORK dsh-local (settings-launcher, 2026-10-21): the sidebar
+// account menu that started the browser sign-in is gone — this build has no explicit
+// sign-in entry — so the scenario boots from a stored grant bound to the double's origin
+// instead of driving the tab handoff, and it observes the account only through Settings
+// (the sidebar carries no avatar either). The themed-tab handoff stays covered by the
+// sign-in dialog unit suites.
 import { createServer, type Server } from 'node:http'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -105,9 +110,17 @@ describe.skipIf(MODE === 'record')('web e2e: DeepSeek account sign-in in a plain
   beforeAll(async () => {
     platform = await mockPlatform()
     root = await mkdtemp(join(tmpdir(), 'dsh-web-account-login-'))
+    const home = join(root, 'home')
+    await mkdir(home, { recursive: true })
+    // A stored grant bound to the double's origin starts the account credential-stored
+    // without driving the browser sign-in flow (FORK dsh-local: the menu entry that used
+    // to start it is gone, so this is the scenario's only way in).
+    await writeFile(join(home, '.credentials.yaml'),
+      `version: 1\nrefs: {}\nrecords:\n  deepseek-account-platform/default:\n    kind: grant\n    payload:\n      version: 1\n      token: ${TOKEN}\n      issuer: ${platform.origin}\n`,
+      { mode: 0o600 })
     const overlay = join(root, 'account-login.overlay.yml')
     await writeFile(overlay, (await readFile(OVERLAY_TEMPLATE, 'utf8')).replaceAll('{{origin}}', platform.origin))
-    scaffold = await launchWebScaffold({ extraOverlayPath: overlay })
+    scaffold = await launchWebScaffold({ harnessHome: home, extraOverlayPath: overlay })
     browser = await chromium.launch()
   })
 
@@ -118,84 +131,69 @@ describe.skipIf(MODE === 'record')('web e2e: DeepSeek account sign-in in a plain
     if (root !== undefined) await rm(root, { recursive: true, force: true })
   })
 
-  it('signs in through a themed tab and recovers both avatars on a later Settings entry', async () => {
+  it('serves the seeded grant and recovers the account avatar across Settings entries', async () => {
     const context = await browser.newContext({ viewport: { width: 1440, height: 960 }, locale: 'en-US', colorScheme: 'dark' })
     onTestFinished(() => context.close())
     const page = await context.newPage()
     const console = watchConsole(page)
     onTestFailed(() => saveFailureShot(page, 'web-e2e-account-login'))
     await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
-    const menu = page.getByRole('button', { name: 'Account menu', exact: true })
-    await menu.click()
-    const tab = context.waitForEvent('page')
-    await page.getByRole('menuitem', { name: 'Sign in', exact: true }).click()
-    const authorization = await tab
-    await authorization.waitForURL(url => url.pathname === '/dsh/authorized', { timeout: 30_000 })
-    expect(await authorization.evaluate(() => window.opener === null)).toBe(true)
-    await expect.poll(() => menu.textContent(), { timeout: 30_000 }).toBe('Web User')
+    const settingsButton = page.getByRole('button', { name: 'Settings', exact: true })
+    await settingsButton.waitFor()
+    // The stream serves the grant at boot: the first profile discovery fires the avatar
+    // request on its own, with no UI entry involved.
+    await expect.poll(() => platform.avatarRequests(), { timeout: 30_000 }).toBe(1)
 
-    const pageOrigin = new URL(scaffold.authenticatedUrl).origin
-    expect(platform.inits).toHaveLength(1)
-    expect(platform.inits[0]).toMatchObject({ login_source: 'web', redirect_uri: `${pageOrigin}/oauth/callback` })
-    const [authorize, authorized] = platform.pages.map(href => new URL(href))
-    expect(authorize?.searchParams.get('theme')).toBe('dark')
-    expect(authorized?.searchParams.get('login_source')).toBe('web')
-    await expect.poll(platform.avatarRequests).toBe(1)
-    await menu.locator('[data-avatar-status="failed"]').waitFor()
-    expect(await menu.locator('img').count()).toBe(0)
+    const settings = page.getByRole('dialog', { name: 'Settings', exact: true })
+    const account = settings.getByRole('region', { name: 'Account', exact: true })
+    const openSettings = async (): Promise<void> => {
+      await settingsButton.click()
+      await settings.waitFor()
+    }
+    const closeSettings = async (): Promise<void> => {
+      await settings.getByRole('button', { name: 'Close', exact: true }).click()
+      await settings.waitFor({ state: 'detached' })
+    }
     const states: string[] = []
     const capture = async (stage: string): Promise<void> => {
-      const sidebar = menu.locator('[data-avatar-status]')
-      const account = page.getByRole('region', { name: 'Account', exact: true })
       const mounted = await account.count() > 0
       const settingsStatus = mounted
         ? await account.locator('[data-avatar-status]').getAttribute('data-avatar-status') : 'unmounted'
-      states.push(`${stage}: sidebar=${await sidebar.getAttribute('data-avatar-status')}, settings=${settingsStatus}, `
-        + `sidebarImages=${await menu.locator('img').count()}, settingsImages=${mounted ? await account.locator('img').count() : 0}, `
+      states.push(`${stage}: settings=${settingsStatus}, `
+        + `settingsImages=${mounted ? await account.locator('img').count() : 0}, `
         + `requests=${platform.avatarRequests()}`)
     }
     await capture('Initial load')
-    await menu.click()
-    await page.getByRole('menuitem', { name: 'Settings', exact: true }).click()
-    const settings = page.getByRole('dialog', { name: 'Settings', exact: true })
-    const account = settings.getByRole('region', { name: 'Account', exact: true })
+
+    await openSettings()
     await expect.poll(platform.avatarRequests).toBe(2)
     await account.locator('[data-avatar-status="failed"]').waitFor()
-    expect(await menu.locator('img').count()).toBe(0)
     expect(await account.locator('img').count()).toBe(0)
+    // The seeded identity reaches the Account page; the sidebar carries neither label nor picture.
+    expect(await account.textContent()).toContain('Web User')
     await capture('First Settings entry')
-    await settings.getByRole('button', { name: 'Close', exact: true }).click()
-    await settings.waitFor({ state: 'detached' })
-    await menu.click()
-    await page.getByRole('menuitem', { name: 'Settings', exact: true }).click()
-    await expect.poll(() => menu.locator('img').count()).toBe(1)
+    await closeSettings()
+
+    await openSettings()
     await expect.poll(() => account.locator('img').count()).toBe(1)
-    for (const image of [menu.locator('img'), account.locator('img')]) {
-      await expect.poll(() => image.evaluate(element =>
-        element instanceof HTMLImageElement && element.complete && element.naturalWidth > 0)).toBe(true)
-      expect(await image.getAttribute('src')).toBe(`${platform.origin}/avatar.svg`)
-    }
+    await expect.poll(() => account.locator('img').evaluate(element =>
+      element instanceof HTMLImageElement && element.complete && element.naturalWidth > 0)).toBe(true)
+    expect(await account.locator('img').getAttribute('src')).toBe(`${platform.origin}/avatar.svg`)
     await capture('Second Settings entry')
-    await settings.getByRole('button', { name: 'Close', exact: true }).click()
-    await settings.waitFor({ state: 'detached' })
-    await menu.click()
-    await page.getByRole('menuitem', { name: 'Settings', exact: true }).click()
+    await closeSettings()
+
+    await openSettings()
     await account.waitFor()
-    expect(await menu.locator('img').count()).toBe(1)
     expect(await account.locator('img').count()).toBe(1)
     expect(platform.avatarRequests()).toBe(3)
     await capture('Third Settings entry')
-    await menu.locator('img').dispatchEvent('error')
-    await menu.locator('[data-avatar-status="failed"]').waitFor()
+    await account.locator('img').dispatchEvent('error')
     await account.locator('[data-avatar-status="failed"]').waitFor()
-    expect(await menu.locator('img').count()).toBe(0)
     expect(await account.locator('img').count()).toBe(0)
     await capture('Rendered image failure')
-    await settings.getByRole('button', { name: 'Close', exact: true }).click()
-    await settings.waitFor({ state: 'detached' })
-    await menu.click()
-    await page.getByRole('menuitem', { name: 'Settings', exact: true }).click()
-    await expect.poll(() => menu.locator('img').count()).toBe(1)
+    await closeSettings()
+
+    await openSettings()
     await expect.poll(() => account.locator('img').count()).toBe(1)
     await capture('Settings entry after rendered failure')
     await compareOrRefreshGolden(AVATAR_EXPECTED, states.join('\n'), MODE)

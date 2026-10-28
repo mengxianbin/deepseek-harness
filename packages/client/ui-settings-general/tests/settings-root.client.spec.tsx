@@ -12,6 +12,7 @@ import type { SettingsRootComponentProps } from '../src/client/shell-contract.ts
 import { SettingsRoot } from '../src/client/SettingsRoot.tsx'
 import { en, zh } from '../src/client/locales.ts'
 import type { DesktopUpdateView } from '../src/types.ts'
+import type { RestartSignalView } from '../src/restart.ts'
 import { Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 
 // Every fixture carries the resource hook the resources plugin merges into GlobalStandardProps.
@@ -47,6 +48,9 @@ function mount({
   desktopUpdate = { failed: false, opening: false },
   onboardingActive = true,
   mainView = true,
+  restartConfigured = false,
+  restartRunningSessions = 0,
+  restartSignal,
   rows = [
     { id: 'general', order: 0, label: 'General' },
     { id: 'models', order: 10, label: 'Models' },
@@ -64,6 +68,9 @@ function mount({
   desktopUpdate?: DesktopUpdateView
   onboardingActive?: boolean
   mainView?: boolean
+  restartConfigured?: boolean
+  restartRunningSessions?: number
+  restartSignal?: RestartSignalView | undefined
   rows?: Row[]
   steps?: Step[]
 } = {}) {
@@ -120,6 +127,9 @@ function mount({
       return select(currentConnectionState)
     },
     useOnboardingSteps: select => select(steps),
+    useRestartConfigured: select => select(restartConfigured),
+    useRestartRunningSessions: select => select(restartRunningSessions),
+    useRestartSignal: select => select(restartSignal),
     useSections: (select) => {
       const [, force] = useState(0)
       useEffect(() => {
@@ -528,4 +538,45 @@ it('passes current Settings key labels to the launcher and removes them when unb
 
   setShortcuts([{ ...row, keys: [], aria: undefined, binding: null, modified: true }])
   expect(launcher()).not.toHaveProperty('settingsShortcut')
+})
+
+it('shows no restart control until the Host announced a restart command', () => {
+  mount()
+  expect(screen.queryByRole('button', { name: 'Restart server' })).toBeNull()
+})
+
+it('keeps the restart control out of the collapsed rail', () => {
+  mount({ wide: false, restartConfigured: true })
+  expect(screen.queryByRole('button', { name: 'Restart server' })).toBeNull()
+})
+
+it('uses the localized restart label', () => {
+  mount({ dictionary: zh, restartConfigured: true })
+  expect(screen.getByRole('button', { name: '重启服务器' })).toBeTruthy()
+})
+
+it('places the restart control in the trigger row ahead of the connection indicator', () => {
+  mount({ restartConfigured: true, connectionState: 'disconnected' })
+  const restart = screen.getByRole('button', { name: 'Restart server' })
+  const settings = screen.getByRole('button', { name: 'Settings' })
+  const indicator = screen.getByRole('button', { name: 'Disconnected, reconnect now' })
+  expect(restart.parentElement?.contains(settings)).toBe(true)
+  expect(settings.compareDocumentPosition(restart) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0)
+  expect(restart.compareDocumentPosition(indicator) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0)
+})
+
+it('delivers the restart-signal judgment to the lit restart control (no printed pill)', () => {
+  mount({ restartConfigured: true, restartSignal: { state: 'NEED_BUILD' } })
+  // FORK sidebar-footer-ui-1026: the judgment rides the button itself — its
+  // accessible name is the next-step copy, and nothing prints beside it.
+  const lamp = screen.getByRole('button', { name: en['restart.signal.needBuild'] })
+  expect(lamp.getAttribute('data-restart-signal')).toBe('NEED_BUILD')
+  expect(screen.queryByRole('status')).toBeNull()
+})
+
+it('delivers the restart-signal judgment to the collapsed dot', () => {
+  mount({ wide: false, restartConfigured: true, restartSignal: { state: 'NEED_RESTART', reason: 'built' } })
+  const dot = screen.getByRole('status')
+  expect(dot.getAttribute('aria-label')).toBe(en['restart.signal.needRestart.built'])
+  expect(screen.queryByRole('button', { name: 'Restart server' })).toBeNull()
 })

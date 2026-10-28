@@ -38,6 +38,8 @@ afterEach(async () => {
 function persistSelection(selection: {
   readonly sessionId?: SessionId
   readonly subagentAddress?: SubagentAddress
+  /** FORK dsh-local (f5-list-states): mirror of the persisted MainSelection blank knowledge. */
+  readonly blank?: boolean
 }): Map<string, string> {
   const backing = new Map([['dsh.sessions.current', JSON.stringify(selection)]])
   vi.stubGlobal('localStorage', {
@@ -320,35 +322,28 @@ function lastOpening(open: MockInstance<UiWorkspaceService['openWorkspace']>): P
 }
 
 describe('UiWorkspaceService', () => {
-  it('prepares and selects the default Workspace after both startup baselines', async () => {
-    const b = bench({ configureWorkspaces: (workspaces) => {
-      workspaces.initializeDefault.mockImplementation(async () => {
-        const item = workspace('default')
-        workspaces.list.set(workspaceState([item]))
-        return item
-      })
-    } })
-    expect(b.workspaces.initializeDefault).not.toHaveBeenCalled()
+  it('settles a selectionless startup into the empty state after both baselines', async () => {
+    const b = bench()
     b.sessions.list.set(sessionState())
+    b.workspaces.list.set(workspaceState([workspace('default')]))
+    await setImmediate()
+    // FORK dsh-local (blank-restore-lazy-a): no persisted selection means no
+    // startup pre-creation — the Host stays untouched and the empty state
+    // owns the main panel.
     expect(b.workspaces.initializeDefault).not.toHaveBeenCalled()
-    b.workspaces.list.set(workspaceState())
-    await vi.waitFor(() => {
-      expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('created-default'), { source: 'mainView' })
-    })
-    expect(b.workspaces.initializeDefault).toHaveBeenCalledExactlyOnceWith(expect.any(AbortSignal))
-    expect(b.sessions.create).toHaveBeenCalledWith({ workspaceId: wid('default') })
+    expect(b.sessions.create).not.toHaveBeenCalled()
+    expect(b.sessions.retain).not.toHaveBeenCalled()
     expect(b.notify).not.toHaveBeenCalled()
+    expect(b.selectPanel).toHaveBeenCalledWith(null)
   })
 
-  it('leaves an ineligible empty installation without a Session or failure notice', async () => {
+  it('leaves an empty installation untouched on a selectionless startup', async () => {
     const b = bench({ workspaces: workspaceState(), sessions: sessionState() })
     await setImmediate()
-    b.workspaces.list.set(workspaceState())
-    b.sessions.list.set(sessionState())
-    await setImmediate()
-    expect(b.workspaces.initializeDefault).toHaveBeenCalledOnce()
+    expect(b.workspaces.initializeDefault).not.toHaveBeenCalled()
     expect(b.sessions.create).not.toHaveBeenCalled()
     expect(b.notify).not.toHaveBeenCalled()
+    expect(b.selectPanel).toHaveBeenCalledWith(null)
   })
 
   it('requires explicit selection when the startup Session list contains history', async () => {
@@ -358,7 +353,11 @@ describe('UiWorkspaceService', () => {
     expect(b.sessions.create).not.toHaveBeenCalled()
   })
 
-  it('publishes a startup directory failure once without creating a Session', async () => {
+  it('publishes a default Workspace failure once for a stale selection without creating a Session', async () => {
+    // A selectionless startup never probes the default directory anymore; a
+    // stale persisted selection on an empty installation still reaches the
+    // fallthrough that prepares one, and its failure stays console-quiet.
+    persistSelection({ sessionId: sid('gone') })
     const b = bench({ workspaces: workspaceState(), sessions: sessionState(), configureWorkspaces: (workspaces) => {
       workspaces.initializeDefault.mockRejectedValueOnce(new Error('denied'))
     } })
@@ -370,7 +369,8 @@ describe('UiWorkspaceService', () => {
     expect(b.notify).toHaveBeenCalledExactlyOnceWith({ kind: 'defaultWorkspaceFailed' })
   })
 
-  it.each(['session', 'panel', 'disposal'] as const)('cancels startup directory preparation after %s navigation', async (kind) => {
+  it.each(['session', 'panel', 'disposal'] as const)('cancels a stale-selection directory preparation after %s navigation', async (kind) => {
+    persistSelection({ sessionId: sid('gone') })
     const pending = Promise.withResolvers<WorkspaceView>()
     const b = bench({ workspaces: workspaceState(), sessions: sessionState(), configureWorkspaces: (workspaces) => {
       workspaces.initializeDefault.mockReturnValueOnce(pending.promise)
@@ -386,7 +386,8 @@ describe('UiWorkspaceService', () => {
     expect(b.notify).not.toHaveBeenCalled()
   })
 
-  it.each(['session', 'panel', 'disposal'] as const)('suppresses a startup directory failure after %s navigation', async (kind) => {
+  it.each(['session', 'panel', 'disposal'] as const)('suppresses a stale-selection directory failure after %s navigation', async (kind) => {
+    persistSelection({ sessionId: sid('gone') })
     const pending = Promise.withResolvers<WorkspaceView>()
     const b = bench({ workspaces: workspaceState(), sessions: sessionState(), configureWorkspaces: (workspaces) => {
       workspaces.initializeDefault.mockReturnValueOnce(pending.promise)
@@ -401,6 +402,7 @@ describe('UiWorkspaceService', () => {
   })
 
   it.each([false, true])('reports Session failure without a directory error and retains the Workspace (superseded: %s)', async (superseded) => {
+    persistSelection({ sessionId: sid('gone') })
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const created = Promise.withResolvers<SessionId>()
     const b = bench({ workspaces: workspaceState(), sessions: sessionState(), configureWorkspaces: (workspaces) => {
@@ -510,16 +512,17 @@ describe('UiWorkspaceService', () => {
     expect(b.notify).not.toHaveBeenCalled()
   })
 
-  it('ignores a rejected startup selection and stale catalog callbacks after disposal', async () => {
+  it('ignores a rejected startup blank restoration and stale catalog callbacks after disposal', async () => {
     const created = Promise.withResolvers<SessionId>()
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    persistSelection({ sessionId: sid('blank'), blank: true })
     const b = bench({
-      workspaces: workspaceState([workspace('a')], [], 'ready'),
-      sessions: sessionState([], 'pending'),
+      workspaces: workspaceState([workspace('a', [sid('blank')])], [], 'ready'),
+      sessions: sessionState([summary('blank', { blank: true, cwd: '/w/a' })], 'ready'),
       configureSessions: (sessions) => { sessions.create.mockReturnValue(created.promise) },
     })
+    await vi.waitFor(() => { expect(b.sessions.create).toHaveBeenCalledOnce() })
     const staleReconcile = b.sessions.list.listenersSnapshot()[0]!
-    b.sessions.list.set(sessionState())
     await b.ctx.fiber.dispose()
     staleReconcile()
     created.reject(new Error('late failure'))
@@ -682,23 +685,40 @@ describe('UiWorkspaceService', () => {
     expect(b.sessions.retain).not.toHaveBeenCalled()
   })
 
-  it('creates a fresh Agent on explicit New Session instead of reusing a mounted blank', async () => {
+  it('returns New Session to the Workspace blank that holds its unsent draft', async () => {
     const b = bench({
       sessions: sessionState([summary('blank', { blank: true, cwd: '/w/a' })], 'pending'),
       workspaces: workspaceState([workspace('a', [sid('blank')])]),
     })
     b.uiWorkspace.startSession(wid('a'))
     await vi.waitFor(() => {
-      expect(b.sessions.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: wid('a') })
+      expect(b.sessions.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: wid('a'), sessionId: sid('blank') })
     })
-    await vi.waitFor(() => { expect(b.sessions.retain).toHaveBeenCalledWith(sid('created-a'), expect.anything()) })
+    await vi.waitFor(() => { expect(b.sessions.retain).toHaveBeenCalledWith(sid('blank'), expect.anything()) })
+  })
+
+  it('reuses any blank without a requested preset and only a matching blank with one', async () => {
+    const b = bench({
+      sessions: sessionState([
+        summary('creator', { blank: true, cwd: '/w/a', projectionValues: { agentPreset: 'cordis' } }),
+        summary('plain', { blank: true, cwd: '/w/a', projectionValues: { agentPreset: 'standard' } }),
+      ], 'pending'),
+      workspaces: workspaceState([workspace('a', [sid('creator'), sid('plain')])]),
+    })
+    await expect(b.uiWorkspace.connectWorkspace(wid('a'))).resolves.toBe(sid('creator'))
+    await expect(b.uiWorkspace.connectWorkspace(wid('a'), { agentPreset: 'standard' })).resolves.toBe(sid('plain'))
+    await expect(b.uiWorkspace.connectWorkspace(wid('a'), { agentPreset: 'ptc' })).resolves.toBe(sid('created-a'))
+    expect(b.sessions.create.mock.calls).toEqual([
+      [{ workspaceId: wid('a'), sessionId: sid('creator') }],
+      [{ workspaceId: wid('a'), sessionId: sid('plain'), agentPreset: 'standard' }],
+      [{ workspaceId: wid('a'), agentPreset: 'ptc' }],
+    ])
   })
 
   it('reports a refused explicit Session creation through the Workspace notice', async () => {
     const b = bench({ workspaces: workspaceState([workspace('a')]), sessions: sessionState() })
-    // Startup restoration creates its own Session first and stays quiet on failure (pinned above).
-    await vi.waitFor(() => { expect(b.sessions.retain).toHaveBeenCalledOnce() })
-    b.sessions.retain.mockClear()
+    // FORK dsh-local (blank-restore-lazy-a): the selectionless startup keeps
+    // the empty state, so nothing is retained before the explicit request.
     expect(b.notify).not.toHaveBeenCalled()
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const refused = new SessionCreateError(new RemoteError(
@@ -793,6 +813,8 @@ describe('UiWorkspaceService', () => {
       { name: 'plain text', options: { prompt: '草稿 🧭\nsecond line', clearPreviousDraft: true } },
       { name: 'empty text', options: { prompt: '' } },
       { name: 'clear without prompt', options: { clearPreviousDraft: true } },
+      { name: 'replace without prompt', options: { whenDraftExists: 'replace' } },
+      { name: 'appended text', options: { prompt: 'next', whenDraftExists: 'append' } },
       { name: 'reference-like text', options: { prompt: '🧭 @notes.md' } },
     ])('prepares $name on the retained target before replacing the current selection', async ({ options }) => {
       const backing = persistSelection({})
@@ -824,7 +846,9 @@ describe('UiWorkspaceService', () => {
       expect(b.notify).not.toHaveBeenCalled()
     })
 
-    it.each([undefined, {}, { clearPreviousDraft: false }])('does not invoke the draft API for default options %j', async (options) => {
+    it.each<DraftInitializationOptions | undefined>([
+      undefined, {}, { clearPreviousDraft: false }, { whenDraftExists: 'append' }, { clearPreviousDraft: true, whenDraftExists: 'keep' },
+    ])('does not invoke the draft API for options that cannot change text %j', async (options) => {
       const b = bench({ workspaces: workspaceState([workspace('a')]) })
       const opening = vi.spyOn(b.uiWorkspace, 'openWorkspace')
 
@@ -994,7 +1018,7 @@ describe('UiWorkspaceService', () => {
     expect(b.sessions.retained[1]!.release).not.toHaveBeenCalled()
   })
 
-  it('opens the most recent Workspace after both startup catalogs become ready', async () => {
+  it('keeps a selectionless startup in the empty state even when Workspaces are ready', async () => {
     const b = bench()
     b.workspaces.list.set(workspaceState([
       workspace('newest', [], '2026-03-01T00:00:00.000Z'),
@@ -1002,9 +1026,14 @@ describe('UiWorkspaceService', () => {
       workspace('older', [], '2026-01-01T00:00:00.000Z'),
     ]))
     b.sessions.list.set(sessionState())
-    await vi.waitFor(() => {
-      expect(b.sessions.retain).toHaveBeenCalledWith(sid('created-newest'), { source: 'mainView' })
-    })
+    await setImmediate()
+    // FORK dsh-local (blank-restore-lazy-a): the former recent-Workspace
+    // policy pre-created a blank here — the ghost shell source. The empty
+    // state now owns the selectionless startup.
+    expect(b.sessions.create).not.toHaveBeenCalled()
+    expect(b.sessions.retain).not.toHaveBeenCalled()
+    expect(b.workspaces.initializeDefault).not.toHaveBeenCalled()
+    expect(b.selectPanel).toHaveBeenCalledWith(null)
   })
 
   it('uses catalog order for Workspace connects without reading the saved selection', async () => {
@@ -1042,6 +1071,89 @@ describe('UiWorkspaceService', () => {
     })
     expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('saved'), { source: 'mainView' })
     expect(b.sessions.create).not.toHaveBeenCalled()
+  })
+
+  // FORK dsh-local (f5-list-states): restoration before the session.list pull lands.
+  describe('restores before the session list arrives', () => {
+    it('opens a persisted non-blank selection directly while the list pull is in flight', () => {
+      persistSelection({ sessionId: sid('saved'), blank: false })
+      const b = bench({
+        workspaces: workspaceState([workspace('a', [sid('saved')])]),
+        sessions: sessionState([], 'pending'),
+      })
+      expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(
+        sid('saved'), { source: 'mainView', persistedSelection: true },
+      )
+      expect(b.sessions.create).not.toHaveBeenCalled()
+    })
+
+    it('waits for the Workspace baseline before opening the persisted selection', () => {
+      persistSelection({ sessionId: sid('saved'), blank: false })
+      const b = bench({
+        workspaces: workspaceState([workspace('a', [sid('saved')])], [], 'pending'),
+        sessions: sessionState([], 'pending'),
+      })
+      expect(b.sessions.retain).not.toHaveBeenCalled()
+
+      b.workspaces.list.set(workspaceState([workspace('a', [sid('saved')])]))
+      expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(
+        sid('saved'), { source: 'mainView', persistedSelection: true },
+      )
+    })
+
+    it('keeps a persisted blank on the catalog path until its row lands', async () => {
+      persistSelection({ sessionId: sid('saved'), blank: true })
+      const b = bench({
+        workspaces: workspaceState([workspace('a', [sid('saved')])]),
+        sessions: sessionState([], 'pending'),
+      })
+      expect(b.sessions.retain).not.toHaveBeenCalled()
+
+      b.sessions.list.set(sessionState([summary('saved', { blank: true, cwd: '/w/a' })]))
+      await vi.waitFor(() => {
+        expect(b.sessions.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: wid('a'), sessionId: sid('saved') })
+      })
+      expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('saved'), { source: 'mainView' })
+    })
+
+    it('keeps a selection persisted before blank knowledge on the catalog path', async () => {
+      // Pre-fork persisted selections carry no blank field: one catalog-bound
+      // restore rewrites them with the knowledge, the next refresh is early.
+      persistSelection({ sessionId: sid('saved') })
+      const b = bench({
+        workspaces: workspaceState([workspace('a', [sid('saved')])]),
+        sessions: sessionState([], 'pending'),
+      })
+      expect(b.sessions.retain).not.toHaveBeenCalled()
+
+      b.sessions.list.set(sessionState([summary('saved')]))
+      await vi.waitFor(() => {
+        expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('saved'), { source: 'mainView' })
+      })
+    })
+
+    it('keeps an archived persisted selection on the catalog path', () => {
+      persistSelection({ sessionId: sid('saved'), blank: false })
+      const b = bench({
+        workspaces: workspaceState([workspace('a', [sid('saved')])], [sid('saved')]),
+        sessions: sessionState([], 'pending'),
+      })
+      expect(b.sessions.retain).not.toHaveBeenCalled()
+    })
+
+    it('opens a persisted subagent address before the list without a parent catalog', () => {
+      const address: SubagentAddress = {
+        parentSessionId: sid('parent'),
+        childSessionId: sid('child'),
+        mode: 'continuable',
+      }
+      persistSelection({ sessionId: address.childSessionId, subagentAddress: address })
+      const b = bench({
+        workspaces: workspaceState(),
+        sessions: sessionState([], 'pending'),
+      })
+      expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(address, { source: 'mainView' })
+    })
   })
 
   it('reclaims the saved blank before opening history, even when another blank is listed first', async () => {
@@ -1361,7 +1473,9 @@ describe('UiWorkspaceService', () => {
     created.resolve(sid('restored'))
     await b.uiWorkspace.connectWorkspace(wid('a'))
     expect(b.sessions.retained).toHaveLength(0)
-    expect(b.selectPanel.mock.calls).toEqual([[panel]])
+    // The selectionless startup cleared the main panel first; the chosen
+    // panel arrives afterwards and survives the pending connection.
+    expect(b.selectPanel.mock.calls).toEqual([[null], [panel]])
     expect(navigation.aborted).toBe(false)
   })
 

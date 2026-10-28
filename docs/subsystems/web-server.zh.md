@@ -149,6 +149,14 @@ admitConnection(request: ConnectionTrustRequest): ConnectionAdmission
 authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): boolean
 
 /**
+ * Re-issue the browser session cookie for a still-valid session, resetting
+ * its absolute window; owns a 204, 405, or structured 401 response.
+ * @param request - GET request on the refresh route carrying the session cookie.
+ * @param response - response owned to completion.
+ */
+authorizeRefresh(request: ConnectionIndexRequest, response: ConnectionIndexResponse): void
+
+/**
  * Add the fresh process token to an ordinary Web application URL.
  * @param baseUrl - clean application URL whose authority and mount are preserved.
  * @returns tokenized URL for initial login; a mount proxy strips its prefix before {@link authorizeIndex}.

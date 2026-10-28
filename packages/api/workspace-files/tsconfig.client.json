@@ -9,6 +9,7 @@
     "src/client/index.ts",
     "src/client/change-feed.ts",
     "src/client/provider.ts",
+    "src/client/watch-status.ts",
     "src/client/remote.ts",
     "src/client/types.ts",
     "src/types.ts"

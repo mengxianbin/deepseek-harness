@@ -8,6 +8,7 @@ import {
 } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type {
+  SessionCompletionOutcome,
   SessionStatusSnapshot,
 } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
@@ -52,8 +53,10 @@ export interface SessionNode {
   running: boolean
   /** Running direct children in the loaded subagent catalog. */
   runningSubagentCount: number
-  /** Finished running while not selected and not yet opened (the green "done" reminder dot). */
+  /** Finished running while not selected and not yet opened (the reminder dot). */
   completed: boolean
+  /** Outcome of that unviewed stop: `'failed'` renders the red error reminder. */
+  completionOutcome?: SessionCompletionOutcome
   /** In the registry-global pin set: leads its section, reorderable only among pinned rows. */
   pinned: boolean
   /** In the registry-global archive set: shown grayed in place and not openable. */
@@ -93,8 +96,10 @@ export interface SearchResultNode {
   running: boolean
   /** Running direct children in the loaded subagent catalog. */
   runningSubagentCount: number
-  /** Finished running while not selected and not yet opened (the green "done" reminder dot). */
+  /** Finished running while not selected and not yet opened (the reminder dot). */
   completed: boolean
+  /** Outcome of that unviewed stop: `'failed'` renders the red error reminder. */
+  completionOutcome?: SessionCompletionOutcome
   /** In the registry-global archive set: shown grayed and not openable. */
   archived: boolean
   snippet?: string
@@ -400,6 +405,7 @@ function sessionNode(
 ): SessionNode {
   const status = statuses.get(s.id)
   const pendingInteraction = visiblePendingKind(status?.pendingInteraction?.kind)
+  const completionOutcome = status?.completionOutcome
   return {
     id: s.id,
     title: sessionTitle(s),
@@ -407,6 +413,7 @@ function sessionNode(
     running: status?.running ?? s.running,
     runningSubagentCount: runningChildCount(list, s.id, statuses),
     completed: status?.completionUnread === true,
+    ...(completionOutcome === undefined ? {} : { completionOutcome }),
     pinned: !archived.has(s.id) && pinned.has(s.id),
     archived: archived.has(s.id),
     updatedAt: s.updatedAt,
@@ -596,6 +603,7 @@ export function deriveSearchResults(
       const match = contentBySession.get(summary.id)
       const status = statuses.get(summary.id)
       const pendingInteraction = visiblePendingKind(status?.pendingInteraction?.kind)
+      const completionOutcome = status?.completionOutcome
       return {
         id: summary.id,
         title: sessionTitle(summary),
@@ -606,6 +614,7 @@ export function deriveSearchResults(
           ? {}
           : { pendingInteraction }),
         completed: status?.completionUnread === true,
+        ...(completionOutcome === undefined ? {} : { completionOutcome }),
         archived: archived.has(summary.id),
         ...match === undefined ? {} : { snippet: match.snippet },
       }

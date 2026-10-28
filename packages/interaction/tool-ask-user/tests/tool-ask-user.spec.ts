@@ -213,7 +213,9 @@ describe('ask_user_question tool', () => {
 
     expect(schemas).toHaveLength(1)
     expect(schemas[0]).toMatchObject({
-      description: 'Ask the user a concise question when you need confirmation, a choice, or missing information before proceeding.',
+      description: 'Ask the user a concise question when you need confirmation, a choice, or missing information before proceeding. '
+        + 'Keep every question field brief — the card renders question, detail, and option text inline; '
+        + 'put long reports in a file and reference its path instead.',
       parameters: { properties: { questions: { description: 'Questions to ask the user before continuing.' } } },
     })
     expect(schemas[0]?.parameters.properties).not.toHaveProperty('timeout')

@@ -14,6 +14,9 @@ import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './suppor
 const DIR = fileURLToPath(new URL('../../../snapshots/web/optional-string-editor', import.meta.url))
 const FIXTURE = join(DIR, 'session.v4.jsonl')
 const MODE = webSnapshotMode()
+// FORK(replay-residual-1022): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 修法).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 describe('web snapshot: standalone string editor through PTC', () => {
   let scaffold: WebScaffold
@@ -27,6 +30,7 @@ describe('web snapshot: standalone string editor through PTC', () => {
       extraOverlayPath: [
         fileURLToPath(new URL('./pin-browse-picker.overlay.yml', import.meta.url)),
         fileURLToPath(new URL('./standalone-string-editor.overlay.yml', import.meta.url)),
+        CATALOG_OVERLAY,
       ],
       profile: { packages: [] },
       compareReplaySession: true,

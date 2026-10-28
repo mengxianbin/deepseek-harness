@@ -118,6 +118,9 @@ describe('Agent.cancel()', () => {
 
   it.each<AgentCancelCause>([
     { kind: 'user' },
+    // R2: the recorded stop entry must survive into the durable turn/end
+    // cause alongside the plain pre-entry shape above.
+    { kind: 'user', entry: 'stop-button' },
     { kind: 'parent' },
     { kind: 'hook', reason: 'policy stopped this turn' },
     { kind: 'disposed' },

@@ -1,10 +1,34 @@
 /* The takeover seats where the input card sits, centered on the InputBar
    axis at the shared content width (input card - 32): sides = clearance +
-   16px so the relation also holds on narrow viewports. */
+   16px so the relation also holds on narrow viewports. The frame is also the
+   positioning context for the floating slash-menu anchor below. */
 .frame {
+  position: relative;
   display: flex;
   justify-content: center;
   padding: 6px calc(var(--dsh-composer-side-clearance) + 16px) 10px;
+  /* FORK dsh-local (ask-scroll-container-cap, 2026-10-26): compressible link
+     in the seat-cap chain — when the seat's scrollport cap (ui-conversation
+     ConversationRoot .composerSeat max-height: 100%) is shorter than this
+     card, the frame yields height so the card below can shrink instead of
+     spilling past the pane bottom where its footer actions would be clipped. */
+  min-height: 0;
+}
+
+/* Floating slash-menu anchor for the answer field (mirrors InputBar's
+   overlayAnchor): a zero-height rail on the frame's top edge, inset by the
+   frame's own horizontal padding and capped at the card's max width so the
+   menu (left/right: 0, ui-input-trigger MenuView) spans exactly the card it
+   floats above. It sits OUTSIDE the card because the card clips its own
+   scroll — an overlay inside it would never show. */
+.triggerAnchor {
+  position: absolute;
+  top: 0;
+  right: calc(var(--dsh-composer-side-clearance) + 16px);
+  left: calc(var(--dsh-composer-side-clearance) + 16px);
+  height: 0;
+  max-width: var(--dsh-chat-content-width);
+  margin-inline: auto;
 }
 
 /* Figma Input 973:36348 body over the 1019:36938 header: no banner strip —
@@ -18,6 +42,15 @@
      hidden): cap the card against the viewport and scroll the option list
      so header and footer actions stay reachable on long batches. */
   max-height: min(60vh, 520px);
+  /* FORK dsh-local (ask-scroll-container-cap, 2026-10-26): min-height: 0
+     makes the card a compressible flex item under the seat's scrollport cap.
+     The viewport-relative cap above budgets TALL viewports; in a container
+     shorter than that budget (the embedded subagent-sidebar chat pane) the
+     seat cap compresses this card instead, and the shrink lands on `.body`
+     (flex 1 1 auto, min-height: 0, overflow-y: auto): the body scrolls and
+     header/footer stay inside the pane instead of being clipped away.
+     Tall-pane behavior is unchanged — the cap above still wins there. */
+  min-height: 0;
   padding: 0 0 10px;
   border: 0;
   --dsw-elevation-stroke-color: var(--dsw-alias-border-l2-darkmode-thin);
@@ -105,6 +138,37 @@
 
 .detail {
   margin: 0 2px 8px;
+}
+
+/* Folded long-content attachment: a chip between the detail summary and the
+   options, pointing at the file that holds the complete text. */
+.attachment {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  margin: 0 2px 8px;
+  padding: 6px 10px;
+  /* Neutral-token borders are hairlines (ui-theme elevation rule). */
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-md);
+}
+
+.attachmentText {
+  flex: 1;
+  min-width: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.attachmentPath {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .footerActions {

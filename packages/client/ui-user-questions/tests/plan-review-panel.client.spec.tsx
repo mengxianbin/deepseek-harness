@@ -114,6 +114,13 @@ const questionDraftStore = createQuestionDraftStore().create(SID)
 const kit: Omit<QuestionComposerProps, 'matched'> = {
   useQuestionCard: () => { throw new Error('plan review does not read question card state') },
   renderSlot: () => null,
+  // Inert: the plan-review presentation renders no answer field, so the
+  // answer surface never attaches from this path.
+  answerTriggers: {
+    attach: () => () => {},
+    track: () => {},
+    arbitrate: () => 'pass',
+  },
   SessionProvider: ({ children }) => children,
   sessionId: SID,
   session: undefined,

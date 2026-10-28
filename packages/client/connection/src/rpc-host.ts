@@ -194,6 +194,24 @@ export class HostConnectionService extends Service implements HostConnectionHand
     return this.browserAuth.authorizeIndex(request, response, this.ctx.get('webServer')?.protocol === 'https:')
   }
 
+  /**
+   * Re-issue the browser session cookie for a still-valid session; native
+   * TLS listeners re-issue Secure cookies.
+   * @param request - GET request on the refresh route carrying the session cookie.
+   * @param response - response owned to completion.
+   */
+  authorizeRefresh(request: ConnectionIndexRequest, response: ConnectionIndexResponse): void {
+    if (!this.isTrusted(request) || this.disposed) {
+      response.writeHead(
+        this.disposed ? 401 : 403,
+        { 'cache-control': 'no-store', 'content-type': 'text/plain; charset=utf-8' },
+      )
+      response.end(this.disposed ? 'unauthorized' : 'forbidden')
+      return
+    }
+    this.browserAuth.refreshCookie(request, response, this.ctx.get('webServer')?.protocol === 'https:')
+  }
+
   /** Add this process's launch token to the clean application URL. */
   authenticatedUrl(baseUrl: string): string {
     return this.browserAuth.authenticatedUrl(baseUrl)

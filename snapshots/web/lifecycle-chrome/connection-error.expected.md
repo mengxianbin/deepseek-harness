@@ -1,2 +1,3 @@
-- button "Account menu": More
+- button "Settings"
 - button "Reconnecting, reconnect now": Reconnecting
+- button "More"

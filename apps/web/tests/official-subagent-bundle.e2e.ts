@@ -22,6 +22,9 @@ const PACKAGE = fileURLToPath(new URL('../../../packages/subagent/subagent-claud
 const BUNDLE = '@deepseek-ai/dsh-subagent-claude-code'
 const RESPONSE = 'OFFICIAL_SUBAGENT_OK'
 const MODE = webSnapshotMode()
+// FORK(replay-residual-1022): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 修法).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 /** Hold only the external model transport so its completion follows the parent's first turn. */
 async function heldNativeEndpoint(upstream: string) {
@@ -95,7 +98,7 @@ describe.skipIf(MODE === 'record')('web snapshot: Official native subagent bundl
     } }]))
     scaffold = await launchWebScaffold({
       developerTools: true, profile: { packages: [{ dir: PACKAGE }] },
-      extraOverlayPath: [fileURLToPath(new URL('./pin-browse-picker.overlay.yml', import.meta.url)), overlay],
+      extraOverlayPath: [fileURLToPath(new URL('./pin-browse-picker.overlay.yml', import.meta.url)), overlay, CATALOG_OVERLAY],
       replayFixture: FIXTURE, compareReplaySession: true,
     })
     expect((await scaffold.ctx.pluginManager.listBundles()).find(bundle => bundle.name === BUNDLE))

@@ -8,6 +8,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
+import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type { AccountView, AccountDetails } from '@deepseek-ai/dsh-deepseek-account/types'
 import type { OnboardingChange } from './onboarding-contract.ts'
@@ -31,6 +32,7 @@ import { DesktopOnboardingEntry, type DesktopOnboardingInjected } from './Deskto
 import { readOnboardingApiKeyPresence } from './onboarding-credentials.ts'
 import { refreshAfterReturn } from './account-refresh.ts'
 import { AccountAvatarLoader } from './account-avatar.ts'
+import { FeedbackEntry, type FeedbackEntryInjected } from './FeedbackEntry.tsx'
 export type { AccountSectionInjected, AccountSectionProps } from './AccountSection.tsx'
 export type { AccountMenuProps } from './AccountMenu.tsx'
 export type { AccountSnapshot } from './AccountSection.tsx'
@@ -310,6 +312,15 @@ export function apply(ctx: Context): void {
   ctx.slots.inject('settings.launcher', () => ctx.slots.register({
     name: 'settings.launcher', locale: 'settings.account', inject: () => operations,
   }, AccountMenu))
+  // FORK sidebar-foot-1027: the questionnaire row returns through the ⋯-menu
+  // seat the pairing/remote-access rows moved into — the account "More" menu
+  // took it out of the sidebar with the launcher swap (FORK dsh-local
+  // settings-launcher), leaving contactUs() mounted nowhere. Unconditional:
+  // the survey works signed out (uid then simply stays off the form).
+  ctx.slots.inject('sidebar.more.action', () => ctx.slots.register({
+    name: 'sidebar.more.action', id: 'account-feedback', locale: 'settings.account',
+    inject: (): FeedbackEntryInjected => ({ contactUs: operations.contactUs }),
+  }, FeedbackEntry))
   ctx.slots.inject('settings.section', () => {
     let unregister: (() => void) | undefined
     const update = () => {

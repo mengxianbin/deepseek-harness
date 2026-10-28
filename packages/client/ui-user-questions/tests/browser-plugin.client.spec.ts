@@ -9,7 +9,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { PendingUserQuestion, UserQuestionProjectionView } from '@deepseek-ai/dsh-user-questions/types'
 import { QuestionComposer } from '../src/client/QuestionComposer.tsx'
-import { PendingQuestion } from '../src/client/contract/slots.ts'
+import { PendingQuestion, type QuestionComposerProps } from '../src/client/contract/slots.ts'
 import { createQuestionDraftStore } from '../src/client/draft-store.ts'
 import { apply, inject } from '../src/client/index.ts'
 import { TimedQuestionWait } from '../../../interaction/user-questions/src/timed-wait.ts'
@@ -105,6 +105,13 @@ async function bench(
   ctx.provide('uiSession', { registerPendingInteraction } as never)
   const registerNode = vi.fn((_definition: { kind: string }) => () => {})
   ctx.provide('uiConversation', { events: { register: registerNode } } as never)
+  // Slash-pipeline stub: only reached through the entry inject's sessionId
+  // path (a direct inject() call without one is inert by contract).
+  const attachAnswer = vi.fn(() => () => {})
+  const answerTrack = vi.fn()
+  const answerArbitrate = vi.fn(() => 'pass' as const)
+  const sessionOf = vi.fn(() => ({ attachAnswer, track: answerTrack, arbitrate: answerArbitrate }) as never)
+  ctx.provide('inputTriggers', { registerSource: () => () => {}, sessionOf } as never)
   let listener: QuestionListener | undefined
   const on = vi.fn((event: string, value: QuestionListener) => {
     expect(event).toBe('user-questions/request')
@@ -157,6 +164,8 @@ async function bench(
     /** The answer-panel provider this plugin fills for the tool call row. */
     panels: () => ctx.get('userQuestionPanels'),
     registerPendingInteraction,
+    /** Slash-pipeline stub handles, for the entry inject's answer-surface face. */
+    slash: { sessionOf, attachAnswer, answerTrack, answerArbitrate },
     registerNode,
     on,
     fiber,
@@ -318,7 +327,9 @@ describe('apply', () => {
   })
 
   it('declares the services it binds', () => {
-    expect(inject).toEqual(['sessions', 'remote', 'remote.userQuestions', 'uiSession', 'slots', 'locale', 'uiConversation'])
+    expect(inject).toEqual([
+      'sessions', 'remote', 'remote.userQuestions', 'uiSession', 'slots', 'locale', 'uiConversation', 'inputTriggers',
+    ])
   })
 
   it('installs the Remote Event listener and delegates an unscoped request', async () => {
@@ -370,9 +381,19 @@ describe('apply', () => {
     const store = entry.store as ReturnType<typeof createQuestionDraftStore>
     expect(store.create(SESSION_ID).getSnapshot()).toEqual({ progressByRequest: {} })
     const pending = b.pending.getSnapshot()[0]!
-    const face = (entry.inject as () => { keyedHooks: { questionCard: (key: string) => PendingQuestion | undefined } })()
+    const face = (entry.inject as () => {
+      keyedHooks: { questionCard: (key: string) => PendingQuestion | undefined }
+      answerTriggers: QuestionComposerProps['answerTriggers']
+    })()
     expect(face.keyedHooks.questionCard(pending.key)).toBe(pending)
     expect(face.keyedHooks.questionCard('question:missing')).toBeUndefined()
+    // No sessionId (the framework hands one only to a Session-bound entry):
+    // the answer-surface face is inert — no controller resolution, pass-through keys.
+    expect(face.answerTriggers.arbitrate('enter', false)).toBe('pass')
+    expect(face.answerTriggers.attach(() => false)).toBeTypeOf('function')
+    face.answerTriggers.track('/g', 2, 'plain', 1)
+    expect(b.slash.sessionOf).not.toHaveBeenCalled()
+    expect(b.slash.answerTrack).not.toHaveBeenCalled()
     const select = entry.select as (
       owner: { pendingInteraction: PendingQuestion | undefined },
     ) => PendingQuestion | null

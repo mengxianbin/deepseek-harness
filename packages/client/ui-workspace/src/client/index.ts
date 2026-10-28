@@ -225,7 +225,7 @@ export function apply(ctx: Context): void {
     forkSession: (sessionId) => {
       uiWorkspace.forkSession(sessionId, (childId) => {
         ctx.get('productAnalytics')?.track('branch_session_click', { session_id: childId, parent_session_id: sessionId, click_position: 'sidebar' })
-      }, { allowMigration: false }).catch((error: unknown) => {
+      }, { allowMigration: false, entry: 'menu' }).catch((error: unknown) => {
         if (error instanceof Error && error.name === 'SessionForkError'
           && (error as SessionForkError).rpcError.code === 'session/migration-required') {
           notify({ kind: 'forkRequiresOpen', sessionId })
@@ -278,6 +278,12 @@ export function apply(ctx: Context): void {
     open: openSession,
     searchSessions,
     searchResultLimit: sessions.searchResultLimit,
+    // FORK dsh-local (f5-list-states): the sidebar error surface's retry.
+    refreshSessions: () => {
+      void sessions.refresh().catch((reason: unknown) => {
+        console.warn('session list refresh rejected:', reason)
+      })
+    },
     requestSessionRename,
     notifyArchivedNotOpenable: () => { notify({ kind: 'archivedNotOpenable' }) },
     renameWorkspace: async (workspaceId, title) => { await workspaces.rename(workspaceId, title) },

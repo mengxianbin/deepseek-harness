@@ -36,6 +36,15 @@ export interface SessionReference extends Disposable {
 export interface SessionRetainOptions {
   readonly source: SessionReferenceSource
   readonly signal?: AbortSignal | undefined
+  /**
+   * FORK dsh-local (f5-list-states, marker: persistedSelection): true for a
+   * selection the Client itself persisted (`dsh.sessions.current`) before the
+   * catalog pull delivered its row, so startup restoration opens the persisted
+   * Session's history without waiting for the full `session.list` response.
+   * Trust transfers to the open: a Host that no longer holds the identity
+   * fails the history open instead of the resolve refusing it here.
+   */
+  readonly persistedSelection?: boolean | undefined
 }
 
 /** Local ownership counts, independent of catalog membership and never persisted. */
@@ -139,6 +148,11 @@ export interface ISessions {
     onCreated?: (childId: SessionId) => void
     /** False refuses source migration; omission preserves the Host default. */
     allowMigration?: boolean
+    /**
+     * UI entry label (`'menu'` / `'shortcut'` / `'footer'`) the Host records in
+     * its fork audit ledger; callers that do not know one omit it.
+     */
+    entry?: string
   }): Promise<SessionId>
   /**
    * Borrow an already-retained Agent-scoped Context without extending its lifetime.

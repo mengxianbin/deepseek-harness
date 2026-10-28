@@ -25,6 +25,9 @@ const MODE = webSnapshotMode()
 
 const PROMPT = '做两个turn，每个turn输出随机一个包的文件结构。注意你做完一个turn之后，直接输出内容，停止，我们的系统会帮你再开一个turn，你看着做一个类似的'
 const COMMAND = `/goal ${PROMPT}`
+// FORK(replay-residual-1022): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 修法).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 const PACKAGE_FILES: Readonly<Record<string, string>> = {
   'packages/client/ui-conversation/README.md': '# UI conversation\n',
@@ -111,7 +114,9 @@ describe('web e2e: Goal keeps one assistant action row per completed turn', () =
   async function launch(): Promise<void> {
     sessionEvents = []
     scaffold = await launchWebScaffold(
-      MODE === 'record' ? {} : { replayFixture: FIXTURE, replayOverride: OVERRIDE },
+      MODE === 'record'
+        ? { extraOverlayPath: CATALOG_OVERLAY }
+        : { replayFixture: FIXTURE, replayOverride: OVERRIDE, extraOverlayPath: CATALOG_OVERLAY },
     )
     await seedPackageInventory(scaffold.workspaceCwd)
     scaffold.ctx.on('session/event', (_session, event: SessionEvent) => { sessionEvents.push(event) })

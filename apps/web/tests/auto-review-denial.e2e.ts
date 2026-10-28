@@ -20,6 +20,9 @@ const FIXTURE = fileURLToPath(new URL('../../../snapshots/web/auto-review-denial
 const UI_EXPECTED = fileURLToPath(new URL('../../../snapshots/web/auto-review-denial/ui.expected.md', import.meta.url))
 const MODE = webSnapshotMode()
 const SEED_ID = 'auto-review-denial-web-e2e'
+// FORK(replay-residual-1022): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 修法).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 describe.skipIf(MODE === 'record')('web e2e: cold Auto-review denial', () => {
   let scaffold: WebScaffold
@@ -51,7 +54,10 @@ describe.skipIf(MODE === 'record')('web e2e: cold Auto-review denial', () => {
     })
     expect(result?.data).not.toHaveProperty('callId')
 
-    scaffold = await launchWebScaffold(AUTO_REVIEW_FIXTURE)
+    scaffold = await launchWebScaffold({
+      ...AUTO_REVIEW_FIXTURE,
+      extraOverlayPath: [AUTO_REVIEW_FIXTURE.extraOverlayPath, CATALOG_OVERLAY],
+    })
     await seedSession(scaffold, fixture, SEED_ID, undefined, { createdAt: WEB_FIXTURE_TIME })
     browser = await chromium.launch()
     page = await newEnglishPage(browser)

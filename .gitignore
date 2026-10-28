@@ -47,3 +47,11 @@ worktrees/
 .agents/worktrees/
 .typert-*/
 native/system/test/bin/
+/dsh-start.log
+/dsh-web.log
+/.tmp-ask/
+/undefined/
+/.wt/
+/.wt-meta.yaml
+packages/api/workspace-files/src/client/watch-status.d.ts*
+packages/api/workspace-files/src/client/watch-status.js*

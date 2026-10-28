@@ -14,6 +14,9 @@ const SNAPSHOT_DIR = fileURLToPath(new URL('../../../snapshots/web/workspace-rec
 const SEED = fileURLToPath(new URL('../../../snapshots/web/seeded-history/session.v3.jsonl', import.meta.url))
 const MODE = webSnapshotMode()
 const TITLES = ['Newest conversation', 'Middle conversation', 'Oldest conversation']
+// FORK(replay-residual-1022): kill the win32 runtime skill-catalog frame
+// for this recorded scenario — see the overlay's header comment (族2 修法).
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 
 describe('web e2e: workspace recency', () => {
   let scaffold: WebScaffold
@@ -25,7 +28,7 @@ describe('web e2e: workspace recency', () => {
   let releaseWorkspace: (() => void) | undefined
 
   beforeAll(async () => {
-    scaffold = await launchWebScaffold({})
+    scaffold = await launchWebScaffold({ extraOverlayPath: CATALOG_OVERLAY })
     const fixture = await readFile(SEED, 'utf8')
     const workspace = await scaffold.ctx.workspaceRegistry.create(scaffold.workspaceCwd)
     const now = Date.now()

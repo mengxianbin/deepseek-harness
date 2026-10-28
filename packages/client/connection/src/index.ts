@@ -7,7 +7,7 @@ import type {} from '@deepseek-ai/dsh-credentials'
 // Activates the webServer Context merge used below.
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import { API_PATH } from './api-path.ts'
-import { CONNECT_PATH } from './connect-protocol.ts'
+import { CONNECT_PATH, REFRESH_PATH } from './connect-protocol.ts'
 import { bridge, DEFAULT_MAX_REQUEST_BODY_BYTES } from './http-bridge.ts'
 import { assertTrustedAuthority } from './api-request-trust.ts'
 import { BrowserAuth } from './browser-auth.ts'
@@ -42,7 +42,7 @@ export type { PeerId, PeerScope, Principal, RemoteInvocation } from '@deepseek-a
 export { RpcId, transportError } from './rpc.ts'
 export { Peer } from './peer.ts'
 export type { PeerOptions } from './peer.ts'
-export { CONNECT_PATH, type ConnectionInteractions } from './connect-protocol.ts'
+export { CONNECT_PATH, REFRESH_PATH, type ConnectionInteractions } from './connect-protocol.ts'
 export {
   clientRequestSchema,
   rpcErrorSchema,
@@ -75,6 +75,22 @@ declare module '@deepseek-ai/cordis' {
 /** Headroom for RPC JSON fields around aggregate base64 image payloads. */
 const REQUEST_ENVELOPE_HEADROOM_BYTES = 1024 * 1024
 
+const DAY_MILLISECONDS = 24 * 60 * 60 * 1000
+const HOUR_MILLISECONDS = 60 * 60 * 1000
+// Browsers and Node share this maximum signed 32-bit timer delay.
+const MAX_TIMER_MS = 2_147_483_647
+
+/**
+ * Cadence for the served page's cookie-refresh heartbeat: one sixth of the
+ * configured cookie window, clamped to 1–12 hours, so an active page rotates
+ * its cookie several window-lengths before absolute expiry.
+ * @param cookieMaxAgeDays - configured absolute cookie lifetime in days.
+ * @returns refresh interval in milliseconds.
+ */
+function deriveCookieRefreshIntervalMs(cookieMaxAgeDays: number): number {
+  return Math.min(12 * HOUR_MILLISECONDS, Math.max(HOUR_MILLISECONDS, cookieMaxAgeDays * DAY_MILLISECONDS / 6))
+}
+
 function assertImageBodyCapacity(ctx: Context, maxRequestBodyBytes: number): void {
   const attachments = ctx.get('attachments')
   if (attachments === undefined) return
@@ -105,6 +121,12 @@ export interface ConnectionConfig {
   trustedHosts?: string[]
   /** Absolute browser and API cookie lifetime in days. Default: 30. */
   cookieMaxAgeDays?: number
+  /**
+   * Page heartbeat interval in ms that re-issues the browser cookie before
+   * its absolute window ends. Default: one sixth of the cookie window,
+   * clamped to 1–12 hours. Explicit 0 disables the heartbeat and its injection.
+   */
+  cookieRefreshIntervalMs?: number
   /** Maximum buffered JSON body for every `/api` request. Default: 300 MiB. */
   maxRequestBodyBytes?: number
 }
@@ -113,6 +135,7 @@ export const Config: z<ConnectionConfig> = z.object({
   recovery: ConnectionRecoveryConfigSchema.default({}),
   trustedHosts: z.array(String).default([]),
   cookieMaxAgeDays: z.natural().min(1).default(30),
+  cookieRefreshIntervalMs: z.natural().max(MAX_TIMER_MS),
   maxRequestBodyBytes: z.natural().min(1).default(DEFAULT_MAX_REQUEST_BODY_BYTES),
 })
 
@@ -128,6 +151,7 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
   // The Loader resolves schema defaults; hand-built test contexts may pass none.
   const trustedHosts = config?.trustedHosts ?? []
   const cookieMaxAgeDays = config?.cookieMaxAgeDays ?? 30
+  const cookieRefreshIntervalMs = config?.cookieRefreshIntervalMs ?? deriveCookieRefreshIntervalMs(cookieMaxAgeDays)
   const maxRequestBodyBytes = config?.maxRequestBodyBytes ?? DEFAULT_MAX_REQUEST_BODY_BYTES
   // Config boundary: a malformed entry fails the load loudly here rather than
   // silently authorizing its hostname prefix at request time.
@@ -142,6 +166,9 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
     assertImageBodyCapacity(webCtx, maxRequestBodyBytes)
     webCtx.on('webserver/index-inject', (table) => {
       table.push({ kind: 'global', name: '__DSH_CONNECTION_RECOVERY__', value: recovery })
+      if (cookieRefreshIntervalMs > 0) {
+        table.push({ kind: 'global', name: '__DSH_COOKIE_REFRESH__', value: { intervalMs: cookieRefreshIntervalMs } })
+      }
     })
     const fetchHandler = connection.createSharedFetchHandler(API_PATH)
     const route: WebRoute = {
@@ -162,6 +189,10 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
       kind: 'exact', path: CONNECT_PATH,
       handler: (req, res) => { connection.authorizeConnect(req, res) },
     }), 'client-connection: /connect route')
+    webCtx.effect(() => webCtx.webServer.register({
+      kind: 'exact', path: REFRESH_PATH,
+      handler: (req, res) => { connection.authorizeRefresh(req, res) },
+    }), 'client-connection: /refresh route')
   })
   ctx.inject(['attachments'], (attachmentCtx) => {
     assertImageBodyCapacity(attachmentCtx, maxRequestBodyBytes)

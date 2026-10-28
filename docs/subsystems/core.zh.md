@@ -295,7 +295,7 @@ interface CancelOptions {
 ```ts type-equiv
 /** Why an active agent driver was cancelled. */
 type AgentCancelCause =
-  | { readonly kind: 'user' }
+  | { readonly kind: 'user'; readonly entry?: AgentCancelEntry }
   | { readonly kind: 'parent' }
   | { readonly kind: 'hook'; readonly reason: string }
   | { readonly kind: 'disposed' }
@@ -731,11 +731,29 @@ enter(agent: Agent, owner: Agent | undefined): () => void
  * @param source - fresh creation, resume, clear, or compaction source.
  * @param signal - optional factory initialization cancellation signal passed to listeners.
  * @returns completion of the serial creation listeners; a listener failure rejects.
+ *   In startup-barrier mode ({@link Config.startupBarrier}) the returned promise
+ *   resolves once the dispatch is registered instead: settlement parks as the
+ *   agent's {@link startupBarrier}, and a listener failure warns instead of
+ *   rejecting.
  * @throws if `agent` is not the exact live registry entry for its id, or its
  *   creation announcement already began (including a reentrant call from a
  *   creation listener).
  */
 async announce(agent: Agent, source: SessionStartSource, signal?: AbortSignal): Promise<void>
+
+/**
+ * The parked creation dispatch for one live agent (startup-barrier mode).
+ * The driver's first turn awaits this before prompt assembly so
+ * SessionStart-class context injection still lands ahead of the first LLM
+ * request; teardown joins it so disposal still retains the session and scope
+ * until the creation dispatch settles.
+ * @param id - the shared agent/session id to look up.
+ * @returns the barrier promise, or undefined when the agent has no parked
+ *   dispatch (unknown id, or barrier mode off — where the dispatch is
+ *   awaited inline by announce instead). A settled barrier stays readable
+ *   until the entry detaches; joining it again is a no-op.
+ */
+startupBarrier(id: SessionId): Promise<void> | undefined
 
 /**
  * Look up a live agent.
@@ -802,16 +820,20 @@ Source: [`packages/core/agent/src/runtime-types.ts`](../../packages/core/agent/s
 
 #### `agent/created` — serial
 
-An entered agent is ready for per-agent initialization after factory setup. Listeners run in order and are awaited before creation resolves. AgentLoop holds queued input until all listeners finish. A throw or rejection fails creation and skips later listeners. Disposal retains the scope and session until dispatch settles; listeners must not await agent.whenIdle() or their own owner's disposal.
+An entered agent is ready for per-agent initialization after factory setup. Listeners run in order and are awaited before creation resolves — unless the registry runs in startup-barrier mode (`Config.startupBarrier`), where creation publishes immediately and the settlement parks as the agent's startup barrier, which the driver awaits (bounded) before the first turn's prompt assembly. AgentLoop holds queued input until the relevant wait completes. A throw or rejection fails creation (barrier mode: warns after publication instead) and skips later listeners. Disposal retains the scope and session until dispatch settles; listeners must not await agent.whenIdle() or their own owner's disposal.
 
 ```ts cordis-catalog
 /**
  * An entered agent is ready for per-agent initialization after factory setup.
- * Listeners run in order and are awaited before creation resolves. AgentLoop
- * holds queued input until all listeners finish. A throw or rejection fails
- * creation and skips later listeners. Disposal retains the scope and session
- * until dispatch settles; listeners must not await agent.whenIdle() or their
- * own owner's disposal.
+ * Listeners run in order and are awaited before creation resolves — unless
+ * the registry runs in startup-barrier mode (`Config.startupBarrier`), where
+ * creation publishes immediately and the settlement parks as the agent's
+ * startup barrier, which the driver awaits (bounded) before the first
+ * turn's prompt assembly. AgentLoop holds queued input until the relevant
+ * wait completes. A throw or rejection fails creation (barrier mode: warns
+ * after publication instead) and skips later listeners. Disposal retains
+ * the scope and session until dispatch settles; listeners must not await
+ * agent.whenIdle() or their own owner's disposal.
  * @param payload.agent - the newly registered agent with its live session and completed setup.
  * @param payload.source - fresh creation, resume, clear, or compaction source.
  * @param payload.signal - factory initialization cancellation signal, when provided.

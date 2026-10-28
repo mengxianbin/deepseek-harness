@@ -36,6 +36,10 @@ export interface SessionStatsProjection {
   decodeMs: number
   /** Summed provider output tokens over the same decode-timed steps. */
   decodeTokens: number
+  /** Model-request retries (`llm/retry`) recorded so far — the retry dashboard total. */
+  retries: number
+  /** The same retries bucketed by provider route, from each `llm/retry` event's `provider`. */
+  retriesByProvider: Record<string, number>
 }
 
 declare module '@deepseek-ai/dsh-session-projection/types' {

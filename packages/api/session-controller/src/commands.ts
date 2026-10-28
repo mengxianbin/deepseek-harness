@@ -2,8 +2,11 @@
 
 import { modelAvailable } from './catalog.ts'
 import { randomUUID } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { dirname } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { brandString } from '@deepseek-ai/dsh-brand'
+import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import type { Agent, ModelSelection as AgentModelSelection } from '@deepseek-ai/dsh-agent'
 import { AttachmentError } from '@deepseek-ai/dsh-attachment'
 import type {
@@ -53,6 +56,53 @@ import type {
   SessionUpdateQueueValue,
   SessionRequestId,
 } from './types.ts'
+
+/** One fork-audit ledger row: everything needed to answer "when, from which
+ * parent, through which entry, from which client" without re-reading logs.
+ * `source` is `'host'` for rows this Host writes in real time; the m-note
+ * side detector (`scripts/dsh/session-fork-audit.mjs`) backfills historical
+ * forks as `'observed'`. */
+interface ForkLedgerEntry {
+  readonly forkedAt: number
+  readonly parentSession: SessionId | string
+  /** `'host'` for rows this Host writes; `'observed'` for detector backfill. */
+  readonly source: string
+  readonly entry: string
+  readonly client?: string
+  readonly atSeq?: number
+  readonly recordedAt: number
+}
+
+/** The on-disk ledger envelope (`~/.dsh/fork-audit/fork-ledger.json`);
+ * `entries` carries `| null` because arbitrary JSON on disk may hold it. */
+interface ForkLedger {
+  version?: number
+  entries?: Record<string, ForkLedgerEntry> | null
+}
+
+/**
+ * Best-effort entry label for a fork that arrived without one: the remote
+ * bridge answers in-process, so its package frames still sit on the call
+ * stack, while browser-driven calls (native rows or plugin RPCs) cross a
+ * socket and carry no local frames beyond the gateway dispatch.
+ * @returns a label when a known in-process caller is on the stack, else undefined.
+ */
+function inferForkEntry(): string | undefined {
+  // V8 always carries stackTraceLimit on Error; widen the constructor type
+  // without optionality so save/restore stays a plain number under
+  // exactOptionalPropertyTypes.
+  const errorConstructor = Error as unknown as { stackTraceLimit: number }
+  const previousLimit = errorConstructor.stackTraceLimit
+  try {
+    errorConstructor.stackTraceLimit = 64
+    const stack = new Error('fork-entry-probe').stack ?? ''
+    return stack.includes('dsh-remote-bridge') ? 'remote' : undefined
+  } catch {
+    return undefined
+  } finally {
+    errorConstructor.stackTraceLimit = previousLimit
+  }
+}
 
 interface SessionReadState {
   readonly id: SessionId
@@ -320,6 +370,7 @@ export class SessionCommandController {
         {},
       )
     }
+    this.recordForkLedger(childId, source.header.id, request)
     if (attachError !== undefined && workspace !== undefined) {
       throw new RemoteError(
         'session/workspace-attach-failed',
@@ -328,6 +379,54 @@ export class SessionCommandController {
       )
     }
     return { sessionId: childId }
+  }
+
+  /**
+   * Append one completed fork to the fork audit ledger
+   * (`$DSH_HOME|~/.dsh/fork-audit/fork-ledger.json`), the L2 half of the
+   * fork-no-dead-corners audit: any fork becomes attributable (when / parent
+   * session / entry / client) within one scheduling tick, and the m-note
+   * detector alarms on a fork-family session the ledger does not know.
+   * Fail-open by contract — an audit write never fails the fork it describes;
+   * a write failure is loud on stderr instead of silent.
+   * @param childId - the newly created fork child.
+   * @param parentSession - the fork source session.
+   * @param request - the caller's fork request, carrying entry/client when known.
+   */
+  private recordForkLedger(childId: SessionId, parentSession: SessionId, request: SessionForkRequest): void {
+    try {
+      // Test workers inherit the real home unless a spec sandboxes it (the
+      // DSH_HOME override pattern restart-stamp specs use): never let suite
+      // forks pollute the production ledger — a sandboxed run opts back in.
+      if (process.env.VITEST !== undefined && process.env.DSH_HOME === undefined) return
+      const ledgerPath = dshHomePath('fork-audit', 'fork-ledger.json')
+      let ledger: ForkLedger = {}
+      if (existsSync(ledgerPath)) {
+        try {
+          ledger = JSON.parse(readFileSync(ledgerPath, 'utf8')) as ForkLedger
+        } catch (error) {
+          console.error(`fork-audit: ledger unparsable, isolating and rebuilding ${ledgerPath}: ${String(error)}`)
+          renameSync(ledgerPath, `${ledgerPath}.corrupt-${String(Date.now())}`)
+        }
+      }
+      const entries: Record<string, ForkLedgerEntry> =
+        typeof ledger.entries === 'object' && ledger.entries !== null ? ledger.entries : {}
+      entries[childId] = {
+        forkedAt: Date.now(),
+        parentSession,
+        source: 'host',
+        entry: request.entry ?? inferForkEntry() ?? 'unknown',
+        ...request.client === undefined ? {} : { client: request.client },
+        ...request.atSeq === undefined ? {} : { atSeq: request.atSeq },
+        recordedAt: Date.now(),
+      }
+      mkdirSync(dirname(ledgerPath), { recursive: true })
+      const tempPath = `${ledgerPath}.tmp-${String(process.pid)}`
+      writeFileSync(tempPath, `${JSON.stringify({ version: 1, entries }, null, 1)}\n`, 'utf8')
+      renameSync(tempPath, ledgerPath)
+    } catch (error) {
+      console.error(`fork-audit: failed to record fork ledger entry for ${childId}: ${String(error)}`)
+    }
   }
 
   /**
@@ -527,7 +626,12 @@ export class SessionCommandController {
     if (hasApiSessionSubagentOwner(this.ctx, agent.session, agent)) {
       throw apiSessionSubagentOwnershipError(request.sessionId)
     }
-    agent.cancel({ kind: 'user' }, { keepInbox: true })
+    // R2: carry the requesting UI entry into the durable turn/end cause;
+    // callers without a recorded entry omit it and the record stays entry-less.
+    agent.cancel(
+      request.entry === undefined ? { kind: 'user' } : { kind: 'user', entry: request.entry },
+      { keepInbox: true },
+    )
     return { accepted: true }
   }
 

@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { chromium, type Browser } from 'playwright'
 import { expect, it, onTestFinished } from 'vitest'
 import { compareOrRefreshGolden, launchWebScaffold, seedSession, selectedSessionFixture, watchConsole, webSnapshotMode, type WebScaffold } from './scaffold.ts'
+import { selectGlobalPanel } from './support.ts'
 
 const bundle = fileURLToPath(new URL('../../../packages/experimental/inspector-profile', import.meta.url))
 const fixture = fileURLToPath(new URL('../../../snapshots/web/fresh-round-trip/session.v4.jsonl', import.meta.url))
@@ -117,7 +118,8 @@ it.each([
   resources.browser = browser
   const page = await browser.newPage({ locale: copy.locale })
   await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
-  await page.getByRole('button', { name: copy.plugins, exact: true }).click()
+  // FORK(replay-residual-1022): 宽态 nav 退役（面板折入 ⋯ 菜单）——同文件 :335 先例走 selectGlobalPanel
+  await selectGlobalPanel(page, copy.plugins)
   const panel = page.locator('[data-plugin-panel]')
   const card = panel.locator('[data-plugin-package="@deepseek-ai/dsh-experimental-inspector-profile"]')
   await card.getByText(copy.description, { exact: true }).waitFor()
@@ -330,7 +332,8 @@ it('opens bottom DevTools and retains its document and selected panel across Ses
   await page.keyboard.press('ControlOrMeta+Shift+Period')
   await iframe.waitFor({ state: 'visible' })
   expect(await unchanged()).toEqual(identity)
-  await page.getByRole('navigation', { name: 'Global panels' }).getByRole('button', { name: 'Plugins', exact: true }).click()
+  // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
+  await selectGlobalPanel(page, 'Plugins')
   await page.locator('[data-plugin-panel]').waitFor()
   expect(await iframe.isVisible()).toBe(true)
   expect(await unchanged()).toEqual(identity)

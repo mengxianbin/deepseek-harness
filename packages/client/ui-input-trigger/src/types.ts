@@ -33,6 +33,17 @@ export interface ClientSessionContext {
 /** Trigger character a source binds to. */
 export type TriggerChar = '/' | '@'
 
+/**
+ * Composer surface the pipeline drives for one session: `draft` is the
+ * resident InputBar's Lexical draft (the default), `answer` is the question
+ * composer's free-text answer field while a takeover owns the seat. At most
+ * one surface is active per controller — the answer surface activates while
+ * its insert target is attached (see `InputTriggerController.attachAnswer`)
+ * — and it executes plain-text pick outcomes only: command claims and
+ * structured references belong to the draft composer.
+ */
+export type TriggerSurface = 'draft' | 'answer'
+
 /** Where the trigger token sits in the draft: leading (trimmed draft starts with it) or inline. */
 export type TriggerPosition = 'leading' | 'inline'
 
@@ -165,6 +176,14 @@ export interface InputTriggerSource {
   readonly order?: number
   /** Whether the menu renders the source-title row; defaults to true. */
   readonly showGroupTitle?: boolean
+  /**
+   * Composer surfaces this source serves; defaults to `['draft']`. An opt-in
+   * joins the source's group to that surface's menu, and its outcomes are
+   * executed there (the answer surface declines non-text outcomes, so a
+   * source opting in should produce plain-text picks — see
+   * {@link TriggerSurface}).
+   */
+  readonly surfaces?: readonly TriggerSurface[]
   candidates(session: ClientSessionContext, req: CandidateRequest): Promise<readonly InputTriggerCandidate[]>
   /**
    * Synchronous breadcrumb rendered above this source's group, re-polled on

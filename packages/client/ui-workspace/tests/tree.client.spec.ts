@@ -302,25 +302,33 @@ describe('deriveGroups', () => {
     expect(strayGroups[1]!.sessions.map(session => session.blank)).toEqual([true])
   })
 
-  it('projects the completion reminder into session and search rows (absent = false)', () => {
+  it('projects the completion reminder and its outcome into session and search rows (absent = false)', () => {
     const done = summary('done', 3)
     const plain = summary('plain', 2)
     const sessions = list(done, plain)
-    const statuses: SessionStatusSnapshot = new Map([[done.id, status(undefined, { completionUnread: true })]])
+    const statuses: SessionStatusSnapshot = new Map(
+      [[done.id, status(undefined, { completionUnread: true, completionOutcome: 'failed' })]],
+    )
     const groups = deriveGroups(
       sessions, [workspace('first', ['done', 'plain'])], noRows, statuses, view(['first']),
     )
     const doneNode = groups[0]!.sessions.find(session => session.id === done.id)!
     const plainNode = groups[0]!.sessions.find(session => session.id === plain.id)!
     expect(doneNode.completed).toBe(true)
+    expect(doneNode.completionOutcome).toBe('failed')
     expect(plainNode.completed).toBe(false)
-    expect(deriveFlat(sessions, visibleSessionIds(sessions, noArchive, 'default'), noRows, statuses)
-      .find(node => node.id === done.id)!.completed).toBe(true)
+    expect(plainNode.completionOutcome).toBeUndefined()
+    const flatNode = deriveFlat(
+      sessions, visibleSessionIds(sessions, noArchive, 'default'), noRows, statuses,
+    ).find(node => node.id === done.id)!
+    expect(flatNode.completed).toBe(true)
+    expect(flatNode.completionOutcome).toBe('failed')
     const search = deriveSearchResults(
       sessions, [workspace('first', ['done', 'plain'])], 'done', noArchive, 'default',
       statuses, { items: [], hasMore: false }, 10,
     )
     expect(search.items[0]?.completed).toBe(true)
+    expect(search.items[0]?.completionOutcome).toBe('failed')
   })
 
   it('hides subagent-origin sessions and reads direct running counts from catalogs', () => {

@@ -24,12 +24,21 @@ const STREAMING_EXPECTED = join(SNAPSHOT_DIR, 'streaming.expected.md')
 const SETTLED_EXPECTED = join(SNAPSHOT_DIR, 'settled.expected.md')
 const MODE = webSnapshotMode()
 const SEED_ID = 'live-job-stream-web-e2e'
+// FORK(testweb-fixture-pollution) · F4(dsh-web-e2e-red-triage-1021): the win32
+// shipped preset gates `bash` off, so `ctx.tools.execute({name:'bash'})` failed
+// as unknown tool — the overlay flips `tool-bash` on (job ids keep their
+// `bash-…` shape) and pins the runtime skill-catalog frame off.
+const CATALOG_OVERLAY = fileURLToPath(new URL('./no-runtime-skill-catalog.overlay.yml', import.meta.url))
 // One fixed line of early output, then a hold on a barrier file the test owns
 // in the job's cwd: the process never exits on its own, so no CI stall can
-// settle it before the scenario kills it. The bounded loop only caps an
-// orphan's lifetime if the runner dies before `afterAll` releases the barrier.
+// settle it before the scenario kills it. F4 dialect-neutral rewrite: the
+// original `printf '…'; for _ in $(seq 1 3000); do [ -e … ] && break; sleep
+// 0.2; done` parses only under bash — the `node -e` form prints the same fixed
+// line first, then polls the release file every 200ms; the 600s deadline only
+// caps an orphan's lifetime if the runner dies before `afterAll` releases the
+// barrier.
 const RELEASE = '.live-job-stream.release'
-const COMMAND = `printf 'streamed-%s\\n' marker-line; for _ in $(seq 1 3000); do [ -e ${RELEASE} ] && break; sleep 0.2; done`
+const COMMAND = `node -e "console.log('streamed-' + 'marker-line'); const fs=require('node:fs'); const deadline=Date.now()+600000; (function tick(){ if (fs.existsSync('${RELEASE}')) return; if (Date.now()>deadline) return; setTimeout(tick, 200) })()"`
 
 /**
  * Wait for opening a session to publish its live Agent.
@@ -55,7 +64,7 @@ describe.skipIf(MODE === 'record')('web e2e: live job stream', () => {
   let agent: Agent
 
   beforeAll(async () => {
-    scaffold = await launchWebScaffold({})
+    scaffold = await launchWebScaffold({ extraOverlayPath: CATALOG_OVERLAY })
     await seedSession(scaffold, await readFile(FIXTURE, 'utf8'), SEED_ID)
     browser = await chromium.launch()
     page = await newEnglishPage(browser)

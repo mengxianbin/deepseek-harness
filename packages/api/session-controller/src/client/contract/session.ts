@@ -9,7 +9,7 @@
  */
 import type { AttachmentIdType, FileAttachmentRef, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
-import type { SessionId, SessionSeq } from '@deepseek-ai/dsh-session/types'
+import type { AgentCancelEntry, SessionId, SessionSeq } from '@deepseek-ai/dsh-session/types'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { PromptContentPart, QueueAction, SessionRequestId } from '../../types.ts'
@@ -108,9 +108,11 @@ export interface ISession {
   /**
    * Cancel the running turn. Pending queued work remains and resumes in FIFO
    * order after the Host reaches cancellation quiescence.
+   * @param entry - UI entry that requested the stop (R2 stop-entry record); omitted
+   * when the caller carries none, keeping the pre-entry request shape.
    * @returns acceptance, or the business error.
    */
-  cancel(): Promise<RemoteResult<{ accepted: true }>>
+  cancel(entry?: AgentCancelEntry): Promise<RemoteResult<{ accepted: true }>>
   /**
    * Rename this session (explicit user title; pins it against automatic
    * regeneration).

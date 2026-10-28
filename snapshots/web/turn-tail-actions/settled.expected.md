@@ -6,6 +6,7 @@
   - tablist:
     - tab "Chat" [selected]
     - tab "Trajectory"
+  - button "More conversation views"
 - text: Begin your reply with the plain sentence "Reading the workspace now." as text, and in that same message call the bash tool with the command "echo alpha". After the tool result, reply with the single word DONE and stop. {{clock}}
 - button "Copy"
 - status: Stopped
@@ -15,11 +16,14 @@
 - button "Ran commands"
 - paragraph: partial
 - text: Stopped
+- status:
+  - text: Task stoppedThis turn was stopped by you — the model did not finish a complete reply.
+  - code: USER_STOPPED
 - button "Copy"
 - button "Good response"
 - button "Bad response"
-- button "Branch into a new conversation"
-- text: {{clock}}
+- button "Branch into a new conversation" [disabled]
+- text: Available only on the last message of a completed turn {{clock}}
 - textbox "Message or run a task, / commands, @ files or sessions"
 - button "Add files or run commands"
 - 'button "Access mode, current: Workspace Write"': Workspace Write

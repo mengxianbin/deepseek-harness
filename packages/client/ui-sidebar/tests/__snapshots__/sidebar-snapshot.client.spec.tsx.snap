@@ -74,6 +74,10 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
         class="footerActions"
       >
         <div
+          data-slot="sidebar.more.action"
+          style="display: contents;"
+        />
+        <div
           data-slot="sidebar.footer.action"
           style="display: contents;"
         />
@@ -118,52 +122,52 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
           >
             <span
               class="glanceRows"
-            >
-              <span
-                class="glanceRow"
-                title="Plan cycle usage: used / total (%)"
-              >
-                <span
-                  class="glanceTrack"
-                >
-                  <span
-                    class="glanceFill"
-                    style="width: 0%;"
-                  />
-                </span>
-                <span
-                  class="glanceValue"
-                >
-                  — / 100
-                </span>
-              </span>
-              <span
-                class="glanceRow"
-                title="Plan cycle days: elapsed / total"
-              >
-                <span
-                  class="glanceTrack"
-                >
-                  <span
-                    class="glanceFill"
-                    style="width: 0%;"
-                  />
-                </span>
-                <span
-                  class="glanceValue"
-                >
-                  — / —
-                </span>
-              </span>
-            </span>
+            />
             <span
-              class="glanceToday"
-              title="Tokens today"
+              class="glanceStats"
+              title="Tokens today · Tokens this plan cycle · Balance —"
             >
               <span
-                class="glanceTodayTokens"
+                class="glanceStat"
               >
-                —
+                <span
+                  class="glanceStatLabel"
+                >
+                  Today
+                </span>
+                <span
+                  class="glanceStatValue"
+                >
+                  —
+                </span>
+              </span>
+              <span
+                class="glanceStat"
+              >
+                <span
+                  class="glanceStatLabel"
+                >
+                  Cycle
+                </span>
+                <span
+                  class="glanceStatValue"
+                >
+                  —
+                </span>
+              </span>
+              <span
+                class="glanceStat"
+              >
+                <span
+                  class="glanceStatLabel"
+                >
+                  Balance
+                </span>
+                <span
+                  class="glanceStatValue"
+                >
+                  —
+                </span>
               </span>
             </span>
           </span>
@@ -218,6 +222,14 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
             style="display: contents;"
           />
         </div>
+        <div
+          class="footerActions"
+        >
+          <div
+            data-slot="sidebar.footer.action"
+            style="display: contents;"
+          />
+        </div>
         <span
           class="root panelMoreSlot"
         >
@@ -240,14 +252,6 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
             />
           </button>
         </span>
-        <div
-          class="footerActions"
-        >
-          <div
-            data-slot="sidebar.footer.action"
-            style="display: contents;"
-          />
-        </div>
       </div>
     </div>
   </div>
@@ -346,6 +350,10 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
         class="footerActions"
       >
         <div
+          data-slot="sidebar.more.action"
+          style="display: contents;"
+        />
+        <div
           data-slot="sidebar.footer.action"
           style="display: contents;"
         />
@@ -390,52 +398,52 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
           >
             <span
               class="glanceRows"
-            >
-              <span
-                class="glanceRow"
-                title="Plan cycle usage: used / total (%)"
-              >
-                <span
-                  class="glanceTrack"
-                >
-                  <span
-                    class="glanceFill"
-                    style="width: 0%;"
-                  />
-                </span>
-                <span
-                  class="glanceValue"
-                >
-                  — / 100
-                </span>
-              </span>
-              <span
-                class="glanceRow"
-                title="Plan cycle days: elapsed / total"
-              >
-                <span
-                  class="glanceTrack"
-                >
-                  <span
-                    class="glanceFill"
-                    style="width: 0%;"
-                  />
-                </span>
-                <span
-                  class="glanceValue"
-                >
-                  — / —
-                </span>
-              </span>
-            </span>
+            />
             <span
-              class="glanceToday"
-              title="Tokens today"
+              class="glanceStats"
+              title="Tokens today · Tokens this plan cycle · Balance —"
             >
               <span
-                class="glanceTodayTokens"
+                class="glanceStat"
               >
-                —
+                <span
+                  class="glanceStatLabel"
+                >
+                  Today
+                </span>
+                <span
+                  class="glanceStatValue"
+                >
+                  —
+                </span>
+              </span>
+              <span
+                class="glanceStat"
+              >
+                <span
+                  class="glanceStatLabel"
+                >
+                  Cycle
+                </span>
+                <span
+                  class="glanceStatValue"
+                >
+                  —
+                </span>
+              </span>
+              <span
+                class="glanceStat"
+              >
+                <span
+                  class="glanceStatLabel"
+                >
+                  Balance
+                </span>
+                <span
+                  class="glanceStatValue"
+                >
+                  —
+                </span>
               </span>
             </span>
           </span>
@@ -490,6 +498,14 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
             style="display: contents;"
           />
         </div>
+        <div
+          class="footerActions"
+        >
+          <div
+            data-slot="sidebar.footer.action"
+            style="display: contents;"
+          />
+        </div>
         <span
           class="root panelMoreSlot"
         >
@@ -512,14 +528,6 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
             />
           </button>
         </span>
-        <div
-          class="footerActions"
-        >
-          <div
-            data-slot="sidebar.footer.action"
-            style="display: contents;"
-          />
-        </div>
       </div>
     </div>
   </div>
@@ -553,52 +561,52 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
           >
             <span
               class="glanceRows"
-            >
-              <span
-                class="glanceRow"
-                title="套餐周期用量：已用 / 总量（%）"
-              >
-                <span
-                  class="glanceTrack"
-                >
-                  <span
-                    class="glanceFill"
-                    style="width: 0%;"
-                  />
-                </span>
-                <span
-                  class="glanceValue"
-                >
-                  — / 100
-                </span>
-              </span>
-              <span
-                class="glanceRow"
-                title="套餐周期天数：已过 / 总计"
-              >
-                <span
-                  class="glanceTrack"
-                >
-                  <span
-                    class="glanceFill"
-                    style="width: 0%;"
-                  />
-                </span>
-                <span
-                  class="glanceValue"
-                >
-                  — / —
-                </span>
-              </span>
-            </span>
+            />
             <span
-              class="glanceToday"
-              title="今日 token 用量"
+              class="glanceStats"
+              title="今日 token 用量 · 套餐周期 token 用量 · 余额 —"
             >
               <span
-                class="glanceTodayTokens"
+                class="glanceStat"
               >
-                —
+                <span
+                  class="glanceStatLabel"
+                >
+                  今日
+                </span>
+                <span
+                  class="glanceStatValue"
+                >
+                  —
+                </span>
+              </span>
+              <span
+                class="glanceStat"
+              >
+                <span
+                  class="glanceStatLabel"
+                >
+                  周期
+                </span>
+                <span
+                  class="glanceStatValue"
+                >
+                  —
+                </span>
+              </span>
+              <span
+                class="glanceStat"
+              >
+                <span
+                  class="glanceStatLabel"
+                >
+                  余额
+                </span>
+                <span
+                  class="glanceStatValue"
+                >
+                  —
+                </span>
               </span>
             </span>
           </span>
@@ -653,6 +661,14 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
             style="display: contents;"
           />
         </div>
+        <div
+          class="footerActions"
+        >
+          <div
+            data-slot="sidebar.footer.action"
+            style="display: contents;"
+          />
+        </div>
         <span
           class="root panelMoreSlot"
         >
@@ -675,14 +691,6 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
             />
           </button>
         </span>
-        <div
-          class="footerActions"
-        >
-          <div
-            data-slot="sidebar.footer.action"
-            style="display: contents;"
-          />
-        </div>
       </div>
     </div>
   </div>

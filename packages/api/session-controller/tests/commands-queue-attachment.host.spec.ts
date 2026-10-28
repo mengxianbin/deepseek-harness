@@ -226,6 +226,10 @@ describe('Session queue commands', () => {
     })), 'session/not-found')
     expect(controller.cancel({ sessionId: agent.id })).toEqual({ accepted: true })
     expect(cancel).toHaveBeenCalledWith({ kind: 'user' }, { keepInbox: true })
+    // R2: a request carrying the stop entry folds it into the cancel cause;
+    // the entry-less request above keeps the pre-entry record shape.
+    expect(controller.cancel({ sessionId: agent.id, entry: 'stop-button' })).toEqual({ accepted: true })
+    expect(cancel).toHaveBeenLastCalledWith({ kind: 'user', entry: 'stop-button' }, { keepInbox: true })
     await ctx.fiber.dispose()
   })
 

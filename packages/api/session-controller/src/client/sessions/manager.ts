@@ -130,12 +130,18 @@ export class SessionManager {
   /**
    * Resolve an acquisition target without materializing a Session.
    * @param target - known identity or durable direct-parent address.
+   * @param persistedSelection - FORK dsh-local (f5-list-states, marker:
+   *   persistedSelection): trust a Client-persisted identity while the catalog
+   *   pull has not delivered its row yet (startup restoration decoupled from
+   *   `session.list`); only meaningful for a plain id, since an address is
+   *   self-vouching. The Host decides existence through the history open.
    * @returns the resolved identity with its explicit or catalog-derived history route installed.
    */
-  resolveTarget(target: SessionTarget): SessionId {
+  resolveTarget(target: SessionTarget, persistedSelection = false): SessionId {
     const id = typeof target === 'string' ? target : target.childSessionId
     const address = typeof target === 'string' ? this.subagentAddress(id) : target
     if (typeof target === 'string'
+      && !persistedSelection
       && !this.sessions.has(id)
       && !this.summaries.some(summary => summary.sessionId === id)
       && address === undefined) {
@@ -550,17 +556,19 @@ export class SessionManager {
    * preserve it or lower it after an exact cut before the first `turn/start`;
    * lineage rides parentSessionId. A child published before Workspace
    * attachment fails is also reconciled into the list.
-   * @param opts - source session, optional exact inclusive boundary seq, and permission to start migration.
+   * @param opts - source session, optional exact inclusive boundary seq, permission
+   *   to start migration, and the optional UI entry label for the fork audit ledger.
    * @returns the fork result (the child session id).
    */
   async fork(
-    opts: { sessionId: SessionId; atSeq?: SessionSeq; allowMigration?: boolean },
+    opts: { sessionId: SessionId; atSeq?: SessionSeq; allowMigration?: boolean; entry?: string },
   ): Promise<RemoteResult<{ sessionId: SessionId }>> {
     const source = this.summaries.find(s => s.sessionId === opts.sessionId)
     const result = await this.remote.session.fork({
       sessionId: opts.sessionId,
       ...opts.atSeq === undefined ? {} : { atSeq: opts.atSeq },
       ...opts.allowMigration === undefined ? {} : { allowMigration: opts.allowMigration },
+      ...opts.entry === undefined ? {} : { entry: opts.entry },
     })
     const childId = result.ok
       ? result.value.sessionId
