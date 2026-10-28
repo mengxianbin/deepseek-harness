@@ -1,16 +1,20 @@
 /**
- * The web-search page's staged form over three settings namespaces: `web`,
- * whose provider selection the Search API switch writes, `web-search-deepseek`
- * for Messages search, and `web-deepseek-api` for the Search and Fetch APIs.
+ * The web-search page's staged form over four settings namespaces: `web`,
+ * whose provider selection the switch writes, `web-search-deepseek` for
+ * Messages search, `web-deepseek-api` for the Search and Fetch APIs, and
+ * `web-search-brave` for Brave Search.
  *
- * The switch selects `deepseek-search-api` and `deepseek-fetch-api` together, or
- * Messages search with local HTTP fetch. A selection equal to the deployment's
- * composed value clears the override instead of storing a copy of it.
+ * The switch selects `deepseek-search-api` and `deepseek-fetch-api` together,
+ * Messages search with local HTTP fetch, or Brave Search with local HTTP fetch.
+ * A selection equal to the deployment's composed value clears the override
+ * instead of storing a copy of it. When the Host serves the Brave section, the
+ * switch renders as a segmented control with the Brave position; without it,
+ * the page renders exactly as it did with only the two DeepSeek positions.
  *
  * The key is the one control that does not live in a section: its literal
  * never rides a response, so the page learns only whether one is configured
  * and writes it through the credentials domain, addressed by the reference the
- * selected API's section names. It is still staged with the rest of the form,
+ * selected section names. It is still staged with the rest of the form,
  * so one save covers everything the page shows.
  */
 
@@ -30,14 +34,22 @@ import {
 export const WEB_SEARCH_NS = 'web-search-deepseek'
 /** Namespace of the DeepSeek Search and Fetch API providers. */
 export const WEB_API_NS = 'web-deepseek-api'
+/** Namespace of the Brave Search provider. */
+export const WEB_BRAVE_NS = 'web-search-brave'
 /** Namespace of the web service's provider selection. */
 export const WEB_NS = 'web'
 
 /** Provider ids the switch writes into the web service's selection. */
 const PROVIDERS = {
-  searchProvider: { api: 'deepseek-search-api', messages: 'deepseek-official' },
-  fetchProvider: { api: 'deepseek-fetch-api', messages: 'http' },
+  searchProvider: { api: 'deepseek-search-api', messages: 'deepseek-official', brave: 'brave' },
+  fetchProvider: { api: 'deepseek-fetch-api', messages: 'http', brave: 'http' },
 } as const
+
+/** One switch position per provider section this page edits. */
+export type ProviderTarget = keyof typeof PROVIDERS['searchProvider']
+
+/** Longest Brave result count the settings page stages (the API's own limit). */
+const BRAVE_MAX_COUNT = 20
 
 /** Credential reference the providers resolve when a section names none. */
 const DEFAULT_API_KEY_REF = 'DEEPSEEK_API_KEY'
@@ -73,6 +85,16 @@ export interface WebApiSettings {
   count?: number
 }
 
+/** The Brave Search fields this page edits. */
+export interface WebBraveSettings {
+  /** Credential reference naming the environment key. */
+  apiKeyEnv?: string
+  /** Brave API base including its `/res` prefix; blank inherits the provider default. */
+  baseURL?: string
+  /** Brave results per search, from 1 through 20. */
+  count?: number
+}
+
 /** What the credentials domain last reported, and for which reference. */
 interface CredentialState {
   /** Reference this answer describes; a stale response for another one is dropped. */
@@ -87,10 +109,14 @@ interface CredentialState {
 export interface WebSearchCardState extends SettingsFormShell {
   /** Whether the Host serves both the selection and the Search / Fetch API section. */
   apiSwitchAvailable: boolean
-  /** Invalid edits or failed saves that switching APIs must keep visible. */
+  /** Invalid edits or failed saves that switching providers must keep visible. */
   apiSwitchBlocked: boolean
   /** Staged switch position: true selects the Search and Fetch APIs. */
   useSearchApi: boolean
+  /** Whether the Host serves the Brave section the third provider position edits. */
+  braveAvailable: boolean
+  /** Staged switch position: true selects Brave Search. */
+  useBrave: boolean
   /** Endpoint of the selected API. */
   baseURL: SettingsFieldState
   /** Maximum Messages server-tool uses. */
@@ -113,6 +139,8 @@ export interface WebSearchCardFace extends SettingsFormActions {
   }
   /** Stage the API switch: true selects the Search and Fetch APIs, false Messages search with local fetch. */
   setSearchApi: (enabled: boolean) => void
+  /** Stage any provider position this page edits; the Brave position is a no-op when its section is not served. */
+  setProvider: (target: ProviderTarget) => void
 }
 
 /** Settings scopes for the namespaces the page edits. */
@@ -123,13 +151,16 @@ export interface WebSearchCardScopes {
   messages: SettingsFormScope<WebSearchSettings>
   /** Search and Fetch API settings. */
   api: SettingsFormScope<WebApiSettings>
+  /** Brave Search settings. */
+  brave: SettingsFormScope<WebBraveSettings>
 }
 
-/** Bridges the three settings scopes and the credentials domain onto the page. */
+/** Bridges the four settings scopes and the credentials domain onto the page. */
 export class WebSearchCardController {
   private readonly selection: SettingsFormModel<WebProviderSelection>
   private readonly messages: SettingsFormModel<WebSearchSettings>
   private readonly api: SettingsFormModel<WebApiSettings>
+  private readonly brave: SettingsFormModel<WebBraveSettings>
   private readonly store: SnapshotStore<WebSearchCardState>
   private readonly unsubscribe: (() => void)[]
   private credential: CredentialState = { ref: '', configured: false, writable: true }
@@ -160,6 +191,17 @@ export class WebSearchCardController {
         },
       },
     ])
+    this.brave = new SettingsFormModel(scopes.brave, [
+      settingsTextField('baseURL'),
+      {
+        ...settingsNumberField('count'),
+        parse: (text) => {
+          if (text.trim() === '') return { kind: 'clear' }
+          const value = Number(text)
+          return Number.isInteger(value) && value >= 1 && value <= BRAVE_MAX_COUNT ? { kind: 'set', value } : undefined
+        },
+      },
+    ])
     this.store = createSnapshotStore(this.projection())
     // A staged switch can change which section names the key, without any
     // scope publishing; a scope change can rename the reference itself.
@@ -168,8 +210,8 @@ export class WebSearchCardController {
       if (this.ref() !== this.credential.ref) void this.readCredential()
     }
     this.unsubscribe = [
-      ...[this.selection, this.messages, this.api].map(form => form.bind(() => form.shell()).subscribe(publish)),
-      ...[scopes.web, scopes.messages, scopes.api].map(scope => scope.subscribe(() => { void this.readCredential() })),
+      ...[this.selection, this.messages, this.api, this.brave].map(form => form.bind(() => form.shell()).subscribe(publish)),
+      ...[scopes.web, scopes.messages, scopes.api, scopes.brave].map(scope => scope.subscribe(() => { void this.readCredential() })),
     ]
     void this.readCredential()
   }
@@ -179,14 +221,22 @@ export class WebSearchCardController {
     return this.selection.shell().available && this.api.shell().available
   }
 
-  /** The staged switch position, read from the staged search selection. */
-  private searchApi(): boolean {
-    return this.switchAvailable() && this.selection.field('searchProvider').text === PROVIDERS.searchProvider.api
+  /** Whether the Host serves the Brave section the third provider position edits. */
+  private braveAvailable(): boolean {
+    return this.brave.shell().available
+  }
+
+  /** The staged provider position, read from the staged search selection. */
+  private mode(): ProviderTarget {
+    const selected = this.selection.field('searchProvider').text
+    if (this.switchAvailable() && selected === PROVIDERS.searchProvider.api) return 'api'
+    if (this.braveAvailable() && selected === PROVIDERS.searchProvider.brave) return 'brave'
+    return 'messages'
   }
 
   private projection(): WebSearchCardState {
     const primary = this.messages.shell()
-    const served = [primary, this.selection.shell(), this.api.shell()].filter(item => item.available)
+    const served = [primary, this.selection.shell(), this.api.shell(), this.brave.shell()].filter(item => item.available)
     const shell: SettingsFormShell = {
       available: primary.available,
       writable: served.every(item => item.writable),
@@ -195,24 +245,30 @@ export class WebSearchCardController {
       saving: served.some(item => item.saving),
       failed: served.some(item => item.failed),
     }
-    const searchApi = this.searchApi()
+    const mode = this.mode()
     return {
       ...shell,
       apiSwitchAvailable: this.switchAvailable(),
       apiSwitchBlocked: shell.invalid || shell.failed,
-      useSearchApi: searchApi,
-      baseURL: (searchApi ? this.api : this.messages).field('baseURL'),
+      useSearchApi: mode === 'api',
+      braveAvailable: this.braveAvailable(),
+      useBrave: mode === 'brave',
+      baseURL: (mode === 'brave' ? this.brave : mode === 'api' ? this.api : this.messages).field('baseURL'),
       maxUses: this.messages.field('maxUses'),
-      count: this.api.field('count'),
+      count: (mode === 'brave' ? this.brave : this.api).field('count'),
       apiKey: this.selection.field(API_KEY_FIELD),
       apiKeyConfigured: this.credential.configured,
       apiKeyWritable: this.credential.writable,
     }
   }
 
-  /** The reference the selected API's section names, or the providers' default. */
+  /** The reference the selected section names, or the providers' default. */
   private ref(): string {
-    return refOf(this.searchApi() ? this.scopes.api.getSnapshot() : this.scopes.messages.getSnapshot())
+    const mode = this.mode()
+    const snapshot = mode === 'brave' ? this.scopes.brave.getSnapshot()
+      : mode === 'api' ? this.scopes.api.getSnapshot()
+        : this.scopes.messages.getSnapshot()
+    return refOf(snapshot)
   }
 
   /**
@@ -261,24 +317,26 @@ export class WebSearchCardController {
 
   /**
    * Build the face the page's slot registration injects. `baseURL` edits the
-   * selected API's endpoint; `maxUses` and `count` edit their own sections.
+   * selected section's endpoint; `maxUses` and `count` edit their own sections.
    * @returns the page's snapshot and its form actions.
    */
   inject(): WebSearchCardFace {
     const formOf = (field: string): { actions(): SettingsFormActions } => {
       if (field === API_KEY_FIELD) return this.selection
       if (field === 'maxUses') return this.messages
-      if (field === 'count') return this.api
-      return this.searchApi() ? this.api : this.messages
+      const mode = this.mode()
+      if (field === 'count') return mode === 'brave' ? this.brave : this.api
+      return mode === 'brave' ? this.brave : mode === 'api' ? this.api : this.messages
     }
     return {
       hooks: { webSearchCard: this.store },
       edit: (field, text) => { formOf(field).actions().edit(field, text) },
       resetField: (field) => { formOf(field).actions().resetField(field) },
-      setSearchApi: (enabled) => { this.select(enabled) },
+      setSearchApi: (enabled) => { this.select(enabled ? 'api' : 'messages') },
+      setProvider: (target) => { this.select(target) },
       save: () => { void this.save() },
       discard: () => {
-        for (const form of [this.selection, this.messages, this.api]) form.actions().discard()
+        for (const form of [this.selection, this.messages, this.api, this.brave]) form.actions().discard()
       },
     }
   }
@@ -286,16 +344,18 @@ export class WebSearchCardController {
   /**
    * Stage both provider selections for one switch position. A target equal to
    * the composed value clears the override so the deployment default keeps
-   * applying.
-   * @param enabled - true for the Search and Fetch APIs.
+   * applying. The Brave position requires its section: without it there is
+   * nothing to edit, and the UI never offers it.
+   * @param target - the provider position to stage.
    */
-  private select(enabled: boolean): void {
+  private select(target: ProviderTarget): void {
+    if (target === 'brave' && !this.braveAvailable()) return
     const base = this.scopes.web.getSnapshot().base as WebProviderSelection | undefined
     const actions = this.selection.actions()
     for (const field of ['searchProvider', 'fetchProvider'] as const) {
-      const target = PROVIDERS[field][enabled ? 'api' : 'messages']
-      if (base?.[field] === target) actions.resetField(field)
-      else actions.edit(field, target)
+      const value = PROVIDERS[field][target]
+      if (base?.[field] === value) actions.resetField(field)
+      else actions.edit(field, value)
     }
   }
 
@@ -308,7 +368,7 @@ export class WebSearchCardController {
   private async save(): Promise<void> {
     const state = this.projection()
     if (!state.available || state.invalid || state.saving) return
-    for (const form of [this.messages, this.api]) {
+    for (const form of [this.messages, this.api, this.brave]) {
       if (!form.shell().available || !form.shell().dirty) continue
       await form.save()
       if (form.shell().failed) return
@@ -332,7 +392,7 @@ export class WebSearchCardController {
   /** Release configuration subscriptions. */
   dispose(): void {
     for (const off of this.unsubscribe) off()
-    for (const form of [this.selection, this.messages, this.api]) form.dispose()
+    for (const form of [this.selection, this.messages, this.api, this.brave]) form.dispose()
   }
 }
 

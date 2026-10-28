@@ -5,6 +5,8 @@ import type { SettingsFormLabels } from '@deepseek-ai/dsh-client-ui-primitives'
 /** Locale keys the page renders. */
 export type WebSearchSettingsLocaleKey =
   | 'title' | 'description' | 'useSearchApi' | 'useSearchApiHint' | 'searchGuide' | 'searchGuideUrl'
+  | 'providerSelect' | 'providerMessages' | 'providerApi' | 'providerBrave'
+  | 'braveBaseUrl' | 'braveBaseUrlHint' | 'braveCountHint' | 'invalidBraveCount'
   | 'apiKey' | 'apiKeyHint' | 'apiKeySet' | 'apiKeyUnset'
   | 'baseUrl' | 'baseUrlHint' | 'searchApiBaseUrl' | 'searchApiBaseUrlHint' | 'maxUses' | 'maxUsesHint' | 'count' | 'countHint'
   | 'overridden' | 'reset' | 'readOnly' | 'unavailable'
@@ -18,6 +20,14 @@ export const en: Record<WebSearchSettingsLocaleKey, string> = {
   useSearchApiHint: 'Off by default: search runs through DeepSeek Messages. For the new Web Search API\'s features and pricing, see the ',
   searchGuide: 'Search & Fetch guide',
   searchGuideUrl: 'https://api-docs.deepseek.com/guides/search',
+  providerSelect: 'Search provider',
+  providerMessages: 'DeepSeek Messages',
+  providerApi: 'Search / Fetch API',
+  providerBrave: 'Brave Search',
+  braveBaseUrl: 'Brave API base URL',
+  braveBaseUrlHint: 'Include the /res prefix, such as https://api.search.brave.com/res. The provider appends /v1/web/search. Leave blank to restore the default.',
+  braveCountHint: 'Results returned per query: an integer from 1 to 20, default 10 — the Brave Search API limit.',
+  invalidBraveCount: 'Enter an integer from 1 to 20, or leave blank to use the default.',
   apiKey: 'API key',
   apiKeyHint: 'Stored outside the settings file. Leave blank to keep the current key.',
   apiKeySet: 'A key is configured.',
@@ -49,6 +59,14 @@ export const zh: Record<WebSearchSettingsLocaleKey, string> = {
   useSearchApiHint: '默认关闭，搜索通过 DeepSeek Messages 完成。新版 Web 搜索 API 功能与计费详见',
   searchGuide: '网页搜索与抓取指南',
   searchGuideUrl: 'https://api-docs.deepseek.com/zh-cn/guides/search',
+  providerSelect: '搜索提供方',
+  providerMessages: 'DeepSeek Messages',
+  providerApi: 'Search / Fetch API',
+  providerBrave: 'Brave Search',
+  braveBaseUrl: 'Brave API 基础地址',
+  braveBaseUrlHint: '填写含 /res 前缀的地址，例如 https://api.search.brave.com/res；程序追加 /v1/web/search，留空恢复默认。',
+  braveCountHint: '每个查询返回的结果条数，须为 1–20 的整数（Brave Search API 上限），默认 10。',
+  invalidBraveCount: '请填 1–20 的整数；留空表示使用默认值。',
   apiKey: 'API Key',
   apiKeyHint: '不写入设置文件。留空表示保持当前密钥。',
   apiKeySet: '已配置密钥。',

@@ -26,7 +26,7 @@ const endpoints = {
 }
 
 function cardActions() {
-  return { edit: vi.fn(), resetField: vi.fn(), setSearchApi: vi.fn(), save: vi.fn(), discard: vi.fn() }
+  return { edit: vi.fn(), resetField: vi.fn(), setSearchApi: vi.fn(), setProvider: vi.fn(), save: vi.fn(), discard: vi.fn() }
 }
 
 describe('WebSearchCard', () => {
@@ -35,7 +35,8 @@ describe('WebSearchCard', () => {
       ...settled,
       apiSwitchAvailable: true,
       apiSwitchBlocked: state.invalid === true || state.failed === true,
-      baseURL: state.useSearchApi === true ? endpoints.api : endpoints.messages, useSearchApi: false, maxUses: field('5'),
+      baseURL: state.useSearchApi === true ? endpoints.api : endpoints.messages, useSearchApi: false,
+      braveAvailable: false, useBrave: false, maxUses: field('5'),
       count: field('10'),
       apiKey: field(''),
       apiKeyConfigured: false,
@@ -51,7 +52,8 @@ describe('WebSearchCard', () => {
   it('renders its one-liner alone in the summary view', () => {
     const store = createSnapshotStore<WebSearchCardState>({
       ...settled, baseURL: endpoints.messages, apiSwitchAvailable: true, apiSwitchBlocked: false, useSearchApi: false,
-      maxUses: field('5'), count: field('10'), apiKey: field(''), apiKeyConfigured: false, apiKeyWritable: true,
+      braveAvailable: false, useBrave: false, maxUses: field('5'), count: field('10'), apiKey: field(''),
+      apiKeyConfigured: false, apiKeyWritable: true,
     })
     const props = { ...cardActions(), view: 'summary', t, useWebSearchCard: bindSnapshotSelector(store) } as WebSearchCardProps
     render(<WebSearchCard {...props} />)
@@ -179,5 +181,56 @@ describe('WebSearchCard', () => {
     expect(actions.edit.mock.calls).toEqual([['baseURL', 'https://other.test'], ['count', '30']])
     expect(actions.resetField.mock.calls).toEqual([['count']])
     expect(actions.setSearchApi).toHaveBeenCalledWith(false)
+  })
+
+  it('offers no Brave position while its section is not served', () => {
+    renderWebSearch()
+    expect(screen.queryByRole('tab', { name: en.providerBrave })).toBeNull()
+    expect(screen.getByRole('switch', { name: en.useSearchApi })).toBeTruthy()
+  })
+
+  it('renders the three provider positions when the Brave section is served and stages Brave', () => {
+    const actions = renderWebSearch({ braveAvailable: true })
+    expect(screen.queryByRole('switch', { name: en.useSearchApi })).toBeNull()
+    expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual([en.providerMessages, en.providerApi, en.providerBrave])
+    expect(screen.getByRole('tab', { name: en.providerMessages }).getAttribute('aria-selected')).toBe('true')
+    fireEvent.click(screen.getByRole('tab', { name: en.providerBrave }))
+    expect(actions.setProvider).toHaveBeenCalledWith('brave')
+    expect(actions.setSearchApi).not.toHaveBeenCalled()
+  })
+
+  it('omits the API position while the Host serves no Search and Fetch API section', () => {
+    renderWebSearch({ braveAvailable: true, apiSwitchAvailable: false })
+    expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual([en.providerMessages, en.providerBrave])
+  })
+
+  it('locks every provider position while an invalid edit is staged', () => {
+    renderWebSearch({ braveAvailable: true, invalid: true, dirty: true })
+    expect(screen.getByRole('tab', { name: en.providerBrave })).toHaveProperty('disabled', true)
+    expect(screen.getByRole('tab', { name: en.providerMessages })).toHaveProperty('disabled', true)
+  })
+
+  it('shows the Brave endpoint and result count in Brave mode', () => {
+    const actions = renderWebSearch({
+      braveAvailable: true,
+      useBrave: true,
+      baseURL: field('https://api.search.brave.com/res'),
+      count: field('15'),
+    })
+    expect(screen.getByRole('tab', { name: en.providerBrave }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.queryByLabelText(en.maxUses)).toBeNull()
+    expect(screen.getByLabelText(en.braveBaseUrl)).toHaveProperty('value', 'https://api.search.brave.com/res')
+    expect(screen.getByText(en.braveBaseUrlHint)).toBeTruthy()
+    expect(screen.queryByText(en.searchApiBaseUrlHint)).toBeNull()
+    expect(screen.getByLabelText(en.count)).toHaveProperty('value', '15')
+    expect(screen.getByText(en.braveCountHint)).toBeTruthy()
+    fireEvent.change(screen.getByLabelText(en.count), { target: { value: '30' } })
+    expect(actions.edit).toHaveBeenCalledWith('count', '30')
+  })
+
+  it('links the localized copy to the same zh dictionary', () => {
+    expect(zh.providerSelect).toBe('搜索提供方')
+    expect(zh.providerBrave).toBe('Brave Search')
+    expect(zh.braveCountHint).toBe('每个查询返回的结果条数，须为 1–20 的整数（Brave Search API 上限），默认 10。')
   })
 })

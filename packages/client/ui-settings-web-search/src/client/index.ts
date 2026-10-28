@@ -1,12 +1,15 @@
 /**
- * The web-search settings page, browser half: the switch between DeepSeek
- * Messages search and the Search and Fetch APIs, which writes the `web`
- * provider selection, and the selected API's key, endpoint, and per-search
- * limit over the `web-search-deepseek` or `web-deepseek-api` namespace. The
- * page registers into the Plugins page's `plugins.item` slot while the Host
+ * The web-search settings page, browser half: the provider switch between
+ * DeepSeek Messages search, the Search and Fetch APIs, and (when the Host
+ * serves its section) Brave Search, which writes the `web` provider selection,
+ * and the selected section's key, endpoint, and per-search limit over the
+ * `web-search-deepseek`, `web-deepseek-api`, or `web-search-brave` namespace.
+ * The page registers into the Plugins page's `plugins.item` slot while the Host
  * serves `web-search-deepseek`, so a deployment without that provider shows no
- * trace of it; the switch appears only while the Host also serves `web` and
- * `web-deepseek-api`.
+ * trace of it; the switch appears only while the Host also serves `web`, the
+ * plain two-position form while it also serves `web-deepseek-api`, and the
+ * segmented form with the Brave position while it also serves
+ * `web-search-brave`.
  */
 
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
@@ -21,12 +24,13 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import { WebSearchCard } from './WebSearchCard.tsx'
-import { WEB_API_NS, WEB_NS, WEB_SEARCH_NS, WebSearchCardController } from './web-search-card-controller.ts'
+import { WEB_API_NS, WEB_BRAVE_NS, WEB_NS, WEB_SEARCH_NS, WebSearchCardController } from './web-search-card-controller.ts'
 import { en, zh, type WebSearchSettingsLocaleKey } from './locales.ts'
 
 export type { WebSearchCardProps } from './WebSearchCard.tsx'
 export type {
-  WebApiSettings, WebProviderSelection, WebSearchCardFace, WebSearchCardScopes, WebSearchCardState, WebSearchSettings,
+  ProviderTarget, WebApiSettings, WebBraveSettings, WebProviderSelection, WebSearchCardFace, WebSearchCardScopes,
+  WebSearchCardState, WebSearchSettings,
 } from './web-search-card-controller.ts'
 export type { WebSearchSettingsLocaleKey } from './locales.ts'
 
@@ -52,6 +56,7 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-settings-web-search: dictionaries')
   const card = new WebSearchCardController({
     web: ctx.configForms.get(WEB_NS), messages: ctx.configForms.get(WEB_SEARCH_NS), api: ctx.configForms.get(WEB_API_NS),
+    brave: ctx.configForms.get(WEB_BRAVE_NS),
   }, ctx)
   ctx.effect(() => () => { card.dispose() }, 'ui-settings-web-search: form subscription')
   // The credential the page reports is not part of any settings section, so

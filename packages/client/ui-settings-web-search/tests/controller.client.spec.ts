@@ -3,7 +3,7 @@ import type { SettingsPathOpView } from '@deepseek-ai/dsh-api-remotes/client'
 import { RemoteError, stubConfigForm, type StubConfigForm } from '@deepseek-ai/dsh-client-test-runtime'
 import {
   WebSearchCardController,
-  type WebApiSettings, type WebProviderSelection, type WebSearchSettings,
+  type WebApiSettings, type WebBraveSettings, type WebProviderSelection, type WebSearchSettings,
 } from '../src/client/web-search-card-controller.ts'
 
 /** Make the stub behave like a Host that accepts every write. */
@@ -46,7 +46,7 @@ function credentialsApi(configured: boolean) {
 const SHIPPED_SELECTION = { searchProvider: 'deepseek-official', fetchProvider: 'http' }
 
 /**
- * Mount the controller over three stub scopes.
+ * Mount the controller over four stub scopes.
  * @param options - whether each Host accepts writes, the credential answer, and the selection's composed layer.
  * @returns the scopes, the controller, its face, and a state reader.
  */
@@ -54,17 +54,19 @@ function bench(options: { accept?: boolean; configured?: boolean; ctx?: never } 
   const web = stubConfigForm<WebProviderSelection>()
   const messages = stubConfigForm<WebSearchSettings>()
   const api = stubConfigForm<WebApiSettings>()
+  const brave = stubConfigForm<WebBraveSettings>()
   if (options.accept === true) {
     acceptWrites(web)
     acceptWrites(messages)
     acceptWrites(api)
+    acceptWrites(brave)
   }
   const credentials = credentialsApi(options.configured ?? true)
   const controller = new WebSearchCardController(
-    { web: web.scope, messages: messages.scope, api: api.scope }, options.ctx ?? credentials.ctx,
+    { web: web.scope, messages: messages.scope, api: api.scope, brave: brave.scope }, options.ctx ?? credentials.ctx,
   )
   const face = controller.inject()
-  return { web, messages, api, credentials, controller, face, state: () => face.hooks.webSearchCard.getSnapshot() }
+  return { web, messages, api, brave, credentials, controller, face, state: () => face.hooks.webSearchCard.getSnapshot() }
 }
 
 /** Serve all three sections, with the shipped selection unless one is given. */
@@ -389,6 +391,152 @@ describe('WebSearchCardController API switch', () => {
     const b = bench()
     serve(b)
     b.controller.dispose()
-    for (const host of [b.web, b.messages, b.api]) expect(host.listenerCount()).toBe(0)
+    for (const host of [b.web, b.messages, b.api, b.brave]) expect(host.listenerCount()).toBe(0)
+  })
+})
+
+describe('WebSearchCardController Brave provider', () => {
+  /** Serve the Brave section the way a loaded web-search-brave plugin does. */
+  function serveBrave(b: ReturnType<typeof bench>, section: WebBraveSettings = {}, layer: WebBraveSettings = {}): void {
+    b.brave.publish({ status: 'ready', writable: true, value: section, base: {}, user: layer })
+  }
+
+  it('stays off the card while the Brave section is not served', () => {
+    const b = bench()
+    serve(b)
+    expect(b.state()).toMatchObject({ braveAvailable: false, useBrave: false, useSearchApi: false })
+    b.face.setProvider('brave')
+    expect(b.state()).toMatchObject({ braveAvailable: false, useBrave: false, dirty: false })
+    expect(b.web.mutate).not.toHaveBeenCalled()
+    b.controller.dispose()
+  })
+
+  it('stages the Brave selection and saves the Brave section before it', async () => {
+    const b = bench({ accept: true })
+    serve(b)
+    serveBrave(b)
+    expect(b.state()).toMatchObject({ braveAvailable: true, useBrave: false, useSearchApi: false })
+    b.face.setProvider('brave')
+    expect(b.state()).toMatchObject({ useBrave: true, useSearchApi: false, dirty: true })
+    expect(b.web.mutate).not.toHaveBeenCalled()
+    b.face.edit('baseURL', 'https://brave.test/res')
+    b.face.edit('count', '15')
+    b.face.save()
+    await vi.waitFor(() => { expect(b.state().dirty).toBe(false) })
+    expect(b.brave.mutate).toHaveBeenCalledWith([
+      { op: 'set', path: ['baseURL'], value: 'https://brave.test/res' },
+      { op: 'set', path: ['count'], value: 15 },
+    ], undefined)
+    // The shipped default already composes fetchProvider http, so selecting
+    // Brave only stages the search side.
+    expect(b.web.mutate).toHaveBeenLastCalledWith([
+      { op: 'set', path: ['searchProvider'], value: 'brave' },
+    ], undefined)
+    expect(b.messages.mutate).not.toHaveBeenCalled()
+    expect(b.api.mutate).not.toHaveBeenCalled()
+    b.controller.dispose()
+  })
+
+  it('keeps the Messages endpoint round trip out of the Brave section in Brave mode', async () => {
+    const b = bench({ accept: true })
+    serve(b)
+    serveBrave(b, { baseURL: 'https://api.brave.test/res' })
+    b.face.setProvider('brave')
+    b.face.edit('baseURL', 'https://other.test/res')
+    b.face.save()
+    await vi.waitFor(() => { expect(b.state().dirty).toBe(false) })
+    expect(b.brave.mutate).toHaveBeenLastCalledWith([{ op: 'set', path: ['baseURL'], value: 'https://other.test/res' }], undefined)
+    expect(b.messages.mutate).not.toHaveBeenCalled()
+    b.face.resetField('baseURL')
+    expect(b.state().baseURL).toMatchObject({ text: '', overridden: false })
+    b.controller.dispose()
+  })
+
+  it('clears the override when the deployment composes Brave by default', async () => {
+    const composed = { searchProvider: 'brave', fetchProvider: 'http' }
+    const b = bench({ accept: true })
+    // An override away from the composed Brave defaults, as an earlier save left it.
+    serve(b, { value: SHIPPED_SELECTION, base: composed, user: SHIPPED_SELECTION })
+    serveBrave(b)
+    expect(b.state()).toMatchObject({ useBrave: false, dirty: false })
+    b.face.setProvider('brave')
+    expect(b.state()).toMatchObject({ useBrave: true, dirty: true })
+    b.face.save()
+    await vi.waitFor(() => { expect(b.state().dirty).toBe(false) })
+    expect(b.web.mutate).toHaveBeenLastCalledWith([
+      { op: 'unset', path: ['searchProvider'] },
+      { op: 'unset', path: ['fetchProvider'] },
+    ], undefined)
+    expect(b.state()).toMatchObject({ useBrave: true })
+    b.controller.dispose()
+  })
+
+  it('stages nothing when Brave is already the composed default and no override exists', () => {
+    const composed = { searchProvider: 'brave', fetchProvider: 'http' }
+    const b = bench({ accept: true })
+    serve(b, { value: composed, base: composed })
+    serveBrave(b)
+    expect(b.state()).toMatchObject({ useBrave: true, dirty: false })
+    b.face.setProvider('brave')
+    expect(b.state().dirty).toBe(false)
+    expect(b.web.mutate).not.toHaveBeenCalled()
+    b.controller.dispose()
+  })
+
+  it('writes an explicit Messages search selection when the deployment composes Brave fetch', async () => {
+    const composed = { searchProvider: 'brave', fetchProvider: 'http' }
+    const b = bench({ accept: true })
+    serve(b, { value: composed, base: composed })
+    serveBrave(b)
+    b.face.setProvider('messages')
+    b.face.save()
+    await vi.waitFor(() => { expect(b.state().dirty).toBe(false) })
+    // fetchProvider http already matches the composed value, so only the
+    // search side is staged.
+    expect(b.web.mutate).toHaveBeenLastCalledWith([
+      { op: 'set', path: ['searchProvider'], value: 'deepseek-official' },
+    ], undefined)
+    b.controller.dispose()
+  })
+
+  it('addresses the credential reference the Brave section declares', async () => {
+    const b = bench({ accept: true })
+    serve(b)
+    serveBrave(b, { apiKeyEnv: 'MY_BRAVE_KEY' })
+    b.face.setProvider('brave')
+    await vi.waitFor(() => { expect(b.credentials.describe).toHaveBeenLastCalledWith(['MY_BRAVE_KEY']) })
+    b.face.edit('apiKey', 'brave-secret')
+    b.face.save()
+    await vi.waitFor(() => { expect(b.credentials.set).toHaveBeenCalledWith('MY_BRAVE_KEY', 'brave-secret') })
+    b.controller.dispose()
+  })
+
+  it.each(['21', '0', '1.5', 'many'])('rejects an unsupported Brave result count: %s', (text) => {
+    const b = bench()
+    serve(b)
+    serveBrave(b)
+    b.face.setProvider('brave')
+    b.face.edit('count', text)
+    expect(b.state()).toMatchObject({ invalid: true, apiSwitchBlocked: true, useBrave: true, count: { text, invalid: true } })
+    b.face.save()
+    expect(b.brave.mutate).not.toHaveBeenCalled()
+    b.controller.dispose()
+  })
+
+  it('accepts the documented Brave count boundary and restores its default', async () => {
+    const b = bench({ accept: true })
+    serve(b)
+    serveBrave(b, { count: 10 }, { count: 10 })
+    b.face.setProvider('brave')
+    b.face.edit('count', '20')
+    expect(b.state().invalid).toBe(false)
+    b.face.save()
+    await vi.waitFor(() => { expect(b.state().dirty).toBe(false) })
+    expect(b.brave.mutate).toHaveBeenCalledWith([{ op: 'set', path: ['count'], value: 20 }], undefined)
+    b.face.edit('count', '   ')
+    b.face.save()
+    await vi.waitFor(() => { expect(b.state().dirty).toBe(false) })
+    expect(b.brave.mutate).toHaveBeenLastCalledWith([{ op: 'unset', path: ['count'] }], undefined)
+    b.controller.dispose()
   })
 })
