@@ -335,6 +335,13 @@ export class UiSession extends Service {
   private readonly current: BindingSource
   private readonly pendingDomains: RuntimePendingDomain[] = []
   private pendingSnapshot: ReadonlyMap<SessionId, SessionPendingInteractionBase> = new Map()
+  /**
+   * The host's objective blocked-on-the-user kinds, carried by status events:
+   * card-free attention facts that fill sessions no pending domain holds, so
+   * an unanswered question stays amber across views, tabs, and read receipts
+   * until it settles (2026-10-28 design ruling: attention never rides read state).
+   */
+  private readonly attention = new Map<SessionId, string>()
   private readonly running = new Map<SessionId, boolean>()
   private readonly unreadStops = new Map<SessionId, SessionCompletionOutcome>()
   private readonly observedFailures = new Set<SessionId>()
@@ -378,8 +385,9 @@ export class UiSession extends Service {
     ctx.effect(() => {
       const disposeList = sessions.list.subscribe(() => { this.publishMain() })
       const disposeStatus = sessions.list.subscribe(() => { this.reconcileStatus() })
-      const disposeRemoteStatus = ctx.remote.$on('api-session/status', (sessionId, running) => {
+      const disposeRemoteStatus = ctx.remote.$on('api-session/status', (sessionId, running, attention) => {
         this.observeRunning(sessionId, running)
+        this.observeAttention(sessionId, attention)
       })
       const disposeRemoteError = ctx.remote.$on('api-session/error', (sessionId) => {
         this.observeFailure(sessionId)
@@ -553,12 +561,35 @@ export class UiSession extends Service {
         }
       }
     }
+    // The host's objective attention fills sessions no domain holds: the
+    // blocking fact exists whether or not any tab built the answering card.
+    for (const [sessionId, kind] of this.attention) {
+      if (next.has(sessionId)) continue
+      next.set(sessionId, {
+        interaction: { key: `attention:${kind}:${String(sessionId)}`, kind, sessionId },
+        precedence: Number.NEGATIVE_INFINITY,
+      })
+    }
     const projected = new Map(
       [...next].map(([sessionId, value]) => [sessionId, value.interaction] as const),
     )
     if (samePendingInteractions(this.pendingSnapshot, projected)) return
     this.pendingSnapshot = projected
     this.publishStatus()
+  }
+
+  /**
+   * Fold the host's objective blocked-on-the-user fact into the status: it
+   * fills sessions no pending domain holds, never displacing a live card.
+   * @param sessionId - Session whose host-reported attention kind refreshed.
+   * @param attention - the objective kind while one is active; absent otherwise.
+   */
+  private observeAttention(sessionId: SessionId, attention: string | undefined): void {
+    const previous = this.attention.get(sessionId)
+    if (previous === attention) return
+    if (attention === undefined) this.attention.delete(sessionId)
+    else this.attention.set(sessionId, attention)
+    this.publishPendingInteractions()
   }
 
   private observeRunning(sessionId: SessionId, running: boolean): void {
@@ -606,6 +637,7 @@ export class UiSession extends Service {
         this.running.delete(id)
         this.unreadStops.delete(id)
         this.observedFailures.delete(id)
+        this.attention.delete(id)
       }
     }
     this.publishStatus()
@@ -622,6 +654,7 @@ export class UiSession extends Service {
       ...this.running.keys(),
       ...this.pendingSnapshot.keys(),
       ...this.unreadStops.keys(),
+      ...this.attention.keys(),
     ])
     const statusStale: true | undefined = this.connectionState !== undefined
       && isConnectionStale(this.connectionState.getSnapshot())

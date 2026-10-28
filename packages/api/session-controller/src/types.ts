@@ -613,6 +613,14 @@ export type SessionControlFrame =
   | { readonly type: 'baseline'; readonly value: SessionControlBaseline }
   | ({ readonly type: 'projection' } & SessionProjectionUpdate)
 
+/**
+ * Objective "blocked on the user" kind carried by session status: a fact of
+ * the Session itself, independent of any client card or read receipt. Today
+ * only the durable userQuestions fold supplies one; the union grows as other
+ * blocking folds (approvals, plan reviews) join the same channel.
+ */
+export type SessionAttentionKind = 'question'
+
 declare module '@deepseek-ai/cordis' {
   interface Events {
     /**
@@ -629,12 +637,15 @@ declare module '@deepseek-ai/cordis' {
      */
     'api-session/removed'(sessionId: SessionId): void
     /**
-     * One Agent changed running state.
+     * One Agent changed running state, or a Session's objective attention fold refreshed.
      * @mode emit
      * @param sessionId - Agent and Session identity.
      * @param running - whether the Agent is running.
+     * @param attention - the Session's objective blocked-on-the-user kind while one is
+     *   active ('question' = an unanswered durable ask); absent otherwise. Card-free:
+     *   every connected client renders it the same way regardless of which view is open.
      */
-    'api-session/status'(sessionId: SessionId, running: boolean): void
+    'api-session/status'(sessionId: SessionId, running: boolean, attention?: SessionAttentionKind): void
     /**
      * One user-authored durable message advanced Session list activity.
      * @mode emit

@@ -629,7 +629,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'rebuilt(id: string): string | undefined',
-        description: 'Publish one completed bundle generation (the HMR watch\'s registration hook — the only entry point through which build changes reach the graph). Unchanged mtime, ctime and size preserve the graph without reading the bundle.',
+        description: 'Publish one completed bundle generation (the HMR watch\'s registration hook — the only entry point through which build changes reach the graph). Filesystem metadata only gates the re-read: the rev is content-addressed (artifactRevision), so a rebuild that regenerates byte-identical artifacts keeps the graph — and every page plugin fiber — without notifying anyone.',
         parameters: [{ name: 'id', description: 'entry id (package name).' }],
         returns: 'the current artifact rev, or undefined for an unknown id.',
       },
@@ -4160,10 +4160,10 @@ export const EVENT_API: readonly EventApiEntry[] = [
   {
     name: 'api-session/status',
     mode: 'emit',
-    signature: '\'api-session/status\'(sessionId: SessionId, running: boolean): void',
-    summary: 'One Agent changed running state.',
-    description: 'One Agent changed running state.',
-    parameters: [{ name: 'sessionId', description: 'Agent and Session identity.' }, { name: 'running', description: 'whether the Agent is running.' }],
+    signature: '\'api-session/status\'(sessionId: SessionId, running: boolean, attention?: SessionAttentionKind): void',
+    summary: 'One Agent changed running state, or a Session\'s objective attention fold refreshed.',
+    description: 'One Agent changed running state, or a Session\'s objective attention fold refreshed.',
+    parameters: [{ name: 'sessionId', description: 'Agent and Session identity.' }, { name: 'running', description: 'whether the Agent is running.' }, { name: 'attention', description: 'the Session\'s objective blocked-on-the-user kind while one is active (\'question\' = an unanswered durable ask); absent otherwise. Card-free: every connected client renders it the same way regardless of which view is open.' }],
   },
   {
     name: 'app-boot/config-reload',
@@ -4427,6 +4427,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     signature: '\'plugin-market/changed\'(): void',
     summary: 'The configured index sources changed.',
     description: 'The configured index sources changed.',
+    parameters: [],
+  },
+  {
+    name: 'restart-signal/changed',
+    mode: 'emit',
+    signature: '\'restart-signal/changed\'(): void',
+    summary: 'The Host\'s restart-signal polling sensor recomputed the state machine after a moved source or configuration fingerprint; subscribed pages recheck to publish the fresh judgment (restart-signal design C.5, the host-detect → push leg that closes R3「页面开着不操作角标自现」).',
+    description: 'The Host\'s restart-signal polling sensor recomputed the state machine after a moved source or configuration fingerprint; subscribed pages recheck to publish the fresh judgment (restart-signal design C.5, the host-detect → push leg that closes R3「页面开着不操作角标自现」). Payload-free by design: the judgment itself rides the recheck route, not the event, so the channel cannot drift from the state machine. Declared here rather than in the ui-settings-general owner package: that package consumes this assembly on its Client face, so an owner-side declaration would close a project-reference cycle.',
     parameters: [],
   },
   {
@@ -4850,12 +4858,16 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface AskUserQuestionAnswerItem {\n    id: string;\n    selected: string[];\n    custom?: string;\n}',
   },
   {
+    name: 'AskUserQuestionAttachment',
+    declaration: 'export interface AskUserQuestionAttachment {\n    path: string;\n    chars: number;\n}',
+  },
+  {
     name: 'AskUserQuestionIntent',
     declaration: 'export type AskUserQuestionIntent = {\n    kind: \'plan-review\';\n    approve: string;\n    callId?: ToolCallId;\n};',
   },
   {
     name: 'AskUserQuestionItem',
-    declaration: 'export interface AskUserQuestionItem {\n    id: string;\n    question: string;\n    detail?: string;\n    header?: string;\n    options?: AskUserQuestionOption[];\n    multiSelect?: boolean;\n    intent?: AskUserQuestionIntent;\n}',
+    declaration: 'export interface AskUserQuestionItem {\n    id: string;\n    question: string;\n    detail?: string;\n    attachment?: AskUserQuestionAttachment;\n    header?: string;\n    options?: AskUserQuestionOption[];\n    multiSelect?: boolean;\n    intent?: AskUserQuestionIntent;\n}',
   },
   {
     name: 'AskUserQuestionOption',
@@ -7074,6 +7086,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface SessionAttachmentValue {\n    readonly attachment: ImageAttachmentRef;\n    readonly data: string;\n}',
   },
   {
+    name: 'SessionAttentionKind',
+    declaration: 'export type SessionAttentionKind = \'question\';',
+  },
+  {
     name: 'SessionAvailability',
     declaration: 'export type SessionAvailability = \'live\' | \'persisted\';',
   },
@@ -7203,7 +7219,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionForkRequest',
-    declaration: 'export interface SessionForkRequest {\n    readonly sessionId: SessionId;\n    readonly atSeq?: number;\n    readonly allowMigration?: boolean;\n}',
+    declaration: 'export interface SessionForkRequest {\n    readonly sessionId: SessionId;\n    readonly atSeq?: number;\n    readonly allowMigration?: boolean;\n    readonly entry?: string;\n    readonly client?: string;\n}',
   },
   {
     name: 'SessionForkSource',

@@ -33,7 +33,7 @@ interface SessionsBench {
   reference(binding: SessionBinding): SessionReference
   setMainView(id: SessionId, count: number): void
   setRetainInfo(id: SessionId, count: number): void
-  emitStatus(id: SessionId, running: boolean): void
+  emitStatus(id: SessionId, running: boolean, attention?: 'question'): void
   emitError(id: SessionId, message: string): void
   release(id: SessionId): Promise<void>
 }
@@ -44,9 +44,9 @@ const roots: Context[] = []
 
 function createSessionsBench(ctx: Context): SessionsBench {
   roots.push(ctx)
-  const listeners = new Map<string, (id: SessionId, value: boolean | string) => void>()
+  const listeners = new Map<string, (id: SessionId, value: boolean | string, attention?: 'question') => void>()
   ctx.provide('remote', {
-    $on: (event: string, listener: (id: SessionId, value: boolean | string) => void) => {
+    $on: (event: string, listener: (id: SessionId, value: boolean | string, attention?: 'question') => void) => {
       listeners.set(event, listener)
       return () => {
         if (listeners.get(event) === listener) listeners.delete(event)
@@ -179,8 +179,8 @@ function createSessionsBench(ctx: Context): SessionsBench {
         retainedBy: count === 0 ? {} : { mainView: count },
       })
     },
-    emitStatus(id, running) {
-      remoteListener('api-session/status')(id, running)
+    emitStatus(id, running, attention) {
+      remoteListener('api-session/status')(id, running, attention)
     },
     emitError(id, message) {
       remoteListener('api-session/error')(id, message)
@@ -880,6 +880,44 @@ describe('UiSession pending interactions', () => {
     removeApproval()
     expect(service.sessionStatus.getSnapshot().has(id)).toBe(false)
     off()
+    await ctx.fiber.dispose()
+  })
+
+  it('fills the host objective attention in and out under any live card domain', async () => {
+    const ctx = new Context()
+    const bench = createSessionsBench(ctx)
+    const service = createUiSession(ctx, bench)
+    const id = sessionId('s1')
+
+    // No card and no watching tab: the host fact alone carries the amber state.
+    bench.emitStatus(id, true, 'question')
+    expect(service.sessionStatus.getSnapshot().get(id)?.pendingInteraction).toMatchObject({
+      kind: 'question', sessionId: id,
+    })
+
+    // Settled: the next status without attention clears it.
+    bench.emitStatus(id, true)
+    expect(service.sessionStatus.getSnapshot().get(id)?.pendingInteraction).toBeUndefined()
+
+    // A live card domain wins while it holds the session; the objective fill
+    // takes the session over the moment the card releases.
+    bench.emitStatus(id, true, 'question')
+    const registerQuestion = service.registerPendingInteraction<SessionPendingInteractionBase>(() => 1)
+    const card = { key: 'question:card', kind: 'question', sessionId: id }
+    const removeCard = registerQuestion(card, () => Promise.resolve())
+    expect(service.sessionStatus.getSnapshot().get(id)?.pendingInteraction).toBe(card)
+    removeCard()
+    expect(service.sessionStatus.getSnapshot().get(id)?.pendingInteraction).toMatchObject({
+      kind: 'question', sessionId: id,
+    })
+
+    // Read receipts never ride attention: unread green and pending amber coexist,
+    // and the stop acknowledgment clears only its own fact.
+    bench.emitStatus(id, false)
+    bench.emitStatus(id, false, 'question')
+    const status = service.sessionStatus.getSnapshot().get(id)
+    expect(status?.pendingInteraction?.kind).toBe('question')
+    expect(status?.completionUnread).toBe(true)
     await ctx.fiber.dispose()
   })
 

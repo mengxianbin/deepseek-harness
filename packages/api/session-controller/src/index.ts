@@ -38,6 +38,7 @@ import type {
   SessionAddress,
   SessionAttachmentRequest,
   SessionAttachmentValue,
+  SessionAttentionKind,
   SessionCancelRequest,
   SessionCancelValue,
   SessionControlFrame,
@@ -201,8 +202,54 @@ export class SessionController extends TypertRemoteService {
     }
     ctx.on('agent/created', publishAgentAvailability)
     ctx.on('agent/disposed', publishAgentAvailability)
+    const runningBySession = new Map<SessionId, boolean>()
+    // The objective "blocked on the user" fold: today only the durable
+    // userQuestions projection carries one. Read structurally so this host
+    // package stays independent of the registering unit's package.
+    interface AttentionProjections {
+      stateOf(session: unknown, key: string): unknown
+      onChanged(listener: (session: { readonly id: SessionId }, key: string) => void): () => void
+    }
+    let projections: AttentionProjections | undefined
+    const attentionFor = (sessionId: SessionId): SessionAttentionKind | undefined => {
+      if (projections === undefined) return undefined
+      const session = ctx.sessions.get(sessionId)
+      if (session === undefined) return undefined
+      const state = projections.stateOf(session, 'userQuestions') as {
+        readonly questions?: { readonly active?: readonly unknown[] }
+      } | undefined
+      return state?.questions?.active !== undefined && state.questions.active.length > 0
+        ? 'question'
+        : undefined
+    }
+    const emitStatus = (sessionId: SessionId, running: boolean): void => {
+      ctx.emit('api-session/status', sessionId, running, attentionFor(sessionId))
+    }
     ctx.on('agent/status', ({ agent, status }) => {
-      ctx.emit('api-session/status', agent.id, status === 'running')
+      const running = status === 'running'
+      runningBySession.set(agent.id, running)
+      emitStatus(agent.id, running)
+    })
+    ctx.on('session/disposed', (session) => {
+      runningBySession.delete(session.id)
+    })
+    // A question opens and closes without an Agent status flip; the projection
+    // registry's change stream is the objective trigger that refreshes status.
+    ctx.inject(['sessionProjections'], (projectionCtx) => {
+      const registry = projectionCtx.sessionProjections as unknown as AttentionProjections
+      projections = registry
+      ctx.effect(() => {
+        const dispose = registry.onChanged((session, key) => {
+          if (key !== 'userQuestions') return
+          const running = runningBySession.get(session.id)
+          if (running === undefined) return
+          emitStatus(session.id, running)
+        })
+        return () => {
+          dispose()
+          if (projections === registry) projections = undefined
+        }
+      }, 'sessionController: attention status')
     })
     ctx.on('agent/error', ({ agent, error }) => {
       ctx.emit('api-session/error', agent.id, errorChain(error))

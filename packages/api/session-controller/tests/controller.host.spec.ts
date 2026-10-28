@@ -108,7 +108,7 @@ describe('SessionController facade', () => {
       content: [{ type: 'text', text: 'browser prompt' }],
       source: { kind: 'user', rpcId: 'controller-rpc' as never },
     }), { surfaceOp: 'append' })
-    expect(status).toHaveBeenCalledWith(sessionId, true)
+    expect(status).toHaveBeenCalledWith(sessionId, true, undefined)
     expect(failure).toHaveBeenCalledWith(sessionId, expect.stringContaining('fixture failure'))
     expect(activity).toHaveBeenCalledWith(sessionId, expect.any(Number))
     session.append('request/header', {
@@ -239,5 +239,66 @@ describe('SessionController facade', () => {
     release.resolve(undefined)
     await disposal
     await expect(waiting).resolves.toMatchObject({ done: true })
+  })
+})
+
+describe('SessionController attention status', () => {
+  it('carries the objective attention fold on every status emission and refreshes on question changes', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(AgentRegistry)
+    const sessionId = SessionId('attention-session')
+    const header: SessionHeader = {
+      version: SESSION_FORMAT_VERSION,
+      id: sessionId,
+      createdAt: 1,
+      cwd: '/workspace',
+      isSeeded: false,
+    }
+    ctx.provide('sessionPersistence', testSessionPersistence(ctx, {
+      list: () => Promise.resolve([header]),
+      inspect: () => Promise.resolve({ meta: header, inheritedEventCount: SessionLogOffset(0), events: [] }),
+    }) as never)
+    // The attention fold reads the projection registry structurally: a stand-in
+    // registry proves the emission contract without the registering unit.
+    let questionActive = true
+    let listener: ((session: { readonly id: SessionId }, key: string) => void) | undefined
+    ctx.provide('sessionProjections', {
+      // The controller registers its own projections at construction; the
+      // stand-in accepts them without a fold of its own.
+      register: () => () => {},
+      stateOf: () => ({ questions: { active: questionActive ? [{}] : [] } }),
+      onChanged: (registered: typeof listener) => {
+        listener = registered
+        return () => { listener = undefined }
+      },
+    } as never)
+    createSessionTestController(ctx, defaults)
+    const status = vi.fn()
+    ctx.on('api-session/status', status)
+
+    const session = ctx.sessions.create(sessionId, { meta: header })
+    const agent = { id: sessionId, session, status: 'idle', ctx } as Agent
+    await ctx.agents.register(agent)
+
+    ctx.emit('agent/status', { agent, status: 'running' })
+    expect(status).toHaveBeenLastCalledWith(sessionId, true, 'question')
+
+    // The question settles without an Agent status flip: the projection change
+    // stream is the trigger that refreshes attention.
+    questionActive = false
+    listener?.(session, 'userQuestions')
+    expect(status).toHaveBeenLastCalledWith(sessionId, true, undefined)
+
+    // Other projection keys never re-emit status.
+    const emissions = status.mock.calls.length
+    listener?.(session, 'someOtherProjection')
+    expect(status).toHaveBeenCalledTimes(emissions)
+
+    // A reopened question rides the next ordinary status emission too.
+    questionActive = true
+    ctx.emit('agent/status', { agent, status: 'running' })
+    expect(status).toHaveBeenLastCalledWith(sessionId, true, 'question')
+    await ctx.fiber.dispose()
   })
 })
