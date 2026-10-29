@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
 import { deriveGlance, formatBalanceFigure, formatCompactTokens, formatRefreshStamp, openUsageSection, UsageGlance, type GlanceWindowRow, type UsageOverviewView } from '../src/client/UsageGlance.tsx'
@@ -652,5 +652,72 @@ describe('UsageGlance', () => {
     expect(triggerClicks).toBe(1)
     await flush()
     expect(document.querySelectorAll('[data-settings-section]')).toHaveLength(0)
+  })
+})
+
+describe('UsageGlance re-login CTA (FORK mimo-login-cta)', () => {
+  // jsdom does not navigate; the tests only need the click's propagation, so
+  // the default action is cancelled while the event still bubbles.
+  const cancelNavigation = (event: Event): void => { event.preventDefault() }
+
+  beforeEach(() => {
+    document.addEventListener('click', cancelNavigation, true)
+  })
+
+  afterEach(() => {
+    document.removeEventListener('click', cancelNavigation, true)
+  })
+
+  it('renders the re-login link beside the em dash once a load reports no mimo balance', async () => {
+    // The shared fixture carries no mimo row at all: a loaded overview whose
+    // mimo balance is undefined is exactly the degraded (cookie-expired) state.
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => OVERVIEW })))
+    render(<UsageGlance t={t} />)
+    const link = await screen.findByRole('link', { name: t('glance.mimoBalance.relogin') })
+    expect(link.getAttribute('href')).toBe('/api/mimo-relogin/page')
+    expect(link.getAttribute('target')).toBe('_blank')
+    // The em dash stays the row's figure; the link is its sibling.
+    expect(link.previousElementSibling?.textContent).toBe('—')
+  })
+
+  it('renders no link while a balance is present (零打扰)', async () => {
+    const overview: UsageOverviewView = {
+      providers: [{ provider: 'mimo', balance: { currency: 'CNY', totalBalance: '6.16', updatedAt: 1 } }],
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => overview })))
+    render(<UsageGlance t={t} />)
+    expect((await screen.findByText('¥6.16')).parentElement?.textContent)
+      .toBe(`${t('glance.mimoBalance.label')}¥6.16`)
+    expect(screen.queryByRole('link')).toBeNull()
+  })
+
+  it('renders no link before the first overview lands (no premature flash)', () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => { /* pending forever */ })))
+    render(<UsageGlance t={t} />)
+    expect(screen.queryByRole('link')).toBeNull()
+  })
+
+  it('stops propagation: the CTA opens the page without replaying the row onto settings', async () => {
+    // The settings-path fixture from the replay tests: if the row's onClick
+    // fired, openUsageSection would click this trigger.
+    const sidebar = document.createElement('div')
+    sidebar.className = 'sidebarCol'
+    const settingsArea = document.createElement('div')
+    settingsArea.className = 'settingsArea'
+    const trigger = document.createElement('button')
+    settingsArea.append(trigger)
+    sidebar.append(settingsArea)
+    document.body.append(sidebar)
+    let triggerClicks = 0
+    trigger.addEventListener('click', () => { triggerClicks += 1 })
+
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => OVERVIEW })))
+    render(<UsageGlance t={t} />)
+    const link = await screen.findByRole('link', { name: t('glance.mimoBalance.relogin') })
+    fireEvent.click(link)
+    expect(triggerClicks).toBe(0)
+    // Control: clicking the row's label still replays onto the usage section.
+    fireEvent.click(screen.getByText(t('glance.mimoBalance.label')))
+    expect(triggerClicks).toBe(1)
   })
 })

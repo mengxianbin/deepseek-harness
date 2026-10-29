@@ -76,6 +76,19 @@
  * column tooltip folds the reading in alongside 今日/周期 and the refresh
  * stamp (v2.3 tooltip precedent).
  *
+ * mimo re-login CTA (FORK mimo-login-cta, 2026-10-29): the degraded balance
+ * row doubles as the entry point to fix it — when the host reports no mimo
+ * balance (`mimoBalance === undefined`, the row reads the em dash) the row
+ * gains a `重新登录` link (`glance.mimoBalance.relogin`) beside the figure,
+ * opening the re-login kit's page (`/api/mimo-relogin/page`) in a new tab.
+ * A present balance never renders the link (零打扰). The link stops
+ * propagation so the control's own settings-replay onClick stays exclusive
+ * to the rest of the row; the URL is same-origin relative (mirroring
+ * `OVERVIEW_ROUTE`), so it lands on whatever origin serves this shell —
+ * 127.0.0.1:3080 in the local deployment; a remote shell resolves against
+ * its own origin and then meets the kit's loopback fence (accepted
+ * 2026-10-29, ruling info-gap ①: balance decay happens in local sessions).
+ *
  * Clicking the control opens the settings panel on the usage section by
  * replaying the user's own path — the shell owns the panel state and exposes
  * no service for it, so every step degrades silently.
@@ -148,6 +161,13 @@ const WINDOW_TITLE_KEY = {
  * deepseek-official's balance, which must not answer for mimo's row.
  */
 const MIMO_ROUTE_ID = 'mimo'
+
+/**
+ * The re-login page the degraded balance row's CTA opens (FORK
+ * mimo-login-cta): same-origin relative, mirroring `OVERVIEW_ROUTE` — the
+ * kit is served by the same origin that serves this shell.
+ */
+const MIMO_RELOGIN_PAGE = '/api/mimo-relogin/page'
 
 /** Currency symbols the balance row knows; others print `1.23 XXX`. */
 const BALANCE_SYMBOL: Record<string, string> = { CNY: '¥', USD: '$' }
@@ -664,6 +684,11 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
   const mimoFigure = mimoBalance === undefined
     ? '—'
     : `${formatBalanceFigure(mimoBalance)}${mimoStale ? '*' : ''}`
+  // Re-login CTA (FORK mimo-login-cta): only a LOADED overview that reports
+  // no mimo balance earns the link — a healthy balance never shows it
+  // (零打扰), and the pre-load placeholder state stays link-free so the row
+  // does not flash `重新登录` on an otherwise healthy start.
+  const showRelogin = state !== null && mimoBalance === undefined
   // One tooltip for the whole column: every reading plus the refresh stamp
   // (the stamp stays off-screen; v2.2 spent a third line on it).
   const columnTitle = [
@@ -765,6 +790,18 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
               <span className={mimoStale ? `${css.glanceStatValue} ${css.glanceStatValueStale}` : css.glanceStatValue}>
                 {mimoFigure}
               </span>
+              {/* The row itself replays onto the settings usage section; the
+                  CTA must only open the re-login page in a new tab, so it
+                  stops the click from reaching the row's onClick. */}
+              {showRelogin && (
+                <a
+                  className={css.glanceRelogin}
+                  href={MIMO_RELOGIN_PAGE}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(event) => { event.stopPropagation() }}
+                >{t('glance.mimoBalance.relogin')}</a>
+              )}
             </span>
           </span>
         </span>
