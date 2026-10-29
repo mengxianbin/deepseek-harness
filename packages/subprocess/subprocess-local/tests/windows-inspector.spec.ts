@@ -1,8 +1,10 @@
 import { spawnSync as nodeSpawnSync } from 'node:child_process'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  captureDescendantProcesses,
   createWindowsProcessInspector,
   isInvalidHandle,
+  sweepHeldProcesses,
   windowsProcessTree,
   WindowsProcessInspector,
 } from '@deepseek-ai/dsh-subprocess-local/src/windows-inspector.ts'
@@ -11,6 +13,7 @@ import type {
   ProcessEntry,
   WindowsProcessInspectorInternals,
   WindowsProcessState,
+  WindowsSweepInternals,
 } from '@deepseek-ai/dsh-subprocess-local/src/windows-inspector.ts'
 
 vi.mock('node:child_process', async (importOriginal) => {
@@ -195,5 +198,124 @@ win32('WindowsProcessInspector over the real koffi bindings', () => {
     expect(() => { inspector.signalGroup(0x7FFFFFFF, 'SIGTERM') }).not.toThrow()
     expect(() => { inspector.signalGroup(0, 'SIGKILL') }).not.toThrow()
     expect(() => { inspector.signalProcess({ pid: 0x7FFFFFFF, started: 'absent' }, 'SIGKILL') }).not.toThrow()
+  })
+})
+
+describe('captureDescendantProcesses / sweepHeldProcesses', () => {
+  const ptr = (value: bigint): NativePtr => value as NativePtr
+
+  function fakeSweep() {
+    const entries: ProcessEntry[] = []
+    const states = new Map<number, WindowsProcessState>()
+    const vanished = new Set<number>()
+    const terminateRefused = new Set<number>()
+    const terminateThrew = new Set<number>()
+    const terminated: number[] = []
+    const released: number[] = []
+    let releaseThrew = false
+    let snapshotThrew = false
+    const internals: WindowsSweepInternals = {
+      snapshot: () => {
+        if (snapshotThrew) throw new Error('table unreadable')
+        return [...entries]
+      },
+      processState: pid => states.get(pid),
+      hold: (pid, started) => {
+        if (vanished.has(pid)) return undefined
+        const state = states.get(pid)
+        if (state === undefined || !state.active || state.started !== started) return undefined
+        return { pid, started: state.started, handle: ptr(BigInt(pid)) }
+      },
+      active: held => states.get(held.pid)?.active === true,
+      terminate: (held) => {
+        terminated.push(held.pid)
+        if (terminateThrew.has(held.pid)) throw new Error('terminate refused hard')
+        return !terminateRefused.has(held.pid)
+      },
+      release: (held) => {
+        released.push(held.pid)
+        if (releaseThrew) throw new Error('close failed')
+      },
+    }
+    return {
+      internals,
+      terminated,
+      released,
+      vanish(pid: number): void { vanished.add(pid) },
+      refuse(pid: number): void { terminateRefused.add(pid) },
+      throwTerminate(pid: number): void { terminateThrew.add(pid) },
+      makeReleaseThrow(): void { releaseThrew = true },
+      makeSnapshotThrow(): void { snapshotThrew = true },
+      deactivate(pid: number): void {
+        const state = states.get(pid)
+        if (state !== undefined) states.set(pid, { ...state, active: false })
+      },
+      add(pid: number, parentPid: number, started: string): void {
+        entries.push({ pid, parentPid })
+        states.set(pid, { started, active: true })
+      },
+    }
+  }
+
+  it('pins live descendants children-first and never the runner itself or strangers', () => {
+    const fake = fakeSweep()
+    fake.add(100, 0, 's100')
+    fake.add(101, 100, 's101')
+    fake.add(102, 101, 's102')
+    fake.add(200, 999, 's200')
+    const held = captureDescendantProcesses(100, fake.internals)
+    expect(held.map(one => one.pid)).toEqual([102, 101])
+    expect(held.map(one => one.started)).toEqual(['s102', 's101'])
+  })
+
+  it('skips a descendant that vanished or died between the walk and the pin', () => {
+    const fake = fakeSweep()
+    fake.add(100, 0, 's100')
+    fake.add(101, 100, 's101')
+    fake.add(102, 100, 's102')
+    fake.vanish(101)
+    fake.deactivate(102)
+    const held = captureDescendantProcesses(100, fake.internals)
+    expect(held).toEqual([])
+  })
+
+  it('degrades to an empty pin set when the table cannot be read', () => {
+    const fake = fakeSweep()
+    fake.makeSnapshotThrow()
+    expect(captureDescendantProcesses(100, fake.internals)).toEqual([])
+  })
+
+  it('reports killed / absent / failed per survivor and releases every handle', () => {
+    const fake = fakeSweep()
+    fake.add(100, 0, 's100')
+    fake.add(101, 100, 's101')
+    fake.add(102, 100, 's102')
+    fake.add(103, 100, 's103')
+    fake.add(104, 100, 's104')
+    const held = captureDescendantProcesses(100, fake.internals)
+    expect(held.map(one => one.pid).sort()).toEqual([101, 102, 103, 104])
+    // The Job kills its members before the sweep runs; only non-members reach here alive.
+    fake.deactivate(102)
+    fake.refuse(103)
+    fake.throwTerminate(104)
+    const results = sweepHeldProcesses(held, fake.internals)
+    expect(results).toEqual([
+      { pid: 101, started: 's101', status: 'killed' },
+      { pid: 102, started: 's102', status: 'absent' },
+      { pid: 103, started: 's103', status: 'failed' },
+      { pid: 104, started: 's104', status: 'failed' },
+    ])
+    expect(fake.terminated).not.toContain(102)
+    expect([...fake.released].sort()).toEqual([101, 102, 103, 104])
+  })
+
+  it('still reports every survivor when a handle release itself fails', () => {
+    const fake = fakeSweep()
+    fake.add(100, 0, 's100')
+    fake.add(101, 100, 's101')
+    const held = captureDescendantProcesses(100, fake.internals)
+    fake.makeReleaseThrow()
+    const results = sweepHeldProcesses(held, fake.internals)
+    expect(results).toEqual([{ pid: 101, started: 's101', status: 'killed' }])
   })
 })

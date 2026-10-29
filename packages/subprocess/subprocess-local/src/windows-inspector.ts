@@ -185,6 +185,7 @@ interface Win32Bindings {
     user: NativePtr,
   ): number
   waitForSingleObject(handle: NativePtr, milliseconds: number): number
+  terminateProcess(process: NativePtr, exitCode: number): number
   closeHandle(handle: NativePtr): number
 }
 
@@ -228,6 +229,7 @@ function win32Structs(): { PVOID: KoffiType; PROCESSENTRY32W: ReturnType<Koffi['
 let cachedStructs: ReturnType<typeof win32Structs> | undefined
 
 const TH32CS_SNAPPROCESS = 0x2
+const PROCESS_TERMINATE = 0x0001
 const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 const SYNCHRONIZE = 0x00100000
 const WAIT_OBJECT_0 = 0
@@ -262,6 +264,7 @@ function win32Bindings(): Win32Bindings {
       koffi.pointer(FILETIME),
     ]),
     waitForSingleObject: bind('WaitForSingleObject', 'uint32', [PVOID, 'uint32']),
+    terminateProcess: bind('TerminateProcess', 'int', [PVOID, 'uint32']),
     closeHandle: bind('CloseHandle', 'int', [PVOID]),
   } as Win32Bindings
   return cachedBindings
@@ -307,30 +310,35 @@ function snapshotWindowsProcesses(bindings: Win32Bindings): ProcessEntry[] {
   return entries
 }
 
-/** Read one process's creation identity and current wait state. */
-function windowsProcessState(bindings: Win32Bindings, pid: number): WindowsProcessState | undefined {
+/** Read one process's creation identity and current wait state from an already-open handle. */
+function processStateFromHandle(bindings: Win32Bindings, handle: NativePtr): WindowsProcessState | undefined {
   const koffi = requireKoffi()
   const { FILETIME } = win32Structs()
+  const creation = allocNative(FILETIME, 1)
+  const exit = allocNative(FILETIME, 1)
+  const kernel = allocNative(FILETIME, 1)
+  const user = allocNative(FILETIME, 1)
+  /* v8 ignore next -- a GetProcessTimes failure after a successful open races process exit and
+     cannot be staged deterministically; the absent-process path is covered and the caller
+     treats undefined as a detector miss. */
+  if (bindings.getProcessTimes(handle, creation, exit, kernel, user) === 0) return undefined
+  const record = koffi.decode(creation, FILETIME) as { dwLowDateTime: number; dwHighDateTime: number }
+  const wait = bindings.waitForSingleObject(handle, 0)
+  /* v8 ignore next -- an opened process handle has exactly one of these two
+     zero-time wait states; an unexpected Win32 failure is an unreadable process. */
+  if (wait !== WAIT_OBJECT_0 && wait !== WAIT_TIMEOUT) return undefined
+  return {
+    started: `${record.dwHighDateTime}:${record.dwLowDateTime}`,
+    active: wait === WAIT_TIMEOUT,
+  }
+}
+
+/** Read one process's creation identity and current wait state. */
+function windowsProcessState(bindings: Win32Bindings, pid: number): WindowsProcessState | undefined {
   const handle = bindings.openProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, 0, pid)
   if (isInvalidHandle(handle)) return undefined
   try {
-    const creation = allocNative(FILETIME, 1)
-    const exit = allocNative(FILETIME, 1)
-    const kernel = allocNative(FILETIME, 1)
-    const user = allocNative(FILETIME, 1)
-    /* v8 ignore next -- a GetProcessTimes failure after a successful open races process exit and
-       cannot be staged deterministically; the absent-process path is covered and the caller
-       treats undefined as a detector miss. */
-    if (bindings.getProcessTimes(handle, creation, exit, kernel, user) === 0) return undefined
-    const record = koffi.decode(creation, FILETIME) as { dwLowDateTime: number; dwHighDateTime: number }
-    const wait = bindings.waitForSingleObject(handle, 0)
-    /* v8 ignore next -- an opened process handle has exactly one of these two
-       zero-time wait states; an unexpected Win32 failure is an unreadable process. */
-    if (wait !== WAIT_OBJECT_0 && wait !== WAIT_TIMEOUT) return undefined
-    return {
-      started: `${record.dwHighDateTime}:${record.dwLowDateTime}`,
-      active: wait === WAIT_TIMEOUT,
-    }
+    return processStateFromHandle(bindings, handle)
   } finally {
     bindings.closeHandle(handle)
   }
@@ -343,4 +351,149 @@ function defaultWindowsProcessInternals(): WindowsProcessInspectorInternals {
     processState: pid => windowsProcessState(win32Bindings(), pid),
     taskkill: taskkillTree,
   }
+}
+
+/**
+ * One descendant process handle pinned across teardown. The handle references
+ * the process OBJECT, so termination through it can never land on a recycled
+ * pid — the tier-2 identity the orphan-governance ranking asks for, one level
+ * below a Job membership table and above a pid ledger.
+ */
+export interface HeldWindowsProcess {
+  /** Pid as observed at capture, for ledger and diagnostics only. */
+  pid: number
+  /** GetProcessTimes creation identity verified at capture (pid-reuse fence). */
+  started: string
+  /** Open handle with PROCESS_TERMINATE held until {@link sweepHeldProcesses}. */
+  handle: NativePtr
+}
+
+/**
+ * Disposition of one captured descendant when the managed range settles.
+ * `absent` = it died with the Job before the sweep reached it; `killed` = the
+ * sweep terminated it (the non-member escape class, e.g. a packaged-app
+ * process sitting in a foreign Job); `failed` = it was still alive and
+ * TerminateProcess was refused.
+ */
+export interface SweptWindowsProcess {
+  /** Pid as observed at capture. */
+  pid: number
+  /** Creation identity captured with the handle. */
+  started: string
+  /** What the sweep did with it. */
+  status: 'absent' | 'killed' | 'failed'
+}
+
+/** Injectable operations behind {@link captureDescendantProcesses} and {@link sweepHeldProcesses}. */
+export interface WindowsSweepInternals {
+  /** Enumerate the current process table (pid/parent pairs). */
+  snapshot(): ProcessEntry[]
+  /** Return one process's creation identity and wait state, or undefined when unreadable. */
+  processState(pid: number): WindowsProcessState | undefined
+  /** Pin a live process whose creation identity matches, or undefined when it vanished or recycled. */
+  hold(pid: number, started: string): HeldWindowsProcess | undefined
+  /** Whether the held handle's process is still active. */
+  active(held: HeldWindowsProcess): boolean
+  /** Terminate the held process object; false when Win32 refuses. */
+  terminate(held: HeldWindowsProcess): boolean
+  /** Close the held handle (identity is inert after this call). */
+  release(held: HeldWindowsProcess): void
+}
+
+/** The koffi-backed default sweep internals; bindings resolve lazily on first use. */
+function defaultWindowsSweepInternals(): WindowsSweepInternals {
+  return {
+    snapshot: () => snapshotWindowsProcesses(win32Bindings()),
+    processState: pid => windowsProcessState(win32Bindings(), pid),
+    hold: (pid, started) => {
+      const bindings = win32Bindings()
+      const handle = bindings.openProcess(
+        PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
+        0,
+        pid,
+      )
+      if (isInvalidHandle(handle)) return undefined
+      let keep = false
+      try {
+        const state = processStateFromHandle(bindings, handle)
+        // Compound-key fence: the table walk and this pin are two reads; a pid
+        // recycled between them must not be handed a termination handle.
+        if (state === undefined || !state.active || state.started !== started) return undefined
+        keep = true
+        return { pid, started: state.started, handle }
+      } finally {
+        if (!keep) bindings.closeHandle(handle)
+      }
+    },
+    active: (held) => {
+      const state = processStateFromHandle(win32Bindings(), held.handle)
+      return state?.active === true
+    },
+    terminate: held => win32Bindings().terminateProcess(held.handle, 1) !== 0,
+    release: (held) => {
+      win32Bindings().closeHandle(held.handle)
+    },
+  }
+}
+
+/**
+ * Pin every live descendant of one range root, children of the root included
+ * but the root itself excluded — the runner owns its own lifetime. The walk
+ * runs BEFORE termination while the parent chain is intact, so member and
+ * non-member descendants are both reachable; members later die with the Job,
+ * the held handles are what lets the sweep reach non-members (packaged-app
+ * processes in a foreign Job) that no Job close will ever touch.
+ * @param rootPid - the runner pid; tree walk starts here.
+ * @param internals - injectable operations; defaults to the koffi-backed table.
+ * @returns identity-pinned handles, empty when nothing is readable (never throws).
+ */
+export function captureDescendantProcesses(
+  rootPid: number,
+  internals: WindowsSweepInternals = defaultWindowsSweepInternals(),
+): HeldWindowsProcess[] {
+  try {
+    const entries = internals.snapshot()
+    const identities = windowsProcessTree(entries, rootPid, pid => internals.processState(pid)?.started)
+    const held: HeldWindowsProcess[] = []
+    for (const identity of identities) {
+      if (identity.pid === rootPid) continue
+      const one = internals.hold(identity.pid, identity.started)
+      if (one !== undefined) held.push(one)
+    }
+    return held
+  } catch {
+    // Containment sweep is best-effort: a table that cannot be read degrades
+    // to Job-only cleanup, exactly the pre-sweep behaviour, and teardown of
+    // the real range must proceed regardless.
+    return []
+  }
+}
+
+/**
+ * Terminate every still-active held descendant and close every handle.
+ * Absent processes are reported, never treated as failures; a handle whose
+ * process died is inert, so PID reuse cannot redirect any of these kills.
+ * @param held - handles from {@link captureDescendantProcesses}.
+ * @param internals - injectable operations; defaults to the koffi-backed table.
+ * @returns one disposition per held process; never throws.
+ */
+export function sweepHeldProcesses(
+  held: HeldWindowsProcess[],
+  internals: WindowsSweepInternals = defaultWindowsSweepInternals(),
+): SweptWindowsProcess[] {
+  const results: SweptWindowsProcess[] = []
+  for (const one of held) {
+    try {
+      if (!internals.active(one)) {
+        results.push({ pid: one.pid, started: one.started, status: 'absent' })
+      } else {
+        results.push({ pid: one.pid, started: one.started, status: internals.terminate(one) ? 'killed' : 'failed' })
+      }
+    } catch {
+      results.push({ pid: one.pid, started: one.started, status: 'failed' })
+    } finally {
+      try { internals.release(one) } catch { /* Best-effort close after a failed sweep step. */ }
+    }
+  }
+  return results
 }

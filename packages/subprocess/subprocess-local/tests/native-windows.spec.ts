@@ -1,10 +1,11 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, describe, expect, it } from 'vitest'
 import type { SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
+import type { LedgerEvent, LedgerSettleEvent } from '../src/ledger.ts'
 import { targetEnvironment } from '../src/runner-launch.ts'
 import { bindManagedProcess } from '../src/spawn.ts'
 import { launchWindowsJob, probeWindowsJob } from '../src/windows-job.ts'
@@ -245,5 +246,67 @@ describe.skipIf(!windowsNative)('Windows Job native containment', () => {
     const invalidHandle = bindManagedProcess(invalid, launchWindowsJob(invalid, targetEnvironment(invalid)))
     await expect(invalidHandle.done).rejects.toMatchObject(expectedSpawnFailure(directError))
     await expect(invalidHandle.waitForExit()).resolves.toBe(true)
+  })
+})
+
+/**
+ * The escape class the Job can never hold: a WindowsApps AppExecutionAlias
+ * (Store/MSIX pwsh) is created under the package runtime's own Job, not the
+ * caller's, so TerminateJobObject and kill-on-close both sail past it. On a
+ * machine whose `pwsh` is not packaged the descendant joins the Job normally,
+ * the case is skipped rather than faked green.
+ */
+function findPackagedPwsh(): string | undefined {
+  const localAppData = process.env.LOCALAPPDATA
+  if (localAppData === undefined) return undefined
+  try {
+    const names = readdirSync(join(localAppData, 'Microsoft', 'WindowsApps'))
+    const familyAlias = names.find(name => /^Microsoft\.PowerShell_[^.]+\.pwsh\.exe$/i.test(name))
+    const plainAlias = names.find(name => name.toLowerCase() === 'pwsh.exe')
+    const chosen = familyAlias ?? plainAlias
+    return chosen === undefined ? undefined : join(localAppData, 'Microsoft', 'WindowsApps', chosen)
+  } catch {
+    return undefined
+  }
+}
+
+const packagedPwsh = findPackagedPwsh()
+
+describe.skipIf(!windowsNative)('Windows Job survivor sweep (foreign-Job escape class)', () => {
+  it.skipIf(packagedPwsh === undefined)('terminates a packaged-app descendant the Job never contained', async () => {
+    const pidFile = join(scratch, `sweep-escape-${Date.now()}.pid`)
+    const events: LedgerEvent[] = []
+    const script = `
+      const { spawn } = require('node:child_process')
+      const { writeFileSync } = require('node:fs')
+      const child = spawn(process.argv[1], ['-NoProfile', '-Command', 'Start-Sleep 600'], { stdio: 'ignore' })
+      writeFileSync(${JSON.stringify(pidFile)}, String(child.pid))
+      setInterval(() => {}, 1000)
+    `
+    const request = spec([process.execPath, '-e', script, packagedPwsh as string], 1000)
+    const handle = bindManagedProcess(request, launchWindowsJob(request, targetEnvironment(request), {
+      recordLedger: (event: LedgerEvent) => { events.push(event) },
+    }))
+    try {
+      const descendant = await waitForPid(pidFile)
+      expect(() => process.kill(descendant, 0)).not.toThrow()
+      handle.terminate()
+      await expect(handle.waitForExit()).resolves.toBe(true)
+      await waitGone(descendant)
+      expect(events.some(event => event.event === 'spawn')).toBe(true)
+      const settle = events.find((event): event is LedgerSettleEvent => event.event === 'settle')
+      expect(settle).toBeDefined()
+      expect(settle?.signalled).toBe(true)
+      expect(settle?.captured).toBeGreaterThanOrEqual(1)
+      const record = settle?.swept.find(one => one.pid === descendant)
+      expect(record).toBeDefined()
+      // `killed` = the handle sweep did it (the escape actually exercised on
+      // this machine); `absent` = it was a Job member and died with the Job.
+      expect(['killed', 'absent']).toContain(record?.status)
+    } finally {
+      handle.terminate()
+      await Promise.allSettled([handle.done, handle.waitForExit()])
+      rmSync(pidFile, { force: true })
+    }
   })
 })

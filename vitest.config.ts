@@ -1,4 +1,6 @@
 import { spawnSync } from 'node:child_process'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import tsconfigPaths from 'vite-tsconfig-paths'
 import { resolvePwshPath } from './packages/shell/pwsh-local/src/resolve.ts'
@@ -177,6 +179,10 @@ const claudeCodeTestingAliases = {
   'claude-code': fileURLToPath(new URL('./packages/experimental/claude-code-mods/tests/support/claude-code.ts', import.meta.url)),
 }
 
+// The subprocess range ledger is machine state that a janitor reads: suites
+// exercising the Windows Job path must journal to scratch, never to ~/.dsh.
+const subprocessLedgerScratch = join(tmpdir(), 'dsh-subprocess-ledger-vitest.jsonl')
+
 export default defineConfig({
   plugins: [pathsPlugin(), standardDecoratorPlugin()],
   resolve: { alias: claudeCodeTestingAliases },
@@ -197,6 +203,7 @@ export default defineConfig({
         test: {
           name: 'thread-safe',
           execArgv: vitestExecArgv,
+          env: { DSH_SUBPROCESS_LEDGER: subprocessLedgerScratch },
           // Node 24 has aborted in its CJS lexer (v8::ToLocalChecked Empty
           // MaybeLocal in cjs_lexer::Parse) from worker threads on macOS,
           // Linux, and Windows. Forked workers avoid that shared thread path.
@@ -219,6 +226,7 @@ export default defineConfig({
         test: {
           name: 'process-bound',
           execArgv: vitestExecArgv,
+          env: { DSH_SUBPROCESS_LEDGER: subprocessLedgerScratch },
           pool: 'forks',
           ...laneTestBudget,
           setupFiles: [

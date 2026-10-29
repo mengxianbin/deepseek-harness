@@ -11,6 +11,13 @@ import {
   probeCurrentTokenJobSupport,
 } from '@deepseek-ai/dsh-win32-process'
 import type { BoundProcessOwner, ManagedProcessLaunch } from './managed-owner.ts'
+import { appendSubprocessLedger } from './ledger.ts'
+import type { LedgerEvent } from './ledger.ts'
+import {
+  captureDescendantProcesses,
+  sweepHeldProcesses,
+} from './windows-inspector.ts'
+import type { HeldWindowsProcess, SweptWindowsProcess } from './windows-inspector.ts'
 import {
   type SerializedRunnerError,
   type WindowsRunnerResult,
@@ -34,6 +41,12 @@ export interface WindowsJobInternals {
   runnerAvailable?: (invocation: RunnerInvocation) => boolean
   loadWin32ProcessBindings?: typeof loadWin32ProcessBindings
   probeCurrentTokenJobSupport?: typeof probeCurrentTokenJobSupport
+  /** Pin the runner's live descendants before termination; defaults to the Toolhelp32 walk. */
+  captureDescendants?: (rootPid: number) => HeldWindowsProcess[]
+  /** Terminate pinned survivors once the range settles; defaults to handle-based kill. */
+  sweepHeld?: (held: HeldWindowsProcess[]) => SweptWindowsProcess[]
+  /** Journal one spawn/settle line; defaults to the DSH-home JSONL ledger. */
+  recordLedger?: (event: LedgerEvent) => void
 }
 
 type RunnerProcess = Omit<ReturnType<typeof spawn>, 'send' | 'stdio'> & {
@@ -67,18 +80,42 @@ export function probeWindowsJob(internals: WindowsJobInternals = {}): boolean {
   }
 }
 
+/**
+ * The three containment effects a range owner composes from the launch seams:
+ * pin descendants before the Job dies, sweep them when the range settles, and
+ * journal both moments. Injected wholesale in tests so no unit run touches the
+ * process table or the ledger file.
+ */
+interface WindowsJobEffects {
+  capture: (rootPid: number) => HeldWindowsProcess[]
+  sweep: (held: HeldWindowsProcess[]) => SweptWindowsProcess[]
+  record: (event: LedgerEvent) => void
+}
+
 class WindowsJobOwner implements BoundProcessOwner {
   private cancellationReason: unknown
   private cancellationReasonSet = false
   private terminationSent = false
+  private captureRan = false
+  private settleRecorded = false
+  private held: HeldWindowsProcess[] = []
 
   constructor(
     private readonly runner: RunnerProcess,
     private readonly exited: Promise<void>,
     private readonly directResultType: () => WindowsRunnerResult['type'] | undefined,
     private readonly failInfrastructure: (error: unknown) => void,
+    private readonly runnerPid: number | null,
+    private readonly effects: WindowsJobEffects,
   ) {
     void this.exited.catch(() => {})
+    // Attached at construction, before any waitForExit() awaiter exists: on a
+    // shared promise the earlier handler runs first, so the sweep and its
+    // ledger line are complete before teardown callers resume.
+    void this.exited.then(
+      () => { this.settle('exit') },
+      () => { this.settle('error') },
+    )
   }
 
   signal(_signal: 'SIGTERM' | 'SIGKILL', cancellationReason?: unknown): void {
@@ -86,6 +123,12 @@ class WindowsJobOwner implements BoundProcessOwner {
       this.cancellationReason = cancellationReason
       this.cancellationReasonSet = true
     }
+    // Pin descendants BEFORE the terminate request reaches the runner: the
+    // Job kill is asynchronous on the other side of IPC, and this is the last
+    // moment the parent chain is guaranteed intact. Capture runs even when
+    // the IPC channel is already dead, because the survivors are then the
+    // only thing left this call can still reach.
+    this.captureOnce()
     if (this.terminationSent || !this.runner.connected) return
     this.terminationSent = true
     try {
@@ -111,7 +154,53 @@ class WindowsJobOwner implements BoundProcessOwner {
   }
 
   terminateForHostExit(): void {
+    // The host is losing control right now: pin, then sweep synchronously —
+    // promise callbacks may never get a turn once process exit begins. Held
+    // members die here directly, held non-members (the foreign-Job class the
+    // Job close can never reach) die here for the same reason, and the
+    // runner SIGKILL below still closes the Job for anything unpinned.
+    this.captureOnce()
+    this.settle('host-exit')
     try { this.runner.kill('SIGKILL') } catch { /* Host exit continues with other live runners. */ }
+  }
+
+  /** Pin the runner's descendants exactly once; the real capture never throws. */
+  private captureOnce(): void {
+    if (this.captureRan) return
+    this.captureRan = true
+    if (this.runnerPid === null) return
+    try {
+      this.held = this.effects.capture(this.runnerPid)
+    } catch {
+      // Degraded to Job-only containment; the settle line records captured: 0.
+      this.held = []
+    }
+  }
+
+  /** Sweep held survivors and journal the settlement exactly once. */
+  private settle(via: 'exit' | 'error' | 'host-exit'): void {
+    if (this.settleRecorded) return
+    this.settleRecorded = true
+    let swept: SweptWindowsProcess[] = []
+    if (this.captureRan && this.held.length > 0) {
+      try {
+        swept = this.effects.sweep(this.held)
+      } catch {
+        swept = []
+      }
+    }
+    try {
+      this.effects.record({
+        event: 'settle',
+        runner: this.runnerPid,
+        signalled: this.captureRan,
+        via,
+        captured: this.held.length,
+        swept,
+      })
+    } catch {
+      // Ledger is observational by contract; the range settles regardless.
+    }
   }
 }
 
@@ -176,11 +265,18 @@ export function launchWindowsJob(
     ))
   }
 
+  const effects: WindowsJobEffects = {
+    capture: internals.captureDescendants ?? captureDescendantProcesses,
+    sweep: internals.sweepHeld ?? sweepHeldProcesses,
+    record: internals.recordLedger ?? appendSubprocessLedger,
+  }
   const owner = new WindowsJobOwner(
     child,
     rangeExit.promise,
     () => directResultType,
     failInfrastructure,
+    child.pid ?? null,
+    effects,
   )
   child.on('message', (value: unknown) => {
     if (directResultType !== undefined) {
@@ -207,6 +303,11 @@ export function launchWindowsJob(
   })
   child.once('spawn', () => {
     runnerSpawned = true
+    try {
+      effects.record({ event: 'spawn', runner: child.pid ?? null, target: spec.argv[0] ?? '' })
+    } catch {
+      // Ledger is observational by contract; spawning continues without it.
+    }
     try {
       if (child.send === undefined) throw new Error('subprocess-local: Windows runner has no IPC channel')
       child.send({ type: 'start', cwd: spec.cwd, env: targetEnv, ...spec.stdio.control === undefined ? {} : { control: spec.stdio.control } }, (error) => {
