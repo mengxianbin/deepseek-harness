@@ -19,7 +19,7 @@ import type { SessionReferenceSource } from '../index.ts'
 import { createScope, scopeIdentityOf, scopeOf as scopeTagOf } from '../scope.ts'
 import { SessionManager } from './manager.ts'
 import type { SessionRemotes } from './remotes.ts'
-import type { SessionListPhase, SessionSearchResultItem, SessionProjectionSnapshot } from './manager.ts'
+import type { SessionListPhase, SessionListScopeOptions, SessionSearchResultItem, SessionProjectionSnapshot } from './manager.ts'
 import type { Session } from './session.ts'
 import type { SessionListEntry } from './lineage.ts'
 
@@ -361,10 +361,13 @@ export class ClientSessions implements ISessions {
 
   /**
    * Refresh the real Session baseline, reusing an in-flight pull.
+   * @param options - row-scope options: `includeArchived` follows the
+   * archived view (archived rows in both directions), `includeSubagents`
+   * widens to subagent rows for this page generation.
    * @returns completion of the current or newly started baseline pull.
    */
-  refresh(): Promise<void> {
-    return this.manager.refreshList()
+  refresh(options?: SessionListScopeOptions): Promise<void> {
+    return this.manager.refreshList(options)
   }
 
   /**

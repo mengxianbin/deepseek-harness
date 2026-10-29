@@ -574,7 +574,7 @@ describe('occlusion fold', () => {
     )
     const frame = view.container.querySelector('[data-question-key]') as HTMLElement
     vi.spyOn(frame, 'getBoundingClientRect').mockReturnValue(
-      { height: tall ? 480 : 120, width: 680, top: 0, left: 0, bottom: 0, right: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect,
+      { height: tall ? 480 : 120, width: 680, top: 0, left: 0, bottom: 0, right: 0, x: 0, y: 0, toJSON: () => ({}) },
     )
     return { view, frame }
   }

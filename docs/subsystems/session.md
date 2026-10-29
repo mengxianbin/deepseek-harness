@@ -855,7 +855,9 @@ inspect( sessionId: SessionId, signal?: AbortSignal, ): Promise<SessionInspectio
 
 /**
  * Read all visible Session rows without resuming an Agent.
- * @param _request - reserved empty list request.
+ * @param _request - row-scope request: `includeArchived` restores archived
+ * rows and `includeSubagents` restores subagent-origin rows; both default
+ * to omitted, which keeps the listing to active first-party rows.
  * @param signal - cancellation for persistence reads and summary generation.
  * @returns visible Session summaries ordered by activity.
  */

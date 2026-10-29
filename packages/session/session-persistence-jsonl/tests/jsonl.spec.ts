@@ -2106,7 +2106,7 @@ describe('JsonlSessionPersistence: durability and crash semantics', () => {
     queueMicrotask(() => { controller.abort(reason) })
 
     await expect(pending).rejects.toBe(reason)
-    expect(discovery).toHaveBeenCalledWith(controller.signal)
+    expect(discovery).toHaveBeenCalledWith(controller.signal, undefined, undefined)
   })
 })
 

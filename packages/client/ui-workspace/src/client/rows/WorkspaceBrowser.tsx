@@ -1066,7 +1066,14 @@ export function WorkspaceBrowser({
     }
     open(sessionId)
   }
-  const leaveArchivedOnly = (): void => { actions.setArchivedFilter('default') }
+  // The default listing omits archived rows server-side (row-cut): show/only
+  // refetches them through `includeArchived`, and returning to the default
+  // view refetches without them so later pulls stay thin.
+  const pickArchivedFilter = (filter: ArchivedFilter): void => {
+    actions.setArchivedFilter(filter)
+    refreshSessions({ includeArchived: filter !== 'default' })
+  }
+  const leaveArchivedOnly = (): void => { pickArchivedFilter('default') }
   const workspaceReady = workspacePhase === 'ready' && workspaceStreamState !== 'loading'
   // FORK dsh-local (f5-list-states, marker: data-list-state): the list's three
   // states — content needs both baselines landed; before that the region is
@@ -1445,7 +1452,7 @@ export function WorkspaceBrowser({
               archivedFilter={archivedFilter}
               onGroupPick={actions.setGroupBy}
               onOrderPick={(mode) => { actions.setOrderBy(mode, activeSessionOrders) }}
-              onArchivedFilterPick={actions.setArchivedFilter}
+              onArchivedFilterPick={pickArchivedFilter}
               t={t}
             />
           )}
