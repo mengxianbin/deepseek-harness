@@ -48,6 +48,10 @@ import { UiWorkspaceService } from './navigation.ts'
 import { createWorkspaceViewStore } from './stores.ts'
 import { WorkspaceBrowser } from './rows/WorkspaceBrowser.tsx'
 import { ArchiveSessionMenuItem, ArchiveSessionRowButton, SessionArchiveConfirmDialog } from './session-actions/ArchiveSession.tsx'
+import {
+  archiveOverrideRequest, isGreenSeal, isStaleSeal, postArchiveOverride, requestSealCheck, STALE_SEAL,
+  type SessionSealInfo,
+} from './session-actions/seal.ts'
 import { derive } from './session-actions/derived.ts'
 import { ForkSessionMenuItem } from './session-actions/ForkSession.tsx'
 import { PinSessionMenuItem, PinSessionRowButton } from './session-actions/PinSession.tsx'
@@ -190,25 +194,78 @@ export function apply(ctx: Context): void {
       uiWorkspace.unpinSession(sessionId).catch(() => { notify({ kind: 'unpinFailed' }) })
     },
   })
+  // FORK archive-seal-gate-ui-1028: the ledger write-back (contract C4) a
+  // confirmed seal archive raises from the archive-SUCCESS callback alone —
+  // never before, so a failed archive leaves no ghost entry. Its own failure
+  // is a console diagnostic: the archive already stands, and the plugin's
+  // observed back-fill keeps the ledger answerable.
+  const recordSealOverride = (sessionId: SessionId, seal: SessionSealInfo, reason?: string): void => {
+    void postArchiveOverride(archiveOverrideRequest(sessionId, seal, reason))
+  }
+  // The quiet archive: the seal gate cleared this Session (green verdict, a
+  // blank placeholder, or an unreachable seal service — fail-open), or the
+  // operator continued past the stale line. No confirmation; the notice
+  // offers undo and the archived filter, and a stale context rides the
+  // success callback as its ledger note.
+  const archiveQuietly = (sessionId: SessionId, seal?: SessionSealInfo): void => {
+    uiWorkspace.archiveSession(sessionId).then(() => {
+      if (seal !== undefined) recordSealOverride(sessionId, seal)
+      notify({ kind: 'archived', sessionId })
+    }).catch((reason: unknown) => {
+      const activity = activeSessionRefusal(reason)
+      if (activity === undefined) {
+        console.warn('session archive rejected:', reason)
+        return
+      }
+      const displayTitle = sessions.list.getSnapshot().byId[sessionId]?.displayTitle ?? sessionId
+      archiveRequest.set({ sessionId, displayTitle, activity, ...(seal === undefined ? {} : { seal }) })
+    })
+  }
+  // FORK archive-seal-gate-ui-1028: every archive entry (menu, row button,
+  // shortcut) fronts the Host call with the seal check (contract C1):
+  // green or an absent verdict (fail-open) archives quietly like before,
+  // stale raises the one-line prompt, red and UNKNOWN open the seal
+  // confirmation. A blank placeholder holds no conversation to seal and
+  // stays the one click the fork gave it (blank-row-archive-1026).
+  const archiveSealGated = (sessionId: SessionId): void => {
+    if (sessions.list.getSnapshot().byId[sessionId]?.blank === true) {
+      archiveQuietly(sessionId)
+      return
+    }
+    void requestSealCheck([sessionId]).then((results) => {
+      const seal = results?.get(sessionId)
+      if (seal === undefined || isGreenSeal(seal)) {
+        archiveQuietly(sessionId)
+        return
+      }
+      if (isStaleSeal(seal)) {
+        notify({
+          kind: 'sealStale',
+          sessionId,
+          ...(seal.followUpCount === undefined ? {} : { followUpCount: seal.followUpCount }),
+        })
+        return
+      }
+      const displayTitle = sessions.list.getSnapshot().byId[sessionId]?.displayTitle ?? sessionId
+      archiveRequest.set({ sessionId, displayTitle, activity: [], seal })
+    /* v8 ignore start -- requestSealCheck is contracted never to reject (its
+       failures become `null` + a warning inside); this rung exists only for a
+       future contract break and must never swallow the operator's click. */
+    }).catch((reason: unknown) => {
+      console.warn('seal check rejected:', reason)
+      archiveQuietly(sessionId)
+    })
+    /* v8 ignore stop */
+  }
   const archiveInjected = (): ArchiveSessionInjected => ({
     hooks: { archived: archivedSet },
     // Archive preserves the log and the account position, so a quiet Session
     // needs no confirmation; the notice offers undo and the archived filter.
-    // The Host's refusal for running work is the one case that asks first:
-    // the confirmation names that work and offers to stop it.
-    archiveSession: (sessionId) => {
-      uiWorkspace.archiveSession(sessionId).then(() => {
-        notify({ kind: 'archived', sessionId })
-      }).catch((reason: unknown) => {
-        const activity = activeSessionRefusal(reason)
-        if (activity === undefined) {
-          console.warn('session archive rejected:', reason)
-          return
-        }
-        const displayTitle = sessions.list.getSnapshot().byId[sessionId]?.displayTitle ?? sessionId
-        archiveRequest.set({ sessionId, displayTitle, activity })
-      })
-    },
+    // FORK archive-seal-gate-ui-1028 fronts this with the seal check: stale
+    // raises the one-line prompt, an unsealed verdict the confirmation, and
+    // the Host's refusal for running work still names that work and offers
+    // to stop it.
+    archiveSession: (sessionId) => { archiveSealGated(sessionId) },
     unarchiveSession,
   })
   installWorkspaceShortcuts(ctx, uiWorkspace, shortcutControls, archiveInjected().archiveSession,
@@ -216,8 +273,11 @@ export function apply(ctx: Context): void {
   const archiveConfirmInjected = (): SessionArchiveConfirmInjected => ({
     hooks: { archiveRequest },
     settleSessionArchive: () => { archiveRequest.set(null) },
-    stopAndArchiveSession: async (sessionId) => {
+    stopAndArchiveSession: async (sessionId, options) => {
       await uiWorkspace.archiveSession(sessionId, { stopActivity: true })
+      // The archive succeeded — the only moment the ledger write-back may
+      // fire (FORK archive-seal-gate-ui-1028; contract C4).
+      if (options !== undefined) recordSealOverride(sessionId, options.seal, options.reason)
       notify({ kind: 'stoppedAndArchived', sessionId })
     },
   })
@@ -264,6 +324,12 @@ export function apply(ctx: Context): void {
         return
       }
       openSession(sessionId)
+    },
+    // FORK archive-seal-gate-ui-1028: the stale line's one click resumes the
+    // archive it paused; the note write-back rides the success callback, and
+    // the reported count stays with the verdict for any confirmation later.
+    continueSealedArchive: (sessionId: SessionId, followUpCount?: number) => {
+      archiveQuietly(sessionId, followUpCount === undefined ? STALE_SEAL : { ...STALE_SEAL, followUpCount })
     },
   }
   registerToasts(ctx, viewStore, toastActions)

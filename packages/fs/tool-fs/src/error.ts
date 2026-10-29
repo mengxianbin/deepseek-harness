@@ -22,7 +22,7 @@ export function remediateFsError(error: unknown, displayPath: string): unknown {
   if (!(error instanceof FsError)) return error
   if (error.code === 'FS_NOT_OBSERVED') {
     return new FsError(
-      `cannot modify "${displayPath}": file has not been read — read the file, then retry`,
+      `cannot modify "${displayPath}": has not been observed — read any window of the file, then retry`,
       error.code,
       { cause: error },
     )

@@ -69,12 +69,18 @@ function launch(
   emitSpawn = true,
 ) {
   const spawn = vi.fn((_command: string, _args: readonly string[], _options: unknown) => child)
+  const recordLedger = vi.fn()
   const result = launchWindowsJob(request, { TARGET: 'yes' }, {
     spawn: spawn as never,
     runnerInvocation: ['C:\\node.exe', 'C:\\runner.js'],
+    // FakeChild's pid is not a real process: the sweep seams stay inert here
+    // so no unit run walks the machine's process table or journals to it.
+    captureDescendants: vi.fn(() => []),
+    sweepHeld: vi.fn(() => []),
+    recordLedger,
   })
   if (emitSpawn) child.emit('spawn')
-  return { child, result, spawn }
+  return { child, result, spawn, recordLedger }
 }
 
 describe('Windows Job capability', () => {
@@ -98,7 +104,13 @@ describe('Windows Job capability', () => {
       expect(load).toHaveBeenCalledOnce()
       expect(probe).toHaveBeenCalledOnce()
 
-      const result = isolated.launchWindowsJob(spec, { TARGET: 'yes' })
+      const result = isolated.launchWindowsJob(spec, { TARGET: 'yes' }, {
+        // Production defaults stay under test elsewhere; this case must not
+        // walk the machine table with the fake pid or journal to the real ledger.
+        captureDescendants: vi.fn(() => []),
+        sweepHeld: vi.fn(() => []),
+        recordLedger: vi.fn(),
+      })
       expect(spawn).toHaveBeenCalledOnce()
       child.emit('spawn')
       child.emit('message', { type: 'target-exit', exitCode: 0 })
@@ -477,5 +489,118 @@ describe('Windows parent runner contract', () => {
     expect(child.sent.filter(message => (message as { type?: string }).type === 'terminate')).toHaveLength(1)
     result.owner.terminateForHostExit()
     expect(child.killed).toEqual(['SIGKILL'])
+  })
+})
+
+describe('Windows Job survivor sweep wiring', () => {
+  const heldFixture = () => [{ pid: 555, started: '7:7', handle: 0n as never }]
+
+  function sweptLaunch() {
+    const child = new FakeChild()
+    const recordLedger = vi.fn()
+    const held = heldFixture()
+    const capture = vi.fn(() => held)
+    const order: string[] = []
+    const sweep = vi.fn(() => {
+      order.push('sweep')
+      return [{ pid: 555, started: '7:7', status: 'killed' as const }]
+    })
+    const spawn = vi.fn(() => child)
+    const result = launchWindowsJob(spec, { TARGET: 'yes' }, {
+      spawn: spawn as never,
+      runnerInvocation: ['C:\\node.exe', 'C:\\runner.js'],
+      captureDescendants: capture,
+      sweepHeld: sweep,
+      recordLedger,
+    })
+    child.emit('spawn')
+    return { child, result, capture, sweep, recordLedger, order, held }
+  }
+
+  it('pins descendants once at first signal and journals the spawn line', () => {
+    const { child, result, capture, recordLedger } = sweptLaunch()
+    expect(recordLedger).toHaveBeenCalledWith({ event: 'spawn', runner: 432, target: 'tool.exe' })
+    result.owner.signal('SIGTERM', undefined)
+    result.owner.signal('SIGKILL', undefined)
+    expect(capture).toHaveBeenCalledExactlyOnceWith(432)
+    expect(child.sent.at(-1)).toEqual({ type: 'terminate' })
+  })
+
+  it('sweeps held survivors before waitForExit resumes and journals one settle line', async () => {
+    const { child, result, sweep, recordLedger, order, held } = sweptLaunch()
+    result.owner.signal('SIGTERM')
+    child.emit('message', { type: 'target-exit', exitCode: 137 })
+    child.connected = false
+    child.exit(0, null)
+    await expect(result.owner.waitForExit()).resolves.toBeUndefined()
+    order.push('wait')
+    expect(order).toEqual(['sweep', 'wait'])
+    expect(sweep).toHaveBeenCalledExactlyOnceWith(held)
+    expect(recordLedger).toHaveBeenCalledWith({
+      event: 'settle',
+      runner: 432,
+      signalled: true,
+      via: 'exit',
+      captured: 1,
+      swept: [{ pid: 555, started: '7:7', status: 'killed' }],
+    })
+    await result.owner.waitForExit()
+    expect(recordLedger).toHaveBeenCalledTimes(2)
+  })
+
+  it('records a natural settlement without ever capturing', async () => {
+    const { child, result, capture, sweep, recordLedger } = sweptLaunch()
+    child.emit('message', { type: 'target-exit', exitCode: 0 })
+    child.connected = false
+    child.exit(0, null)
+    await expect(result.owner.waitForExit()).resolves.toBeUndefined()
+    expect(capture).not.toHaveBeenCalled()
+    expect(sweep).not.toHaveBeenCalled()
+    expect(recordLedger).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'settle', signalled: false, via: 'exit', captured: 0, swept: [],
+    }))
+  })
+
+  it('pins and sweeps synchronously on host-exit teardown, then never journals twice', () => {
+    const { child, result, capture, sweep, recordLedger } = sweptLaunch()
+    // Consume the direct outcome up front: the synthetic runner exit below
+    // rejects it, and an unconsumed rejection would surface as a runner error.
+    const directFailure = result.direct.then(() => 'settled' as const, () => 'rejected' as const)
+    result.owner.signal('SIGTERM')
+    result.owner.terminateForHostExit()
+    // Synchronous: the host may stop turning event-loop ticks after this call.
+    expect(capture).toHaveBeenCalledExactlyOnceWith(432)
+    expect(sweep).toHaveBeenCalledOnce()
+    expect(recordLedger).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'settle', via: 'host-exit', signalled: true, captured: 1,
+    }))
+    expect(child.killed).toEqual(['SIGKILL'])
+    child.exit(0, null)
+    expect(recordLedger).toHaveBeenCalledTimes(2)
+    return expect(directFailure).resolves.toBe('rejected')
+  })
+
+  it('degrades to Job-only containment when the capture itself throws', async () => {
+    const child = new FakeChild()
+    const recordLedger = vi.fn()
+    const capture = vi.fn(() => { throw new Error('table unreadable') })
+    const sweep = vi.fn(() => [])
+    const result = launchWindowsJob(spec, { TARGET: 'yes' }, {
+      spawn: vi.fn(() => child) as never,
+      runnerInvocation: ['C:\\node.exe', 'C:\\runner.js'],
+      captureDescendants: capture,
+      sweepHeld: sweep,
+      recordLedger,
+    })
+    child.emit('spawn')
+    result.owner.signal('SIGTERM')
+    child.emit('message', { type: 'target-exit', exitCode: 0 })
+    child.connected = false
+    child.exit(0, null)
+    await expect(result.owner.waitForExit()).resolves.toBeUndefined()
+    expect(sweep).not.toHaveBeenCalled()
+    expect(recordLedger).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'settle', signalled: true, captured: 0, swept: [],
+    }))
   })
 })

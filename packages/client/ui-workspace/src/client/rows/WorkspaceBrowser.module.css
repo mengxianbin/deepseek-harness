@@ -588,6 +588,21 @@
   color: var(--dsw-alias-label-secondary);
 }
 
+/* FORK archive-seal-gate-ui-1028: the seal confirmation's status line, above
+   the optional force reason and any roster of running work. */
+.sealStatus {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* The reason field's gap before whatever follows it (same input family as
+   the rename dialog). */
+.sealReason {
+  margin-bottom: 8px;
+}
+
 /* The stop-and-archive dialog's list of work that will be stopped. */
 .archiveActivity {
   margin: 0 0 8px;
