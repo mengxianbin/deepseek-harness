@@ -13,10 +13,13 @@
  * bytes change — while added/removed/renamed paths and tsconfig edits flip
  * it and force one fresh walk.
  *
- * Usage: `node scripts/restart-signal/signal-cli.ts --stamp <repo>:<kind> [--stamp ...]`
+ * Usage: `node scripts/restart-signal/signal-cli.ts [--explain] --stamp <repo>:<kind> [--stamp ...]`
  * where `<kind>` is `harness` (face sets from the tsconfig graphs) or
  * `dsh-web` (whole-repository stamp, mirroring that repository's own runner).
- * Output on stdout: one JSON object `{"stamps":[{"repository","kind","host","client"}]}`.
+ * Output on stdout: one JSON object `{"stamps":[{"repository","kind","host","client"}]}`,
+ * or with `--explain` one `{"explanations":[…]}` carrying each tree's baseline
+ * time, built faces, and per-face package change lists — method and known
+ * approximations documented in ./explain.ts.
  * @module scripts/restart-signal/signal-cli
  */
 
@@ -25,6 +28,7 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
+import { explainTree, readBaseline } from './explain.ts'
 import { resolveFacePathSets } from './face-paths.ts'
 import { faceContentStamp, isRuntimeDataPath, wholeRepoContentStamp } from './repo-stamp.ts'
 
@@ -181,8 +185,26 @@ export function parseStampArgs(args: readonly string[]): StampSpec[] {
   return specs
 }
 
+/**
+ * The `--explain` flag token; filtered out before stamp parsing so the
+ * stamp-only option surface stays unchanged.
+ */
+const EXPLAIN_FLAG = '--explain'
+
 function main(args: readonly string[]): number {
-  const stamps = parseStampArgs(args).map(stampRepository)
+  const explain = args.includes(EXPLAIN_FLAG)
+  const specs = parseStampArgs(args.filter(argument => argument !== EXPLAIN_FLAG))
+  if (explain) {
+    const explanations = specs.map((spec) => {
+      // Baseline first: a tree without a manifest fails before the face walk.
+      const baseline = readBaseline(spec.repository, spec.kind)
+      const facePaths = spec.kind === 'harness' ? cachedFacePathSets(spec.repository) : undefined
+      return explainTree(spec.repository, spec.kind, baseline, facePaths)
+    })
+    process.stdout.write(`${JSON.stringify({ explanations }, undefined, 2)}\n`)
+    return 0
+  }
+  const stamps = specs.map(stampRepository)
   process.stdout.write(`${JSON.stringify({ stamps })}\n`)
   return 0
 }
