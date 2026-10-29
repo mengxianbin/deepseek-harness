@@ -2,9 +2,13 @@
  * The archive action: a `sidebar.workspaces.session.menu.item` row and a
  * `sidebar.workspaces.session.row.action` button over one injected behavior,
  * plus the `shell.overlay` dialog that confirms stopping a Session's running
- * work before archiving it. The same entries restore an archived row; the
- * notice a successful archive raises and the diagnostics for Host rejections
- * live in the injected callbacks, not here.
+ * work before archiving it — and, since FORK archive-seal-gate-ui-1028, the
+ * seal confirmation an unsealed Session raises: its status line in human
+ * wording, the 30-day auto-delete countdown copy, and the optional
+ * force-archive reason field (empty submits; the server normalizes it).
+ * The same entries restore an archived row; the notice a successful archive
+ * raises and the diagnostics for Host rejections live in the injected
+ * callbacks, not here.
  */
 import { useState } from 'react'
 import type { SessionActivity, SessionActivityItem } from '@deepseek-ai/dsh-api-workspace-controller/client'
@@ -20,6 +24,7 @@ import type {
   ArchiveSessionInjected, SessionArchiveConfirmInjected, SessionArchiveConfirmProps, SessionArchiveConfirmRequest,
   SessionMenuItemProps, SessionRowActionProps,
 } from '../contract/slots.ts'
+import { isStaleSeal, type SessionSealInfo } from './seal.ts'
 import css from '../rows/Rows.module.css'
 import browserCss from '../rows/WorkspaceBrowser.module.css'
 
@@ -75,7 +80,9 @@ export function ArchiveSessionRowButton({
  * The `shell.overlay` entry: nothing while no confirmation is pending,
  * otherwise one dialog per request (keyed by the Session). Confirming asks
  * the Host to stop the listed work and archive; cancelling leaves the
- * Session running and visible.
+ * Session running and visible. FORK archive-seal-gate-ui-1028: a request the
+ * seal gate raised carries its verdict, and the dialog renders the seal
+ * confirmation copy (status line, 30-day countdown, optional reason).
  * @param props - the request hook, its settlement, the stop-and-archive hop, and the locale seat.
  * @returns the open dialog, or null.
  */
@@ -104,6 +111,12 @@ function ArchiveConfirmForm({ request, stopAndArchiveSession, onSettle, t }: {
 }) {
   const [archiving, setArchiving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [reason, setReason] = useState('')
+  // FORK archive-seal-gate-ui-1028: a red seal verdict runs the seal copy and
+  // the optional reason field; a stale verdict (raised through the refusal
+  // path) keeps the plain stop-and-archive copy and adds only its status line.
+  const seal = request.seal
+  const forced = seal !== undefined && !isStaleSeal(seal)
   const close = () => {
     if (archiving) return
     onSettle()
@@ -111,12 +124,18 @@ function ArchiveConfirmForm({ request, stopAndArchiveSession, onSettle, t }: {
   const confirm = () => {
     setArchiving(true)
     setError(null)
-    stopAndArchiveSession(request.sessionId).then(() => {
+    const hop = seal === undefined
+      ? stopAndArchiveSession(request.sessionId)
+      : stopAndArchiveSession(
+        request.sessionId,
+        forced && reason.trim() !== '' ? { seal, reason: reason.trim() } : { seal },
+      )
+    hop.then(() => {
       setArchiving(false)
       onSettle()
-    }).catch((reason: unknown) => {
+    }).catch((failure: unknown) => {
       setArchiving(false)
-      setError(reason instanceof Error ? reason.message : String(reason))
+      setError(failure instanceof Error ? failure.message : String(failure))
     })
   }
   return (
@@ -124,8 +143,10 @@ function ArchiveConfirmForm({ request, stopAndArchiveSession, onSettle, t }: {
       open
       onClose={close}
       closeLabel={t('close')}
-      title={t('archive.confirm.title')}
-      description={t('archive.confirm.desc', { title: request.displayTitle })}
+      title={forced ? t('archive.seal.title') : t('archive.confirm.title')}
+      description={forced
+        ? t('archive.seal.desc', { title: request.displayTitle })
+        : t('archive.confirm.desc', { title: request.displayTitle })}
       footer={(
         <>
           <Button variant="outline" disabled={archiving} onClick={close}>{t('cancel')}</Button>
@@ -135,20 +156,57 @@ function ArchiveConfirmForm({ request, stopAndArchiveSession, onSettle, t }: {
             disabled={archiving}
             onClick={confirm}
           >
-            {t('archive.confirm.action')}
+            {forced ? t('archive.seal.action') : t('archive.confirm.action')}
           </Button>
         </>
       )}
     >
-      <ul className={browserCss.archiveActivity} aria-label={t('archive.confirm.activity')}>
-        {request.activity.map((entry, index) => (
-          <li key={`${entry.kind}-${String(index)}`} title={activityTitle(entry, t)}>{activityLine(entry, t)}</li>
-        ))}
-      </ul>
-      {archiving && <div className={browserCss.deleteStatus} role="status">{t('archive.confirm.pending')}</div>}
+      {seal !== undefined && <div className={browserCss.sealStatus}>{sealStatusLine(seal, t)}</div>}
+      {forced && (
+        <input
+          className={`${browserCss.renameInput} ${browserCss.sealReason}`}
+          value={reason}
+          aria-label={t('archive.seal.reason')}
+          placeholder={t('archive.seal.reason')}
+          disabled={archiving}
+          onChange={(e) => { setReason(e.target.value); setError(null) }}
+        />
+      )}
+      {request.activity.length > 0 && (
+        <ul className={browserCss.archiveActivity} aria-label={t('archive.confirm.activity')}>
+          {request.activity.map((entry, index) => (
+            <li key={`${entry.kind}-${String(index)}`} title={activityTitle(entry, t)}>{activityLine(entry, t)}</li>
+          ))}
+        </ul>
+      )}
+      {archiving && (
+        <div className={browserCss.deleteStatus} role="status">
+          {forced ? t('archive.seal.pending') : t('archive.confirm.pending')}
+        </div>
+      )}
       {error !== null && <div className={browserCss.renameError} role="alert">{error}</div>}
     </Modal>
   )
+}
+
+/**
+ * The seal status line's human wording (FORK archive-seal-gate-ui-1028): each
+ * known detail speaks for itself, an UNKNOWN verdict names the indeterminable
+ * state, and an UNSEALED verdict the dictionary has no detail line for falls
+ * back to the plain group wording.
+ * @param seal - the verdict behind the confirmation.
+ * @param t - the locale seat.
+ * @returns the line shown above the confirm body.
+ */
+function sealStatusLine(seal: SessionSealInfo, t: SessionArchiveConfirmProps['t']): string {
+  if (seal.verdict === 'UNKNOWN') return t('archive.seal.status.unknown')
+  switch (seal.detail) {
+    case 'sentinel-pending': return t('archive.seal.status.sentinel-pending')
+    case 'save-tail-no-sentinel': return t('archive.seal.status.save-tail-no-sentinel')
+    case 'save-trace-no-sentinel': return t('archive.seal.status.save-trace-no-sentinel')
+    case 'sentinel-stale': return t('archive.seal.status.sentinel-stale', { n: seal.followUpCount ?? 0 })
+    default: return t('archive.seal.status.unsealed')
+  }
 }
 
 /**

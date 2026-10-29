@@ -429,8 +429,17 @@ describe('SessionArchiveConfirmDialog', () => {
         stopAndArchiveSession={stopAndArchiveSession}
       />,
     )
-    const ask = (activity: SessionArchiveConfirmRequest['activity']): void => {
-      act(() => { request.set({ sessionId: sid('one'), displayTitle: 'Busy session', activity }) })
+    const ask = (
+      activity: SessionArchiveConfirmRequest['activity'],
+      seal?: SessionArchiveConfirmRequest['seal'],
+    ): void => {
+      act(() => {
+        request.set({
+          sessionId: sid('one'), displayTitle: 'Busy session', activity,
+          // FORK archive-seal-gate-ui-1028: a seal request rides the same store.
+          ...(seal === undefined ? {} : { seal }),
+        })
+      })
     }
     return { settleSessionArchive, ask }
   }
@@ -538,6 +547,78 @@ describe('SessionArchiveConfirmDialog', () => {
       '1 other item of work (probe)',
     ])
   })
+
+  // FORK archive-seal-gate-ui-1028: the seal tiers' dialog surface — red
+  // runs the seal copy, the 30-day countdown line, and the optional reason;
+  // stale (raised through the refusal path) keeps the plain copy.
+  it('red: seal copy, 30-day countdown line, status wording, and an empty reason submits as-is', async () => {
+    const stopAndArchiveSession = vi.fn(async () => {})
+    const { settleSessionArchive, ask } = archiveDialog(stopAndArchiveSession)
+    ask([], { verdict: 'UNSEALED', detail: 'sentinel-pending' })
+    const dialog = screen.getByRole('dialog', { name: '归档未收口的会话？' })
+    expect(dialog.textContent).toContain('尚未收口')
+    expect(dialog.textContent).toContain('30 天倒计时')
+    expect(dialog.textContent).toContain('撤销归档即解除')
+    expect(screen.getByText('save 尚未完成：收口哨兵仍在等待')).toBeTruthy()
+    // No reported work: no (empty) roster row.
+    expect(screen.queryByRole('list', { name: '将被停止的工作' })).toBeNull()
+    const input = screen.getByLabelText<HTMLInputElement>('强制归档原因（可选）')
+    expect(input.value).toBe('')
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '强制归档' }).disabled).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: '强制归档' }))
+    expect(stopAndArchiveSession).toHaveBeenCalledWith(sid('one'), { seal: { verdict: 'UNSEALED', detail: 'sentinel-pending' } })
+    expect(screen.getByRole('status').textContent).toBe('正在归档…')
+    await waitFor(() => { expect(settleSessionArchive).toHaveBeenCalledOnce() })
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('red: a typed reason travels trimmed, and an UNKNOWN verdict takes the same surface', async () => {
+    const stopAndArchiveSession = vi.fn(async () => {})
+    const { ask } = archiveDialog(stopAndArchiveSession)
+    ask([], { verdict: 'UNKNOWN' })
+    expect(screen.getByRole('dialog', { name: '归档未收口的会话？' })).toBeTruthy()
+    expect(screen.getByText('无法判定收口状态')).toBeTruthy()
+    const input = screen.getByLabelText<HTMLInputElement>('强制归档原因（可选）')
+    fireEvent.change(input, { target: { value: '  板行已 [x]、转录未收口  ' } })
+    fireEvent.click(screen.getByRole('button', { name: '强制归档' }))
+    expect(stopAndArchiveSession).toHaveBeenCalledWith(sid('one'), {
+      seal: { verdict: 'UNKNOWN' }, reason: '板行已 [x]、转录未收口',
+    })
+  })
+
+  it('stale: keeps the stop-and-archive copy, shows the N line, and offers no reason field', () => {
+    const stopAndArchiveSession = vi.fn(async () => {})
+    const { ask } = archiveDialog(stopAndArchiveSession)
+    ask([], { verdict: 'UNSEALED', detail: 'sentinel-stale', followUpCount: 4 })
+    expect(screen.getByRole('dialog', { name: '停止并归档此会话？' })).toBeTruthy()
+    expect(screen.getByText('上次 save 已 DONE、其后续聊 4 条')).toBeTruthy()
+    expect(screen.queryByLabelText('强制归档原因（可选）')).toBeNull()
+    // The countdown line belongs to the force window, not the refusal copy.
+    expect(screen.queryByText(/30 天倒计时/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '停止并归档' }))
+    expect(stopAndArchiveSession).toHaveBeenCalledWith(sid('one'), {
+      seal: { verdict: 'UNSEALED', detail: 'sentinel-stale', followUpCount: 4 },
+    })
+  })
+
+  it('keeps the running-work roster beside the seal line when the Host reported one', () => {
+    const stopAndArchiveSession = vi.fn(async () => {})
+    const { ask } = archiveDialog(stopAndArchiveSession)
+    ask([{ kind: 'turn' }], { verdict: 'UNSEALED', detail: 'save-tail-no-sentinel' })
+    expect(screen.getByText('末次 save 未写入收口哨兵')).toBeTruthy()
+    expect(screen.getByRole('list', { name: '将被停止的工作' })).toBeTruthy()
+    expect(screen.getByText('进行中的回合')).toBeTruthy()
+  })
+
+  it.each([
+    ['save-trace-no-sentinel', '有 save 痕迹但无收口哨兵'],
+    ['missing', '会话未收口'],
+  ] as const)('renders the status line for the %s detail arm', (detail, line) => {
+    const stopAndArchiveSession = vi.fn(async () => {})
+    const { ask } = archiveDialog(stopAndArchiveSession)
+    ask([], detail === 'missing' ? { verdict: 'UNSEALED' } : { verdict: 'UNSEALED', detail })
+    expect(screen.getByText(line)).toBeTruthy()
+  })
 })
 
 // A provider outside this package may merge its own family into the kind map;
@@ -585,6 +666,7 @@ describe('RowActionToast', () => {
     const undoArchive = vi.fn()
     const showArchived = vi.fn()
     const openForkSource = vi.fn()
+    const continueSealedArchive = vi.fn()
     const runtime = await SlotTestRuntime.create()
     onTestFinished(() => runtime.dispose())
     const locale = new LocaleRuntime(runtime.ctx)
@@ -601,7 +683,7 @@ describe('RowActionToast', () => {
         subscribe: listener => view.subscribe(listener),
       }),
     }, {
-      undoArchive, showArchived, openForkSource,
+      undoArchive, showArchived, openForkSource, continueSealedArchive,
     })
     runtime.slots.register({
       name: 'shell.overlay', id: 'workspace.row-toast',
@@ -613,7 +695,7 @@ describe('RowActionToast', () => {
     const notify = (notice: RowToast): void => {
       act(() => { toast.set({ ...notice, seq: ++seq }) })
     }
-    return { dismissToast, undoArchive, showArchived, openForkSource, notify, locale, view }
+    return { dismissToast, undoArchive, showArchived, openForkSource, continueSealedArchive, notify, locale, view }
   }
 
   it('updates locale and archive actions without restarting the same notice', async () => {
@@ -822,6 +904,19 @@ describe('RowActionToast', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('the stale line notice offers the one-click continue (FORK archive-seal-gate-ui-1028)', async () => {
+    const { dismissToast, continueSealedArchive, notify } = await toastSurface()
+    notify({ kind: 'sealStale', sessionId: sid('one'), followUpCount: 3 })
+    const alert = screen.getByRole('alert')
+    expect(alert.textContent).toContain('上次 save 已 DONE、其后续聊 3 条')
+    expect(alert.textContent).toContain('继续归档')
+    fireEvent.click(screen.getByRole('button', { name: '继续归档' }))
+    expect(dismissToast).toHaveBeenCalledOnce()
+    expect(continueSealedArchive).toHaveBeenCalledExactlyOnceWith(sid('one'), 3)
+    expect(callOrder(dismissToast)).toBeLessThan(callOrder(continueSealedArchive))
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 })
 

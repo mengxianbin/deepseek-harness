@@ -8,12 +8,12 @@ import { ArchiveToastEntry, ToastEntry, WorkspaceToast } from './Toast.tsx'
 /** Register notice presentations with their business-owned display fields and actions.
  * @param ctx - Workspace plugin context.
  * @param viewStore - Viewing store, read only by archive notices.
- * @param actions - Archive and source-opening callbacks.
+ * @param actions - Archive, stale-continue, and source-opening callbacks.
  */
 export function registerToasts(
   ctx: Context,
   viewStore: WorkspaceViewStoreHandle,
-  actions: Pick<RowToastActions, 'undoArchive' | 'showArchived' | 'openForkSource'>,
+  actions: Pick<RowToastActions, 'undoArchive' | 'showArchived' | 'openForkSource' | 'continueSealedArchive'>,
 ): void {
   const archiveFilterAction: ArchiveToastInjected['filterAction'] = (t, dismiss) => ({
     prefix: t('toast.archivedOr'), label: t('toast.archivedFilter'),
@@ -100,5 +100,22 @@ export function registerToasts(
         filterAction: archiveFilterAction,
       }),
     }, ArchiveToastEntry)
+    // FORK archive-seal-gate-ui-1028: the stale tier's one-line prompt —
+    // information with one action, never a dialog (ruling `stale-tier`).
+    // The long hold keeps the click reachable; ignoring it archives nothing.
+    yield ctx.slots.register({
+      name: 'workspace.toast', key: 'sealStale', locale: 'workspace',
+      inject: (): ToastDisplayInjected<'sealStale'> => ({
+        display: (notice, t, dismiss) => ({
+          text: t('toast.sealStale', { n: notice.followUpCount ?? 0 }),
+          tone: 'warning',
+          holdMs: 10_000,
+          actions: [{
+            label: t('toast.sealStaleContinue'),
+            onClick: () => { dismiss(); actions.continueSealedArchive(notice.sessionId, notice.followUpCount) },
+          }],
+        }),
+      }),
+    }, ToastEntry<PropsRuntime<'workspace.toast', 'sealStale'>>)
   })
 }

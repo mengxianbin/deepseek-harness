@@ -212,6 +212,45 @@ function viewInstance(slots: SlotRegistry) {
 /** Let the injected callbacks' Host-call chains settle: one macrotask drains every pending microtask. */
 const settled = (): Promise<void> => new Promise((resolve) => { setTimeout(resolve, 0) })
 
+/** FORK archive-seal-gate-ui-1028: one row a canned seal-check answer carries. */
+type SealCheckRow = { id: string; verdict: string; detail?: string; followUpCount?: number }
+
+/** One canned answer of the fake seal-gate routes. */
+type SealFetchResponse = { ok: boolean; status: number; json: () => Promise<unknown> }
+
+/**
+ * Fake the plugin's two seal-gate routes over the global fetch.
+ * @param answers - `check` is the seal-check payload (an Error rejects; default
+ * `{ results: [] }` = every id reads as absent), `overrideStatus` is the
+ * write-back's HTTP status (default 200).
+ * @returns the fetch mock (its calls cover both routes).
+ */
+function stubSealGate(answers: { check?: unknown; overrideStatus?: number } = {}) {
+  const fetchMock = vi.fn(async (input: unknown, init?: unknown): Promise<SealFetchResponse> => {
+    if (input === '/api/dsh-session-archive/seal-check') {
+      const check = answers.check
+      if (check instanceof Error) throw check
+      const payload: unknown = check ?? { results: [] as readonly SealCheckRow[] }
+      return { ok: true, status: 200, json: async () => payload }
+    }
+    if (input === '/api/dsh-session-archive/archive-override') {
+      const status = answers.overrideStatus ?? 200
+      return { ok: status >= 200 && status < 300, status, json: async () => ({}) }
+    }
+    throw new Error(`seal-gate test fetch saw an unexpected route: ${String(input)} (init: ${JSON.stringify(init ?? null)})`)
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  onTestFinished(() => { vi.unstubAllGlobals() })
+  return fetchMock
+}
+
+/** The parsed C4 write-back bodies one fake service saw. */
+function overrideBodies(fetchMock: ReturnType<typeof stubSealGate>): unknown[] {
+  return fetchMock.mock.calls
+    .filter(call => call[0] === '/api/dsh-session-archive/archive-override')
+    .map(call => JSON.parse((call[1] as RequestInit).body as string) as unknown)
+}
+
 describe('ui-workspace apply', () => {
   it('keeps the host Loader entry inert', () => {
     expect(hostApply).not.toThrow()
@@ -318,6 +357,8 @@ describe('ui-workspace apply', () => {
     expect(b.slots.entries('workspace.toast').map(row => row.options.key)).toEqual([
       'sessionIdCopied', 'sessionIdCopyFailed', 'pinFailed', 'unpinFailed', 'archivedNotOpenable',
       'defaultWorkspaceFailed', 'shortcutForkFailed', 'createFailed', 'forkRequiresOpen', 'archived', 'stoppedAndArchived',
+      // FORK archive-seal-gate-ui-1028: the stale tier's one-line prompt.
+      'sealStale',
     ])
     for (const registration of b.slots.entries('workspace.toast')) {
       expect(registration.locale).toBe('workspace')
@@ -497,13 +538,17 @@ describe('ui-workspace apply', () => {
     const b = await bench()
     declare(b.slots, 'sidebar.workspaces', 'shell.overlay')
     await b.ctx.plugin({ inject: [...inject], apply }).await()
+    // FORK archive-seal-gate-ui-1028: both Sessions read green, so the gate
+    // stays out of the way of this pre-gate behavior spec.
+    stubSealGate({ check: { results: [{ id: 'one', verdict: 'DONE' }, { id: 'two', verdict: 'NEUTRAL' }] } })
     const archiveSession = vi.spyOn(b.ctx.uiWorkspace, 'archiveSession').mockResolvedValue(undefined)
     const unarchiveSession = vi.spyOn(b.ctx.uiWorkspace, 'unarchiveSession').mockResolvedValue(undefined)
     const toast = faceOf(entry(b.slots, 'shell.overlay', 'workspace.row-toast')) as RowToastInjected
     const archive = faceOf(entry(b.slots, ROW_ACTION, 'archive')) as ArchiveSessionInjected
 
     archive.archiveSession(sid('one'))
-    expect(archiveSession).toHaveBeenCalledWith('one')
+    // The seal check fronts the Host call, so the archive lands a tick later.
+    await vi.waitFor(() => { expect(archiveSession).toHaveBeenCalledWith('one') })
     await vi.waitFor(() => {
       expect(toast.hooks.toast.getSnapshot()).toEqual({ kind: 'archived', sessionId: 'one', seq: 1 })
     })
@@ -544,6 +589,9 @@ describe('ui-workspace apply', () => {
     const archiveSession = vi.spyOn(b.ctx.uiWorkspace, 'archiveSession')
       .mockRejectedValueOnce(refusal)
       .mockResolvedValueOnce(undefined)
+    // FORK archive-seal-gate-ui-1028: green verdict — the refusal path below
+    // is the pre-gate behavior, with no seal context on the request.
+    stubSealGate({ check: { results: [{ id: 'busy', verdict: 'NEUTRAL' }] } })
     const archive = faceOf(entry(b.slots, ROW_ACTION, 'archive')) as ArchiveSessionInjected
     const confirm = faceOf(entry(b.slots, 'shell.overlay', 'workspace.session-archive')) as SessionArchiveConfirmInjected
     const toast = faceOf(entry(b.slots, 'shell.overlay', 'workspace.row-toast')) as RowToastInjected
@@ -567,6 +615,207 @@ describe('ui-workspace apply', () => {
     } finally {
       warn.mockRestore()
     }
+  })
+
+  // FORK archive-seal-gate-ui-1028: the three seal tiers over the assembled
+  // apply — green archives like before, stale raises the one-line prompt
+  // whose action continues and writes the note, red (and UNKNOWN) opens the
+  // seal confirmation whose hop writes force with the typed reason.
+  describe('archive seal gate (FORK archive-seal-gate-ui-1028)', () => {
+    /** The assembled surfaces one gate test drives. */
+    async function gateBench(sessionIds: readonly string[] = ['one']) {
+      const b = await bench()
+      b.setSessions(sessionState(sessionIds.map((id, index) => summary(id, index + 1))))
+      declare(b.slots, 'sidebar.workspaces', 'shell.overlay')
+      await b.ctx.plugin({ inject: [...inject], apply }).await()
+      const archiveSession = vi.spyOn(b.ctx.uiWorkspace, 'archiveSession')
+      return {
+        b,
+        archiveSession,
+        archive: faceOf(entry(b.slots, ROW_ACTION, 'archive')) as ArchiveSessionInjected,
+        confirm: faceOf(entry(b.slots, 'shell.overlay', 'workspace.session-archive')) as SessionArchiveConfirmInjected,
+        toast: faceOf(entry(b.slots, 'shell.overlay', 'workspace.row-toast')) as RowToastInjected,
+      }
+    }
+
+    it('green verdict archives exactly like before and writes no ledger override', async () => {
+      const { b, archiveSession, archive, confirm, toast } = await gateBench()
+      const fetchMock = stubSealGate({ check: { results: [{ id: 'one', verdict: 'DONE' }] } })
+
+      archive.archiveSession(sid('one'))
+      await vi.waitFor(() => {
+        expect(toast.hooks.toast.getSnapshot()).toEqual({ kind: 'archived', sessionId: 'one', seq: 1 })
+      })
+      expect(archiveSession).toHaveBeenCalledExactlyOnceWith('one')
+      expect(confirm.hooks.archiveRequest.getSnapshot()).toBeNull()
+      expect(fetchMock.mock.calls.map(call => call[0])).toEqual(['/api/dsh-session-archive/seal-check'])
+      expect(overrideBodies(fetchMock)).toEqual([])
+      expect(b.retain).not.toHaveBeenCalled()
+    })
+
+    it('an unreachable seal service warns and archives anyway (fail-open)', async () => {
+      // 'ghost' is absent from the session list: the blank-row probe reads its
+      // summary as undefined and falls through to the gate like any row.
+      const { archiveSession, archive, toast } = await gateBench()
+      stubSealGate({ check: new Error('seal service down') })
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        archive.archiveSession(sid('ghost'))
+        await vi.waitFor(() => {
+          expect(toast.hooks.toast.getSnapshot()).toEqual({ kind: 'archived', sessionId: 'ghost', seq: 1 })
+        })
+        expect(archiveSession).toHaveBeenCalledExactlyOnceWith('ghost')
+        expect(warn).toHaveBeenCalledWith('seal check rejected:', expect.any(Error))
+      } finally {
+        warn.mockRestore()
+      }
+    })
+
+    it('stale raises the one-line prompt; its action continues and writes the note', async () => {
+      const { b, archiveSession, archive, confirm, toast } = await gateBench()
+      const fetchMock = stubSealGate({
+        check: { results: [{ id: 'one', verdict: 'UNSEALED', detail: 'sentinel-stale', followUpCount: 3 }] },
+      })
+
+      archive.archiveSession(sid('one'))
+      await vi.waitFor(() => {
+        expect(toast.hooks.toast.getSnapshot()).toMatchObject({ kind: 'sealStale', sessionId: 'one', followUpCount: 3 })
+      })
+      // The prompt is information, not a dialog: no Host call, no overlay.
+      expect(archiveSession).not.toHaveBeenCalled()
+      expect(confirm.hooks.archiveRequest.getSnapshot()).toBeNull()
+
+      const notice = toast.hooks.toast.getSnapshot()
+      if (notice === null || notice.kind !== 'sealStale') throw new Error('expected the stale notice')
+      const staleEntry = b.slots.entries('workspace.toast').find(row => row.options.key === 'sealStale')!
+      const display = faceOf(staleEntry) as ToastDisplayInjected<'sealStale'>
+      const dismiss = vi.fn()
+      display.display(notice, b.locale.bind('workspace'), dismiss).actions![0]!.onClick()
+      expect(dismiss).toHaveBeenCalledOnce()
+
+      await vi.waitFor(() => {
+        expect(toast.hooks.toast.getSnapshot()).toMatchObject({ kind: 'archived', sessionId: 'one' })
+      })
+      expect(archiveSession).toHaveBeenCalledExactlyOnceWith('one')
+      await vi.waitFor(() => {
+        expect(overrideBodies(fetchMock)).toEqual([{ ids: ['one'], mode: 'note', seal: 'stale' }])
+      })
+    })
+
+    it('stale without a reported count still prompts, continues, and lands on the archived notice', async () => {
+      const { b, archiveSession, archive, toast } = await gateBench()
+      const fetchMock = stubSealGate({
+        check: { results: [{ id: 'one', verdict: 'UNSEALED', detail: 'sentinel-stale' }] },
+      })
+
+      archive.archiveSession(sid('one'))
+      await vi.waitFor(() => {
+        expect(toast.hooks.toast.getSnapshot()).toEqual({ kind: 'sealStale', sessionId: 'one', seq: 1 })
+      })
+      const notice = toast.hooks.toast.getSnapshot()
+      if (notice === null || notice.kind !== 'sealStale') throw new Error('expected the stale notice')
+      const staleEntry = b.slots.entries('workspace.toast').find(row => row.options.key === 'sealStale')!
+      const display = faceOf(staleEntry) as ToastDisplayInjected<'sealStale'>
+      // The absent count localizes as 0 in the copy, and continuing without
+      // one still reaches the quiet archive and its note write-back.
+      const fields = display.display(notice, b.locale.bind('workspace'), vi.fn())
+      expect(fields.text).toBe('上次 save 已 DONE、其后续聊 0 条')
+      fields.actions![0]!.onClick()
+
+      await vi.waitFor(() => {
+        expect(toast.hooks.toast.getSnapshot()).toMatchObject({ kind: 'archived', sessionId: 'one' })
+      })
+      expect(archiveSession).toHaveBeenCalledExactlyOnceWith('one')
+      expect(overrideBodies(fetchMock)).toEqual([{ ids: ['one'], mode: 'note', seal: 'stale' }])
+    })
+
+    it('red opens the seal confirmation instead of archiving; confirming writes force with the reason', async () => {
+      const { b, archiveSession, archive, confirm, toast } = await gateBench(['busy'])
+      b.setSessions(sessionState([{ ...summary('busy', 3), displayTitle: 'Busy session' }]))
+      const fetchMock = stubSealGate({
+        check: { results: [{ id: 'busy', verdict: 'UNSEALED', detail: 'sentinel-pending' }] },
+      })
+
+      archive.archiveSession(sid('busy'))
+      await vi.waitFor(() => {
+        expect(confirm.hooks.archiveRequest.getSnapshot()).toEqual({
+          sessionId: 'busy', displayTitle: 'Busy session', activity: [],
+          seal: { verdict: 'UNSEALED', detail: 'sentinel-pending' },
+        })
+      })
+      // The gate interrupted before the Host call.
+      expect(archiveSession).not.toHaveBeenCalled()
+      expect(toast.hooks.toast.getSnapshot()).toBeNull()
+
+      await confirm.stopAndArchiveSession(sid('busy'), {
+        seal: { verdict: 'UNSEALED', detail: 'sentinel-pending' },
+        reason: '板行已收口、强归补账',
+      })
+      expect(archiveSession).toHaveBeenLastCalledWith('busy', { stopActivity: true })
+      await vi.waitFor(() => {
+        expect(overrideBodies(fetchMock)).toEqual([
+          { ids: ['busy'], mode: 'force', seal: 'sentinel-pending', reason: '板行已收口、强归补账' },
+        ])
+      })
+      expect(toast.hooks.toast.getSnapshot()).toMatchObject({ kind: 'stoppedAndArchived', sessionId: 'busy' })
+    })
+
+    it('an UNKNOWN verdict opens the same confirmation', async () => {
+      const { archiveSession, archive, confirm } = await gateBench(['mystery'])
+      stubSealGate({ check: { results: [{ id: 'mystery', verdict: 'UNKNOWN' }] } })
+
+      archive.archiveSession(sid('mystery'))
+      await vi.waitFor(() => {
+        expect(confirm.hooks.archiveRequest.getSnapshot()).toEqual({
+          sessionId: 'mystery', displayTitle: 'mystery', activity: [],
+          seal: { verdict: 'UNKNOWN' },
+        })
+      })
+      expect(archiveSession).not.toHaveBeenCalled()
+    })
+
+    it('a blank placeholder skips the check and archives in one click (FORK blank-row-archive-1026)', async () => {
+      const { b, archiveSession, archive, toast } = await gateBench(['fresh'])
+      b.setSessions(sessionState([{ ...summary('fresh', 1), blank: true }]))
+      const fetchMock = stubSealGate()
+
+      archive.archiveSession(sid('fresh'))
+      await vi.waitFor(() => {
+        expect(toast.hooks.toast.getSnapshot()).toEqual({ kind: 'archived', sessionId: 'fresh', seq: 1 })
+      })
+      expect(archiveSession).toHaveBeenCalledExactlyOnceWith('fresh')
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it('a refused stale continuation carries the verdict into the confirmation', async () => {
+      const { b, archiveSession, archive, confirm, toast } = await gateBench(['busy'])
+      const activity = [{ kind: 'turn' as const }]
+      const refusal = Object.assign(new Error('workspace session archive failed: workspace/session-active: active'), {
+        name: 'WorkspaceArchiveError',
+        rpcError: new RemoteError('workspace/session-active', 'active', { sessionId: sid('busy'), activity }),
+      })
+      archiveSession.mockRejectedValueOnce(refusal)
+      stubSealGate({ check: { results: [{ id: 'busy', verdict: 'UNSEALED', detail: 'sentinel-stale', followUpCount: 2 }] } })
+
+      archive.archiveSession(sid('busy'))
+      await vi.waitFor(() => {
+        expect(toast.hooks.toast.getSnapshot()).toMatchObject({ kind: 'sealStale', followUpCount: 2 })
+      })
+      const notice = toast.hooks.toast.getSnapshot()
+      if (notice === null || notice.kind !== 'sealStale') throw new Error('expected the stale notice')
+      const staleEntry = b.slots.entries('workspace.toast').find(row => row.options.key === 'sealStale')!
+      const display = faceOf(staleEntry) as ToastDisplayInjected<'sealStale'>
+      display.display(notice, b.locale.bind('workspace'), vi.fn()).actions![0]!.onClick()
+
+      // The Host refusal (running work) still raises the stop-and-archive
+      // confirmation — now carrying the stale verdict the prompt reported.
+      await vi.waitFor(() => {
+        expect(confirm.hooks.archiveRequest.getSnapshot()).toMatchObject({
+          sessionId: 'busy', activity,
+          seal: { verdict: 'UNSEALED', detail: 'sentinel-stale', followUpCount: 2 },
+        })
+      })
+    })
   })
 
   it('the notice share takes the notice down, undoes an archive, and shows the archived rows', async () => {

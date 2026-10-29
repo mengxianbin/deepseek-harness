@@ -53,6 +53,9 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { ShortcutCatalogEntry } from '@deepseek-ai/dsh-client-shortcuts/client'
 import type { WorkspaceShortcutState } from '../shortcuts.ts'
 import type { StartSessionOptions } from '../navigation.ts'
+// FORK archive-seal-gate-ui-1028: the seal verdict shape the confirmation and
+// its write-back share (wire vocabulary lives with its client, seal.ts).
+import type { SessionSealInfo } from '../session-actions/seal.ts'
 import type {} from './toast.ts'
 import type { createWorkspaceViewStore } from '../stores.ts'
 
@@ -310,6 +313,12 @@ export type SessionRowActionProps<Injected extends object = object> =
 export type RowToast =
   | { kind: 'archived'; sessionId: SessionId }
   | { kind: 'stoppedAndArchived'; sessionId: SessionId }
+  /**
+   * FORK archive-seal-gate-ui-1028: the stale tier's one-line notice — a DONE
+   * save followed by later chatter, offered as information with one action,
+   * never as a dialog.
+   */
+  | { kind: 'sealStale'; sessionId: SessionId; followUpCount?: number }
   | { kind: 'sessionIdCopied' }
   | { kind: 'sessionIdCopyFailed' }
   | { kind: 'pinFailed' }
@@ -349,9 +358,12 @@ export interface PinSessionInjected {
 
 /**
  * Archive action share (menu row and hover button). The callbacks carry the
- * whole behavior: the Host call, the notice a success raises, the
- * stop-and-archive confirmation a Host refusal for running work raises, and
- * the diagnostics for any other rejection.
+ * whole behavior: the seal check that fronts the Host call (FORK
+ * archive-seal-gate-ui-1028 — green or an unreachable seal service archives
+ * quietly, stale raises the one-line notice, red opens the seal
+ * confirmation), the notice a success raises, the stop-and-archive
+ * confirmation a Host refusal for running work raises, and the diagnostics
+ * for any other rejection.
  */
 export interface ArchiveSessionInjected {
   hooks: {
@@ -362,7 +374,8 @@ export interface ArchiveSessionInjected {
    * Archive a Session into the registry-global set: the row keeps its
    * account position and shows per the archived filter; archiving the
    * current session clears the selection into the New Session view state.
-   * A Session with running work is not archived by this call: the Host's
+   * The seal gate fronts this call (FORK archive-seal-gate-ui-1028); a
+   * Session with running work is not archived by this call: the Host's
    * refusal opens the stop-and-archive confirmation instead.
    */
   archiveSession: (sessionId: SessionId) => void
@@ -372,7 +385,8 @@ export interface ArchiveSessionInjected {
 
 /**
  * A stop-and-archive confirmation the archive action asked for: the Host
- * refused the plain archive because this work still runs.
+ * refused the plain archive because this work still runs, or the seal gate
+ * raised it over an unsealed Session (FORK archive-seal-gate-ui-1028).
  */
 export interface SessionArchiveConfirmRequest {
   /** Session to stop and archive. */
@@ -381,6 +395,23 @@ export interface SessionArchiveConfirmRequest {
   displayTitle: string
   /** What the Host reported running, in family order. */
   activity: readonly SessionActivity[]
+  /**
+   * FORK archive-seal-gate-ui-1028: the seal verdict behind this
+   * confirmation. Present it drives the seal copy, the optional reason
+   * field (red only), and the ledger write-back after a successful archive.
+   */
+  seal?: SessionSealInfo
+}
+
+/**
+ * FORK archive-seal-gate-ui-1028: what the confirm dialog hands the
+ * stop-and-archive hop when its request carried a seal verdict.
+ */
+export interface StopAndArchiveOptions {
+  /** The verdict the confirmation was about (drives the C4 ledger write-back). */
+  seal: SessionSealInfo
+  /** The typed force reason (red only); empty stays absent → server normalizes `override:no-reason`. */
+  reason?: string
 }
 
 /**
@@ -397,9 +428,11 @@ export interface SessionArchiveConfirmInjected {
   /**
    * Archive a Session after the Host stops its running work; resolves once
    * the archive set is durable (the stops settle in the background) and
-   * raises the stopped-and-archived notice.
+   * raises the stopped-and-archived notice. A request-raising seal verdict
+   * (and the typed force reason) rides along as the post-success ledger
+   * write-back (FORK archive-seal-gate-ui-1028).
    */
-  stopAndArchiveSession: (sessionId: SessionId) => Promise<void>
+  stopAndArchiveSession: (sessionId: SessionId, options?: StopAndArchiveOptions) => Promise<void>
 }
 
 /** Fork action share. */
@@ -458,6 +491,12 @@ export interface RowToastActions {
   showArchived: () => void
   /** Open the fork source without retrying the fork. */
   openForkSource: (sessionId: SessionId) => void
+  /**
+   * Continue the archive the stale seal notice paused (FORK
+   * archive-seal-gate-ui-1028); `followUpCount` rides so a later
+   * confirmation still names the chatter count the notice showed.
+   */
+  continueSealedArchive: (sessionId: SessionId, followUpCount?: number) => void
 }
 
 /** Props of the rename dialog entry in `shell.overlay`. */

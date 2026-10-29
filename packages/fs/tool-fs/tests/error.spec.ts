@@ -24,8 +24,8 @@ describe('remediateFsError', () => {
     ]
     const remedied = sources.map(error => remediateFsError(error, 'x') as FsError)
     expect(remedied.map(error => error.message)).toEqual([
-      'cannot modify "x": file has not been read — read the file, then retry',
-      'cannot modify "x": file has not been read — read the file, then retry',
+      'cannot modify "x": has not been observed — read any window of the file, then retry',
+      'cannot modify "x": has not been observed — read any window of the file, then retry',
     ])
     expect(remedied.map(error => error.code)).toEqual(['FS_NOT_OBSERVED', 'FS_NOT_OBSERVED'])
     expect(remedied.map(error => error.cause)).toEqual(sources)

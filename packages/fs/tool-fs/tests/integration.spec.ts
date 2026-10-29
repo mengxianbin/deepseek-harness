@@ -47,7 +47,7 @@ function text(result: { content: { type: string; text?: string }[] }): string {
 }
 
 function notObservedDiagnostic(path: string): string {
-  return `Error: cannot modify "${path}": file has not been read — read the file, then retry`
+  return `Error: cannot modify "${path}": has not been observed — read any window of the file, then retry`
 }
 
 afterEach(async () => {
