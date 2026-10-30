@@ -23,7 +23,15 @@ export const zh = {
   'glance.mimoBalance.label': '余额',
   'glance.mimoBalance.stale': '陈旧，最后探测',
   'glance.refreshed': '数据刷新于',
-  'glance.trigger.hint': '≥85%：切 MiMo 官方',
+  // 双层口径（2026-10-24 裁定；线值随 2026-10-27 参数修订）：85% 只是 UI 预警红层，95/99 才是自动动作线。
+  'glance.trigger.hint': '≥85% 预警；95% 换新会话默认、99% 自动切换',
+  'glance.source.label': '源',
+  'glance.source.go': 'OpenCode Go',
+  'glance.source.mimo': 'MiMo 官方',
+  'glance.source.baseline': '常态',
+  'glance.source.triggered': '自动切换中',
+  'glance.source.decided': '最近决策',
+  'glance.source.defaults': '新会话默认',
 } satisfies Record<string, string>
 
 /** The sidebar namespace key union. */
@@ -52,5 +60,13 @@ export const en = {
   'glance.mimoBalance.label': 'Balance',
   'glance.mimoBalance.stale': 'stale, last probe',
   'glance.refreshed': 'Refreshed',
-  'glance.trigger.hint': '≥85%: switch to MiMo official',
+  // Double-layer ruling (2026-10-24; lines per the 2026-10-27 revision): 85% is the UI warning red, 95/99 the auto-action lines.
+  'glance.trigger.hint': '≥85% warn; default at 95%, switch at 99%',
+  'glance.source.label': 'Source',
+  'glance.source.go': 'OpenCode Go',
+  'glance.source.mimo': 'MiMo official',
+  'glance.source.baseline': 'Baseline',
+  'glance.source.triggered': 'Auto-switched',
+  'glance.source.decided': 'Decided',
+  'glance.source.defaults': 'New sessions default to',
 } satisfies Record<SidebarKey, string>

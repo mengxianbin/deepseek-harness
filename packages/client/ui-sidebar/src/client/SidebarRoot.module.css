@@ -905,6 +905,30 @@
   background: var(--dsw-alias-state-error-primary);
 }
 
+/* FORK (source-badge-redo-1030, redo of auto-route badge v3.5 66b78fb3aa,
+   2026-10-30): the current-source status dot — quiet secondary at baseline,
+   warn while the auto-router's policy sits in its triggered phase (it
+   switched the active session set to MiMo official). Sits left of the window
+   rows: a width-only addition, so the wide titlebar logo row's 40px height
+   budget (3 × 12px rows + 4px padding) stays intact. The tooltip spells
+   source, phase, the last decision time, and — while the default source
+   differs from the in-flight source (the 95–99 dead zone) — the new-session
+   default line. */
+.glanceSourceDot {
+  flex: none;
+  align-self: center;
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--dsw-alias-label-secondary);
+  opacity: 0.55;
+}
+
+.glanceSourceDotActive {
+  background: var(--dsw-alias-state-warn-primary);
+  opacity: 1;
+}
+
 /* FORK dsh-local (usage glance v2.3, 2026-10-22): the stats column stacks two
    labeled rows — a muted 10px locale label (今日 / 周期) beside a 12px compact
    total — in their own sub-column to the right of the window rows; the cycle
