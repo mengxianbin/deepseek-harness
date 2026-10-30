@@ -32,6 +32,8 @@ export const zh = {
   'glance.source.triggered': '自动切换中',
   'glance.source.decided': '最近决策',
   'glance.source.defaults': '新会话默认',
+  'glance.source.pollError': '控制器轮询异常',
+  'glance.source.frozen': 'dsh 已自动切至 MiMo 官方',
 } satisfies Record<string, string>
 
 /** The sidebar namespace key union. */
@@ -69,4 +71,6 @@ export const en = {
   'glance.source.triggered': 'Auto-switched',
   'glance.source.decided': 'Decided',
   'glance.source.defaults': 'New sessions default to',
+  'glance.source.pollError': 'Controller poll failing',
+  'glance.source.frozen': 'dsh auto-switched to MiMo official',
 } satisfies Record<SidebarKey, string>

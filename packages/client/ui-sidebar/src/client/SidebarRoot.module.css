@@ -905,15 +905,14 @@
   background: var(--dsw-alias-state-error-primary);
 }
 
-/* FORK (source-badge-redo-1030, redo of auto-route badge v3.5 66b78fb3aa,
-   2026-10-30): the current-source status dot — quiet secondary at baseline,
-   warn while the auto-router's policy sits in its triggered phase (it
-   switched the active session set to MiMo official). Sits left of the window
-   rows: a width-only addition, so the wide titlebar logo row's 40px height
-   budget (3 × 12px rows + 4px padding) stays intact. The tooltip spells
-   source, phase, the last decision time, and — while the default source
-   differs from the in-flight source (the 95–99 dead zone) — the new-session
-   default line. */
+/* FORK (source-badge-redo-1030 v2 "exception-only", 2026-10-30, on the user's
+   design call: a permanently-on dot is redundant while auto-routing is
+   healthy and steals width from the calibrated read-out columns): the dot
+   renders ONLY while it carries information the layout cannot — a failing
+   controller poll (error red) or the 95–99 dead zone (warn + the
+   new-session-default tooltip line). The triggered state speaks through the
+   dimmed rows instead (.glanceRowsFrozen); baseline renders nothing, byte
+   for byte the pre-badge layout. */
 .glanceSourceDot {
   flex: none;
   align-self: center;
@@ -927,6 +926,18 @@
 .glanceSourceDotActive {
   background: var(--dsw-alias-state-warn-primary);
   opacity: 1;
+}
+
+.glanceSourceDotError {
+  background: var(--dsw-alias-state-error-primary);
+  opacity: 1;
+}
+
+/* Triggered phase: the Go window rows stop describing dsh's live spend (the
+   active set moved to MiMo official) — dim them rather than adding chrome;
+   the button tooltip spells the switch. Width-only budget untouched. */
+.glanceRowsFrozen {
+  opacity: 0.5;
 }
 
 /* FORK dsh-local (usage glance v2.3, 2026-10-22): the stats column stacks two
