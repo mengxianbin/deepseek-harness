@@ -11,8 +11,12 @@
  * and the foot holds `sidebar.settings` plus `sidebar.footer.action`; the shell
  * hands them the wide flag (plus an expand request callback for the browser).
  * Low-frequency actions fold into the footer ⋯ menu through
- * `sidebar.more.action` (user ruling sidebar-footer-ui-1026); the collapsed
- * rail — which has no ⋯ menu — keeps them in the foot.
+ * `sidebar.more.action` (user ruling sidebar-footer-ui-1026). FORK
+ * rail-more-sync-1030 (2026-10-30 用户裁定): the collapsed rail hosts the
+ * SAME ⋯ menu as the wide foot — its per-panel icon column and its foot's
+ * action rows are gone, so the rail mirrors the wide layout's folded entries
+ * instead of outlisting them (the rail keeps only its New Session icon on top
+ * of the menu anchor).
  *
  * The column also owns whether the scroll regions nested in it draw a
  * scrollbar at all: the shell tracks the pointer and rebinds ui-theme's
@@ -25,10 +29,10 @@ import {
   FishLogo, IconEllipsisOutlineRegular, IconNewChatOutlineMedium, IconNewChatOutlineRegular,
   IconPanelLeftOutlineRegular, IconUserOutlineMedium, isDarwinDesktop, Menu, ShortcutKeys, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { InjectFace, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { InjectFace, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {
-  SidebarPanelMetadata, SidebarRootComponentProps, SidebarRootInjected, SidebarSectionOwnerProps,
+  SidebarPanelMetadata, SidebarRootComponentProps, SidebarRootInjected,
 } from './contract/slots.ts'
 import { UsageGlance } from './UsageGlance.tsx'
 import { FIXED_PANEL_ID } from './panel-pins.ts'
@@ -45,46 +49,10 @@ const COLLAPSE_SETTLE_MS = 150
  */
 const SCROLLBAR_LINGER_MS = 2000
 
-type PanelRowProps =
-  Pick<SidebarPanelMetadata, 'id' | 'label'>
-  & Pick<SidebarSectionOwnerProps, 'wide'>
-  & Pick<PropsRuntime<'sidebar'>, 'usePanelInfo'>
-  & Pick<InjectFace<SidebarRootInjected>, 'selectPanel' | 'trackEntryClick'>
-  & PropsRenderSlots<'sidebar.panellist'>
-
 /** Analytics category of an official panel; other panels are never reported. */
 function officialEntry(id: string): 'plugin' | 'cron' | undefined {
   if (id === 'plugins') return 'plugin'
   return id === 'schedules' ? 'cron' : undefined
-}
-
-/** Each panel row subscribes only to its own selection state. */
-function PanelRow({ id, label, wide, usePanelInfo, selectPanel, trackEntryClick, renderSlot }: PanelRowProps) {
-  const active = usePanelInfo(info => info.activePanelId === id)
-  return (
-    <Tooltip label={label} delayMs={500} disabled={wide}>
-      <button
-        type="button"
-        className={clsx(css.panelRow, active && css.panelActive)}
-        aria-label={label}
-        aria-current={active ? 'page' : undefined}
-        onClick={() => {
-          const entry = officialEntry(id)
-          if (entry !== undefined) trackEntryClick({ menu_name: entry, position: 'sidebar' })
-          selectPanel(id)
-        }}
-      >
-        <span className={css.panelGlyph} aria-hidden="true">
-          {renderSlot('sidebar.panellist', { size: wide ? 16 : 18, active }, { only: id })}
-        </span>
-        {wide && (
-          <span className={clsx(css.panelTitle, css.wide)}>
-            {label}
-          </span>
-        )}
-      </button>
-    </Tooltip>
-  )
 }
 
 type PanelMoreProps =
@@ -97,6 +65,14 @@ type PanelMoreProps =
   & {
     /** Whether the ⋯-menu action seat has registrants (draws the group separator). */
     readonly hasMoreActions: boolean
+  }
+  & {
+    /**
+     * Anchor placement: the wide foot row, or the collapsed rail's top seat
+     * (FORK rail-more-sync-1030) — the menu body is identical, only the
+     * anchor's row geometry and tooltip side differ.
+     */
+    readonly rail: boolean
   }
 
 /** The New Session row's menu id (an action, not a registered main panel). */
@@ -119,10 +95,11 @@ const MIMO_RELOGIN_PAGE = '/api/mimo-relogin/page'
  * the session list — New Session (round 2: the wide capsule is folded in
  * here as the head row, sessions are opened from a workspace anyway) and the
  * low-frequency global panels (plugins, schedules, task board) live behind
- * this control instead of owning rows above the browsing region. The
- * collapsed rail keeps both its New Session icon and its per-panel icon
- * column, so rail reachability is unchanged. Panel glyphs still come from
- * each entry's own `sidebar.panellist` registration.
+ * this control instead of owning rows above the browsing region. FORK
+ * rail-more-sync-1030: the collapsed rail anchors this same menu (its old
+ * per-panel icon column is retired), so both states list identical entries;
+ * the rail keeps only its New Session icon above the anchor. Panel glyphs
+ * still come from each entry's own `sidebar.panellist` registration.
  *
  * rc.3 merge (2026-10-24): upstream's navigation-entry customization lands
  * here instead of a nav-row More launcher — the menu keeps FULL panel
@@ -131,6 +108,12 @@ const MIMO_RELOGIN_PAGE = '/api/mimo-relogin/page'
  * entirely), reports official-entry clicks as `sidebar_more`, and renders
  * the `sidebar.panellist.actions` registrations (entry-customization's
  * Install/Create plugin rows) after the data rows when any exist.
+ *
+ * FORK rail-more-sync-1030 (2026-10-30 用户裁定): the collapsed rail renders
+ * this SAME menu from its own anchor (rail top, under New Session) — the
+ * rail's per-panel icon column and foot action rows are retired so both
+ * states list identical entries through one component. The menu body is
+ * state-independent; only the anchor's placement differs.
  *
  * FORK mimo-login-cta moved (2026-10-30 用户指示): the standing MiMo
  * re-login entry — formerly the balance row's inline `重新登录` link — leads
@@ -143,7 +126,8 @@ const MIMO_RELOGIN_PAGE = '/api/mimo-relogin/page'
  * @returns the ⋯ anchor with its menu.
  */
 function PanelMore({
-  panels, unpinned, hasEntryActions, hasMoreActions, usePanelInfo, selectPanel, startSession, setPinned, trackEntryClick, renderSlot, t,
+  panels, unpinned, hasEntryActions, hasMoreActions, rail,
+  usePanelInfo, selectPanel, startSession, setPinned, trackEntryClick, renderSlot, t,
 }: PanelMoreProps) {
   const [open, setOpen] = useState(false)
   const activePanelId = usePanelInfo(info => info.activePanelId)
@@ -198,10 +182,12 @@ function PanelMore({
       portal
       dense
       // FORK (sidebar-layout round 3c): the flex item is this anchor WRAPPER
-      // span, not the trigger button — the row order must ride it.
-      className={css.panelMoreSlot}
+      // span, not the trigger button — the row order must ride it. The rail
+      // anchor (rail-more-sync-1030) swaps the foot-row order pin for the
+      // rail stack's own geometry (SidebarRoot.module.css .panelMoreSlot).
+      className={clsx(css.panelMoreSlot, rail && css.panelMoreRail)}
       anchor={(
-        <Tooltip label={t('panels.more')} delayMs={500}>
+        <Tooltip label={t('panels.more')} delayMs={500} {...(rail ? { side: 'right' as const } : {})}>
           <button
             type="button"
             className={clsx(css.iconButton, css.panelMore)}
@@ -437,26 +423,27 @@ export function SidebarRoot({
           </button>
         </Tooltip>
       )}
-      {/* FORK dsh-local (sidebar-layout): wide renders no top panel rows —
-          the region below owns the reclaimed height; the rail keeps its
-          per-panel icon column, entered at collapse settle as before.
-          rc.3 merge: the rail column honors entry pins (plugins is fixed),
-          mirroring upstream's launcher filtering. */}
-      {!wide && panels.length > 0 && (
-        <nav className={css.panelList} aria-label={t('panels.label')}>
-          {panels.filter(({ id }) => id === FIXED_PANEL_ID || !unpinned.includes(id)).map(({ id, label }) => (
-            <PanelRow
-              key={id}
-              id={id}
-              label={label}
-              wide={wide}
-              usePanelInfo={usePanelInfo}
-              selectPanel={selectPanel}
-              trackEntryClick={trackEntryClick}
-              renderSlot={renderSlot}
-            />
-          ))}
-        </nav>
+      {/* FORK rail-more-sync-1030 (2026-10-30 用户裁定): the rail's per-panel
+          icon column is RETIRED — the rail anchors the same ⋯ menu the wide
+          foot renders, so both states list identical entries through one
+          component. rc.3 pins had already stopped filtering this launcher;
+          with the column gone the pin list no longer shapes any rail
+          surface. */}
+      {!wide && (
+        <PanelMore
+          panels={panels}
+          unpinned={unpinned}
+          hasEntryActions={hasEntryActions}
+          hasMoreActions={moreActions.length > 0}
+          rail
+          usePanelInfo={usePanelInfo}
+          selectPanel={selectPanel}
+          startSession={startSession}
+          setPinned={setPinned}
+          trackEntryClick={trackEntryClick}
+          renderSlot={renderSlot}
+          t={t}
+        />
       )}
 
       {/* The browsing region fills the column between the controls and the
@@ -474,8 +461,9 @@ export function SidebarRoot({
           pairing + remote access moved INTO the ⋯ menu). The dsh-usage glance
           card is removed (usage-glance ruling, 2026-10-15): the plan cycle
           pair now lives in the logo row beside the whale mark (UsageGlance),
-          so nothing injects above this row. The rail keeps its original stack
-          and folds the ⋯-menu actions into the foot (no ⋯ menu on the rail). */}
+          so nothing injects above this row. FORK rail-more-sync-1030: the
+          rail foot no longer renders the ⋯-menu action seat either — the
+          rail's ⋯ anchor (top) hosts those rows in its menu, same as wide. */}
       <div className={css.footArea}>
         {wide
           ? (
@@ -491,6 +479,7 @@ export function SidebarRoot({
                 unpinned={unpinned}
                 hasEntryActions={hasEntryActions}
                 hasMoreActions={moreActions.length > 0}
+                rail={false}
                 usePanelInfo={usePanelInfo}
                 selectPanel={selectPanel}
                 startSession={startSession}
@@ -504,7 +493,6 @@ export function SidebarRoot({
           : (
             <>
               <div className={css.footerActions}>
-                {renderSlot('sidebar.more.action', { wide })}
                 {renderSlot('sidebar.footer.action', { wide })}
               </div>
               <div className={css.settingsArea}>

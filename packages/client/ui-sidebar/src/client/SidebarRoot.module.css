@@ -81,7 +81,10 @@
   margin-top: 6px;
 }
 
-:global([data-windows-titlebar]) .collapsed .panelList,
+/* FORK rail-more-sync-1030: the rail ⋯ anchor (.panelMoreSlot) joins the
+   hidden stack with the region and foot — the Windows caption collapse keeps
+   only the toggle and New Session in the caption row. */
+:global([data-windows-titlebar]) .collapsed .panelMoreSlot,
 :global([data-windows-titlebar]) .collapsed .regionArea,
 :global([data-windows-titlebar]) .collapsed .footArea {
   display: none;
@@ -155,9 +158,15 @@
    render stays static. */
 .railIn .iconButton,
 .railIn .newSession,
-.railIn .panelList,
+.railIn .panelMoreRail,
 .railIn .regionArea {
   animation: rail-in 150ms var(--ds-ease-in-out) backwards;
+}
+
+/* The rail ⋯ trigger is an .iconButton INSIDE the animated anchor wrapper —
+   animating both would stack the translation (wrapper + child both shift). */
+.railIn .panelMoreRail .iconButton {
+  animation: none;
 }
 
 .railIn .footArea {
@@ -526,97 +535,6 @@
   }
 }
 
-.panelList {
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-bottom: 8px;
-}
-
-/* Panel entries use a 3px paint inset, the New Session bar's 12px radius,
-   the session rows' hover/selected fill, and the primary ink. */
-.panelRow {
-  display: flex;
-  align-items: center;
-  gap: var(--dsh-sidebar-label-gap);
-  margin: 0;
-  min-height: 36px;
-  padding: 7px calc(var(--dsh-sidebar-row-padding) - var(--dsh-sidebar-paint-inset));
-  box-sizing: border-box;
-  border: none;
-  border-inline: var(--dsh-sidebar-paint-inset) solid transparent;
-  border-radius: var(--dsw-radius-md);
-  background: transparent;
-  background-clip: padding-box;
-  color: var(--dsw-alias-label-primary);
-  font: inherit;
-  line-height: 22px;
-  text-align: left;
-  cursor: pointer;
-}
-
-@media (hover: hover) {
-  .panelRow:hover {
-    background-color: var(--dsw-alias-interactive-bg-hover);
-  }
-}
-
-.panelRow.panelActive {
-  background-color: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
-}
-
-.panelRow:focus-visible {
-  outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
-  outline-offset: -2px;
-}
-
-/* The More launcher keeps the panel rows' geometry inside the menu's anchor wrapper. */
-.moreAnchor {
-  display: flex;
-  flex-direction: column;
-}
-
-.panelRow[aria-expanded='true'] {
-  background-color: var(--dsw-alias-interactive-bg-hover);
-}
-
-.moreMenu {
-  width: 288px;
-  max-width: calc(100vw - 24px);
-}
-
-.panelGlyph {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.panelTitle {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.collapsed .panelList {
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.collapsed .panelRow {
-  width: 36px;
-  height: 36px;
-  justify-content: center;
-  margin: 0;
-  border-inline: 0;
-  background-clip: border-box;
-  padding: 0;
-  color: var(--dsw-alias-label-primary);
-}
-
 /* Region seat: always mounted so the foot never moves. Its trailing margin
    cancels the wide shell inset so the nested scrollbar can sit at the sidebar
    edge; the browser restores that inset inside its own rows. */
@@ -698,6 +616,17 @@
 
 .panelMore {
   flex: none;
+}
+
+/* FORK rail-more-sync-1030: the collapsed rail's ⋯ anchor wrapper — a plain
+   vertical-stack item under the New Session icon (the foot-row order pin
+   above only applies inside .footRow). The trigger button itself picks up
+   the rail's 36px icon geometry and primary ink from `.collapsed
+   .iconButton`. */
+.panelMoreRail {
+  display: flex;
+  flex: none;
+  margin-bottom: 12px;
 }
 
 /* FORK dsh-local (sidebar-footer-ui-1026): the ⋯-menu action seat renders
@@ -958,15 +887,14 @@
   background: var(--dsw-alias-state-error-primary);
 }
 
-/* FORK (source-badge-redo-1030, redo of auto-route badge v3.5 66b78fb3aa,
-   2026-10-30): the current-source status dot — quiet secondary at baseline,
-   warn while the auto-router's policy sits in its triggered phase (it
-   switched the active session set to MiMo official). Sits left of the window
-   rows: a width-only addition, so the wide titlebar logo row's 40px height
-   budget (3 × 12px rows + 4px padding) stays intact. The tooltip spells
-   source, phase, the last decision time, and — while the default source
-   differs from the in-flight source (the 95–99 dead zone) — the new-session
-   default line. */
+/* FORK (source-badge-redo-1030 v2 "exception-only", 2026-10-30, on the user's
+   design call: a permanently-on dot is redundant while auto-routing is
+   healthy and steals width from the calibrated read-out columns): the dot
+   renders ONLY while it carries information the layout cannot — a failing
+   controller poll (error red) or the 95–99 dead zone (warn + the
+   new-session-default tooltip line). The triggered state speaks through the
+   dimmed rows instead (.glanceRowsFrozen); baseline renders nothing, byte
+   for byte the pre-badge layout. */
 .glanceSourceDot {
   flex: none;
   align-self: center;
@@ -980,6 +908,18 @@
 .glanceSourceDotActive {
   background: var(--dsw-alias-state-warn-primary);
   opacity: 1;
+}
+
+.glanceSourceDotError {
+  background: var(--dsw-alias-state-error-primary);
+  opacity: 1;
+}
+
+/* Triggered phase: the Go window rows stop describing dsh's live spend (the
+   active set moved to MiMo official) — dim them rather than adding chrome;
+   the button tooltip spells the switch. Width-only budget untouched. */
+.glanceRowsFrozen {
+  opacity: 0.5;
 }
 
 /* FORK dsh-local (usage glance v2.3, 2026-10-22): the stats column stacks two
@@ -1034,7 +974,7 @@
   .fading > *,
   .railIn .iconButton,
   .railIn .newSession,
-  .railIn .panelList,
+  .railIn .panelMoreRail,
   .railIn .footArea,
   .railIn .regionArea,
   .glanceFill {

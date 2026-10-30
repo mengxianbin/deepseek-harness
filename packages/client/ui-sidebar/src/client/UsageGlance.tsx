@@ -90,22 +90,22 @@
  * replaying the user's own path — the shell owns the panel state and exposes
  * no service for it, so every step degrades silently.
  *
- * v3.5 current-source badge (FORK source-badge-redo-1030, 2026-10-30 — redo
- * of `66b78fb3aa` against the post-CTA-restructure master): a current-source
- * status dot rides left of the window rows — the badge for the auto-routing
- * controller (`dsh-auto-route`, ruling form 乙, live since 2026-10-30). It
- * reads the controller's own policy state at `GET /api/auto-route/status`
- * (same origin, same 60s cadence; a 404 — controller not installed — hides
- * it, so the badge degrades together with the feature), never the overview's
- * `current{provider,model,source}` — that is last-request-routing semantics
- * and would flap while both sources run. The dot is quiet secondary at
- * baseline and warn while the policy is triggered (the controller switched
- * the active set to MiMo official); its tooltip spells the source name, the
- * phase, the last decision time, and — while the policy's default source
- * differs from its in-flight source (the 95–99 dead zone, 2026-10-27
- * revision) — a `新会话默认` line (the 10-27 board row's two-leg-fork
- * polish). The dot is a width-only addition — the wide titlebar logo row's
- * 40px height budget (3 × 12px rows + 4px padding) stays untouched.
+ * v3.5 source indication, exception-only v2 (FORK source-badge-redo-1030,
+ * 2026-10-30 — redo of `66b78fb3aa` against the post-CTA-restructure master,
+ * then redesigned on the user's same-day design call: a permanently-on dot is
+ * redundant while auto-routing is healthy and it steals width from the
+ * calibrated read-out columns). The control reads the auto-routing
+ * controller's own policy state at `GET /api/auto-route/status` (same origin,
+ * same 60s cadence; a 404 — controller not installed — reads as nothing at
+ * all), never the overview's `current{provider,model,source}` — that is
+ * last-request-routing semantics and would flap while both sources run.
+ * Three states, zero chrome at rest: **failing poll** → a small error-red
+ * dot (the policy reads are stale — traffic may be stuck on the last
+ * switched side); **95–99 dead zone** (`defaultsSource` diverges from
+ * `effectiveSource`) → a warn dot whose tooltip adds the new-session-default
+ * line; **triggered** → no dot at all, the Go window rows simply dim (they
+ * stopped describing dsh's live spend) and the button tooltip spells the
+ * switch. Baseline + healthy renders the pre-badge layout untouched.
  * @module ui-sidebar/client/UsageGlance
  */
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
@@ -309,6 +309,8 @@ export interface SourceBadgeView {
   decidedAt?: number
   /** Default-model provider id, present only while it differs from the in-flight source (the 95–99 dead zone). */
   defaultsSource?: string
+  /** True while the controller's latest meter poll failed — the policy reads are stale. */
+  pollFailing?: boolean
 }
 
 /** The source name for the dot's tooltip (the raw id when the locale map lacks it). */
@@ -334,11 +336,12 @@ export function readSourceBadge(document_: unknown): SourceBadgeView | undefined
   if (typeof document_ !== 'object' || document_ === null) return undefined
   const policy = (document_ as { policy?: unknown }).policy
   if (typeof policy !== 'object' || policy === null) return undefined
-  const { effectiveSource, phase, lastDecisionAt, defaultsSource } = policy as {
+  const { effectiveSource, phase, lastDecisionAt, defaultsSource, lastPoll } = policy as {
     effectiveSource?: unknown
     phase?: unknown
     lastDecisionAt?: unknown
     defaultsSource?: unknown
+    lastPoll?: unknown
   }
   if (typeof effectiveSource !== 'string' || effectiveSource === '') return undefined
   return {
@@ -347,6 +350,9 @@ export function readSourceBadge(document_: unknown): SourceBadgeView | undefined
     ...(typeof lastDecisionAt === 'number' && Number.isFinite(lastDecisionAt) ? { decidedAt: lastDecisionAt } : {}),
     ...(typeof defaultsSource === 'string' && defaultsSource !== '' && defaultsSource !== effectiveSource
       ? { defaultsSource }
+      : {}),
+    ...(typeof lastPoll === 'object' && lastPoll !== null && (lastPoll as { ok?: unknown }).ok === false
+      ? { pollFailing: true }
       : {}),
   }
 }
@@ -768,6 +774,19 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
     : `${formatBalanceFigure(mimoBalance)}${mimoStale ? '*' : ''}`
   // The re-login CTA moved to the footer ⋯ menu (2026-10-30 用户指示, see the
   // module header); the stats column is readings-only again.
+  // Exception-only source indication (v2, 2026-10-30 用户设计裁定): a
+  // permanently-on dot is redundant while auto-routing is healthy and it
+  // steals width from the calibrated read-out columns. The dot renders ONLY
+  // while it carries information the layout cannot — a failing controller
+  // poll (error red: the policy reads are stale, traffic may be stuck on the
+  // last switched side) or the 95–99 dead zone (warn dot + the
+  // new-session-default tooltip line). The triggered state speaks through
+  // the dimmed Go rows instead — they stopped describing dsh's live spend —
+  // and the button tooltip spells the switch. Baseline + healthy renders
+  // nothing: the pre-badge layout, byte for byte.
+  const pollFailing = sourceBadge?.pollFailing === true
+  const frozen = sourceBadge?.triggered === true && !pollFailing
+  const badgeDot = sourceBadge !== undefined && (pollFailing || sourceBadge.defaultsSource !== undefined)
   // One tooltip for the whole column: every reading plus the refresh stamp
   // (the stamp stays off-screen; v2.2 spent a third line on it).
   const columnTitle = [
@@ -784,30 +803,37 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
         type="button"
         className={css.glanceButton}
         aria-label={t('glance.open')}
-        title={t('glance.open')}
+        title={frozen
+          ? `${t('glance.source.frozen')} · ${t('glance.open')}`
+          : t('glance.open')}
         onClick={() => { openUsageSection() }}
       >
         <span className={css.glanceBody}>
-          {sourceBadge === undefined
-            ? null
-            : (
+          {badgeDot
+            ? (
               <span
-                className={sourceBadge.triggered
-                  ? `${css.glanceSourceDot} ${css.glanceSourceDotActive}`
-                  : css.glanceSourceDot}
-                title={[
-                  `${t('glance.source.label')}: ${sourceBadgeName(t, sourceBadge.source)}`,
-                  t(sourceBadge.triggered ? 'glance.source.triggered' : 'glance.source.baseline'),
-                  ...(sourceBadge.decidedAt === undefined
-                    ? []
-                    : [`${t('glance.source.decided')} ${formatRefreshStamp(sourceBadge.decidedAt)}`]),
-                  ...(sourceBadge.defaultsSource === undefined
-                    ? []
-                    : [`${t('glance.source.defaults')}: ${sourceBadgeName(t, sourceBadge.defaultsSource)}`]),
-                ].join(' · ')}
+                className={pollFailing
+                  ? `${css.glanceSourceDot} ${css.glanceSourceDotError}`
+                  : `${css.glanceSourceDot} ${css.glanceSourceDotActive}`}
+                title={pollFailing
+                  ? [
+                    `${t('glance.source.label')}: ${sourceBadgeName(t, sourceBadge.source)}`,
+                    t('glance.source.pollError'),
+                  ].join(' · ')
+                  : [
+                    `${t('glance.source.label')}: ${sourceBadgeName(t, sourceBadge.source)}`,
+                    t(sourceBadge.triggered ? 'glance.source.triggered' : 'glance.source.baseline'),
+                    ...(sourceBadge.decidedAt === undefined
+                      ? []
+                      : [`${t('glance.source.decided')} ${formatRefreshStamp(sourceBadge.decidedAt)}`]),
+                    ...(sourceBadge.defaultsSource === undefined
+                      ? []
+                      : [`${t('glance.source.defaults')}: ${sourceBadgeName(t, sourceBadge.defaultsSource)}`]),
+                  ].join(' · ')}
               />
-            )}
-          <span className={css.glanceRows}>
+            )
+            : null}
+          <span className={frozen ? `${css.glanceRows} ${css.glanceRowsFrozen}` : css.glanceRows}>
             {windows.map((row) => {
               // The tick sits at the continuous elapsed share of the window;
               // the percent and the day/hour pair each hold their own

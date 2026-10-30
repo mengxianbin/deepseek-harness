@@ -711,8 +711,8 @@ describe('readSourceBadge — the policy-layer read (auto-route badge, v3.5)', (
     expect(readSourceBadge(OVERVIEW)).toBeUndefined()
   })
 
-  it('parses phase, source, and a finite decision stamp only', () => {
-    expect(readSourceBadge({ policy: { effectiveSource: 'mimo', phase: 'triggered', lastDecisionAt: 123 } }))
+  it('parses phase, source, a finite decision stamp, and the poll health only', () => {
+    expect(readSourceBadge({ policy: { effectiveSource: 'mimo', phase: 'triggered', lastDecisionAt: 123, lastPoll: { ok: true } } }))
       .toEqual({ source: 'mimo', triggered: true, decidedAt: 123 })
     expect(readSourceBadge({ policy: { effectiveSource: 'opencode-go', phase: 'baseline' } }))
       .toEqual({ source: 'opencode-go', triggered: false })
@@ -721,6 +721,13 @@ describe('readSourceBadge — the policy-layer read (auto-route badge, v3.5)', (
       .toEqual({ source: 'x', triggered: false })
     expect(readSourceBadge({ policy: { effectiveSource: 'deepseek-official', phase: 'other' } }))
       .toEqual({ source: 'deepseek-official', triggered: false })
+    // Poll health: only an explicit ok:false surfaces (missing/ok reads healthy-absent).
+    expect(readSourceBadge({ policy: { effectiveSource: 'mimo', phase: 'baseline', lastPoll: { ok: false, error: 'x' } } }))
+      .toEqual({ source: 'mimo', triggered: false, pollFailing: true })
+    expect(readSourceBadge({ policy: { effectiveSource: 'mimo', phase: 'triggered', lastPoll: { ok: true } } }))
+      .toEqual({ source: 'mimo', triggered: true })
+    expect(readSourceBadge({ policy: { effectiveSource: 'mimo', phase: 'triggered', lastPoll: {} } }))
+      .toEqual({ source: 'mimo', triggered: true })
   })
 
   it('keeps the default source only while it differs from the in-flight one (two-leg fork)', () => {
@@ -735,18 +742,39 @@ describe('readSourceBadge — the policy-layer read (auto-route badge, v3.5)', (
   })
 })
 
-describe('current-source badge (auto-route, v3.5)', () => {
+describe('current-source badge (auto-route, exception-only v2)', () => {
   /** The status route contract (host-only endpoint; loopback in production). */
   const STATUS_ROUTE = '/api/auto-route/status'
 
-  it('renders the dot at baseline and repaints it when the policy switches (closed-loop criterion)', async () => {
+  /** A healthy status document around the given policy block. */
+  const statusDoc = (policy: Record<string, unknown>): unknown => ({
+    ok: true,
+    service: 'dsh-auto-route',
+    policy,
+  })
+
+  it('renders nothing at baseline — the badge stays silent when nothing carries information', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
-    let status: unknown = {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => ({
+      status: 200,
       ok: true,
-      service: 'dsh-auto-route',
-      policy: { phase: 'baseline', effectiveSource: 'opencode-go', lastDecisionAt: NOW - 5_000 },
-    }
+      json: async () => (url === STATUS_ROUTE
+        ? statusDoc({ phase: 'baseline', effectiveSource: 'opencode-go', lastDecisionAt: NOW - 5_000, lastPoll: { at: NOW, ok: true } })
+        : OVERVIEW),
+    })))
+    const { container } = render(<UsageGlance t={t} />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    // No dot, no dim — the pre-badge layout byte for byte.
+    expect(container.querySelectorAll('[class*="glanceSourceDot"]')).toHaveLength(0)
+    expect(container.querySelector('[class*="glanceRowsFrozen"]')).toBeNull()
+    expect(screen.getByText('85%')).toBeTruthy()
+  })
+
+  it('dims the Go rows and spells the switch when the policy is triggered (no dot)', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+    let status: unknown = statusDoc({ phase: 'triggered', effectiveSource: 'mimo', lastDecisionAt: NOW, lastPoll: { at: NOW, ok: true } })
     vi.stubGlobal('fetch', vi.fn(async (url: string) => ({
       status: 200,
       ok: true,
@@ -754,23 +782,33 @@ describe('current-source badge (auto-route, v3.5)', () => {
     })))
     const { container } = render(<UsageGlance t={t} />)
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
-    const dot = () => container.querySelector('[class*="glanceSourceDot"]')
-    expect(dot()?.className).toContain('glanceSourceDot')
-    expect(dot()?.className).not.toContain('glanceSourceDotActive')
-    expect(dot()?.getAttribute('title')).toBe(
-      `${t('glance.source.label')}: ${t('glance.source.go')}`
-      + ` · ${t('glance.source.baseline')}`
-      + ` · ${t('glance.source.decided')} ${formatRefreshStamp(NOW - 5_000)}`,
-    )
-    // The controller's trigger edge (any window >= 0.99) flips the policy to
-    // mimo; the next cycle repaints the dot — the badge-change criterion of
-    // the auto-route closed loop, observed from the UI side.
-    status = { ok: true, service: 'dsh-auto-route', policy: { phase: 'triggered', effectiveSource: 'mimo', lastDecisionAt: NOW } }
+    // The triggered state speaks through the dimmed rows, never a dot.
+    expect(container.querySelectorAll('[class*="glanceSourceDot"]')).toHaveLength(0)
+    expect(container.querySelector('[class*="glanceRowsFrozen"]')).toBeTruthy()
+    const button = container.querySelector('button')
+    expect(button?.getAttribute('title')).toContain(t('glance.source.frozen'))
+    // The controller's restore edge (all windows < 0.95) brings the rows back.
+    status = statusDoc({ phase: 'baseline', effectiveSource: 'opencode-go', lastPoll: { at: NOW, ok: true } })
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
-    expect(dot()?.className).toContain('glanceSourceDotActive')
-    expect(dot()?.getAttribute('title')).toContain(t('glance.source.mimo'))
-    expect(dot()?.getAttribute('title')).toContain(t('glance.source.triggered'))
-    expect(dot()?.getAttribute('title')).toContain(t('glance.source.decided'))
+    expect(container.querySelector('[class*="glanceRowsFrozen"]')).toBeNull()
+    expect(button?.getAttribute('title')).not.toContain(t('glance.source.frozen'))
+  })
+
+  it('surfaces a red dot only while the controller poll fails', async () => {
+    // Real timers: waitFor's polling needs them (the cadence test above owns
+    // the fake-timer surface).
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (url === STATUS_ROUTE
+      ? { status: 200, ok: true, json: async () => statusDoc({ phase: 'baseline', effectiveSource: 'opencode-go', lastPoll: { at: NOW, ok: false, error: 'meter source unreachable: fetch failed' } }) }
+      : { status: 200, ok: true, json: async () => OVERVIEW })))
+    const { container } = render(<UsageGlance t={t} />)
+    expect(await screen.findByText('85%')).toBeTruthy()
+    const dot = container.querySelector('[class*="glanceSourceDot"]')
+    expect(dot?.className).toContain('glanceSourceDotError')
+    expect(dot?.getAttribute('title')).toBe(
+      `${t('glance.source.label')}: ${t('glance.source.go')} · ${t('glance.source.pollError')}`,
+    )
+    // A failing poll never dims the rows — the numbers are still the live Go truth.
+    expect(container.querySelector('[class*="glanceRowsFrozen"]')).toBeNull()
   })
 
   it('appends the new-session default line only while the default source differs (two-leg fork)', async () => {

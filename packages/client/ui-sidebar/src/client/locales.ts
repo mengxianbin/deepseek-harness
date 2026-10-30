@@ -6,7 +6,6 @@ export const zh = {
   'session.new.label': '新建会话',
   'toggle.open': '打开侧边栏',
   'toggle.collapse': '收起侧边栏',
-  'panels.label': '全局面板',
   'panels.more': '更多',
   'panels.mimoLogin': '登录MiMo',
   'glance.open': '打开使用统计',
@@ -33,6 +32,8 @@ export const zh = {
   'glance.source.decided': '最近决策',
   'glance.source.defaults': '新会话默认',
   'version.copied': '版本号复制成功',
+  'glance.source.pollError': '控制器轮询异常',
+  'glance.source.frozen': 'dsh 已自动切至 MiMo 官方',
 } satisfies Record<string, string>
 
 /** The sidebar namespace key union. */
@@ -44,7 +45,6 @@ export const en = {
   'session.new.label': 'New session',
   'toggle.open': 'Open sidebar',
   'toggle.collapse': 'Collapse sidebar',
-  'panels.label': 'Global panels',
   'panels.more': 'More',
   'panels.mimoLogin': 'Sign in to MiMo',
   'glance.open': 'Open usage statistics',
@@ -71,6 +71,8 @@ export const en = {
   'glance.source.decided': 'Decided',
   'glance.source.defaults': 'New sessions default to',
   'version.copied': 'Version copied',
+  'glance.source.pollError': 'Controller poll failing',
+  'glance.source.frozen': 'dsh auto-switched to MiMo official',
 } satisfies Record<SidebarKey, string>
 
 /** Japanese copy, checked against the English keys. */
@@ -79,7 +81,6 @@ export const ja = {
   'session.new.label': '新規セッション',
   'toggle.open': 'サイドバーを開く',
   'toggle.collapse': 'サイドバーを折りたたむ',
-  'panels.label': 'グローバルパネル',
   'panels.more': 'その他',
   'panels.mimoLogin': 'MiMoにログイン',
   'glance.open': '使用統計を開く',
@@ -105,6 +106,8 @@ export const ja = {
   'glance.source.decided': '最近の決定',
   'glance.source.defaults': '新規セッションの既定',
   'version.copied': 'バージョンをコピーしました',
+  'glance.source.pollError': 'コントローラーのポーリング異常',
+  'glance.source.frozen': 'dsh は自動で MiMo 公式に切り替わりました',
 } satisfies Record<keyof typeof en, string>
 
 /** Spanish dictionary, checked against the English keys. */
@@ -113,7 +116,6 @@ export const es = {
   'session.new.label': 'Nueva sesión',
   'toggle.open': 'Abrir barra lateral',
   'toggle.collapse': 'Contraer barra lateral',
-  'panels.label': 'Paneles globales',
   'panels.more': 'Más',
   'panels.mimoLogin': 'Iniciar sesión en MiMo',
   'glance.open': 'Abrir estadísticas de uso',
@@ -139,6 +141,8 @@ export const es = {
   'glance.source.decided': 'Decisión reciente',
   'glance.source.defaults': 'Valor por defecto en sesiones nuevas',
   'version.copied': 'Versión copiada',
+  'glance.source.pollError': 'Error de sondeo del controlador',
+  'glance.source.frozen': 'dsh cambió automáticamente a MiMo oficial',
 } satisfies Record<keyof typeof en, string>
 
 /** French dictionary, checked against the English keys. */
@@ -147,7 +151,6 @@ export const fr = {
   'session.new.label': 'Nouvelle séance',
   'toggle.open': 'Ouvrir la barre latérale',
   'toggle.collapse': 'Réduire la barre latérale',
-  'panels.label': 'Panneaux globaux',
   'panels.more': 'Plus',
   'panels.mimoLogin': 'Se connecter à MiMo',
   'glance.open': 'Ouvrir les statistiques d\'utilisation',
@@ -173,6 +176,8 @@ export const fr = {
   'glance.source.decided': 'Décision récente',
   'glance.source.defaults': 'Valeur par défaut des nouvelles séances',
   'version.copied': 'Version copiée',
+  'glance.source.pollError': 'Échec de l’interrogation du contrôleur',
+  'glance.source.frozen': 'dsh est passé automatiquement à MiMo officiel',
 } satisfies Record<keyof typeof en, string>
 
 /** German dictionary, checked against the English keys. */
@@ -181,7 +186,6 @@ export const de = {
   'session.new.label': 'Neue Sitzung',
   'toggle.open': 'Seitenleiste öffnen',
   'toggle.collapse': 'Seitenleiste einklappen',
-  'panels.label': 'Globale Bereiche',
   'panels.more': 'Mehr',
   'panels.mimoLogin': 'Bei MiMo anmelden',
   'glance.open': 'Nutzungsstatistik öffnen',
@@ -207,6 +211,8 @@ export const de = {
   'glance.source.decided': 'Letzte Entscheidung',
   'glance.source.defaults': 'Standard für neue Sitzungen',
   'version.copied': 'Version kopiert',
+  'glance.source.pollError': 'Controller-Abfrage fehlerhaft',
+  'glance.source.frozen': 'dsh hat automatisch auf MiMo offiziell umgeschaltet',
 } satisfies Record<keyof typeof en, string>
 
 /** Russian dictionary, checked against the English keys. */
@@ -215,7 +221,6 @@ export const ru = {
   'session.new.label': 'Новая сессия',
   'toggle.open': 'Открыть боковую панель',
   'toggle.collapse': 'Свернуть боковую панель',
-  'panels.label': 'Глобальные панели',
   'panels.more': 'Ещё',
   'panels.mimoLogin': 'Войти в MiMo',
   'glance.open': 'Открыть статистику использования',
@@ -241,6 +246,8 @@ export const ru = {
   'glance.source.decided': 'Последнее решение',
   'glance.source.defaults': 'По умолчанию для новых сессий',
   'version.copied': 'Версия скопирована',
+  'glance.source.pollError': 'Сбой опроса контроллера',
+  'glance.source.frozen': 'dsh автоматически переключился на официальный MiMo',
 } satisfies Record<keyof typeof en, string>
 
 /** Portuguese dictionary, checked against the English keys. */
@@ -249,7 +256,6 @@ export const pt = {
   'session.new.label': 'Nova sessão',
   'toggle.open': 'Abrir barra lateral',
   'toggle.collapse': 'Recolher barra lateral',
-  'panels.label': 'Painéis globais',
   'panels.more': 'Mais',
   'panels.mimoLogin': 'Entrar no MiMo',
   'glance.open': 'Abrir estatísticas de uso',
@@ -275,4 +281,6 @@ export const pt = {
   'glance.source.decided': 'Decisão recente',
   'glance.source.defaults': 'Padrão de novas sessões',
   'version.copied': 'Versão copiada',
+  'glance.source.pollError': 'Falha na sondagem do controlador',
+  'glance.source.frozen': 'dsh mudou automaticamente para MiMo oficial',
 } satisfies Record<keyof typeof en, string>
