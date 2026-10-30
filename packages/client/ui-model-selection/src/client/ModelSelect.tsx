@@ -39,6 +39,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ModelLabelOwner, ModelSelectInjected } from './slots.ts'
+import { forgetModelEffort, modelEffortFor, rememberModelEffort } from './effort-memory.ts'
 import css from './ModelSelect.module.css'
 import { orderModelProviders } from './provider-order.ts'
 
@@ -402,11 +403,22 @@ export function ModelSelect(
       closeAfterSelection()
       return
     }
-    submit(selection)
+    // Per-model effort memory: switching restores the level this route was
+    // last explicitly set to (validated against its current vocabulary, so a
+    // foreign provider's ids never ride along); an untouched route submits
+    // bare and the Host resolves its model default.
+    const target = groups.find(group => group.id === selection.provider)
+      ?.models.find(model => model.id === selection.model)
+    const remembered = modelEffortFor(selection.provider, selection.model, target?.reasoning)
+    submit(remembered === undefined ? selection : { ...selection, reasoningEffort: remembered })
   }
 
   const chooseEffort = (effort: string | undefined): void => {
     if (state.current === null) return
+    // The effort pane is the only writer of the memory: an explicit level is
+    // remembered for this route; re-picking Provider default forgets it.
+    if (effort === undefined) forgetModelEffort(state.current.provider, state.current.model)
+    else rememberModelEffort(state.current.provider, state.current.model, effort)
     if (effectiveEffort === effort) {
       closeAfterSelection()
       return
