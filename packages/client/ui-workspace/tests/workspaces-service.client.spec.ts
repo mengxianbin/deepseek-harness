@@ -1431,6 +1431,47 @@ describe('UiWorkspaceService', () => {
     })
   })
 
+  it('keeps an explicit creation failure visible after a failed startup and a catalog update', async () => {
+    // FORK dsh-local (blank-restore-lazy-a-1026, 0.2.2-alpha.2): a selectionless
+    // startup now settles into the empty state and never pre-creates a blank, so
+    // it cannot fail-and-warn on its own. The "failed startup" premise is driven
+    // via a saved blank instead — the explicit-creation-failure visibility this
+    // test guards is unchanged.
+    persistSelection({ sessionId: sid('blank') })
+    const startupFailure = new Error('startup failed')
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const creating = Promise.withResolvers<undefined>()
+    const created = Promise.withResolvers<SessionId>()
+    const b = bench({
+      sessions: sessionState([summary('blank', { blank: true, cwd: '/w/a' })]),
+      workspaces: workspaceState([workspace('a', [sid('blank')])]),
+      configureSessions: (sessions) => {
+        sessions.create.mockRejectedValueOnce(startupFailure).mockImplementationOnce(() => {
+          creating.resolve(undefined)
+          return created.promise
+        })
+      },
+    })
+    await vi.waitFor(() => {
+      expect(warning).toHaveBeenCalledExactlyOnceWith('initial Session restoration failed:', startupFailure)
+    })
+
+    b.uiWorkspace.startSession(wid('a'))
+    await creating.promise
+    b.sessions.list.set(sessionState([summary('creating', { blank: true, cwd: '/w/a' })]))
+    created.reject(new Error('creation refused'))
+
+    await vi.waitFor(() => {
+      expect(b.notify).toHaveBeenCalledExactlyOnceWith({ kind: 'createFailed', message: 'creation refused' })
+    })
+    expect(b.sessions.create).toHaveBeenCalledTimes(2)
+    expect(b.sessions.retain).not.toHaveBeenCalled()
+    expect(warning.mock.calls).toEqual([
+      ['initial Session restoration failed:', startupFailure],
+      ['new session failed:', expect.any(Error)],
+    ])
+  })
+
   it('settles empty startup without creating a Session on later catalog updates', () => {
     const b = bench({ sessions: sessionState(), workspaces: workspaceState() })
     b.workspaces.list.set(workspaceState([workspace('a')]))

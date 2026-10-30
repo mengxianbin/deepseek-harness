@@ -67,6 +67,9 @@
     },
     {
       "path": "../../util/workspace-path"
+    },
+    {
+      "path": "../../core/tool-executor-ptc"
     }
   ]
 }

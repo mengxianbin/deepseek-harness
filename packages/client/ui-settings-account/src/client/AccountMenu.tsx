@@ -47,7 +47,11 @@ export function AccountMenu({
   useEffect(() => subscribeModelSignInRequired?.(() => { setSignInNotice(value => value + 1) }), [subscribeModelSignInRequired])
   const [expiryNotice, setExpiryNotice] = useState(false)
   useEffect(() => subscribeSessionExpired?.(() => { setExpiryNotice(true) }), [subscribeSessionExpired])
-  return <div ref={anchor} className={css.root}>
+  // FORK (settings-launcher): the base More-menu machinery (profile label,
+  // open/busy state, requestSignOut/beginSignIn) left with the menu. Upstream
+  // (0.2.2) insets the root while signed in on the wide foot; the gear keeps
+  // that attribute.
+  return <div ref={anchor} className={css.root} data-inset={signedIn && wide}>
     {signInNotice > 0 && <Toast key={signInNotice} text={t('modelSignInRequired')} onDone={() => { setSignInNotice(0) }} />}
     {expiryNotice && <Toast text={t('sessionExpired')} onDone={() => { setExpiryNotice(false) }} />}
     {signedIn && !account.desktopOnboardingVisible && !account.onboarding && account.notices && <AccountNoticeStack

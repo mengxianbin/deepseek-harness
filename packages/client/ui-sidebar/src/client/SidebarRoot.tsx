@@ -227,6 +227,7 @@ export function SidebarRoot({
   selectPanel,
   setPinned,
   trackEntryClick,
+  useRemoteAccess,
   usePanels,
   useEntryPins,
   useEntryActions,
@@ -242,6 +243,8 @@ export function SidebarRoot({
   const moreActions = useMoreActions(snapshot => snapshot)
   const shortcut = useShortcuts(rows => rows.find(row => row.id === 'sidebar.left.toggle'))
   const newShortcut = useShortcuts(rows => rows.find(row => row.id === 'session.new'))
+  // A page whose access snapshot excludes starting a Session offers no New Session affordance.
+  const canStartSession = useRemoteAccess('session/create')
   const toggleLabel = collapsed ? t('toggle.open') : t('toggle.collapse')
   // Wide content stays mounted while the collapse animates (fading via
   // .collapsed .wide), unmounts at settle, and remounts right away on expand.
@@ -385,8 +388,9 @@ export function SidebarRoot({
           FORK dsh-local (sidebar-layout round 2): the wide non-darwin capsule is folded into
           the footer ⋯ menu (head row) — sessions are opened from a workspace anyway; macOS
           keeps its capsule (its wordmark is window-drag surface, not a button), and the rail
-          keeps its icon. */}
-      {(!wide || darwinDesktop) && (
+          keeps its icon. Upstream rc: the access snapshot gates the control — no
+          `session/create`, no New Session affordance in either state. */}
+      {canStartSession && (!wide || darwinDesktop) && (
         <Tooltip label={t('session.new.label')} shortcutKeys={newShortcut?.keys} delayMs={500} side={captionTooltipSide} disabled={wide}>
           <button
             type="button"

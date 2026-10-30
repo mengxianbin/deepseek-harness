@@ -102,7 +102,7 @@ function setPageUrl(url: string): void {
 describe('ui-settings-general apply', () => {
   it('declares the services it uses', () => {
     expect(inject).toEqual([
-      'slots', 'locale', 'connection', 'remote', 'remote.settings', 'configForms', 'shortcuts', 'modules', 'uiSession',
+      'slots', 'locale', 'connection', 'remote', 'remote.settings', 'configForms', 'shortcuts', 'modules', 'uiSession', 'remoteAccess',
     ])
   })
 

@@ -42,9 +42,9 @@ import {
 } from './contract/slots.ts'
 import { createQuestionDraftStore } from './draft-store.ts'
 import { QuestionComposer } from './QuestionComposer.tsx'
-import { questionReplyDefinition } from './question-reply.ts'
+import { answeredQuestionDefinition, questionReplyDefinition } from './question-reply.ts'
 import { QuestionReplyView } from './QuestionReplyView.tsx'
-import { en, zh, type QuestionKey } from './locales.ts'
+import { en, ja, es, fr, de, ru, pt, zh, type QuestionKey } from './locales.ts'
 
 export type {
   AnswerTriggerSurface, PendingQuestion, PlanReview, QuestionAnswer, QuestionComposerProps, QuestionWait,
@@ -385,7 +385,7 @@ function publishContinuedQuestions(ctx: ClientContext, cards: QuestionCards): ()
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
-  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-user-questions: dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, { zh, en, ja, es, fr, de, ru, pt }), 'ui-user-questions: dictionaries')
   const questionDraftStore = createQuestionDraftStore()
   const inputTriggers = ctx.get('inputTriggers') as InputTriggerServiceContract
   const sessions = ctx.sessions
@@ -453,6 +453,7 @@ export function apply(ctx: ClientContext): void {
     QuestionComposer,
   ))
   ctx.uiConversation.events.register(questionReplyDefinition)
+  ctx.uiConversation.events.register(answeredQuestionDefinition)
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
     name: 'conversation.chat.node',
     key: 'question-reply',

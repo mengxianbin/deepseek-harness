@@ -12,6 +12,8 @@ import { createUserMessage, MessageId, type UserMessage } from '@deepseek-ai/dsh
 import { NonEmptyToolCallIdError, SessionStore, SessionId, type Session } from '@deepseek-ai/dsh-session'
 
 const SIGNAL = new AbortController().signal
+/** Pre-step now carries the committed model selection; the notice path only needs a well-formed one. */
+const MODEL = { provider: 'mock-provider', model: 'mock-model' }
 const INPUT = createUserMessage({
   content: [{ type: 'text', text: 'continue' }],
   source: { kind: 'user' },
@@ -24,6 +26,9 @@ async function createHarness() {
   // Store-attached so appends publish `session/event` (bare Session.create does not).
   const session = ctx.sessions.prepare(SessionId('degradation-notice'))
   ctx.sessions.enter(session)
+  // Append now refuses a session whose `session/created` has not completed, so
+  // the harness publishes it before the notice path appends anything.
+  ctx.sessions.announce(session)
   const agent = { session } as Agent
   const dispose = installDegradationNotice(ctx, session)
   return { agent, ctx, dispose, session }
@@ -50,7 +55,7 @@ function settleMessage(session: Session) {
 async function preStep(ctx: Context, agent: Agent) {
   return agentEvents(ctx, agent).waterfall(
     'agent/pre-step',
-    { turn: 2, step: 1, messages: [INPUT], signal: SIGNAL },
+    { turn: 2, step: 1, messages: [INPUT], signal: SIGNAL, modelSelection: MODEL },
     () => Promise.resolve({ kind: 'enter' as const, messages: [INPUT] }),
   )
 }
@@ -133,7 +138,7 @@ describe('installDegradationNotice()', () => {
     }
     const rejected = await agentEvents(ctx, agent).waterfall(
       'agent/pre-step',
-      { turn: 2, step: 1, messages: [], signal: SIGNAL },
+      { turn: 2, step: 1, messages: [], signal: SIGNAL, modelSelection: MODEL },
       () => Promise.resolve({ kind: 'reject' as const, messages: [] }),
     )
     expect(rejected.kind).toBe('reject')

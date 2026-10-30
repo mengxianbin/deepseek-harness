@@ -11,16 +11,14 @@
 - button "Copy"
 - status: Completed
 - button "Completed in {{duration}}" [disabled]
-- button "Analysis completed" [expanded]
+- button "Asked questions" [expanded]
 - button "Think The user wants me to ask them a checkpoint question first, then continue with whatever they interject. Let me do exactly that."
-- button "Ask question 1/1 answered" [expanded]
-- term: Ready to continue?
-- definition:
-  - list:
-    - listitem: "Yes"
-    - listitem: "No"
-- definition: "Yes"
-- button "Inspect"
+- button "Ask question 1/1 answered"
+- group "Questions and answers":
+  - term: Checkpoint Ready to continue?
+  - definition: "Yes"
+  - text: {{clock}}
+  - button "Copy"
 - text: "Interjection: include the word BANANA in your final reply. {{clock}}"
 - button "Copy"
 - text: "Interjection: include the word ORANGE in your final reply. {{clock}}"

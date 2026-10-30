@@ -94,7 +94,7 @@ it('rebuilds a fresh service from the bytes persisted at intake', async () => {
     const drafts = before.root.createDrafts(before.binding.session.sessionId, [
       new File([Uint8Array.of(137, 80, 78, 71)], 'shot.png', { type: 'image/png' }),
       new File([Uint8Array.of(1)], 'note.txt', { type: 'text/plain' }),
-    ])
+    ], false)
     await vi.waitFor(() => { expect(fake.rows('attachments')).toHaveLength(2) })
     // The rebuild's fiber teardown: this service forgets its registry and dies.
     await before.fiber.dispose()
@@ -126,7 +126,7 @@ it('releases the persisted bytes when the draft gives the attachment up', async 
     const before = await page()
     const [draft] = before.root.createDrafts(before.binding.session.sessionId, [
       new File([Uint8Array.of(1)], 'gone.png', { type: 'image/png' }),
-    ])
+    ], false)
     if (draft === undefined) throw new Error('draft missing')
     await vi.waitFor(() => { expect(fake.rows('attachments')).toHaveLength(1) })
     before.root.releaseDraftAttachment(draft.id)

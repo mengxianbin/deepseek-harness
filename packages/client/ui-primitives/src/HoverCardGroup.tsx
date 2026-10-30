@@ -18,10 +18,16 @@ export const HoverCardGroupContext = createContext<GroupState | null>(null)
  * @param props.className - classes for the physical list container.
  * @param props.containerRef - FORK dsh-local (session-watermark-fit, marker: fittedSessionWatermark): exposes the
  * physical list container for viewport measurement; upstream callers do not pass it.
+ * @param props.as - physical container tag; use span to preserve inline text layout.
  * @returns the list container and its private hover coordinator.
  */
 export function HoverCardGroup(
-  { children, className, containerRef }: { children: ReactNode; className?: string; containerRef?: Ref<HTMLDivElement> },
+  { children, className, as: Container = 'div', containerRef }: {
+    children: ReactNode
+    className?: string | undefined
+    as?: 'div' | 'span'
+    containerRef?: Ref<HTMLDivElement>
+  },
 ) {
   const [group] = useState<GroupState>(() => {
     let pointer: 'outside' | 'list' | 'card' = 'outside'
@@ -56,7 +62,7 @@ export function HoverCardGroup(
   })
   return (
     <HoverCardGroupContext.Provider value={group}>
-      <div
+      <Container
         className={className}
         ref={containerRef}
         onPointerOverCapture={(event) => {
@@ -71,7 +77,7 @@ export function HoverCardGroup(
         }}
       >
         {children}
-      </div>
+      </Container>
     </HoverCardGroupContext.Provider>
   )
 }

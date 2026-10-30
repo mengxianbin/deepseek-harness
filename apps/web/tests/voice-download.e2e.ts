@@ -12,6 +12,8 @@ import { newEnglishPage, selectGlobalPanel } from './support.ts'
 
 const bundle = fileURLToPath(new URL('../../../packages/experimental/voice-input-bundle', import.meta.url))
 const expected = fileURLToPath(new URL('./expected/voice-download.expected.md', import.meta.url))
+// The input-device picker on the same page shows its own alert when headless Chromium offers no microphone.
+const DOWNLOAD_ALERT = '[role="alert"]:has-text("Download source")'
 
 it('shows the failed asset, actual download source and recovery advice, then retries on request', async () => {
   const resources: { scaffold?: WebScaffold; browser?: Browser } = {}
@@ -46,14 +48,14 @@ it('shows the failed asset, actual download source and recovery advice, then ret
   await selectGlobalPanel(page, 'Plugins')
   await page.locator('[data-plugin-package="@deepseek-ai/dsh-experimental-voice-input-bundle"]').getByRole('button').click()
   await page.getByRole('button', { name: 'Download and prepare', exact: true }).click()
-  const alert = page.getByRole('alert')
+  const alert = page.getByRole('alert').filter({ hasText: 'Download source' })
   await alert.waitFor()
   expect(await alert.textContent()).toContain('HTTP 503')
   expect(await alert.textContent()).toContain(`Download source: ${origin}`)
   expect(requests).toHaveLength(1)
   expect(requests[0]).toContain('/resolve/2365baeacb507f821a0c8120fcee3d484dba7a07/model.int8.onnx')
   await compareOrRefreshGolden(expected,
-    (await captureStableAria(page, '[role="alert"]', scaffold.workspaceCwd)).replaceAll(origin, 'https://model-mirror.example'), webSnapshotMode())
+    (await captureStableAria(page, DOWNLOAD_ALERT, scaffold.workspaceCwd)).replaceAll(origin, 'https://model-mirror.example'), webSnapshotMode())
   status = 404
   await page.getByRole('button', { name: 'Retry preparation', exact: true }).click()
   await expect.poll(() => alert.textContent()).toContain('HTTP 404')
@@ -110,7 +112,7 @@ it.each([{ winner: 0, manual: false }, { winner: 1, manual: false }, { winner: 0
     await picker.waitFor()
     if (manual) await picker.selectOption(origins[winner]!)
     await page.getByRole('button', { name: 'Download and prepare', exact: true }).click()
-    const alert = page.getByRole('alert')
+    const alert = page.getByRole('alert').filter({ hasText: 'Download source' })
     await alert.waitFor()
     expect(downloads).toEqual(manual ? [winner] : [winner, 1 - winner])
     expect(requestedPaths).toHaveLength(manual ? 1 : 4)
@@ -120,7 +122,7 @@ it.each([{ winner: 0, manual: false }, { winner: 1, manual: false }, { winner: 0
     expect(await alert.textContent()).toContain(manual ? 'HTTP 503' : 'HTTP 502')
     expect(await alert.textContent()).toContain(`Download source: ${failedOrigin}`)
     await compareOrRefreshGolden(manual ? expected : fileURLToPath(new URL('./expected/voice-download-fallback.expected.md', import.meta.url)),
-      (await captureStableAria(page, '[role="alert"]', scaffold.workspaceCwd)).replaceAll(failedOrigin, manual ? 'https://model-mirror.example' : 'https://fallback-model-source.example'),
+      (await captureStableAria(page, DOWNLOAD_ALERT, scaffold.workspaceCwd)).replaceAll(failedOrigin, manual ? 'https://model-mirror.example' : 'https://fallback-model-source.example'),
       webSnapshotMode())
     expect(tripwire.pageErrors).toEqual([])
   })

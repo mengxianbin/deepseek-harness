@@ -15,7 +15,9 @@ import Loader from '@deepseek-ai/cordis-plugin-loader'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime, { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
+import { defineContentToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import * as unitScheduler from '@deepseek-ai/dsh-unit-scheduler'
 
 afterEach(() => { vi.restoreAllMocks() })
@@ -37,6 +39,7 @@ async function setup(config?: unitScheduler.Config) {
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(NativeToolExecutor)
   const fiber = config === undefined
     ? await ctx.plugin(unitScheduler)
     : await ctx.plugin(unitScheduler, config)
@@ -70,10 +73,8 @@ function instantTool(name: string) {
 /** Dispatch one call through the real pipeline, optionally keyed to an owner session. */
 function call(ctx: Context, name: string, session?: string) {
   return ctx.tools.execute({
-    callId: ToolCallId(`c${++callSeq}`),
-    name,
-    arguments: {},
     signal: new AbortController().signal,
+    calls: [{ type: 'tool-call', id: ToolCallId(`c${++callSeq}`), name, arguments: '{}' }],
     ...(session === undefined ? {} : { agent: agentOf(session) }),
   })
 }
@@ -120,7 +121,7 @@ describe('unit-scheduler slot gating (behavioral)', () => {
     // The single slot belongs to session-a; `job_output` must not queue for it.
     const raced = await within(call(ctx, 'job_output', 'session-a'), 1_000)
     expect(raced).not.toBe('late')
-    expect(raced).toMatchObject({ isError: false })
+    expect(raced).toMatchObject({ results: [{ result: { isError: false } }] })
 
     holder.releaseGate()
     await holding
@@ -141,7 +142,7 @@ describe('unit-scheduler slot gating (behavioral)', () => {
     // ...and get its slot once one is released.
     holder.releaseGate()
     await holding
-    expect(await within(pending, 2_000)).toMatchObject({ isError: false })
+    expect(await within(pending, 2_000)).toMatchObject({ results: [{ result: { isError: false } }] })
   })
 
   it('a queued call fails OPEN after waitTimeoutMs: released without a slot and logged', async () => {
@@ -158,7 +159,7 @@ describe('unit-scheduler slot gating (behavioral)', () => {
     const raced = await within(call(ctx, 'read', 'session-b'), 2_000)
     const elapsed = Date.now() - startedAt
     // Fail-open: the tool RAN (no slot) after the bounded wait, not before it.
-    expect(raced).toMatchObject({ isError: false })
+    expect(raced).toMatchObject({ results: [{ result: { isError: false } }] })
     expect(elapsed).toBeGreaterThanOrEqual(40)
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('unit-scheduler fail-open'))
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('read'))
@@ -216,8 +217,8 @@ describe('unit-scheduler slot gating (behavioral)', () => {
     ctx.tools.register(outer)
 
     const raced = await within(call(ctx, 'outer_tool', 'session-a'), 2_000)
-    expect(raced).toMatchObject({ isError: false })
-    expect(nested).toMatchObject({ isError: false })
+    expect(raced).toMatchObject({ results: [{ result: { isError: false } }] })
+    expect(nested).toMatchObject({ results: [{ result: { isError: false } }] })
     // Without the accounting offset the nested call would queue, time out and fail open.
     expect(warn).not.toHaveBeenCalled()
   })
@@ -233,10 +234,8 @@ describe('unit-scheduler slot gating (behavioral)', () => {
     await holder.started
     const controller = new AbortController()
     const pending = ctx.tools.execute({
-      callId: ToolCallId(`c${++callSeq}`),
-      name: 'shell-follower',
-      arguments: {},
       signal: controller.signal,
+      calls: [{ type: 'tool-call', id: ToolCallId(`c${++callSeq}`), name: 'shell-follower', arguments: '{}' }],
       agent: agentOf('session-b'),
     })
     await sleep(30)
@@ -259,7 +258,7 @@ describe('unit-scheduler slot gating (behavioral)', () => {
     await holder.started
     await fiber.dispose()
     // The listener is gone: this call must not queue for the occupied slot.
-    expect(await within(call(ctx, 'shell-after-dispose', 'session-b'), 1_000)).toMatchObject({ isError: false })
+    expect(await within(call(ctx, 'shell-after-dispose', 'session-b'), 1_000)).toMatchObject({ results: [{ result: { isError: false } }] })
 
     holder.releaseGate()
     await holding
@@ -278,7 +277,7 @@ describe('unit-scheduler configuration', () => {
     await holder.started
     holder.releaseGate()
     await holding
-    expect(await within(call(ctx, 'shell-no-config', 'session-a'), 2_000)).toMatchObject({ isError: false })
+    expect(await within(call(ctx, 'shell-no-config', 'session-a'), 2_000)).toMatchObject({ results: [{ result: { isError: false } }] })
   })
 
   it('derives the documented default budget from the machine', () => {
@@ -290,6 +289,7 @@ describe('unit-scheduler configuration', () => {
     const ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     await expect(async () => { await ctx.plugin(unitScheduler, { maxSlots: 0 }) }).rejects.toThrow(/maxSlots/)
   })
 })
@@ -309,11 +309,12 @@ describe('unit-scheduler real-load-path guard', () => {
     const ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     const loader = Object.create(Loader.prototype) as Loader
     const unwrapped = loader.unwrapExports(unitScheduler) as Parameters<Context['plugin']>[0]
     await ctx.plugin(unwrapped, { maxSlots: 1, maxSlotsPerSession: 1, waitTimeoutMs: 50 })
     ctx.tools.register(instantTool('probe').tool)
     const result = await call(ctx, 'probe', 'session-a')
-    expect(result).toMatchObject({ isError: false })
+    expect(result).toMatchObject({ results: [{ result: { isError: false } }] })
   })
 })

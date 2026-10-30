@@ -11,16 +11,17 @@
 - button "Copy"
 - status: Completed
 - button "Completed in {{duration}}" [expanded]
-- button "Analysis completed" [expanded]
+- button "Asked questions" [expanded]
 - button "Think The user wants me to use the ask_user_question tool with specific parameters. Let me do exactly that."
 - button "Ask question 1/1 answered" [expanded]
 - term: Which color do you prefer?
-- definition:
-  - list:
-    - listitem: Blue A cool recessive hue that reads as calm and trustworthy in long reading sessions and dense dashboards.
-    - listitem: Green A restful mid-spectrum hue with the highest perceived brightness, easiest on the eye over long sessions.
 - definition: Blue Include accessibility notes
 - button "Inspect"
+- group "Questions and answers":
+  - term: Pick one Which color do you prefer?
+  - definition: Blue, Include accessibility notes
+  - text: {{clock}}
+  - button "Copy"
 - button "Analysis completed" [expanded]
 - button "Think The user answered \"Blue\". I should now reply with the single word DONE and stop."
 - paragraph: DONE

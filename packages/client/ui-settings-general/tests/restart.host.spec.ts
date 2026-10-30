@@ -50,7 +50,8 @@ function fixture() {
     connection.browserPeer)
   const emitIndex = (): IndexInjection[] => {
     const table: IndexInjection[] = []
-    ctx.emit('webserver/index-inject', table)
+    // `webserver/index-inject` now carries the rendering Peer beside the table.
+    ctx.emit('webserver/index-inject', table, connection.browserPeer)
     return table
   }
   return { ctx, post, get, emitIndex }

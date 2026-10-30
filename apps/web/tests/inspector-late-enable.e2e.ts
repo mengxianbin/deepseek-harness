@@ -36,7 +36,8 @@ it('opens bottom DevTools after the Developer Tools bundle is enabled on an alre
   // FORK(replay-residual-1022): footer ⋯ 菜单路由替代宽态 nav（面板折入页脚 ⋯ 菜单后 nav 不再渲染）
   await selectGlobalPanel(page, 'Plugins')
   const plugins = page.locator('[data-plugin-panel]')
-  const toggle = plugins.getByRole('switch', { name: 'Enable Developer Tools', exact: true })
+  await plugins.getByRole('button', { name: 'More', exact: true }).click()
+  const toggle = plugins.getByRole('switch', { name: 'Enable Developer tools', exact: true })
   await toggle.waitFor()
   expect(await toggle.getAttribute('aria-checked')).toBe('false')
   const panel = page.locator('[data-inspector-panel]')
@@ -44,6 +45,10 @@ it('opens bottom DevTools after the Developer Tools bundle is enabled on an alre
 
   await toggle.click()
   await expect.poll(() => toggle.getAttribute('aria-checked'), { timeout: PLUGIN_TOGGLE_SETTLE_MS }).toBe('true')
+  // Enabling a More-page bundle also pins it to the main list.
+  await plugins.getByRole('button', { name: 'Back to plugins', exact: true }).click()
+  await plugins.locator('[data-plugin-group="extensions"]').getByRole('switch', { name: 'Enable Developer tools', exact: true }).waitFor()
+  expect(await toggle.getAttribute('aria-checked')).toBe('true')
   await panel.waitFor({ state: 'attached', timeout: 20_000 }).catch((error: unknown) => {
     throw new Error(`Bottom panel did not mount; ${BOOTSTRAP_PATH} responses: ${JSON.stringify(bootstraps)}`, { cause: error })
   })

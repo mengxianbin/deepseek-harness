@@ -6,7 +6,7 @@
 {"type":"turn/start","data":{"turn":1}}
 {"type":"agent/inbox/spliced","data":{"target":"next-turn","start":0,"removedCount":1,"inserted":[]}}
 {"type":"hook/invoked","data":{"turn":1,"point":"UserPromptSubmit","dialect":"claude-code","handlerId":"claude-code:UserPromptSubmit:1"}}
-{"type":"hook/result","data":{"turn":1,"point":"UserPromptSubmit","handlerId":"claude-code:UserPromptSubmit:1","decision":"pass","exitCode":1,"stderrSummary":"ParserError: \r\nLine |\r\n   1 |  �� t.UTF8Encoding]::new($false); echo 'blocked by policy hook' >&2; exit ��\r\n     |                                                                 ~\r\n     | �ض����������ȱ���ļ��淶��","durationMs":4.00729100000035}}
+{"type":"hook/result","data":{"turn":1,"point":"UserPromptSubmit","handlerId":"claude-code:UserPromptSubmit:1","decision":"pass","exitCode":1,"stderrSummary":"ParserError: \r\nLine |\r\n   1 |  �� t.UTF8Encoding]::new($false); echo 'blocked by policy hook' >&2; exit ��\r\n     |                                                                 ~\r\n     | Missing file specification after redirection operator.","durationMs":4.00729100000035}}
 {"type":"step/start","data":{"turn":1,"step":1}}
 {"type":"system/message","data":{"turn":1,"step":1,"message":{"role":"system","content":[{"type":"text","text":"{{system}}"}],"source":{"kind":"system-prompt"},"id":"{{message:2}}"}},"surfaceOp":"append"}
 {"type":"user/message","data":{"content":[{"type":"text","text":"Delete everything in the repo."}],"source":{"kind":"user"},"role":"user","id":"{{message:1}}"},"surfaceOp":"append"}

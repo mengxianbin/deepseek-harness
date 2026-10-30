@@ -26,6 +26,7 @@ afterEach(() => {
   delete document.documentElement.dataset.platform
   vi.unstubAllEnvs()
   vi.useRealTimers()
+  Reflect.deleteProperty(navigator, 'clipboard')
 })
 
 // The shell never reads the global hooks itself, but they ride the standard
@@ -151,6 +152,47 @@ describe('SidebarRoot shell', () => {
     expect(b.toggleSidebar).toHaveBeenCalledOnce()
   })
 
+  it('reports the collapsed rail New Session as a sidebar click outside the Windows caption', () => {
+    const b = mountShell({ collapsed: true, width: 56 })
+    fireEvent.click(screen.getByRole('button', { name: 'New session' }))
+    expect(b.startSession).toHaveBeenCalledOnce()
+    expect(b.trackEntryClick).toHaveBeenCalledExactlyOnceWith({ menu_name: 'new_session', position: 'sidebar' })
+  })
+
+  it('offers no New Session control while the access snapshot excludes session/create', () => {
+    const toggleSidebar = vi.fn()
+    const startSession = vi.fn()
+    const useRemoteAccess = vi.fn((action: string) => action !== 'session/create')
+    render(<SidebarRoot
+      collapsed={false} width={300}
+      useSessions={neverHook} useSessionStatus={useSessionStatus} useSessionRetainInfo={neverHook}
+      usePanelInfo={usePanelInfo} selectPanel={() => {}} usePanels={selector => selector([])} useEntryPins={selector => selector([])}
+      useEntryActions={selector => selector(false)} setPinned={vi.fn()}
+      useShortcuts={selector => selector([])}
+      useMoreActions={selector => selector([])}
+      useResource={useResource} useWorkspaces={neverHook}
+      {...allowAllAccess}
+      useRemoteAccess={useRemoteAccess}
+      startSession={startSession} toggleSidebar={toggleSidebar} trackEntryClick={vi.fn()} t={t}
+      renderSlot={((key: string) => {
+        if (key === 'sidebar.brand.mark') return <span data-testid="brand-mark">M</span>
+        if (key === 'sidebar.brand.name') return <span data-testid="brand-name">Brand</span>
+        return null
+      }) as SidebarRootComponentProps['renderSlot']}
+    />)
+
+    // Neither the brand-name seat nor any dedicated button starts a Session.
+    // FORK (usage glance v2): the wide row keeps the brand NAME occupant and
+    // never seats the mark, so the mark slot stays empty here.
+    expect(useRemoteAccess).toHaveBeenCalledWith('session/create')
+    expect(screen.queryByRole('button', { name: 'New session' })).toBeNull()
+    expect(screen.queryByTestId('brand-mark')).toBeNull()
+    expect(screen.getByTestId('brand-name')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
+    expect(toggleSidebar).toHaveBeenCalledOnce()
+    expect(startSession).not.toHaveBeenCalled()
+  })
+
   it('renders no brand surfaces when no package fills the slots', () => {
     vi.stubEnv('DSH_CLIENT_COMMIT_HASH', '0123456')
     vi.stubEnv('DSH_CLIENT_GIT_DIRTY', 'true')
@@ -271,17 +313,17 @@ describe('SidebarRoot shell', () => {
         : null) as SidebarRootComponentProps['renderSlot']}
     />)
     const toggle = screen.getByRole('button', { name: 'Open sidebar' })
-    fireEvent.mouseEnter(toggle)
+    fireEvent.pointerEnter(toggle)
     act(() => { vi.advanceTimersByTime(500) })
     expect(screen.getByRole('tooltip').textContent).toBe('Open sidebar')
     // The badge's own bubble replaces the toggle's rather than stacking on it,
     // even after the toggle's longer hover delay has elapsed.
-    fireEvent.mouseEnter(screen.getByTestId('badge'))
+    fireEvent.pointerEnter(screen.getByTestId('badge'))
     act(() => { vi.advanceTimersByTime(500) })
     expect(screen.getAllByRole('tooltip').map(bubble => bubble.textContent)).toEqual(['Update — V1.2.3'])
-    fireEvent.mouseLeave(screen.getByTestId('badge'), { relatedTarget: toggle })
+    fireEvent.pointerLeave(screen.getByTestId('badge'), { relatedTarget: toggle })
     expect(screen.getByRole('tooltip').textContent).toBe('Open sidebar')
-    fireEvent.mouseLeave(toggle)
+    fireEvent.pointerLeave(toggle)
     expect(screen.queryByRole('tooltip')).toBeNull()
   })
 })
@@ -300,9 +342,9 @@ it('keeps the macOS sidebar toggle in its top strip', () => {
 it('wires the shell.leading controls to the shared sidebar actions', () => {
   const toggleSidebar = vi.fn()
   const startSession = vi.fn()
-  const trackEntryClick = vi.fn<SidebarRootComponentProps['trackEntryClick']>()
-  // This occupant only consumes its two actions and locale, not Session hooks.
-  const props = { toggleSidebar, startSession, trackEntryClick, t, useShortcuts: select => select([{ id: 'sidebar.left.toggle' as ShortcutCommandId, label: 'Toggle sidebar', aliases: [], binding: null, modified: false, conflicts: [], issue: null, keys: ['⌘', 'B'], aria: 'Meta+B' }]) } as HeaderLeadingControlsProps
+  const trackEntryClick = vi.fn<HeaderLeadingControlsProps['trackEntryClick']>()
+  // This occupant only consumes its actions, the global access Hook, and locale, not Session hooks.
+  const props = { toggleSidebar, startSession, trackEntryClick, t, useRemoteAccess: allowAllAccess.useRemoteAccess, useShortcuts: select => select([{ id: 'sidebar.left.toggle' as ShortcutCommandId, label: 'Toggle sidebar', aliases: [], binding: null, modified: false, conflicts: [], issue: null, keys: ['⌘', 'B'], aria: 'Meta+B' }]) } as HeaderLeadingControlsProps
   render(<HeaderLeadingControls {...props} />)
   fireEvent.click(screen.getByRole('button', { name: en['toggle.open'] }))
   fireEvent.click(screen.getByRole('button', { name: en['session.new.label'] }))
@@ -310,13 +352,20 @@ it('wires the shell.leading controls to the shared sidebar actions', () => {
   expect(startSession).toHaveBeenCalledOnce()
   // rc.3 merge: the titlebar starter reports its own position.
   expect(trackEntryClick).toHaveBeenCalledExactlyOnceWith({ menu_name: 'new_session', position: 'titlebar' })
+  expect(trackEntryClick.mock.invocationCallOrder[0]).toBeLessThan(startSession.mock.invocationCallOrder[0]!)
+  cleanup()
+
+  // A page whose access snapshot excludes starting a Session keeps only the sidebar toggle.
+  render(<HeaderLeadingControls {...props} useRemoteAccess={action => action !== 'session/create'} />)
+  expect(screen.getByRole('button', { name: en['toggle.open'] })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: en['session.new.label'] })).toBeNull()
 })
 
 describe('Windows caption tooltips', () => {
   afterEach(() => { document.documentElement.removeAttribute('data-windows-titlebar') })
 
   const hover = (button: HTMLElement): void => {
-    fireEvent.mouseEnter(button)
+    fireEvent.pointerEnter(button)
     act(() => { vi.advanceTimersByTime(500) })
   }
 

@@ -1,7 +1,17 @@
 .root { flex: 1; min-width: 0; }
+/* Upstream (0.2.2): the root insets while the wide foot shows the signed-in
+   account seat. */
+.root[data-inset='true'] { margin-inline: 2px; }
 /* FORK dsh-local (settings-launcher): the launcher renders the standard settings
    trigger (figma sidebar foot, same box as the shell fallback: 42px row / 36px
-   rail) instead of the account More row. */
-.trigger { user-select: none; display: flex; align-items: center; width: 100%; height: 42px; gap: 8px; padding: 0 10px 0 8px; box-sizing: border-box; border: 0; border-radius: var(--dsw-radius-md); background: transparent; color: var(--dsw-alias-label-primary); font: inherit; font-size: 14px; line-height: 22px; overflow: hidden; cursor: pointer; }
-.trigger.rail { width: 36px; height: 36px; justify-content: center; gap: 0; padding: 0; }
-.trigger:hover { background: var(--dsw-alias-interactive-bg-hover); }
+   rail) instead of the account More row. The row rides upstream's sidebar
+   paint-inset contract (12px total inline inset = row-padding − paint-inset +
+   the transparent border the hover fill clips against), so it matches the
+   0.2.2 panel and settings rows; the base More-menu rules (.anchor, .avatar,
+   .label, [data-collapsed], [data-signed-out], .signedOutMenu) left with the
+   menu. */
+.trigger { user-select: none; display: flex; align-items: center; width: 100%; height: 42px; gap: 8px; padding: 0 calc(var(--dsh-sidebar-row-padding) - var(--dsh-sidebar-paint-inset)); box-sizing: border-box; border: 0; border-inline: var(--dsh-sidebar-paint-inset) solid transparent; border-radius: var(--dsw-radius-md); background: transparent; background-clip: padding-box; color: var(--dsw-alias-label-primary); font: inherit; font-size: 14px; line-height: 22px; overflow: hidden; cursor: pointer; }
+.trigger.rail { width: 36px; height: 36px; justify-content: center; gap: 0; padding: 0; border-inline: 0; background-clip: border-box; }
+@media (hover: hover) {
+  .trigger:hover { background-color: var(--dsw-alias-interactive-bg-hover); }
+}

@@ -14,6 +14,7 @@ import {
   RpcId,
   apply,
   inject,
+  Peer,
   type ClientRequest,
   type ConnectionConfig,
   type HostConnectionHandle,
@@ -21,6 +22,9 @@ import {
 } from '../src/index.ts'
 import { DEFAULT_MAX_REQUEST_BODY_BYTES } from '../src/http-bridge.ts'
 import { provideBrowserCredentials } from './browser-credentials.ts'
+
+/** The Peer an index render speaks for; this listener reads no field of it. */
+const PAGE_PEER = { principal: { kind: 'owner' } } as Parameters<WebServer['renderIndex']>[1]
 
 /** Structural webServer fake recording both route registries. */
 function fakeHttpServer(
@@ -32,7 +36,7 @@ function fakeHttpServer(
   return {
     host,
     protocol,
-    register(route) {
+    register(route: WebRoute) {
       if (routes.some(candidate => candidate.kind === route.kind && candidate.path === route.path)) {
         throw new Error(`duplicate route ${route.path}`)
       }
@@ -272,7 +276,7 @@ describe('connection node half', () => {
     const { ctx, dispose } = await mounted({ recovery: { generationReadyTimeoutMs: 25_000 } })
     try {
       const rows: IndexInjection[] = []
-      ctx.emit('webserver/index-inject', rows)
+      ctx.emit('webserver/index-inject', rows, PAGE_PEER)
       expect(rows).toEqual([{
         kind: 'global', name: '__DSH_CONNECTION_RECOVERY__', value: {
           backoffBaseMs: 500, backoffFactor: 2, backoffMaxMs: 10_000,
@@ -283,7 +287,7 @@ describe('connection node half', () => {
       }])
       await dispose()
       const after: IndexInjection[] = []
-      ctx.emit('webserver/index-inject', after)
+      ctx.emit('webserver/index-inject', after, PAGE_PEER)
       expect(after).toEqual([])
     } finally {
       await dispose()
@@ -299,7 +303,8 @@ describe('connection node half', () => {
     const { ctx, dispose } = await mounted(config)
     try {
       const rows: IndexInjection[] = []
-      ctx.emit('webserver/index-inject', rows)
+      // `webserver/index-inject` now carries the rendering Peer beside the table.
+      ctx.emit('webserver/index-inject', rows, new Peer(ctx.root, { principal: { kind: 'owner' } }))
       expect(rows.find(row => row.kind === 'global' && row.name === '__DSH_COOKIE_REFRESH__'))
         .toEqual({ kind: 'global', name: '__DSH_COOKIE_REFRESH__', value: { intervalMs } })
     } finally {
@@ -311,7 +316,7 @@ describe('connection node half', () => {
     const { ctx, dispose } = await mounted({ cookieRefreshIntervalMs: 0 })
     try {
       const rows: IndexInjection[] = []
-      ctx.emit('webserver/index-inject', rows)
+      ctx.emit('webserver/index-inject', rows, new Peer(ctx.root, { principal: { kind: 'owner' } }))
       expect(rows.some(row => row.kind === 'global' && row.name === '__DSH_COOKIE_REFRESH__')).toBe(false)
     } finally {
       await dispose()

@@ -8,15 +8,34 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
-import AgentRegistry from '@deepseek-ai/dsh-agent'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import AgentRegistry, { AgentModel } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+
+/**
+ * The registry injects `sessionProjections`, so a bare Context installs nothing
+ * without the projection service; upstream's own harnesses mount it first.
+ */
+async function registryContext(config?: { startupBarrier: boolean }): Promise<Context> {
+  const ctx = new Context()
+  await ctx.plugin(SessionProjectionRegistry)
+  await ctx.plugin(AgentRegistry, config)
+  return ctx
+}
+
+/** A recorded selection; the projection shape needs `lastUsed` plus an absent `pending`. */
+const SELECTION = { provider: 'mock-provider', model: 'mock-model' }
 
 function stubAgent(rawId: string): Agent {
   const id = SessionId(rawId)
+  const session = Session.create(id)
   return {
     id,
     options: {},
-    session: Session.create(id),
+    session,
+    // The registry barrier never reads a selection; a real AgentModel keeps the
+    // stub honest against the Agent contract without mocking its members.
+    model: new AgentModel(() => ({ lastUsed: SELECTION, pending: null }), session, {}),
     inbox: { nextTurn: [], nextStep: [] } as never,
     status: 'idle',
     ctx: new Context(),
@@ -32,8 +51,7 @@ function stubAgent(rawId: string): Agent {
 
 describe('startup-barrier mode', () => {
   it('announce returns before a slow listener settles and parks its settlement as the agent barrier', async () => {
-    const ctx = new Context()
-    await ctx.plugin(AgentRegistry, { startupBarrier: true })
+    const ctx = await registryContext({ startupBarrier: true })
     const release = Promise.withResolvers<undefined>()
     let listenerDone = false
     ctx.on('agent/created', async () => {
@@ -63,8 +81,7 @@ describe('startup-barrier mode', () => {
   })
 
   it('contains a listener failure after publication as a warning instead of a rejection', async () => {
-    const ctx = new Context()
-    await ctx.plugin(AgentRegistry, { startupBarrier: true })
+    const ctx = await registryContext({ startupBarrier: true })
     const warnings: string[] = []
     ctx.logger.warn = ((message: unknown) => { warnings.push(String(message)) }) as typeof ctx.logger.warn
     const heard: string[] = []
@@ -87,8 +104,7 @@ describe('startup-barrier mode', () => {
   })
 
   it('reports no barrier for unknown agents and stays inert with the mode off', async () => {
-    const ctx = new Context()
-    await ctx.plugin(AgentRegistry)
+    const ctx = await registryContext()
     expect(ctx.agents.startupBarrier(SessionId('unknown'))).toBeUndefined()
   })
 })

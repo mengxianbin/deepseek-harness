@@ -44,10 +44,12 @@ export const API_REMOTE_FORWARDED_EVENTS = [
   { event: 'cordis/inspect-query', mode: 'emit' },
   { event: 'cordis/inspect-query-resolved', mode: 'emit' },
   { event: 'llm/adapters-updated', mode: 'emit' },
+  { event: 'llm/models-updated', mode: 'emit' },
   { event: 'permission-presets/catalog-changed', mode: 'emit' },
   { event: 'plugin-manager/changed', mode: 'emit' },
   { event: 'plugin-manager/install-log', mode: 'emit' },
   { event: 'plugin-manager/install-state', mode: 'emit' },
+  { event: 'plugin-manager/update-state', mode: 'emit' },
   { event: 'plugin-market/changed', mode: 'emit' },
   // Owner: the restart-signal machine in ui-settings-general. The declaration
   // lives in this package's ./types (owner-side would close a project-

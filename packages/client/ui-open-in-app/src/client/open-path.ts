@@ -6,16 +6,16 @@
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { RemoteResult } from '@deepseek-ai/dsh-api-remotes/client'
 import type { SessionOpenWorkspacePathRequest, SessionWorkspacePathApplication } from '@deepseek-ai/dsh-api-session-controller/types'
+import type { OpenInAppOutcome, OpenInAppPathFailure } from './outcome.ts'
 
 /** What a path gesture asks of the Host desktop: the default application, or the file manager showing the file. */
 export type OpenInAppPathAction = 'open' | 'reveal'
 
-/** Failure kind of one settled path gesture, for the initiating control to announce. */
-export type OpenInAppPathFailure = 'openError' | 'revealError'
-
 /**
  * How long a failed desktop read waits before it is read again. The wait is short so the
  * page-load races that fail the first call heal on their own, without the user reloading.
+ * (FORK: `OpenInAppPathFailure` moved to ./outcome.ts with upstream's OpenInAppOutcome
+ * rework — it arrives on the import above, so the local duplicate is gone.)
  */
 export const DESKTOP_RETRY_BACKOFF_MS = 2000
 
@@ -69,9 +69,9 @@ export class OpenInAppPathController {
    * @param path - absolute path on the Host, as the file's metadata reports it.
    * @param action - default application open, or file-manager reveal.
    * @param application - registered application path for an explicit open.
-   * @returns the failure kind to announce, or `null` once the Host acknowledged.
+   * @returns the acknowledged open or reveal, or the named failure to announce.
    */
-  async openPath(path: string, action: OpenInAppPathAction, application?: string): Promise<OpenInAppPathFailure | null> {
+  async openPath(path: string, action: OpenInAppPathAction, application?: string): Promise<OpenInAppOutcome> {
     const request: SessionOpenWorkspacePathRequest = action === 'reveal' ? { path, action } : { path, ...(application === undefined ? {} : { application }) }
     let ok = false
     try {
@@ -80,7 +80,9 @@ export class OpenInAppPathController {
       // Swallows carrier rejections: a Host that cannot be reached failed the
       // gesture like a Host that refused it, and the control announces that.
     }
-    return ok ? null : action === 'open' ? 'openError' : 'revealError'
+    if (ok) return { kind: action === 'reveal' ? 'revealed' : 'opened' }
+    const failure: OpenInAppPathFailure = action === 'open' ? 'openError' : 'revealError'
+    return { kind: 'failed', failure }
   }
 
   /**
