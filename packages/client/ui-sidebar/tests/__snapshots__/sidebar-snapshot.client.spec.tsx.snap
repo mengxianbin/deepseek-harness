@@ -59,6 +59,28 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
         </span>
       </span>
     </button>
+    <span
+      class="root panelMoreSlot panelMoreRail"
+    >
+      <button
+        aria-expanded="false"
+        aria-haspopup="menu"
+        aria-label="More"
+        class="iconButton panelMore"
+        type="button"
+      >
+        <svg
+          aria-hidden="true"
+          data-content="d1c61540"
+          fill="none"
+          height="16"
+          stroke-width="1"
+          viewBox="0 0 16 16"
+          width="16"
+          xmlns="http://www.w3.org/2000/svg"
+        />
+      </button>
+    </span>
     <div
       class="regionArea"
     >
@@ -73,10 +95,6 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
       <div
         class="footerActions"
       >
-        <div
-          data-slot="sidebar.more.action"
-          style="display: contents;"
-        />
         <div
           data-slot="sidebar.footer.action"
           style="display: contents;"
@@ -335,6 +353,28 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
         </span>
       </span>
     </button>
+    <span
+      class="root panelMoreSlot panelMoreRail"
+    >
+      <button
+        aria-expanded="false"
+        aria-haspopup="menu"
+        aria-label="More"
+        class="iconButton panelMore"
+        type="button"
+      >
+        <svg
+          aria-hidden="true"
+          data-content="d1c61540"
+          fill="none"
+          height="16"
+          stroke-width="1"
+          viewBox="0 0 16 16"
+          width="16"
+          xmlns="http://www.w3.org/2000/svg"
+        />
+      </button>
+    </span>
     <div
       class="regionArea"
     >
@@ -349,10 +389,6 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
       <div
         class="footerActions"
       >
-        <div
-          data-slot="sidebar.more.action"
-          style="display: contents;"
-        />
         <div
           data-slot="sidebar.footer.action"
           style="display: contents;"

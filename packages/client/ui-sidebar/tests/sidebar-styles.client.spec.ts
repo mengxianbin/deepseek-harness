@@ -26,9 +26,11 @@ function declarations(selector: string): Map<string, string> | undefined {
 }
 
 describe('SidebarRoot.module.css', () => {
-  it('uses a compact expanded navigation gap without shrinking the collapsed rail spacing', () => {
-    expect(declarations('.panelList')?.get('gap')).toBe('2px')
-    expect(declarations('.collapsed .panelList')?.get('gap')).toBe('12px')
+  it('gives the rail ⋯ anchor wrapper its vertical-stack seat (FORK rail-more-sync-1030)', () => {
+    const railAnchor = declarations('.panelMoreRail')
+    expect(railAnchor?.get('display')).toBe('flex')
+    expect(railAnchor?.get('flex')).toBe('none')
+    expect(railAnchor?.get('margin-bottom')).toBe('12px')
   })
 
   it('shares and cancels the wide shell trailing padding structurally', () => {

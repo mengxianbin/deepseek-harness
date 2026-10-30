@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
-/** Global panel entries (footer ⋯ menu wide, rail icon column collapsed) and DOM focus through the production slot renderer. */
+/** Global panel entries (footer ⋯ menu wide, the same ⋯ menu from the rail anchor collapsed)
+ * and DOM focus through the production slot renderer. */
 import type { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
@@ -223,33 +224,11 @@ describe('sidebar global panels', () => {
     expect(trigger.isConnected).toBe(true)
   })
 
-  it.each([false, true])('renders ordered panel controls (menu wide / rail icons collapsed) with collapsed=%s', async (collapsed) => {
+  it.each([false, true])('renders ordered panel controls in the ⋯ menu (wide foot / rail anchor) with collapsed=%s', async (collapsed) => {
     const { runtime, locale, view } = await bench(collapsed)
     await mountPanels(runtime, locale)
-    if (collapsed) {
-      expect(view.queryByRole('button', { name: 'More' })).toBeNull()
-      const navigation = await view.findByRole('navigation', { name: 'Global panels' })
-      const rows = within(navigation).getAllByRole('button')
-      expect(rows.map(row => row.getAttribute('aria-label'))).toEqual(['Beta panel', 'Alpha panel'])
-      for (const [id, label] of [[BETA, 'Beta panel'], [ALPHA, 'Alpha panel']] as const) {
-        const row = within(navigation).getByRole('button', { name: label })
-        expect(row.getAttribute('aria-current')).toBeNull()
-        expect(row.textContent).toBe('')
-        expect(row.querySelectorAll('svg')).toHaveLength(1)
-        const icon = within(row).getByTestId(`${id}-icon`)
-        expect(icon.getAttribute('data-active')).toBe('false')
-        expect(icon.querySelector('svg')?.getAttribute('width')).toBe('18')
-        expect(icon.querySelector('svg')?.getAttribute('height')).toBe('18')
-        act(() => { row.focus() })
-        expect(document.activeElement).toBe(row)
-        expect(view.getByRole('tooltip').textContent).toBe(label)
-        act(() => { row.blur() })
-        expect(document.activeElement).not.toBe(row)
-        expect(view.queryByRole('tooltip')).toBeNull()
-      }
-      return
-    }
-    // Wide: the top rows are gone; entries live in the footer ⋯ menu.
+    // FORK rail-more-sync-1030: both states list the entries through the SAME
+    // ⋯ menu — no navigation landmark renders in either.
     expect(view.queryByRole('navigation')).toBeNull()
     const { trigger, menu } = await openPanelsMenu(view)
     expect(trigger.getAttribute('aria-haspopup')).toBe('menu')
@@ -343,31 +322,7 @@ describe('sidebar global panels', () => {
   it.each([false, true])('keeps main selection while DOM focus moves between controls with collapsed=%s', async (collapsed) => {
     const { runtime, locale, layout, view } = await bench(collapsed)
     await mountPanels(runtime, locale)
-    if (collapsed) {
-      const navigation = await view.findByRole('navigation', { name: 'Global panels' })
-      const alpha = within(navigation).getByRole('button', { name: 'Alpha panel' })
-      const beta = within(navigation).getByRole('button', { name: 'Beta panel' })
-      act(() => { alpha.focus() })
-      expect(document.activeElement).toBe(alpha)
-      expect(runtime.panelInfo.getSnapshot()).toEqual({ activePanelId: null })
-      expect(alpha.getAttribute('aria-current')).toBeNull()
-      expect(layout.selectPanel).not.toHaveBeenCalled()
-      fireEvent.click(alpha)
-      const selected = runtime.panelInfo.getSnapshot()
-      const textbox = view.getByRole('textbox', { name: 'Alpha content input' })
-      const action = view.getByRole('button', { name: 'Alpha content action' })
-      for (const target of [textbox, action, beta, alpha]) {
-        act(() => { target.focus() })
-        expect(document.activeElement).toBe(target)
-        expect(runtime.panelInfo.getSnapshot()).toBe(selected)
-        expect(alpha.getAttribute('aria-current')).toBe('page')
-        expect(beta.getAttribute('aria-current')).toBeNull()
-        expect(view.getByRole('heading', { name: 'Alpha content' })).toBeTruthy()
-        expect(view.queryByRole('heading', { name: 'Beta content' })).toBeNull()
-      }
-      expect(layout.selectPanel).toHaveBeenCalledExactlyOnceWith(ALPHA)
-      return
-    }
+    // FORK rail-more-sync-1030: both states focus the same ⋯ menu rows.
     fireEvent.click(await view.findByRole('button', { name: 'More' }))
     let menu = await view.findByRole('menu')
     const alpha = within(menu).getByRole('menuitem', { name: 'Alpha panel' })
@@ -542,14 +497,19 @@ describe('sidebar entry click analytics', () => {
     expect(layout.selectPanel).toHaveBeenLastCalledWith(SCHEDULES)
   })
 
-  it('leaves the collapsed rail rows unreported for non-official panels', async () => {
+  it('leaves the rail menu rows unreported for non-official panels (FORK rail-more-sync-1030)', async () => {
     const track = vi.fn<TrackProductEvent>()
     const { runtime, locale, view } = await bench(true, track)
     await mountPanels(runtime, locale)
-    const navigation = await view.findByRole('navigation', { name: 'Global panels' })
-    fireEvent.click(within(navigation).getByRole('button', { name: 'Alpha panel' }))
-    fireEvent.click(within(navigation).getByRole('button', { name: 'Beta panel' }))
-    // FORK ruling: non-official rail rows report nothing (upstream reports official rows only; none are mounted here).
-    expect(track).not.toHaveBeenCalled()
+    // The rail anchor's own click reports the trigger, same as the wide foot.
+    fireEvent.click(await view.findByRole('button', { name: 'More' }))
+    expect(track).toHaveBeenCalledExactlyOnceWith('sidebar_menu_click', { menu_name: 'more', position: 'sidebar' })
+    const menu = await view.findByRole('menu')
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Alpha panel' }))
+    fireEvent.click(await view.findByRole('button', { name: 'More' }))
+    fireEvent.click(within(await view.findByRole('menu')).getByRole('menuitem', { name: 'Beta panel' }))
+    // Non-official rows report nothing (upstream reports official rows only; none are mounted here).
+    expect(track).toHaveBeenCalledTimes(2)
+    expect(track).toHaveBeenNthCalledWith(2, 'sidebar_menu_click', { menu_name: 'more', position: 'sidebar' })
   })
 })
