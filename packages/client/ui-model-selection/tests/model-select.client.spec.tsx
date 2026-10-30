@@ -523,7 +523,8 @@ describe('ModelSelect per-model effort memory', () => {
   const mountSeat = (groups: ModelDirectoryState['groups'], current: ModelDirectoryState['current']) => {
     const directory = createSnapshotStore<ModelDirectoryState>(state({ groups, current }))
     const select = vi.fn().mockResolvedValue({ ok: true, value: undefined })
-    render(<ModelSelect renderSlot={renderLabel} locked={false} available directory={directory} load={vi.fn()} select={select} t={t} />)
+    render(<ModelSelect renderSlot={renderLabel} locked={false} available directory={directory} load={vi.fn()}
+      resolveText={resolveText} select={select} t={t} />)
     return select
   }
 
