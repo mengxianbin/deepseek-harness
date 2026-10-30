@@ -491,9 +491,11 @@ describe('UsageGlance', () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => overview })))
     render(<UsageGlance t={t} />)
     // Anchor on the FIGURE: the stat labels render before the first load
-    // lands, so waiting on the label alone would race the fetch.
+    // lands, so waiting on the label alone would race the fetch. The row now
+    // always carries the re-login CTA (always-on, 2026-10-30 裁定), so the
+    // parent stacks label + figure + link.
     expect((await screen.findByText('¥6.16')).parentElement?.textContent)
-      .toBe(`${t('glance.mimoBalance.label')}¥6.16`)
+      .toBe(`${t('glance.mimoBalance.label')}¥6.16${t('glance.mimoBalance.relogin')}`)
     // The column tooltip folds the mimo reading between the cycle row and the stamp.
     screen.getByTitle(
       new RegExp(`^${t('glance.today')} · ${t('glance.cycle')} · ${t('glance.mimoBalance.label')} ¥6\\.16 · ${t('glance.refreshed')} \\d{2}\\.\\d{2}\\.\\d{2} \\d{2}:\\d{2}$`),
@@ -513,7 +515,9 @@ describe('UsageGlance', () => {
     const { container } = render(<UsageGlance t={t} />)
     const value = await screen.findByText('¥36.87*')
     expect(value.className).toContain('glanceStatValueStale')
-    expect(value.parentElement?.textContent).toBe(`${t('glance.mimoBalance.label')}¥36.87*`)
+    // The row always carries the re-login CTA (always-on, 2026-10-30 裁定).
+    expect(value.parentElement?.textContent)
+      .toBe(`${t('glance.mimoBalance.label')}¥36.87*${t('glance.mimoBalance.relogin')}`)
     // The tooltip swaps in the stale marker and the fact's own probe stamp.
     const probeStamp = formatRefreshStamp(1)
     screen.getByTitle(
@@ -680,21 +684,31 @@ describe('UsageGlance re-login CTA (FORK mimo-login-cta)', () => {
     expect(link.previousElementSibling?.textContent).toBe('—')
   })
 
-  it('renders no link while a balance is present (零打扰)', async () => {
+  it('renders the re-login link beside a live balance too (always-on, 2026-10-30 裁定)', async () => {
+    // The 2026-10-30 ruling supersedes the 2026-10-29 零打扰 gate: the CTA's
+    // behavior must be identical whether or not the cookie expired — a live
+    // balance renders the link the same way the degraded state does.
     const overview: UsageOverviewView = {
       providers: [{ provider: 'mimo', balance: { currency: 'CNY', totalBalance: '6.16', updatedAt: 1 } }],
     }
     vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => overview })))
     render(<UsageGlance t={t} />)
     expect((await screen.findByText('¥6.16')).parentElement?.textContent)
-      .toBe(`${t('glance.mimoBalance.label')}¥6.16`)
-    expect(screen.queryByRole('link')).toBeNull()
+      .toBe(`${t('glance.mimoBalance.label')}¥6.16${t('glance.mimoBalance.relogin')}`)
+    // Same link, same target, same sibling position as the degraded state.
+    const link = screen.getByRole('link', { name: t('glance.mimoBalance.relogin') })
+    expect(link.getAttribute('href')).toBe('/api/mimo-relogin/page')
+    expect(link.getAttribute('target')).toBe('_blank')
+    expect(link.previousElementSibling?.textContent).toBe('¥6.16')
   })
 
-  it('renders no link before the first overview lands (no premature flash)', () => {
+  it('renders the re-login link before the first overview lands (no render gate)', () => {
+    // The old pre-load flash guard (`state !== null`) is gone along with the
+    // always-on ruling: the standing entry point renders from first paint.
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => { /* pending forever */ })))
     render(<UsageGlance t={t} />)
-    expect(screen.queryByRole('link')).toBeNull()
+    const link = screen.getByRole('link', { name: t('glance.mimoBalance.relogin') })
+    expect(link.getAttribute('href')).toBe('/api/mimo-relogin/page')
   })
 
   it('stops propagation: the CTA opens the page without replaying the row onto settings', async () => {

@@ -150,6 +150,11 @@ describe('heavy-io gate wiring', () => {
       ['heavy:test:coverage:partitioned', 'pnpm run test:coverage:partitioned'],
       ['heavy:test:gui', 'vitest run packages/client packages/host'],
       ['heavy:install', 'pnpm install'],
+      // B-case bare-path closure: `test` and `test:coverage` previously sat
+      // ungated behind these twins, so a direct `pnpm run test` raced queued
+      // jobs. Now wrapped in place — inner command text unchanged.
+      ['test', 'pnpm run build:native-system && vitest run'],
+      ['test:coverage', 'pnpm run build:native-system && vitest run --coverage'],
     ] as const) {
       expect(packageScripts[entry], entry).toBe(`tsx scripts/heavy-io-gate.ts "${inner}"`)
     }
@@ -157,8 +162,6 @@ describe('heavy-io gate wiring', () => {
     // The CI gate graph consumes these originals verbatim (ci-workflow/run-gates
     // contracts), so the gated entries must stay separate keys.
     expect(packageScripts.typecheck).toBe('tsx scripts/build.ts --scope typecheck')
-    expect(packageScripts.test).toBe('pnpm run build:native-system && vitest run')
-    expect(packageScripts['test:coverage']).toBe('pnpm run build:native-system && vitest run --coverage')
     expect(packageScripts['test:coverage:partitioned']).toBe('tsx scripts/run-coverage-partitions.ts')
     expect(packageScripts['test:gui']).toBe('vitest run packages/client packages/host')
     expect(packageScripts['build:lib']).toBe('pnpm run build:lib:host && pnpm run build:lib:client')
