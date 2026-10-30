@@ -75,6 +75,16 @@ function isConnectionStale(state: string | undefined): boolean {
   return state === 'disconnected' || state === 'connecting'
 }
 
+/**
+ * Silence after which one Session's status is flagged unconfirmable: twice the
+ * Host's heartbeat cadence (collab step2 §4.2), so a dropped frame heals within
+ * one interval and only a missed sweep shows a ring.
+ */
+export const SESSION_HEARTBEAT_STALE_MS = 30_000
+
+/** Re-fold cadence of the status snapshot, so an elapsed-time flag can flip without an unrelated event. */
+const SESSION_HEARTBEAT_TICK_MS = 5_000
+
 /** Independent UI status facts for one Session identity. */
 export interface SessionStatus {
   /** Latest known running state; absent until a baseline or event establishes it. */
@@ -103,6 +113,13 @@ export interface SessionStatus {
    * row while the connection withholds confirmation, absent otherwise.
    */
   readonly statusStale?: true
+  /**
+   * The Host's periodic status heartbeat stopped arriving for this Session
+   * (collab step2 §4.2): the shown status is the last one that did arrive and
+   * can no longer be confirmed. Present for the stale Session alone, absent
+   * while heartbeats keep arriving.
+   */
+  readonly heartbeatStale?: true
 }
 
 /** Current UI status indexed by Session identity. */
@@ -343,6 +360,13 @@ export class UiSession extends Service {
    */
   private readonly attention = new Map<SessionId, string>()
   private readonly running = new Map<SessionId, boolean>()
+  /**
+   * Wall-clock of the most recent Host truth for each Session — a status frame
+   * or a list row whose `running` the baseline adopted. Drives the per-Session
+   * heartbeat staleness flag (collab step2 §4.2): past the interval the shown
+   * status is the last one heard and can no longer be confirmed.
+   */
+  private readonly lastStatusAt = new Map<SessionId, number>()
   private readonly unreadStops = new Map<SessionId, SessionCompletionOutcome>()
   private readonly observedFailures = new Set<SessionId>()
   private statusSnapshot: SessionStatusSnapshot = new Map()
@@ -396,10 +420,16 @@ export class UiSession extends Service {
       // facts that read them (job counts, the stale flag).
       const disposeJobs = this.jobs?.state.subscribe(() => { this.publishStatus() })
       const disposeConnection = this.connectionState?.subscribe(() => { this.publishStatus() })
+      // Heartbeat staleness is a function of elapsed time, so it needs a tick
+      // of its own: without one a quiet Host would only surface on the next
+      // unrelated event. publishStatus de-duplicates, so an idle tick costs a
+      // comparison per row.
+      const heartbeatTick = setInterval(() => { this.publishStatus() }, SESSION_HEARTBEAT_TICK_MS)
       this.publishMain()
       this.reconcileStatus()
       return () => {
         this.active = false
+        clearInterval(heartbeatTick)
         disposeList()
         disposeStatus()
         disposeRemoteStatus()
@@ -603,6 +633,9 @@ export class UiSession extends Service {
    * @param attention - the objective kind while one is active; absent otherwise.
    */
   private observeAttention(sessionId: SessionId, attention: string | undefined): void {
+    // A heartbeat repeats the current truth, so an unchanged frame still proves
+    // the Host is alive for this Session: record before the equality shortcut.
+    this.lastStatusAt.set(sessionId, Date.now())
     const previous = this.attention.get(sessionId)
     if (previous === attention) return
     if (attention === undefined) this.attention.delete(sessionId)
@@ -611,6 +644,7 @@ export class UiSession extends Service {
   }
 
   private observeRunning(sessionId: SessionId, running: boolean): void {
+    this.lastStatusAt.set(sessionId, Date.now())
     const previous = this.running.get(sessionId)
     const beforeBaseline = this.sessions.list.getSnapshot().phase === 'pending'
     this.running.set(sessionId, running)
@@ -643,7 +677,12 @@ export class UiSession extends Service {
     for (const id of list.ids) {
       const row = list.byId[id] as SessionSummary
       const previous = this.running.get(id)
-      if (previous === undefined) this.running.set(id, row.running)
+      // The list pull is Host truth just as much as a status frame, so it also
+      // restarts the heartbeat clock (a row pulled a moment ago is confirmed).
+      if (previous === undefined) {
+        this.running.set(id, row.running)
+        this.lastStatusAt.set(id, Date.now())
+      }
       else if (previous !== row.running) this.observeRunning(id, row.running)
     }
     for (const id of present) {
@@ -656,6 +695,7 @@ export class UiSession extends Service {
         this.unreadStops.delete(id)
         this.observedFailures.delete(id)
         this.attention.delete(id)
+        this.lastStatusAt.delete(id)
       }
     }
     this.publishStatus()
@@ -679,14 +719,29 @@ export class UiSession extends Service {
       ? true
       : undefined
     const next = new Map<SessionId, SessionStatus>()
+    const now = Date.now()
     for (const id of ids) {
-      const outcome = this.unreadStops.get(id)
+      const remembered = this.unreadStops.get(id)
+      // The Host folds the last turn's end reason into a durable projection
+      // (collab step2 §7.2): a failure stays on the row across a refresh, a
+      // restart, and the row being open, until a later turn ends some other
+      // way. The in-memory unread map still drives the clean-stop green mark.
+      const durableOutcome = list.byId[id]?.projectionValues?.lastTurnOutcome?.kind === 'error'
+        ? 'failed' as const
+        : undefined
+      const outcome = remembered ?? durableOutcome
       const roster = this.jobs?.state.getSnapshot().rows[String(id)]
       const activeJobCount = roster === undefined
         ? 0
         : roster.filter(job => countsAsActiveOwnJob(job, id)).length
       const pendingWakeup: true | undefined = list.byId[id]?.projectionValues?.goal != null
         && this.running.get(id) === false
+        ? true
+        : undefined
+      // A heartbeat that never arrived leaves the shown status unconfirmable;
+      // a row with no Host truth at all is still loading, not stale.
+      const heartbeatStale: true | undefined = this.lastStatusAt.get(id) !== undefined
+        && now - (this.lastStatusAt.get(id) as number) > SESSION_HEARTBEAT_STALE_MS
         ? true
         : undefined
       next.set(id, {
@@ -697,6 +752,7 @@ export class UiSession extends Service {
         ...(activeJobCount === 0 ? {} : { activeJobCount }),
         ...(pendingWakeup === undefined ? {} : { pendingWakeup }),
         ...(statusStale === undefined ? {} : { statusStale }),
+        ...(heartbeatStale === undefined ? {} : { heartbeatStale }),
       })
     }
     if (sameSessionStatus(this.statusSnapshot, next)) return
@@ -880,7 +936,8 @@ function sameSessionStatus(left: SessionStatusSnapshot, right: SessionStatusSnap
       || candidate.completionOutcome !== status.completionOutcome
       || candidate.activeJobCount !== status.activeJobCount
       || candidate.pendingWakeup !== status.pendingWakeup
-      || candidate.statusStale !== status.statusStale) return false
+      || candidate.statusStale !== status.statusStale
+      || candidate.heartbeatStale !== status.heartbeatStale) return false
   }
   return true
 }

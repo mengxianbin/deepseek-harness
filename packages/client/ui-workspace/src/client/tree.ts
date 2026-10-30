@@ -63,6 +63,8 @@ export interface SessionNode {
   pendingWakeup?: true
   /** The status could not be confirmed: the connection is down or reconnecting. */
   statusStale?: true
+  /** The Host's status heartbeat went quiet for this Session: the shown status is the last one heard. */
+  heartbeatStale?: true
   /** In the registry-global pin set: leads its section, reorderable only among pinned rows. */
   pinned: boolean
   /** In the registry-global archive set: shown grayed in place and not openable. */
@@ -114,6 +116,8 @@ export interface SearchResultNode {
   pendingWakeup?: true
   /** The status could not be confirmed: the connection is down or reconnecting. */
   statusStale?: true
+  /** The Host's status heartbeat went quiet for this Session: the shown status is the last one heard. */
+  heartbeatStale?: true
   /** In the registry-global archive set: shown grayed and not openable. */
   archived: boolean
   snippet?: string
@@ -412,6 +416,7 @@ function sessionNode(
   const activeJobCount = status?.activeJobCount
   const pendingWakeup = status?.pendingWakeup
   const statusStale = status?.statusStale
+  const heartbeatStale = status?.heartbeatStale
   return {
     id: s.id,
     title: sessionTitle(s),
@@ -423,6 +428,7 @@ function sessionNode(
     ...(activeJobCount === undefined ? {} : { activeJobCount }),
     ...(pendingWakeup === undefined ? {} : { pendingWakeup }),
     ...(statusStale === undefined ? {} : { statusStale }),
+    ...(heartbeatStale === undefined ? {} : { heartbeatStale }),
     pinned: !archived.has(s.id) && pinned.has(s.id),
     archived: archived.has(s.id),
     updatedAt: s.updatedAt,
@@ -618,6 +624,7 @@ export function deriveSearchResults(
       const activeJobCount = status?.activeJobCount
       const pendingWakeup = status?.pendingWakeup
       const statusStale = status?.statusStale
+      const heartbeatStale = status?.heartbeatStale
       return {
         id: summary.id,
         title: sessionTitle(summary),
@@ -632,6 +639,7 @@ export function deriveSearchResults(
         ...(activeJobCount === undefined ? {} : { activeJobCount }),
         ...(pendingWakeup === undefined ? {} : { pendingWakeup }),
         ...(statusStale === undefined ? {} : { statusStale }),
+        ...(heartbeatStale === undefined ? {} : { heartbeatStale }),
         archived: archived.has(summary.id),
         ...match === undefined ? {} : { snippet: match.snippet },
       }

@@ -72,6 +72,14 @@ export { ApiSessionNotFound } from './agent.ts'
 export { SessionFileReferences } from './file-references.ts'
 export { SessionSkillCatalog } from './skill-catalog.ts'
 
+/**
+ * Cadence of the per-Session status heartbeat sweep (collab step2 §4.2, first
+ * value; a means-layer parameter). The client flags a Session whose frames stop
+ * arriving after twice this interval, so a single dropped frame heals within
+ * one interval instead of waiting for the next full list pull.
+ */
+export const SESSION_STATUS_SWEEP_MS = 15_000
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     /** Host Session business API and Remote namespace owner. */
@@ -252,7 +260,11 @@ export class SessionController extends TypertRemoteService {
         ? 'question'
         : undefined
     }
+    // Every id this controller has published a status for; the heartbeat sweep
+    // re-emits their current truth so a dropped frame heals itself.
+    const sweepSessions = new Set<SessionId>()
     const emitStatus = (sessionId: SessionId, running: boolean): void => {
+      sweepSessions.add(sessionId)
       ctx.emit('api-session/status', sessionId, running, attentionFor(sessionId))
     }
     ctx.on('agent/status', ({ agent, status }) => {
@@ -262,6 +274,7 @@ export class SessionController extends TypertRemoteService {
     })
     ctx.on('session/disposed', (session) => {
       runningBySession.delete(session.id)
+      sweepSessions.delete(session.id)
     })
     // A question opens and closes without an Agent status flip; the projection
     // registry's change stream is the objective trigger that refreshes status.
@@ -271,8 +284,15 @@ export class SessionController extends TypertRemoteService {
       ctx.effect(() => {
         const dispose = registry.onChanged((session, key) => {
           if (key !== 'userQuestions') return
+          if (ctx.sessions.get(session.id) === undefined) return
+          // `runningBySession` is memory only and is written solely by
+          // `agent/status`, so a Host that restarted without this Session
+          // running a turn has no entry for it. Falling back to the live Agent
+          // registry instead of skipping keeps the settle frame flowing: the
+          // skip left clients wearing an attention dot the Host had already
+          // cleared (collab step4 波0 定罪, 2026-10-30).
           const running = runningBySession.get(session.id)
-          if (running === undefined) return
+            ?? ctx.agents.get(session.id)?.status === 'running'
           emitStatus(session.id, running)
         })
         return () => {
@@ -281,6 +301,28 @@ export class SessionController extends TypertRemoteService {
         }
       }, 'sessionController: attention status')
     })
+    // Heartbeat sweep (collab step2 §4.2): `api-session/status` carries no
+    // sequence number and no replay, so one dropped frame left a client
+    // statically wrong until the next full list pull. Re-emitting the current
+    // truth on a fixed cadence bounds that staleness to one interval, and the
+    // client turns a missed sweep into a dashed ring after two.
+    ctx.effect(() => {
+      const timer = setInterval(() => {
+        for (const sessionId of [...sweepSessions]) {
+          if (ctx.sessions.get(sessionId) === undefined) {
+            sweepSessions.delete(sessionId)
+            continue
+          }
+          const running = runningBySession.get(sessionId)
+            ?? ctx.agents.get(sessionId)?.status === 'running'
+          ctx.emit('api-session/status', sessionId, running, attentionFor(sessionId))
+        }
+      }, SESSION_STATUS_SWEEP_MS)
+      timer.unref()
+      return () => {
+        clearInterval(timer)
+      }
+    }, 'sessionController: status heartbeat sweep')
     ctx.on('agent/error', ({ agent, error }) => {
       ctx.emit('api-session/error', agent.id, errorChain(error))
     })
