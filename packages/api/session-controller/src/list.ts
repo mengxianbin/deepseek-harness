@@ -17,7 +17,8 @@ import {
   SESSION_SEARCH_SNIPPET_MAX_CODE_POINTS,
 } from './types.ts'
 import type {
-  SessionListMetadata, SessionListRequest, SessionProjectionHints, SessionProjectionValues,
+  SessionLastTurnOutcome, SessionLastTurnOutcomeKind, SessionListMetadata, SessionListRequest,
+  SessionProjectionHints, SessionProjectionValues,
   SessionSearchItem,
   SessionSearchValue, SessionSummary,
 } from './types.ts'
@@ -48,6 +49,39 @@ const sessionListMetadataSchema: z.ZodType<SessionListMetadata> = z.object({
   blank: z.boolean(),
   lastPromptAt: z.number().nullable(),
 })
+
+/** End reasons the row marker has a stable meaning for; plugin-merged variants stay folded away. */
+const LAST_TURN_OUTCOME_KINDS = ['completed', 'error', 'aborted', 'blocked'] as const
+
+const lastTurnOutcomeSchema: z.ZodType<SessionLastTurnOutcome | null> = z.object({
+  kind: z.enum(LAST_TURN_OUTCOME_KINDS),
+  at: z.number(),
+}).nullable()
+
+/**
+ * Advance the durable last-turn-outcome projection by one committed event.
+ *
+ * The row-level failure marker has to survive a page refresh and a Host
+ * restart (collab step2 §7.2), which a client-side unread map cannot: it lives
+ * only in memory and is cleared the moment the row becomes the main view.
+ * Folding the fact from `turn/end` makes the transcript the single source, so
+ * a failure stays visible until a later turn supersedes it.
+ *
+ * @param state - outcome before the event.
+ * @param event - next committed Session event.
+ * @returns the original or advanced outcome value.
+ */
+export function applyLastTurnOutcome(
+  state: SessionLastTurnOutcome | null,
+  event: SessionEvent,
+): SessionLastTurnOutcome | null {
+  if (event.type !== 'turn/end') return state
+  const kind = event.data.reason.kind
+  if (!(LAST_TURN_OUTCOME_KINDS as readonly string[]).includes(kind)) return state
+  const outcomeKind = kind as SessionLastTurnOutcomeKind
+  const next: SessionLastTurnOutcome = { kind: outcomeKind, at: event.time }
+  return state !== null && state.kind === outcomeKind && state.at === next.at ? state : next
+}
 
 const imageLimitsSchema = z.object({
   maxImageBytes: z.number().int().positive(),
@@ -125,6 +159,14 @@ export class ApiSessionList {
         view: () => this.ctx.attachments.imageLimits,
         summary: false,
       },
+      stateVersion: 1,
+    })
+    await this.ctx.sessionProjections.register<'lastTurnOutcome', SessionLastTurnOutcome | null>({
+      key: 'lastTurnOutcome',
+      stateSchema: lastTurnOutcomeSchema,
+      init: () => null,
+      apply: applyLastTurnOutcome,
+      wire: { viewSchema: lastTurnOutcomeSchema, view: state => state },
       stateVersion: 1,
     })
   }

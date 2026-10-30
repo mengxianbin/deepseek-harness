@@ -418,10 +418,16 @@ function ownsLeadingCell(status: SessionStatus): boolean {
  * waiting to wake — all outrank the unread-completion reminder below them
  * (四档序：② 档高于 ③ 档), and every arrangement that loses its primary seat
  * rides into the hover card as a secondary line.
+ *
+ * One deliberate exception (collab step2 §7.2 失败例外): a **failed** stop is
+ * promoted above the wake-up weak mark, because a goal on the books used to
+ * swallow the red dot whole and leave a dead session looking merely sleepy.
+ * A clean completion keeps its ③-tier place below every ②-tier arrangement.
  */
 function sessionStatuses(
   node: Pick<SessionNode, 'pendingInteraction' | 'running' | 'runningSubagentCount'
-    | 'completed' | 'completionOutcome' | 'activeJobCount' | 'pendingWakeup' | 'statusStale'>,
+    | 'completed' | 'completionOutcome' | 'activeJobCount' | 'pendingWakeup'
+    | 'statusStale' | 'heartbeatStale'>,
   t: RowTranslate,
 ): readonly [SessionStatus, ...SessionStatus[]] {
   const subagents: SessionStatus | undefined = node.runningSubagentCount === 0
@@ -487,14 +493,18 @@ function sessionStatuses(
   if (node.running) return ranked({ state: 'ongoing', label: t('status.running') }, subagents, jobs, wakeup)
   if (subagents !== undefined) return ranked(subagents, jobs, wakeup)
   if (jobs !== undefined) return ranked(jobs, wakeup)
+  // 失败例外: a failed stop outranks the wake-up weak mark; the mark keeps its
+  // seat in the hover card so the goal is still visible underneath.
+  if (node.completed && node.completionOutcome === 'failed') {
+    return ranked({ state: 'error', label: t('status.turnFailed') }, wakeup)
+  }
   if (wakeup !== undefined) return ranked(wakeup)
-  if (node.completed) return [{
-    state: node.completionOutcome === 'failed' ? 'error' : 'done',
-    label: node.completionOutcome === 'failed' ? t('status.turnFailed') : t('status.completed'),
-  }]
-  // ④ splits: a confirmed nothing stays blank; a status the connection cannot
-  // confirm wears the gray dashed ring instead (真无事 = 空白 / 读不到 = 虚线圈).
+  if (node.completed) return [{ state: 'done', label: t('status.completed') }]
+  // ④ splits: a confirmed nothing stays blank; a status neither the connection
+  // nor the heartbeat can confirm wears the gray dashed ring instead
+  // (真无事 = 空白 / 读不到 = 虚线圈).
   if (node.statusStale !== undefined) return [{ state: 'stale', label: t('status.notSynced') }]
+  if (node.heartbeatStale !== undefined) return [{ state: 'stale', label: t('status.heartbeatStale') }]
   return [{ state: 'idle', label: t('status.idle') }]
 }
 

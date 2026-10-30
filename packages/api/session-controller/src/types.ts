@@ -19,6 +19,12 @@ declare module '@deepseek-ai/dsh-session-projection/types' {
     /** Persisted facts used to summarize a Session without activating it. */
     sessionListMetadata: SessionListMetadata
     /**
+     * End reason of the most recent completed turn, folded from the transcript
+     * so the row-level failure marker survives a refresh and a Host restart
+     * (collab step2 §7.2). `null` until a turn has ended.
+     */
+    lastTurnOutcome: SessionLastTurnOutcome | null
+    /**
      * Image-intake limits enforced by the Session prompt endpoint. Boot
      * constant, excluded from Session summary payloads: every Session shares
      * it, so a list row would repeat one host-wide fact.
@@ -33,6 +39,16 @@ export interface SessionListMetadata {
   readonly blank: boolean
   /** Latest human-authored prompt time in the folded prefix. */
   readonly lastPromptAt: number | null
+}
+
+/** Turn-end reasons the row marker reads; plugin-merged variants are not folded into the projection. */
+export type SessionLastTurnOutcomeKind = 'completed' | 'error' | 'aborted' | 'blocked'
+
+/** Durable record of how the last turn ended, or `null` when no turn has ended yet. */
+export interface SessionLastTurnOutcome {
+  readonly kind: SessionLastTurnOutcomeKind
+  /** Wall-clock time of the `turn/end` event that produced this record. */
+  readonly at: number
 }
 
 /**
