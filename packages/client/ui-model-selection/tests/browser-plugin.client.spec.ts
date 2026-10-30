@@ -298,6 +298,40 @@ describe('ui-model-selection dual entry', () => {
     })
   })
 
+  it('a popup model switch restores the target route\'s remembered effort, else its default', async () => {
+    // This lane has no jsdom window; the memory module reads a store stub.
+    const stored = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => { stored.set(key, value) },
+    })
+    try {
+      stored.set('dsh.model-selection.effort-memory.v1', JSON.stringify({
+        '["deepseek-official","deepseek-v4-pro"]': 'max',
+      }))
+      const b = await bench()
+      b.mint('s1')
+      const options = await b.popup().options(projection('s1'), new AbortController().signal)
+      const pro = options.find((o: SelectOption) => o.label === 'DeepSeek-V4-Pro')!
+      await b.popup().onSelect(pro, projection('s1'))
+      expect(b.hostCurrent()).toEqual({
+        provider: 'deepseek-official',
+        model: 'deepseek-v4-pro',
+        reasoningEffort: 'max',
+      })
+      // A route the memory never saw keeps the model default.
+      const flash = options.find((o: SelectOption) => o.label === 'DeepSeek-V4-Flash')!
+      await b.popup().onSelect(flash, projection('s1'))
+      expect(b.hostCurrent()).toEqual({
+        provider: 'deepseek-official',
+        model: 'deepseek-v4-flash',
+        reasoningEffort: 'high',
+      })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it.each(['en', 'zh'] as const)('localizes account provider headings in the %s model popup', async (locale) => {
     const b = await bench(locale)
     try {
