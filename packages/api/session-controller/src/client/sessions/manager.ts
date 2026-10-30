@@ -54,7 +54,8 @@ export interface SessionSearchResultItem {
  * on return to the default view). `includeSubagents` is widen-only: once a
  * hydration trigger asks for subagent rows they stay for this page
  * generation, because the subagent catalog chains read them as their
- * fallback layer.
+ * fallback layer. Every pull states the scope explicitly on the wire
+ * (f5-contract-a2-1030: the server default is the full pre-f5 corpus).
  */
 export interface SessionListScopeOptions {
   readonly includeArchived?: boolean
@@ -122,9 +123,12 @@ export class SessionManager {
   /** Active list request's mutation log; its identity also fences completion after reconnect. */
   private listMutations: SessionListMutation[] | null = null
   /**
-   * Row scope of the list request. Both flags start false (the default pull
-   * carries active first-party rows only); archived flips with the archived
-   * view, subagents widen on hydration triggers.
+   * Row scope of the list request. Both row flags start false and every pull
+   * states them explicitly (f5-contract-a2-1030: only an explicit false cuts
+   * server-side, so an omitted flag would fetch the full pre-f5 corpus);
+   * archived flips with the archived view, subagents widen on hydration
+   * triggers. Projection hints stay trimmed for this page generation — the
+   * main page is the thin-column consumer.
    */
   private listScope: { archived: boolean; subagents: boolean } = { archived: false, subagents: false }
   private readonly addresses = new Map<SessionId, SubagentAddress>()
@@ -445,9 +449,13 @@ export class SessionManager {
     this.applyListScope(options)
     if (this.listInflight !== null) return this.listInflight
     const scope = { ...this.listScope }
+    // Explicit by contract (f5-contract-a2-1030): the server serves the full
+    // pre-f5 corpus unless a caller states otherwise, so this main-page pull
+    // names its row cuts and the heavy-column trim on every request.
     const request: SessionListRequest = {
-      ...(scope.archived ? { includeArchived: true } : {}),
-      ...(scope.subagents ? { includeSubagents: true } : {}),
+      includeArchived: scope.archived,
+      includeSubagents: scope.subagents,
+      trimHeavyProjections: true,
     }
     this.listState = 'loading'
     this.listError = null

@@ -1066,9 +1066,10 @@ export function WorkspaceBrowser({
     }
     open(sessionId)
   }
-  // The default listing omits archived rows server-side (row-cut): show/only
-  // refetches them through `includeArchived`, and returning to the default
-  // view refetches without them so later pulls stay thin.
+  // The default view cuts archived rows through an explicit
+  // `includeArchived: false` (row-cut): show/only refetches with them, and
+  // returning to the default view refetches with the explicit cut so later
+  // pulls stay thin.
   const pickArchivedFilter = (filter: ArchivedFilter): void => {
     actions.setArchivedFilter(filter)
     refreshSessions({ includeArchived: filter !== 'default' })

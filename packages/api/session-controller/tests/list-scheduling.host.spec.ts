@@ -83,8 +83,8 @@ async function harness(rows: readonly Row[], summaryMs = 8, workSliceMs = 8) {
   })
   const listSessions = vi.fn(async (_signal?: AbortSignal, _options?: SessionListQueryOptions) => records)
   ctx.provide('sessionQuery', { listSessions } as never)
-  // The default list pre-excludes this registry set before any header read;
-  // the scheduling fixture archives nothing.
+  // An explicit row-cut list pre-excludes this registry set before any
+  // header read; the scheduling fixture archives nothing.
   ctx.provide('workspaceRegistry', { archivedSessionIds: [] } as never)
   ctx.provide('sessionProjectionCache', {
     cachedSnapshot: (header: SessionRecord['header']) => {
@@ -192,7 +192,7 @@ describe('Session-list work slices', () => {
     } as never)
     h.ctx.provide('fileUploads', { registerAgentResolver: () => dispose } as never)
     h.ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'test', model: 'test' }) } as never)
-    // workspaceRegistry already came from the harness (the default list
+    // workspaceRegistry already came from the harness (an explicit row cut
     // pre-excludes its archived ids); providing it twice would throw.
     new RemoteAccessService(h.ctx)
     const controller = new SessionController(h.ctx, { nativeOpen: false, listWorkSliceMs: 4 }, { canOpenPath: () => false })
@@ -234,11 +234,11 @@ describe('Session-list work slices', () => {
       if (id === abortAt) betweenRows(() => { controller.abort(reason) })
     }
 
-    await expect(h.list.list(undefined, controller.signal)).rejects.toBe(reason)
+    // Explicit row cuts (f5-contract-a2-1030) ride beside the signal.
+    await expect(h.list.list({ includeArchived: false, includeSubagents: false }, controller.signal)).rejects.toBe(reason)
     expect(h.trace).toEqual(abortAt === 'first'
       ? [`${phase}:first`]
       : [`${phase}:first`, `${phase}:middle`, `${phase}:last`])
-    // The default listing passes the row-scope options beside the signal.
     expect(h.listSessions).toHaveBeenCalledTimes(1)
     const [signalArg, optionsArg] = h.listSessions.mock.calls[0] ?? []
     expect(signalArg).toBe(controller.signal)

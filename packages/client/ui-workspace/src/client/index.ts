@@ -319,7 +319,8 @@ export function apply(ctx: Context): void {
     undoArchive: unarchiveSession,
     showArchived: () => {
       viewInstance.actions.setArchivedFilter('show')
-      // The default listing omits archived rows server-side (row-cut).
+      // The default view cuts archived rows client-side (explicit false), so
+      // show/only must refetch with them (row-cut).
       void sessions.refresh({ includeArchived: true }).catch((reason: unknown) => {
         console.warn('session list refresh rejected:', reason)
       })
