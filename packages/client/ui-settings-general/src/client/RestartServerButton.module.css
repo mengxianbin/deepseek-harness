@@ -18,6 +18,23 @@
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
+/* Wide column: the full 28x28 box above. */
+.restartWide {
+  width: 28px;
+  height: 28px;
+}
+
+/* FORK rail-restart-entry-1030: the collapsed rail turns the same control
+   into a compact, clickable dot-size button — dark it centers the refresh
+   glyph, a lit judgment centers the status dot (RestartServerButton.tsx
+   swaps the child by wide && lit). It opens the identical confirm dialog,
+   so a restart stays reachable without expanding the sidebar. */
+.restartRail {
+  width: 20px;
+  height: 20px;
+  border-radius: var(--dsw-radius-xl);
+}
+
 /* Dispatch outcome line, squeezed between the trigger and the connection pill. */
 .notice {
   flex: 1 1 auto;
@@ -47,19 +64,14 @@
   color: var(--dsw-alias-label-secondary);
 }
 
-/* Collapsed rail: the whole lamp is one status dot carrying the copy as its accessible name. */
+/* The lit status dot centered in the rail button (RestartServerButton.tsx).
+   The per-state hue is painted on the BUTTON via .restartLit /
+   .restart[data-restart-signal]; `:where()` keeps this selector at zero
+   specificity so it inherits the parent color instead of fighting it. */
 .signalDot {
   flex: none;
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--dsw-alias-state-warn-primary);
-}
-
-.signalDot[data-restart-signal='BUILD_FAILED'] {
-  background: var(--dsw-alias-state-error-primary);
-}
-
-.signalDot[data-restart-signal='BUILDING'] {
-  background: var(--dsw-alias-label-secondary);
+  background: currentColor;
 }

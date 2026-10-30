@@ -8,7 +8,13 @@
   margin: 4px 0;
 }
 
+/* FORK rail-restart-entry-1030: the collapsed rail stacks its controls
+   vertically — the settings gear over the compact restart dot-button — since
+   the 36px row cannot hold two side-by-side controls. */
 .triggerRow.railRow {
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
   width: 36px;
   margin: 8px 0 10px;
 }

@@ -349,11 +349,12 @@ describe('Restart server button', () => {
   const t = makeTranslate(en)
   const base: RestartServerButtonProps = { t, configured: true, runningSessions: 0, wide: true }
 
-  it('renders nothing until the Host announced a command, or while the rail column is collapsed', () => {
+  it('renders nothing until the Host announced a command, and keeps a clickable entry when collapsed', () => {
     const view = render(<RestartServerButton {...base} configured={false} />)
     expect(screen.queryByRole('button')).toBeNull()
+    // FORK rail-restart-entry-1030: the collapsed rail keeps a clickable entry.
     view.rerender(<RestartServerButton {...base} wide={false} />)
-    expect(screen.queryByRole('button')).toBeNull()
+    expect(screen.getByRole('button', { name: en['restart.button'] })).toBeTruthy()
     view.rerender(<RestartServerButton {...base} />)
     expect(screen.getByRole('button', { name: en['restart.button'] })).toBeTruthy()
   })
@@ -477,12 +478,17 @@ describe('Restart server button', () => {
     expect(screen.queryByRole('status')).toBeNull()
   })
 
-  it('collapses the lit lamp into a status dot carrying the copy as its accessible name', () => {
+  it('collapses the lit lamp into a clickable dot-button opening the same dialog (FORK rail-restart-entry-1030)', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
+    onTestFinished(() => { vi.unstubAllGlobals() })
     render(<RestartServerButton {...base} wide={false} signal={{ state: 'NEED_RESTART', reason: 'built' }} />)
-    const dot = screen.getByRole('status')
-    expect(dot.getAttribute('aria-label')).toBe(en['restart.signal.needRestart.built'])
+    const dot = screen.getByRole('button', { name: en['restart.signal.needRestart.built'] })
     expect(dot.getAttribute('data-restart-signal')).toBe('NEED_RESTART')
-    expect(screen.queryByRole('button')).toBeNull()
+    // The dot is the decorative child; the reason stays on the button's accessible name.
+    expect(dot.querySelector('[aria-hidden="true"]')).toBeTruthy()
+    fireEvent.click(dot)
+    const dialog = screen.getByRole('dialog', { name: en['restart.confirm.title'] })
+    expect(dialog.textContent).toContain(en['restart.signal.needRestart.built'])
   })
 
   it('shows no collapsed dot without a configured restart command or while the judgment is dark', () => {

@@ -12,7 +12,7 @@ export type RestartServerButtonProps = PropsLocale<'settings'> & {
   configured: boolean
   /** Sessions currently running, named in the confirmation copy. */
   runningSessions: number
-  /** Expanded sidebar column — the collapsed rail row shows only the signal dot. */
+  /** Expanded sidebar column — the collapsed rail renders the compact dot-button (FORK rail-restart-entry-1030). */
   wide: boolean
   /** Latest restart-signal judgment; `undefined` before the first delivery renders nothing. */
   signal?: RestartSignalView | undefined
@@ -55,9 +55,13 @@ function lampLit(signal: RestartSignalView | undefined): signal is RestartSignal
  * no longer prints a copy pill): a lit judgment (INIT/BUILDING/BUILD_FAILED/
  * NEED_BUILD/NEED_RESTART) lights the BUTTON itself, the hover/focus tooltip
  * carries the one next-step line, and the confirm dialog repeats it as its
- * first sentence; the collapsed rail keeps its standalone dot carrying the
- * same copy as its accessible name. `OK` and the client-only `CLIENT_UPDATED`
- * state (F5/HMR territory, design §二) render nothing.
+ * first sentence; the collapsed rail renders the same control as a compact
+ * dot-button — dark it is the refresh glyph, a lit judgment swaps in the
+ * status dot — and a click there opens the identical confirm dialog, so a
+ * restart is reachable without expanding the sidebar
+ * (FORK rail-restart-entry-1030, 2026-10-30 用户选 A). `OK` and the
+ * client-only `CLIENT_UPDATED` state (F5/HMR territory, design §二) render
+ * nothing in both states.
  * @param props - localized copy, the page's restart capability, and the latest judgment as plain data.
  * @returns the control with its dialog and lamp; nothing while unavailable.
  */
@@ -67,16 +71,6 @@ export function RestartServerButton({ t, configured, runningSessions, wide, sign
   if (!configured) return null
   const lit = lampLit(signal)
   const copy = lit ? restartSignalCopy(t, signal) : ''
-  if (!wide) {
-    if (!lit) return null
-    return (
-      <span
-        className={css.signalDot} role="status" aria-label={copy} title={copy}
-        data-restart-signal={signal.state}
-      />
-    )
-  }
-
   const openConfirm = (): void => {
     setResult('idle')
     setConfirming(true)
@@ -104,15 +98,17 @@ export function RestartServerButton({ t, configured, runningSessions, wide, sign
 
   return (
     <>
-      <Tooltip label={label} delayMs={500} side="top">
+      <Tooltip label={label} delayMs={500} side={wide ? 'top' : 'right'}>
         <button
           type="button"
-          className={clsx(css.restart, lit && css.restartLit)}
+          className={clsx(css.restart, wide ? css.restartWide : css.restartRail, lit && css.restartLit)}
           aria-label={label}
           data-restart-signal={lit ? signal.state : undefined}
           onClick={openConfirm}
         >
-          <IconRefreshOutlineMedium size={16} />
+          {wide || !lit
+            ? <IconRefreshOutlineMedium size={wide ? 16 : 14} />
+            : <span className={css.signalDot} aria-hidden="true" />}
         </button>
       </Tooltip>
       {result !== 'idle' && (

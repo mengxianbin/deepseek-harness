@@ -558,9 +558,12 @@ it('shows no restart control until the Host announced a restart command', () => 
   expect(screen.queryByRole('button', { name: 'Restart server' })).toBeNull()
 })
 
-it('keeps the restart control out of the collapsed rail', () => {
+it('keeps a clickable restart entry in the collapsed rail (FORK rail-restart-entry-1030)', () => {
   mount({ wide: false, restartConfigured: true })
-  expect(screen.queryByRole('button', { name: 'Restart server' })).toBeNull()
+  const restart = screen.getByRole('button', { name: 'Restart server' })
+  // A collapsed-rail click opens the same confirm dialog as the wide column.
+  fireEvent.click(restart)
+  expect(screen.getByRole('dialog', { name: en['restart.confirm.title'] })).toBeTruthy()
 })
 
 it('uses the localized restart label', () => {
@@ -587,9 +590,9 @@ it('delivers the restart-signal judgment to the lit restart control (no printed 
   expect(screen.queryByRole('status')).toBeNull()
 })
 
-it('delivers the restart-signal judgment to the collapsed dot', () => {
+it('delivers the restart-signal judgment to the collapsed dot-button (FORK rail-restart-entry-1030)', () => {
   mount({ wide: false, restartConfigured: true, restartSignal: { state: 'NEED_RESTART', reason: 'built' } })
-  const dot = screen.getByRole('status')
-  expect(dot.getAttribute('aria-label')).toBe(en['restart.signal.needRestart.built'])
-  expect(screen.queryByRole('button', { name: 'Restart server' })).toBeNull()
+  const dot = screen.getByRole('button', { name: en['restart.signal.needRestart.built'] })
+  expect(dot.getAttribute('data-restart-signal')).toBe('NEED_RESTART')
+  expect(dot.querySelector('[aria-hidden="true"]')).toBeTruthy()
 })
