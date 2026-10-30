@@ -168,14 +168,6 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
                 >
                   —
                 </span>
-                <a
-                  class="glanceRelogin"
-                  href="/api/mimo-relogin/page"
-                  rel="noopener noreferrer"
-                  target="_blank"
-                >
-                  Sign in again
-                </a>
               </span>
             </span>
           </span>
@@ -452,14 +444,6 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
                 >
                   —
                 </span>
-                <a
-                  class="glanceRelogin"
-                  href="/api/mimo-relogin/page"
-                  rel="noopener noreferrer"
-                  target="_blank"
-                >
-                  Sign in again
-                </a>
               </span>
             </span>
           </span>
@@ -623,14 +607,6 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
                 >
                   —
                 </span>
-                <a
-                  class="glanceRelogin"
-                  href="/api/mimo-relogin/page"
-                  rel="noopener noreferrer"
-                  target="_blank"
-                >
-                  重新登录
-                </a>
               </span>
             </span>
           </span>

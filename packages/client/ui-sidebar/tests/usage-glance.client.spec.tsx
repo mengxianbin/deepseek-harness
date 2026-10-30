@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
@@ -491,11 +491,11 @@ describe('UsageGlance', () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => overview })))
     render(<UsageGlance t={t} />)
     // Anchor on the FIGURE: the stat labels render before the first load
-    // lands, so waiting on the label alone would race the fetch. The row now
-    // always carries the re-login CTA (always-on, 2026-10-30 裁定), so the
-    // parent stacks label + figure + link.
+    // lands, so waiting on the label alone would race the fetch. The row is
+    // readings-only since the re-login CTA moved to the ⋯ menu (2026-10-30
+    // 用户指示), so the parent stacks label + figure alone.
     expect((await screen.findByText('¥6.16')).parentElement?.textContent)
-      .toBe(`${t('glance.mimoBalance.label')}¥6.16${t('glance.mimoBalance.relogin')}`)
+      .toBe(`${t('glance.mimoBalance.label')}¥6.16`)
     // The column tooltip folds the mimo reading between the cycle row and the stamp.
     screen.getByTitle(
       new RegExp(`^${t('glance.today')} · ${t('glance.cycle')} · ${t('glance.mimoBalance.label')} ¥6\\.16 · ${t('glance.refreshed')} \\d{2}\\.\\d{2}\\.\\d{2} \\d{2}:\\d{2}$`),
@@ -515,9 +515,9 @@ describe('UsageGlance', () => {
     const { container } = render(<UsageGlance t={t} />)
     const value = await screen.findByText('¥36.87*')
     expect(value.className).toContain('glanceStatValueStale')
-    // The row always carries the re-login CTA (always-on, 2026-10-30 裁定).
+    // The row is readings-only (the CTA moved to the ⋯ menu, 2026-10-30).
     expect(value.parentElement?.textContent)
-      .toBe(`${t('glance.mimoBalance.label')}¥36.87*${t('glance.mimoBalance.relogin')}`)
+      .toBe(`${t('glance.mimoBalance.label')}¥36.87*`)
     // The tooltip swaps in the stale marker and the fact's own probe stamp.
     const probeStamp = formatRefreshStamp(1)
     screen.getByTitle(
@@ -659,61 +659,25 @@ describe('UsageGlance', () => {
   })
 })
 
-describe('UsageGlance re-login CTA (FORK mimo-login-cta)', () => {
-  // jsdom does not navigate; the tests only need the click's propagation, so
-  // the default action is cancelled while the event still bubbles.
-  const cancelNavigation = (event: Event): void => { event.preventDefault() }
-
-  beforeEach(() => {
-    document.addEventListener('click', cancelNavigation, true)
-  })
-
-  afterEach(() => {
-    document.removeEventListener('click', cancelNavigation, true)
-  })
-
-  it('renders the re-login link beside the em dash once a load reports no mimo balance', async () => {
+describe('UsageGlance balance row after the re-login CTA moved (FORK mimo-login-cta moved, 2026-10-30)', () => {
+  it('renders no re-login link in the glance — the entry point lives in the ⋯ menu now', async () => {
     // The shared fixture carries no mimo row at all: a loaded overview whose
-    // mimo balance is undefined is exactly the degraded (cookie-expired) state.
+    // mimo balance is undefined is the degraded (cookie-expired) state that
+    // once carried the inline link.
     vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => OVERVIEW })))
-    render(<UsageGlance t={t} />)
-    const link = await screen.findByRole('link', { name: t('glance.mimoBalance.relogin') })
-    expect(link.getAttribute('href')).toBe('/api/mimo-relogin/page')
-    expect(link.getAttribute('target')).toBe('_blank')
-    // The em dash stays the row's figure; the link is its sibling.
-    expect(link.previousElementSibling?.textContent).toBe('—')
+    const { container } = render(<UsageGlance t={t} />)
+    // The em dash stays the balance row's figure, with no link sibling.
+    const figures = [...container.querySelectorAll('[class*="glanceStatValue"]')]
+    expect(figures[figures.length - 1]?.textContent).toBe('—')
+    expect(figures[figures.length - 1]?.parentElement?.textContent)
+      .toBe(`${t('glance.mimoBalance.label')}—`)
+    expect(screen.queryByRole('link')).toBeNull()
   })
 
-  it('renders the re-login link beside a live balance too (always-on, 2026-10-30 裁定)', async () => {
-    // The 2026-10-30 ruling supersedes the 2026-10-29 零打扰 gate: the CTA's
-    // behavior must be identical whether or not the cookie expired — a live
-    // balance renders the link the same way the degraded state does.
-    const overview: UsageOverviewView = {
-      providers: [{ provider: 'mimo', balance: { currency: 'CNY', totalBalance: '6.16', updatedAt: 1 } }],
-    }
-    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => overview })))
-    render(<UsageGlance t={t} />)
-    expect((await screen.findByText('¥6.16')).parentElement?.textContent)
-      .toBe(`${t('glance.mimoBalance.label')}¥6.16${t('glance.mimoBalance.relogin')}`)
-    // Same link, same target, same sibling position as the degraded state.
-    const link = screen.getByRole('link', { name: t('glance.mimoBalance.relogin') })
-    expect(link.getAttribute('href')).toBe('/api/mimo-relogin/page')
-    expect(link.getAttribute('target')).toBe('_blank')
-    expect(link.previousElementSibling?.textContent).toBe('¥6.16')
-  })
-
-  it('renders the re-login link before the first overview lands (no render gate)', () => {
-    // The old pre-load flash guard (`state !== null`) is gone along with the
-    // always-on ruling: the standing entry point renders from first paint.
-    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => { /* pending forever */ })))
-    render(<UsageGlance t={t} />)
-    const link = screen.getByRole('link', { name: t('glance.mimoBalance.relogin') })
-    expect(link.getAttribute('href')).toBe('/api/mimo-relogin/page')
-  })
-
-  it('stops propagation: the CTA opens the page without replaying the row onto settings', async () => {
-    // The settings-path fixture from the replay tests: if the row's onClick
-    // fired, openUsageSection would click this trigger.
+  it('keeps the whole-row settings replay intact (the stopPropagation carve-out left with the link)', async () => {
+    // The settings-path fixture from the replay tests: the row's onClick
+    // replays onto the usage section; the old CTA needed a carve-out, the
+    // readings-only row does not.
     const sidebar = document.createElement('div')
     sidebar.className = 'sidebarCol'
     const settingsArea = document.createElement('div')
@@ -727,10 +691,7 @@ describe('UsageGlance re-login CTA (FORK mimo-login-cta)', () => {
 
     vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => OVERVIEW })))
     render(<UsageGlance t={t} />)
-    const link = await screen.findByRole('link', { name: t('glance.mimoBalance.relogin') })
-    fireEvent.click(link)
-    expect(triggerClicks).toBe(0)
-    // Control: clicking the row's label still replays onto the usage section.
+    await screen.findByText(t('glance.mimoBalance.label'))
     fireEvent.click(screen.getByText(t('glance.mimoBalance.label')))
     expect(triggerClicks).toBe(1)
   })

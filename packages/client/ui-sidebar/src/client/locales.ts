@@ -8,6 +8,7 @@ export const zh = {
   'toggle.collapse': '收起侧边栏',
   'panels.label': '全局面板',
   'panels.more': '更多',
+  'panels.mimoLogin': '登录MiMo',
   'glance.open': '打开使用统计',
   'glance.window.month.label': '月',
   'glance.window.week.label': '周',
@@ -21,7 +22,6 @@ export const zh = {
   'glance.cycle.label': '周期',
   'glance.mimoBalance.label': '余额',
   'glance.mimoBalance.stale': '陈旧，最后探测',
-  'glance.mimoBalance.relogin': '重新登录',
   'glance.refreshed': '数据刷新于',
   'glance.trigger.hint': '≥85%：切 MiMo 官方',
 } satisfies Record<string, string>
@@ -37,6 +37,7 @@ export const en = {
   'toggle.collapse': 'Collapse sidebar',
   'panels.label': 'Global panels',
   'panels.more': 'More',
+  'panels.mimoLogin': 'Sign in to MiMo',
   'glance.open': 'Open usage statistics',
   'glance.window.month.label': 'Mo',
   'glance.window.week.label': 'Wk',
@@ -50,7 +51,6 @@ export const en = {
   'glance.cycle.label': 'Cycle',
   'glance.mimoBalance.label': 'Balance',
   'glance.mimoBalance.stale': 'stale, last probe',
-  'glance.mimoBalance.relogin': 'Sign in again',
   'glance.refreshed': 'Refreshed',
   'glance.trigger.hint': '≥85%: switch to MiMo official',
 } satisfies Record<SidebarKey, string>

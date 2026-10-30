@@ -77,21 +77,14 @@
  * stamp (v2.3 tooltip precedent).
  *
  * mimo re-login CTA (FORK mimo-login-cta, 2026-10-29; always-on since
- * 2026-10-30 用户裁定「不论 cookie 过期与否，CTA 行为相同」): the balance row
- * carries a STANDING entry point to re-login — the row always renders the
- * `重新登录` link (`glance.mimoBalance.relogin`) beside the figure, opening
- * the re-login kit's page (`/api/mimo-relogin/page`) in a new tab, whatever
- * the row reads (live figure, em dash, or the pre-load placeholder). The
- * 2026-10-29 gates (link only on a loaded missing balance — 零打扰; the
- * pre-load flash guard) are superseded: one identical behavior in every
- * balance state is easier to test and to maintain, and the login entry
- * stays visible at all times. The link stops propagation so the control's
- * own settings-replay onClick stays exclusive to the rest of the row; the
- * URL is same-origin relative (mirroring `OVERVIEW_ROUTE`), so it lands on
- * whatever origin serves this shell — 127.0.0.1:3080 in the local
- * deployment; a remote shell resolves against its own origin and then
- * meets the kit's loopback fence (accepted 2026-10-29, ruling info-gap ①:
- * balance decay happens in local sessions).
+ * 2026-10-30 用户裁定「不论 cookie 过期与否，CTA 行为相同」; MOVED 2026-10-30
+ * 用户指示): the standing entry point to re-login no longer rides the
+ * balance row — it moved to the footer ⋯ menu as its FIRST item, renamed
+ * `登录MiMo` (`panels.mimoLogin`, opening the re-login kit's page
+ * `/api/mimo-relogin/page` in a new tab; SidebarRoot owns it now). The
+ * balance row is readings-only again: label + figure, no link, no
+ * stopPropagation carve-out. The always-on ruling survives the move — the
+ * menu item renders in every balance state and before the first load.
  *
  * Clicking the control opens the settings panel on the usage section by
  * replaying the user's own path — the shell owns the panel state and exposes
@@ -165,14 +158,6 @@ const WINDOW_TITLE_KEY = {
  * deepseek-official's balance, which must not answer for mimo's row.
  */
 const MIMO_ROUTE_ID = 'mimo'
-
-/**
- * The re-login page the balance row's CTA opens (FORK mimo-login-cta,
- * always-on since 2026-10-30): same-origin relative, mirroring
- * `OVERVIEW_ROUTE` — the kit is served by the same origin that serves this
- * shell.
- */
-const MIMO_RELOGIN_PAGE = '/api/mimo-relogin/page'
 
 /** Currency symbols the balance row knows; others print `1.23 XXX`. */
 const BALANCE_SYMBOL: Record<string, string> = { CNY: '¥', USD: '$' }
@@ -689,12 +674,8 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
   const mimoFigure = mimoBalance === undefined
     ? '—'
     : `${formatBalanceFigure(mimoBalance)}${mimoStale ? '*' : ''}`
-  // Re-login CTA (FORK mimo-login-cta, always-on since 2026-10-30 用户裁定):
-  // NO render gate at all — the link is a standing entry point, identical
-  // in every balance state and before the first load. Dropping the old
-  // `state !== null && mimoBalance === undefined` gate is the ruling's
-  // "same behavior regardless of cookie expiry" made literal: one code
-  // path, one test judgment, no state-dependent branches.
+  // The re-login CTA moved to the footer ⋯ menu (2026-10-30 用户指示, see the
+  // module header); the stats column is readings-only again.
   // One tooltip for the whole column: every reading plus the refresh stamp
   // (the stamp stays off-screen; v2.2 spent a third line on it).
   const columnTitle = [
@@ -796,17 +777,6 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
               <span className={mimoStale ? `${css.glanceStatValue} ${css.glanceStatValueStale}` : css.glanceStatValue}>
                 {mimoFigure}
               </span>
-              {/* The row itself replays onto the settings usage section; the
-                  CTA must only open the re-login page in a new tab, so it
-                  stops the click from reaching the row's onClick. Always
-                  rendered (FORK mimo-login-cta always-on, 2026-10-30). */}
-              <a
-                className={css.glanceRelogin}
-                href={MIMO_RELOGIN_PAGE}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={(event) => { event.stopPropagation() }}
-              >{t('glance.mimoBalance.relogin')}</a>
             </span>
           </span>
         </span>
