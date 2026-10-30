@@ -8,6 +8,7 @@ import type { ImageAttachmentLimits } from '@deepseek-ai/dsh-attachment'
 import type { Session, SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import type { ProjectionSnapshot } from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
+import type {} from '@deepseek-ai/dsh-workspace'
 import { SessionQueryError, type SessionRecord, type SessionSearchCursor } from '@deepseek-ai/dsh-session-query'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import { z } from 'zod'
@@ -16,13 +17,30 @@ import {
   SESSION_SEARCH_SNIPPET_MAX_CODE_POINTS,
 } from './types.ts'
 import type {
-  SessionListMetadata, SessionProjectionHints, SessionProjectionValues, SessionSearchItem,
+  SessionListMetadata, SessionListRequest, SessionProjectionHints, SessionProjectionValues,
+  SessionSearchItem,
   SessionSearchValue, SessionSummary,
 } from './types.ts'
 
 const SEARCH_PROVIDER_CALL_LIMIT = 100
 const SESSION_SEARCH_QUERY_MAX_CHARS = 500
 const MESSAGE_TYPES = new Set(['user/message', 'assistant/message'])
+
+/**
+ * Projection keys a list summary omits: every reader of these keys opens its
+ * Session first (an exact `session/projections` baseline then carries them),
+ * so a listing never needs to pay their bytes. `title`, `subagentCatalog`,
+ * `goal`, `agentPreset`, `subagent`, and `subagentTiming` are deliberately
+ * absent from this set — cold rows are their only source.
+ */
+const SESSION_LIST_OMITTED_PROJECTION_KEYS: ReadonlySet<string> = new Set([
+  'contextBreakdown',
+  'contextPressure',
+  'inbox',
+  'sessionStats',
+  'tokenUsage',
+  'turnOutline',
+])
 
 const sessionListMetadataSchema: z.ZodType<SessionListMetadata> = z.object({
   blank: z.boolean(),
@@ -126,12 +144,28 @@ export class ApiSessionList {
 
   /**
    * Read every visible attached and persisted Session without activating an Agent.
+   * @param request - row-scope request: `includeArchived` restores archived
+   * rows (excluded from the directory scan before any header read by default)
+   * and `includeSubagents` restores subagent-origin rows (dropped right after
+   * their header read by default); the flags are independent.
    * @param signal - optional cancellation for persistence reads and summary generation.
    * @returns visible Session summaries ordered by activity.
    */
-  async list(signal?: AbortSignal): Promise<SessionSummary[]> {
+  async list(request?: SessionListRequest, signal?: AbortSignal): Promise<SessionSummary[]> {
     signal?.throwIfAborted()
-    const records = await this.ctx.sessionQuery.listSessions(signal)
+    const includeArchived = request?.includeArchived === true
+    const includeSubagents = request?.includeSubagents === true
+    // One consistent archived snapshot serves both the directory-level
+    // pre-exclusion and every record the listing merges.
+    const archivedSessionIds = includeArchived
+      ? undefined
+      : new Set<SessionId>(this.ctx.workspaceRegistry.archivedSessionIds)
+    const records = await this.ctx.sessionQuery.listSessions(signal, {
+      ...(archivedSessionIds === undefined ? {} : { excludeSessionIds: archivedSessionIds }),
+      // Origin lives only in the header: this predicate runs after the header
+      // read and before the stat, the earliest point it can decide.
+      ...(includeSubagents ? {} : { select: (header: SessionHeader) => header.origin !== 'subagent' }),
+    })
     signal?.throwIfAborted()
     const items: SessionSummary[] = []
     const cold: SessionRecord[] = []
@@ -316,16 +350,23 @@ export class ApiSessionList {
  * Wrap one projection block as Session-list hints of the named sequence space.
  * @param kind - which sequence space the block's watermark belongs to.
  * @param block - the block, or `undefined` when no source served one.
- * @returns the hints, or `undefined` when the block is absent or carries no value.
+ * @returns the hints, or `undefined` when the block is absent or carries no
+ * value the list keeps (see `SESSION_LIST_OMITTED_PROJECTION_KEYS`).
  */
 function hintsOf(
   kind: SessionProjectionHints['kind'],
   block: ProjectionSnapshot | undefined,
 ): SessionProjectionHints | undefined {
   if (block === undefined || Object.keys(block.values).length === 0) return undefined
-  // Listing hints contain every wire value the source currently holds but
-  // remain partial: missing cells and cache rows are never materialized here.
-  return { kind, asOfSeq: block.asOfSeq, values: block.values as SessionProjectionValues }
+  // Listing hints remain partial: missing cells and cache rows are never
+  // materialized here. The display-heavy keys are filtered into a fresh
+  // object — the source block is shared with the projection stores and must
+  // never be mutated in place.
+  const values = Object.fromEntries(
+    Object.entries(block.values).filter(([key]) => !SESSION_LIST_OMITTED_PROJECTION_KEYS.has(key)),
+  ) as SessionProjectionValues
+  if (Object.keys(values).length === 0) return undefined
+  return { kind, asOfSeq: block.asOfSeq, values }
 }
 
 function normalizeSearchQuery(query: string): string {

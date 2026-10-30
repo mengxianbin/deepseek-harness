@@ -4,7 +4,7 @@ import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import SessionStore, { SessionId, type Session } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import type { SessionRecord } from '@deepseek-ai/dsh-session-query'
+import type { SessionListQueryOptions, SessionRecord } from '@deepseek-ai/dsh-session-query'
 import { resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { scheduler } from 'node:timers/promises'
@@ -81,8 +81,11 @@ async function harness(rows: readonly Row[], summaryMs = 8, workSliceMs = 8) {
     if (row.phase === 'live') attach(row.id)
     return { header: session.header, live: row.phase === 'live', persisted: true }
   })
-  const listSessions = vi.fn(async (_signal?: AbortSignal) => records)
+  const listSessions = vi.fn(async (_signal?: AbortSignal, _options?: SessionListQueryOptions) => records)
   ctx.provide('sessionQuery', { listSessions } as never)
+  // The default list pre-excludes this registry set before any header read;
+  // the scheduling fixture archives nothing.
+  ctx.provide('workspaceRegistry', { archivedSessionIds: [] } as never)
   ctx.provide('sessionProjectionCache', {
     cachedSnapshot: (header: SessionRecord['header']) => {
       recordSummary('cold', header.id)
@@ -158,7 +161,7 @@ describe('Session-list work slices', () => {
       if (id === SessionId('first')) betweenRows(() => { controller.abort(reason) })
       return get(id)
     })
-    await expect(h.list.list(controller.signal)).rejects.toBe(reason)
+    await expect(h.list.list(undefined, controller.signal)).rejects.toBe(reason)
     expect(lookup).toHaveBeenCalledTimes(2)
     expect(h.trace).toEqual([])
   })
@@ -169,7 +172,7 @@ describe('Session-list work slices', () => {
     const controller = new AbortController()
     const reason = new Error('stop without waiting')
     h.observer.summary = (_phase, id) => { if (id === abortAt) controller.abort(reason) }
-    await expect(h.list.list(controller.signal)).rejects.toBe(reason)
+    await expect(h.list.list(undefined, controller.signal)).rejects.toBe(reason)
     expect(yieldWork).not.toHaveBeenCalled()
     expect(h.trace).toEqual(abortAt === 'first' ? ['cold:first'] : ['cold:first', 'cold:last'])
   })
@@ -189,7 +192,8 @@ describe('Session-list work slices', () => {
     } as never)
     h.ctx.provide('fileUploads', { registerAgentResolver: () => dispose } as never)
     h.ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'test', model: 'test' }) } as never)
-    h.ctx.provide('workspaceRegistry', { list: () => [], archivedSessionIds: [] } as never)
+    // workspaceRegistry already came from the harness (the default list
+    // pre-excludes its archived ids); providing it twice would throw.
     new RemoteAccessService(h.ctx)
     const controller = new SessionController(h.ctx, { nativeOpen: false, listWorkSliceMs: 4 }, { canOpenPath: () => false })
     const yieldWork = vi.spyOn(scheduler, 'yield')
@@ -230,11 +234,16 @@ describe('Session-list work slices', () => {
       if (id === abortAt) betweenRows(() => { controller.abort(reason) })
     }
 
-    await expect(h.list.list(controller.signal)).rejects.toBe(reason)
+    await expect(h.list.list(undefined, controller.signal)).rejects.toBe(reason)
     expect(h.trace).toEqual(abortAt === 'first'
       ? [`${phase}:first`]
       : [`${phase}:first`, `${phase}:middle`, `${phase}:last`])
-    expect(h.listSessions).toHaveBeenCalledExactlyOnceWith(controller.signal)
+    // The default listing passes the row-scope options beside the signal.
+    expect(h.listSessions).toHaveBeenCalledTimes(1)
+    const [signalArg, optionsArg] = h.listSessions.mock.calls[0] ?? []
+    expect(signalArg).toBe(controller.signal)
+    expect(optionsArg?.excludeSessionIds).toBeInstanceOf(Set)
+    expect(typeof optionsArg?.select).toBe('function')
     if (phase === 'live' && abortAt === 'first') {
       expect(lookup).toHaveBeenCalledExactlyOnceWith(SessionId('first'))
     }
@@ -248,7 +257,7 @@ describe('Session-list work slices', () => {
       if (phase === 'live') betweenRows(() => { controller.abort(reason) })
     }
 
-    await expect(h.list.list(controller.signal)).rejects.toBe(reason)
+    await expect(h.list.list(undefined, controller.signal)).rejects.toBe(reason)
     expect(h.trace).toEqual(['live:live'])
   })
 
@@ -258,7 +267,7 @@ describe('Session-list work slices', () => {
     const reason = new Error('already cancelled')
     controller.abort(reason)
 
-    await expect(h.list.list(controller.signal)).rejects.toBe(reason)
+    await expect(h.list.list(undefined, controller.signal)).rejects.toBe(reason)
     expect(h.listSessions).not.toHaveBeenCalled()
     expect(h.trace).toEqual([])
   })
@@ -272,7 +281,7 @@ describe('Session-list work slices', () => {
       return []
     })
 
-    await expect(h.list.list(controller.signal)).rejects.toBe(reason)
+    await expect(h.list.list(undefined, controller.signal)).rejects.toBe(reason)
     expect(h.trace).toEqual([])
   })
 

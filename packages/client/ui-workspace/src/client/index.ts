@@ -317,7 +317,13 @@ export function apply(ctx: Context): void {
   })
   const toastActions = {
     undoArchive: unarchiveSession,
-    showArchived: () => { viewInstance.actions.setArchivedFilter('show') },
+    showArchived: () => {
+      viewInstance.actions.setArchivedFilter('show')
+      // The default listing omits archived rows server-side (row-cut).
+      void sessions.refresh({ includeArchived: true }).catch((reason: unknown) => {
+        console.warn('session list refresh rejected:', reason)
+      })
+    },
     openForkSource: (sessionId: SessionId) => {
       if (workspaces.list.getSnapshot().archivedSessionIds.includes(sessionId)) {
         notify({ kind: 'archivedNotOpenable' })
@@ -344,9 +350,10 @@ export function apply(ctx: Context): void {
     open: openSession,
     searchSessions,
     searchResultLimit: sessions.searchResultLimit,
-    // FORK dsh-local (f5-list-states): the sidebar error surface's retry.
-    refreshSessions: () => {
-      void sessions.refresh().catch((reason: unknown) => {
+    // FORK dsh-local (f5-list-states): the sidebar error surface's retry;
+    // the archived view passes includeArchived to refetch its rows.
+    refreshSessions: (options?: { readonly includeArchived?: boolean }) => {
+      void sessions.refresh(options).catch((reason: unknown) => {
         console.warn('session list refresh rejected:', reason)
       })
     },

@@ -247,6 +247,12 @@ function installControllers(
       resources: { register: () => dispose },
     } as never)
   }
+  if (ctx.get('workspaceRegistry') === undefined) {
+    // The default session/list pre-excludes this set before any header read
+    // (f5-list-thin-1029); tests without a workspace registry mean "nothing
+    // is archived".
+    ctx.provide('workspaceRegistry', { archivedSessionIds: [] } as never)
+  }
   if (ctx.get('agentDefaultModel') === undefined) {
     ctx.provide('agentDefaultModel', {
       currentSelection: defaults.defaultModelSelection,

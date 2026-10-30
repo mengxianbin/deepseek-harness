@@ -721,7 +721,7 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
                   <span className={css.attachmentText}>{t('attachment.folded', { chars: attachment.chars })}</span>
                   {openAttachment !== undefined
                     ? (
-                      <Button variant="outline" onClick={() => openAttachment(attachment.path)}>
+                      <Button variant="outline" onClick={() => { openAttachment(attachment.path) }}>
                         {t('attachment.open')}
                       </Button>
                     )

@@ -266,6 +266,18 @@ export interface SkillListValue {
 /** Session list request. */
 export interface SessionListRequest {
   readonly cursor?: string
+  /**
+      Return archived Sessions as rows too. Omitted, the listing excludes the
+      registry's archived ids before any header read, so the default listing
+      never opens, decompresses, or stats an archived session.
+  */
+  readonly includeArchived?: boolean
+  /**
+      Return subagent-origin Sessions as rows too. Omitted, the listing drops
+      subagent rows the moment their header reveals `origin`, before their
+      stat. The two flags are independent: full-corpus inventory passes both.
+  */
+  readonly includeSubagents?: boolean
 }
 
 /** Session list response value. */

@@ -15,7 +15,7 @@ import {
 } from '@deepseek-ai/dsh-session-format-catalog'
 import { readdirSync, type Dirent } from 'node:fs'
 import { open, mkdir, readdir, realpath, link, rm, stat, truncate } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { scheduler } from 'node:timers/promises'
 import { createHash, randomBytes } from 'node:crypto'
@@ -515,18 +515,22 @@ class JsonlSessionPersistence extends SessionPersistence {
   /**
    * List every stored session visible to this process: materialized artifacts
    * plus this process's created-but-unmaterialized sessions.
-   * @param options - optional cancellation.
+   * @param options - optional cancellation plus the optional listing filters
+   * (`excludeSessionIds` skips directories before any header read; `select`
+   * drops a session after its header read and before its stat).
    * @returns one snapshot per session, in no promised order.
    */
   async list(options?: SessionPersistenceListOptions): Promise<readonly SessionPersistenceSnapshot[]> {
     const signal = options?.signal
+    const excludeSessionIds = options?.excludeSessionIds
+    const select = options?.select
     const snapshots: SessionPersistenceSnapshot[] = []
     const listed = new Set<SessionId>()
     // Snapshot pending entries BEFORE scanning storage: a session whose first
     // append lands mid-scan is then still in this snapshot (its artifact may
     // predate the scan), so create-to-list visibility never has a hole.
     const pending = [...this.tracker.pendingEntries()]
-    const artifacts = await this.listArtifacts(signal)
+    const artifacts = await this.listArtifacts(signal, excludeSessionIds, select)
     const corpusRevision = artifacts.some(artifact => artifact.sourceVersion < SESSION_FORMAT_VERSION)
       ? await this.historicalCorpusRevision(signal) : undefined
     const statted = settledValues(await settleLimited(this.listLimit, artifacts, async (artifact) => {
@@ -555,7 +559,10 @@ class JsonlSessionPersistence extends SessionPersistence {
       })
     }
     for (const [id, entry] of pending) {
-      if (!listed.has(id)) snapshots.push({ header: entry.header, revision: entry.revision })
+      if (listed.has(id)) continue
+      if (excludeSessionIds?.has(id)) continue
+      if (select !== undefined && !select(entry.header)) continue
+      snapshots.push({ header: entry.header, revision: entry.revision })
     }
     signal?.throwIfAborted()
     return snapshots
@@ -1074,10 +1081,22 @@ class JsonlSessionPersistence extends SessionPersistence {
     }
   }
 
-  /** Enumerate selected physical generations without interpreting their headers or bodies. */
-  private async listGenerations(signal?: AbortSignal): Promise<ResolvedJsonlGeneration[]> {
-    const selected = await this.mapSessionDirectories((dir) => {
+  /**
+   * Enumerate selected physical generations without interpreting their headers or bodies.
+   * @param signal - optional cancellation for directory listings.
+   * @param excludedEncoded - session-directory names (encoded ids) skipped
+   * before their directory is even opened, so an excluded session costs no
+   * readdir of its own directory, no header read, and no stat.
+   */
+  private async listGenerations(
+    signal?: AbortSignal,
+    excludedEncoded?: ReadonlySet<string>,
+  ): Promise<ResolvedJsonlGeneration[]> {
+    const selected = await this.mapSessionDirectories(async (dir) => {
       signal?.throwIfAborted()
+      // The directory name is `encodeSegment(id)` (see `sessionDir`): comparing
+      // the encoded form needs no decoder and is injective over session ids.
+      if (excludedEncoded !== undefined && excludedEncoded.has(basename(dir))) return undefined
       return this.resolveGenerationInDirectory(dir, signal)
     }, signal)
     return selected.filter(source => source !== undefined)
@@ -1133,13 +1152,26 @@ class JsonlSessionPersistence extends SessionPersistence {
     return hash.digest('hex')
   }
 
+  /**
+   * Read every selected generation's header into a listing artifact.
+   * @param signal - optional cancellation for directory and header reads.
+   * @param excludeSessionIds - ids skipped from the directory scan before any
+   * header read (`listGenerations` sees only their encoded names).
+   * @param select - post-header predicate; a rejected header is dropped before
+   * its artifact is stat'ed.
+   */
   private async listArtifacts(
     signal?: AbortSignal,
+    excludeSessionIds?: ReadonlySet<SessionId>,
+    select?: (header: SessionHeader) => boolean,
   ): Promise<Array<GenerationHeader & { path: string; sourceVersion: number }>> {
     signal?.throwIfAborted()
     await this.ensureRootEncoding()
     signal?.throwIfAborted()
-    const generations = await this.listGenerations(signal)
+    const excludedEncoded = excludeSessionIds === undefined
+      ? undefined
+      : new Set([...excludeSessionIds].map(id => encodeSegment(id)))
+    const generations = await this.listGenerations(signal, excludedEncoded)
     const headers = await settleLimited(this.listLimit, generations, async (selected) => {
       signal?.throwIfAborted()
       try {
@@ -1157,6 +1189,9 @@ class JsonlSessionPersistence extends SessionPersistence {
       if (outcome.status === 'rejected') throw outcome.reason
       const { selected, metadata } = outcome.value
       if (metadata === undefined) continue
+      // Origin-only facts exist first in the header: this is the earliest
+      // point a `select` predicate can drop a session, still before its stat.
+      if (select !== undefined && !select(metadata.header)) continue
       if (ids.has(metadata.header.id)) {
         throw new Error(`duplicate JSONL session id "${metadata.header.id}" appears in multiple project directories`)
       }
