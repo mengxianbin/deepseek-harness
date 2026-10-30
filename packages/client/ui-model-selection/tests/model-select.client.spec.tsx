@@ -71,6 +71,9 @@ function modelGroups(count: number): ModelDirectoryState['groups'] {
 const scrollIntoView = vi.fn()
 beforeEach(() => {
   scrollIntoView.mockClear()
+  // jsdom's store outlives one test; the seat now reads/writes per-model
+  // effort memory, which must never leak between tests.
+  localStorage.clear()
   const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView')
   Object.defineProperty(Element.prototype, 'scrollIntoView', { configurable: true, writable: true, value: scrollIntoView })
   onTestFinished(() => {
@@ -498,6 +501,96 @@ describe('ModelSelect reasoning effort', () => {
 
     expect(screen.queryByRole('button')).toBeNull()
     expect(load).not.toHaveBeenCalled()
+  })
+})
+
+describe('ModelSelect per-model effort memory', () => {
+  const dualGroups = (
+    externalReasoning?: ModelDirectoryState['groups'][number]['models'][number]['reasoning'],
+  ): ModelDirectoryState['groups'] => [{
+    id: 'deepseek-official',
+    name: 'DeepSeek',
+    models: [
+      { id: 'deepseek-v4-flash', name: 'DeepSeek-V4-Flash', reasoning },
+      { id: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro', reasoning },
+    ],
+  }, {
+    id: 'external',
+    name: 'External Provider',
+    models: [{ id: 'external-model', name: 'External Model', ...(externalReasoning === undefined ? {} : { reasoning: externalReasoning }) }],
+  }]
+
+  const mountSeat = (groups: ModelDirectoryState['groups'], current: ModelDirectoryState['current']) => {
+    const directory = createSnapshotStore<ModelDirectoryState>(state({ groups, current }))
+    const select = vi.fn().mockResolvedValue({ ok: true, value: undefined })
+    render(<ModelSelect renderSlot={renderLabel} locked={false} available directory={directory} load={vi.fn()} select={select} t={t} />)
+    return select
+  }
+
+  const openModelPane = (): void => {
+    fireEvent.click(screen.getByRole('button', { name: /选择模型|当前/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /^模型/ }))
+  }
+
+  it('restores the chosen route\'s own remembered level when switching to it', () => {
+    localStorage.setItem('dsh.model-selection.effort-memory.v1', JSON.stringify({
+      '["deepseek-official","deepseek-v4-pro"]': 'max',
+    }))
+    const select = mountSeat(dualGroups(), { provider: 'deepseek-official', model: 'deepseek-v4-flash' })
+    openModelPane()
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /DeepSeek-V4-Pro/ }))
+    expect(select).toHaveBeenCalledWith({
+      provider: 'deepseek-official', model: 'deepseek-v4-pro', reasoningEffort: 'max',
+    })
+  })
+
+  it('submits a bare selection for a route with no memory and never borrows another route\'s level', () => {
+    localStorage.setItem('dsh.model-selection.effort-memory.v1', JSON.stringify({
+      '["deepseek-official","deepseek-v4-flash"]': 'max',
+    }))
+    const select = mountSeat(dualGroups(), { provider: 'deepseek-official', model: 'deepseek-v4-flash' })
+    openModelPane()
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /External Model/ }))
+    expect(select).toHaveBeenCalledWith({ provider: 'external', model: 'external-model' })
+  })
+
+  it('falls back to the model default when the remembered level left the route\'s vocabulary', () => {
+    localStorage.setItem('dsh.model-selection.effort-memory.v1', JSON.stringify({
+      '["deepseek-official","deepseek-v4-pro"]': 'ultra',
+    }))
+    const select = mountSeat(dualGroups(), { provider: 'deepseek-official', model: 'deepseek-v4-flash' })
+    openModelPane()
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /DeepSeek-V4-Pro/ }))
+    expect(select).toHaveBeenCalledWith({ provider: 'deepseek-official', model: 'deepseek-v4-pro' })
+  })
+
+  it('an explicit effort pick writes the memory; re-picking Provider default forgets it', () => {
+    const groups = dualGroups({ efforts: [{ id: 'standard', name: 'Standard' }] })
+    const select = mountSeat(groups, { provider: 'deepseek-official', model: 'deepseek-v4-flash' })
+    const memory = () => JSON.parse(localStorage.getItem('dsh.model-selection.effort-memory.v1') ?? '{}') as Record<string, string>
+
+    fireEvent.click(screen.getByRole('button', { name: /选择模型|当前/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /推理等级/ }))
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /Max/ }))
+    expect(select).toHaveBeenCalledWith({
+      provider: 'deepseek-official', model: 'deepseek-v4-flash', reasoningEffort: 'max',
+    })
+    expect(memory()).toEqual({ '["deepseek-official","deepseek-v4-flash"]': 'max' })
+
+    // The external route has no model default, so its pane offers Provider
+    // default — which is already its effective value, so re-picking it only
+    // closes the menu, but still drops that route's memory.
+    cleanup()
+    localStorage.setItem('dsh.model-selection.effort-memory.v1', JSON.stringify({
+      '["deepseek-official","deepseek-v4-flash"]': 'max',
+      '["external","external-model"]': 'standard',
+    }))
+    const external = mountSeat(groups, { provider: 'external', model: 'external-model' })
+    fireEvent.click(screen.getByRole('button', { name: /选择模型|当前/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /推理等级/ }))
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /Default/ }))
+    expect(external).not.toHaveBeenCalled()
+    expect(memory()).toEqual({ '["deepseek-official","deepseek-v4-flash"]': 'max' })
   })
 })
 

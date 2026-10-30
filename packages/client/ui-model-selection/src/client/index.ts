@@ -24,6 +24,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import { IconDataOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ModelDirectoryState } from './directory.ts'
+import { modelEffortFor } from './effort-memory.ts'
 import { ModelDirectoryResolver } from './service.ts'
 import type { ModelSelectInjected } from './slots.ts'
 import { ModelSelect } from './ModelSelect.tsx'
@@ -87,9 +88,12 @@ function selectionOf(state: ModelDirectoryState, id: string): ModelSelection | u
     for (const model of group.models) {
       if (rowId(group.id, model.id) !== id) continue
       const sameRoute = state.current?.provider === group.id && state.current.model === model.id
+      // Per-model effort memory (shared with the composer seat): a different
+      // route restores its own remembered level when its vocabulary still
+      // offers it, and only otherwise falls to the model default.
       const reasoningEffort = sameRoute
         ? state.current?.reasoningEffort ?? model.reasoning?.defaultEffort
-        : model.reasoning?.defaultEffort
+        : modelEffortFor(group.id, model.id, model.reasoning) ?? model.reasoning?.defaultEffort
       return {
         provider: group.id,
         model: model.id,

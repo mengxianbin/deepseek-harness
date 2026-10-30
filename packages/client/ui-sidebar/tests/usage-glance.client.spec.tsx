@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
-import { deriveGlance, formatBalanceFigure, formatCompactTokens, formatRefreshStamp, openUsageSection, UsageGlance, type GlanceWindowRow, type UsageOverviewView } from '../src/client/UsageGlance.tsx'
+import { deriveGlance, formatBalanceFigure, formatCompactTokens, formatRefreshStamp, openUsageSection, readSourceBadge, sourceBadgeName, UsageGlance, type GlanceWindowRow, type UsageOverviewView } from '../src/client/UsageGlance.tsx'
 import { en } from '../src/client/locales.ts'
 
 const t = makeTranslate({ ...commonEn, ...en })
@@ -491,7 +491,9 @@ describe('UsageGlance', () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => overview })))
     render(<UsageGlance t={t} />)
     // Anchor on the FIGURE: the stat labels render before the first load
-    // lands, so waiting on the label alone would race the fetch.
+    // lands, so waiting on the label alone would race the fetch. The row is
+    // readings-only since the re-login CTA moved to the ⋯ menu (2026-10-30
+    // 用户指示), so the parent stacks label + figure alone.
     expect((await screen.findByText('¥6.16')).parentElement?.textContent)
       .toBe(`${t('glance.mimoBalance.label')}¥6.16`)
     // The column tooltip folds the mimo reading between the cycle row and the stamp.
@@ -513,7 +515,9 @@ describe('UsageGlance', () => {
     const { container } = render(<UsageGlance t={t} />)
     const value = await screen.findByText('¥36.87*')
     expect(value.className).toContain('glanceStatValueStale')
-    expect(value.parentElement?.textContent).toBe(`${t('glance.mimoBalance.label')}¥36.87*`)
+    // The row is readings-only (the CTA moved to the ⋯ menu, 2026-10-30).
+    expect(value.parentElement?.textContent)
+      .toBe(`${t('glance.mimoBalance.label')}¥36.87*`)
     // The tooltip swaps in the stale marker and the fact's own probe stamp.
     const probeStamp = formatRefreshStamp(1)
     screen.getByTitle(
@@ -561,18 +565,20 @@ describe('UsageGlance', () => {
 
   it('refreshes on the poll cadence and on visibility changes', async () => {
     vi.useFakeTimers()
+    // Each load cycle issues two same-origin reads: the overview AND the
+    // auto-route status the current-source badge consumes (v3.5).
     const fetchMock = vi.fn(async () => ({ status: 200, ok: true, json: async () => OVERVIEW }))
     vi.stubGlobal('fetch', fetchMock)
     render(<UsageGlance t={t} />)
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
     expect(fetchMock).toHaveBeenCalledTimes(2)
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    expect(fetchMock).toHaveBeenCalledTimes(4)
     await act(async () => {
       document.dispatchEvent(new Event('visibilitychange'))
       await vi.advanceTimersByTimeAsync(0)
     })
-    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock).toHaveBeenCalledTimes(6)
   })
 
   it('replays the user path onto the usage section', async () => {
@@ -652,5 +658,156 @@ describe('UsageGlance', () => {
     expect(triggerClicks).toBe(1)
     await flush()
     expect(document.querySelectorAll('[data-settings-section]')).toHaveLength(0)
+  })
+})
+
+describe('UsageGlance balance row after the re-login CTA moved (FORK mimo-login-cta moved, 2026-10-30)', () => {
+  it('renders no re-login link in the glance — the entry point lives in the ⋯ menu now', async () => {
+    // The shared fixture carries no mimo row at all: a loaded overview whose
+    // mimo balance is undefined is the degraded (cookie-expired) state that
+    // once carried the inline link.
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => OVERVIEW })))
+    const { container } = render(<UsageGlance t={t} />)
+    // The em dash stays the balance row's figure, with no link sibling.
+    const figures = [...container.querySelectorAll('[class*="glanceStatValue"]')]
+    expect(figures[figures.length - 1]?.textContent).toBe('—')
+    expect(figures[figures.length - 1]?.parentElement?.textContent)
+      .toBe(`${t('glance.mimoBalance.label')}—`)
+    expect(screen.queryByRole('link')).toBeNull()
+  })
+
+  it('keeps the whole-row settings replay intact (the stopPropagation carve-out left with the link)', async () => {
+    // The settings-path fixture from the replay tests: the row's onClick
+    // replays onto the usage section; the old CTA needed a carve-out, the
+    // readings-only row does not.
+    const sidebar = document.createElement('div')
+    sidebar.className = 'sidebarCol'
+    const settingsArea = document.createElement('div')
+    settingsArea.className = 'settingsArea'
+    const trigger = document.createElement('button')
+    settingsArea.append(trigger)
+    sidebar.append(settingsArea)
+    document.body.append(sidebar)
+    let triggerClicks = 0
+    trigger.addEventListener('click', () => { triggerClicks += 1 })
+
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => OVERVIEW })))
+    render(<UsageGlance t={t} />)
+    await screen.findByText(t('glance.mimoBalance.label'))
+    fireEvent.click(screen.getByText(t('glance.mimoBalance.label')))
+    expect(triggerClicks).toBe(1)
+  })
+})
+
+describe('readSourceBadge — the policy-layer read (auto-route badge, v3.5)', () => {
+  it('drops foreign and partial payloads — the dot is absent, never wrong', () => {
+    expect(readSourceBadge(undefined)).toBeUndefined()
+    expect(readSourceBadge(null)).toBeUndefined()
+    expect(readSourceBadge('status')).toBeUndefined()
+    expect(readSourceBadge({})).toBeUndefined()
+    expect(readSourceBadge({ policy: {} })).toBeUndefined()
+    expect(readSourceBadge({ policy: { effectiveSource: '' } })).toBeUndefined()
+    // The overview document itself carries no policy layer.
+    expect(readSourceBadge(OVERVIEW)).toBeUndefined()
+  })
+
+  it('parses phase, source, and a finite decision stamp only', () => {
+    expect(readSourceBadge({ policy: { effectiveSource: 'mimo', phase: 'triggered', lastDecisionAt: 123 } }))
+      .toEqual({ source: 'mimo', triggered: true, decidedAt: 123 })
+    expect(readSourceBadge({ policy: { effectiveSource: 'opencode-go', phase: 'baseline' } }))
+      .toEqual({ source: 'opencode-go', triggered: false })
+    // A non-finite stamp is dropped rather than rendered as Invalid Date.
+    expect(readSourceBadge({ policy: { effectiveSource: 'x', phase: 'baseline', lastDecisionAt: Number.NaN } }))
+      .toEqual({ source: 'x', triggered: false })
+    expect(readSourceBadge({ policy: { effectiveSource: 'deepseek-official', phase: 'other' } }))
+      .toEqual({ source: 'deepseek-official', triggered: false })
+  })
+
+  it('keeps the default source only while it differs from the in-flight one (two-leg fork)', () => {
+    // The 95–99 dead zone: in-flight rides Go while new sessions are born on mimo.
+    expect(readSourceBadge({ policy: { effectiveSource: 'opencode-go', phase: 'baseline', defaultsSource: 'mimo' } }))
+      .toEqual({ source: 'opencode-go', triggered: false, defaultsSource: 'mimo' })
+    // Aligned legs (the common case) carry no fork line.
+    expect(readSourceBadge({ policy: { effectiveSource: 'mimo', phase: 'triggered', defaultsSource: 'mimo' } }))
+      .toEqual({ source: 'mimo', triggered: true })
+    expect(readSourceBadge({ policy: { effectiveSource: 'mimo', phase: 'triggered', defaultsSource: '' } }))
+      .toEqual({ source: 'mimo', triggered: true })
+  })
+})
+
+describe('current-source badge (auto-route, v3.5)', () => {
+  /** The status route contract (host-only endpoint; loopback in production). */
+  const STATUS_ROUTE = '/api/auto-route/status'
+
+  it('renders the dot at baseline and repaints it when the policy switches (closed-loop criterion)', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+    let status: unknown = {
+      ok: true,
+      service: 'dsh-auto-route',
+      policy: { phase: 'baseline', effectiveSource: 'opencode-go', lastDecisionAt: NOW - 5_000 },
+    }
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => ({
+      status: 200,
+      ok: true,
+      json: async () => (url === STATUS_ROUTE ? status : OVERVIEW),
+    })))
+    const { container } = render(<UsageGlance t={t} />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    const dot = () => container.querySelector('[class*="glanceSourceDot"]')
+    expect(dot()?.className).toContain('glanceSourceDot')
+    expect(dot()?.className).not.toContain('glanceSourceDotActive')
+    expect(dot()?.getAttribute('title')).toBe(
+      `${t('glance.source.label')}: ${t('glance.source.go')}`
+      + ` · ${t('glance.source.baseline')}`
+      + ` · ${t('glance.source.decided')} ${formatRefreshStamp(NOW - 5_000)}`,
+    )
+    // The controller's trigger edge (any window >= 0.99) flips the policy to
+    // mimo; the next cycle repaints the dot — the badge-change criterion of
+    // the auto-route closed loop, observed from the UI side.
+    status = { ok: true, service: 'dsh-auto-route', policy: { phase: 'triggered', effectiveSource: 'mimo', lastDecisionAt: NOW } }
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    expect(dot()?.className).toContain('glanceSourceDotActive')
+    expect(dot()?.getAttribute('title')).toContain(t('glance.source.mimo'))
+    expect(dot()?.getAttribute('title')).toContain(t('glance.source.triggered'))
+    expect(dot()?.getAttribute('title')).toContain(t('glance.source.decided'))
+  })
+
+  it('appends the new-session default line only while the default source differs (two-leg fork)', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => ({
+      status: 200,
+      ok: true,
+      json: async () => (url === STATUS_ROUTE
+        ? { ok: true, policy: { phase: 'baseline', effectiveSource: 'opencode-go', defaultsSource: 'mimo' } }
+        : OVERVIEW),
+    })))
+    const { container } = render(<UsageGlance t={t} />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    const title = container.querySelector('[class*="glanceSourceDot"]')?.getAttribute('title') ?? ''
+    expect(title).toContain(`${t('glance.source.defaults')}: ${sourceBadgeName(t, 'mimo')}`)
+    expect(title).toContain(t('glance.source.go'))
+  })
+
+  it('keeps the overview snapshot alive when the status fetch fails', async () => {
+    // Real timers: waitFor's polling needs them (the cadence test above owns
+    // the fake-timer surface).
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (url === STATUS_ROUTE
+      ? { status: 503, ok: false, json: async () => ({}) }
+      : { status: 200, ok: true, json: async () => OVERVIEW })))
+    const { container } = render(<UsageGlance t={t} />)
+    // The rows still render; the dot is simply absent.
+    expect(await screen.findByText('85%')).toBeTruthy()
+    expect(container.querySelectorAll('[class*="glanceSourceDot"]')).toHaveLength(0)
+  })
+
+  it('hides the dot when the controller is absent (404)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (url === STATUS_ROUTE
+      ? { status: 404, ok: false, json: async () => ({}) }
+      : { status: 200, ok: true, json: async () => OVERVIEW })))
+    const { container } = render(<UsageGlance t={t} />)
+    expect(await screen.findByText('85%')).toBeTruthy()
+    expect(container.querySelectorAll('[class*="glanceSourceDot"]')).toHaveLength(0)
   })
 })

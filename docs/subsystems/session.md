@@ -855,7 +855,11 @@ resolveAgent(sessionId: SessionId): Promise<ApiSessionAgentResult>
 
 /**
  * Read all visible Session rows without resuming an Agent.
- * @param _request - reserved empty list request.
+ * @param _request - row-scope request: omission keeps the pre-f5 full-corpus
+ *   contract (archived rows, subagent rows, untrimmed hints); an explicit
+ *   `includeArchived: false` / `includeSubagents: false` cuts those rows and
+ *   `trimHeavyProjections: true` trims the heavy hint columns for the thin
+ *   main-page listing.
  * @param signal - cancellation for persistence reads and summary generation.
  * @returns visible Session summaries ordered by activity.
  */

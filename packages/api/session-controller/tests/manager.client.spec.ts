@@ -777,6 +777,8 @@ describe('subagent catalogs', () => {
     expect(manager.subagentAddress(S1)).toBeUndefined()
     expect(manager.resolveTarget(S2)).toBe(S2)
     expect(manager.get(S2).getSnapshot().subagent).toBeNull()
+    // A Host-added subagent row only widens the next pull's scope; it never
+    // pulls eagerly while idle.
     expect(remote.session.list).not.toHaveBeenCalled()
     expect(remote.session.projections).not.toHaveBeenCalled()
   })
@@ -1100,6 +1102,11 @@ describe('subagent catalogs', () => {
   it('uses current Session status rather than the time an initial catalog read started', async ({ mock, remote }) => {
     const response = Promise.withResolvers<Awaited<ReturnType<typeof remote.session.projections>>>()
     remote.session.projections.mockImplementation(() => response.promise)
+    // The subagent add widens the row scope, so the follow-up pull carries the
+    // row back (the Host returns subagent rows under includeSubagents).
+    remote.session.list.mockResolvedValue(ok({
+      items: [summary(S2, { origin: 'subagent', parentSessionId: S1 })],
+    }))
     const manager = makeManager(mock, remote)
     const read = manager.refreshProjections(S1)
     manager.handleSessionAdded(summary(S2, { origin: 'subagent', parentSessionId: S1 }))
@@ -1640,5 +1647,64 @@ describe('Session summary projection replacement', () => {
     const entry = manager.getListSnapshot().items[0]
     expect(entry?.projectionValues).toEqual({ title: 'fresh' })
     expect(entry?.title).toBe('fresh')
+  })
+})
+
+describe('list row scope (f5-contract-a2-1030)', () => {
+  // The server default is the full pre-f5 corpus, so every main-page pull
+  // states its scope explicitly: both row cuts plus the heavy-column trim.
+  const THIN = { includeArchived: false, includeSubagents: false, trimHeavyProjections: true } as const
+
+  it('pulls thin explicitly and hydrates subagent rows once a catalog lands', async ({ mock, remote }) => {
+    remote.session.list.mockResolvedValue(ok({
+      items: [{
+        agentAvailable: true,
+        sessionId: S1,
+        updatedAt: 100,
+        running: false,
+        blank: false,
+        projections: {
+          kind: 'cached' as const,
+          asOfSeq: 1,
+          values: { subagentCatalog: [{ id: S2, createdAt: 1, mode: 'continuable' as const, label: 'child' }] },
+        },
+      }],
+    }))
+    const manager = makeManager(mock, remote)
+    onTestFinished(() => manager.dispose())
+
+    await manager.refreshList()
+
+    // First pull names the thin scope; the landed catalog widens the row
+    // scope and a follow-up pull asks for subagent rows.
+    expect(remote.session.list).toHaveBeenNthCalledWith(1, THIN)
+    expect(remote.session.list).toHaveBeenNthCalledWith(2, { ...THIN, includeSubagents: true })
+  })
+
+  it('widens the next pull when the host adds a subagent row mid-generation', async ({ mock, remote }) => {
+    remote.session.list.mockResolvedValue(ok({ items: [] }))
+    const manager = makeManager(mock, remote)
+    onTestFinished(() => manager.dispose())
+    await manager.refreshList()
+    expect(remote.session.list).toHaveBeenLastCalledWith(THIN)
+
+    // No eager pull while idle — the row already exists in this snapshot —
+    // but the next pull must ask for subagent rows so it survives the merge.
+    manager.handleSessionAdded(summary(S2, { origin: 'subagent', parentSessionId: S1 }))
+    expect(remote.session.list).toHaveBeenCalledTimes(1)
+    await manager.refreshList()
+    expect(remote.session.list).toHaveBeenLastCalledWith({ ...THIN, includeSubagents: true })
+  })
+
+  it('passes includeArchived through and drops back to the explicit cut', async ({ mock, remote }) => {
+    remote.session.list.mockResolvedValue(ok({ items: [] }))
+    const manager = makeManager(mock, remote)
+    onTestFinished(() => manager.dispose())
+
+    await manager.refreshList({ includeArchived: true })
+    expect(remote.session.list).toHaveBeenLastCalledWith({ ...THIN, includeArchived: true })
+
+    await manager.refreshList({ includeArchived: false })
+    expect(remote.session.list).toHaveBeenLastCalledWith(THIN)
   })
 })

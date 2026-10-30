@@ -179,14 +179,14 @@ async function openPanelsMenu(view: Awaited<ReturnType<typeof bench>>['view'], t
 }
 
 describe('sidebar global panels', () => {
-  it('offers New Session head of the ⋯ menu, follows panel registrations, and drops each contribution', async () => {
+  it('leads the ⋯ menu with MiMo sign-in and New Session, follows panel registrations, and drops each contribution', async () => {
     const { runtime, locale, startSession, view } = await bench()
     expect(runtime.slots.entries('sidebar.panellist')).toEqual([])
     expect(view.queryByRole('navigation')).toBeNull()
-    // Wide renders the ⋯ even with zero panels: New Session always rides it.
+    // Wide renders the ⋯ even with zero panels: the MiMo sign-in row and New Session always ride it.
     let trigger = await view.findByRole('button', { name: 'More' })
     let { menu } = await openPanelsMenu(view)
-    expect(within(menu).getAllByRole('menuitem').map(row => row.textContent)).toEqual(['New Session'])
+    expect(within(menu).getAllByRole('menuitem').map(row => row.textContent)).toEqual(['Sign in to MiMo', 'New Session'])
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'New Session' }))
     // The shell's inject wrapper forwards its optional workspace id (absent here → undefined).
     expect(startSession).toHaveBeenCalledExactlyOnceWith(undefined)
@@ -195,7 +195,7 @@ describe('sidebar global panels', () => {
 
     const { alpha, beta } = await mountPanels(runtime, locale)
     ;({ menu } = await openPanelsMenu(view))
-    expect(within(menu).getAllByRole('menuitem').map(row => row.textContent)).toEqual(['New Session', 'Beta panel', 'Alpha panel'])
+    expect(within(menu).getAllByRole('menuitem').map(row => row.textContent)).toEqual(['Sign in to MiMo', 'New Session', 'Beta panel', 'Alpha panel'])
     expect(within(menu).getAllByRole('separator')).toHaveLength(1)
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Alpha panel' }))
     expect(view.getByRole('heading', { name: 'Alpha content' })).toBeTruthy()
@@ -255,8 +255,10 @@ describe('sidebar global panels', () => {
     expect(trigger.getAttribute('aria-haspopup')).toBe('menu')
     expect(trigger.getAttribute('aria-expanded')).toBe('true')
     const rows = within(menu).getAllByRole('menuitem')
-    expect(rows.map(row => row.textContent)).toEqual(['New Session', 'Beta panel', 'Alpha panel'])
-    // New Session leads the menu with its own glyph (not a panellist entry).
+    expect(rows.map(row => row.textContent)).toEqual(['Sign in to MiMo', 'New Session', 'Beta panel', 'Alpha panel'])
+    // The MiMo sign-in row leads the menu with its own glyph (not a panellist entry).
+    expect(within(menu).getByRole('menuitem', { name: 'Sign in to MiMo' }).querySelectorAll('svg')).toHaveLength(1)
+    // New Session follows the sign-in row with its own glyph (not a panellist entry).
     expect(within(within(menu).getByRole('menuitem', { name: 'New Session' })).queryByTestId(/-icon/)).toBeNull()
     for (const [id, label] of [[BETA, 'Beta panel'], [ALPHA, 'Alpha panel']] as const) {
       const row = within(menu).getByRole('menuitem', { name: label })
@@ -275,7 +277,7 @@ describe('sidebar global panels', () => {
     const { runtime, locale, view } = await bench()
     await mountPanels(runtime, locale, 20)
     const { menu } = await openPanelsMenu(view)
-    expect(within(menu).getAllByRole('menuitem').map(row => row.textContent)).toEqual(['New Session', 'Alpha panel', 'Beta panel'])
+    expect(within(menu).getAllByRole('menuitem').map(row => row.textContent)).toEqual(['Sign in to MiMo', 'New Session', 'Alpha panel', 'Beta panel'])
   })
 
   it('selects registered main content and keeps a repeated selection active', async () => {
@@ -333,7 +335,7 @@ describe('sidebar global panels', () => {
     await mountPanel(runtime, { id: ALPHA, heading: 'Alpha content', label: 'Alpha panel', order: 20 })
     await mountPanel(runtime, { id: BETA, heading: 'Beta content' })
     const { menu } = await openPanelsMenu(view)
-    expect(within(menu).getAllByRole('menuitem').map(row => row.textContent)).toEqual(['New Session', BETA, 'Alpha panel'])
+    expect(within(menu).getAllByRole('menuitem').map(row => row.textContent)).toEqual(['Sign in to MiMo', 'New Session', BETA, 'Alpha panel'])
     fireEvent.click(within(menu).getByRole('menuitem', { name: BETA }))
     expect(view.getByRole('heading', { name: 'Beta content' })).toBeTruthy()
   })
@@ -430,13 +432,13 @@ describe('sidebar entry actions in the footer menu', () => {
     const { menu } = await openPanelsMenu(view)
     const rows = within(menu)
     expect(rows.getAllByRole('menuitem').map(row => row.textContent))
-      .toEqual(['New Session', 'Beta panel', 'Alpha panel',
+      .toEqual(['Sign in to MiMo', 'New Session', 'Beta panel', 'Alpha panel',
         'Open Beta panel', 'Unpin Beta panel', 'Open Alpha panel', 'Unpin Alpha panel', 'Dismiss'])
 
     fireEvent.click(rows.getByRole('menuitem', { name: 'Unpin Alpha panel' }))
     expect(rows.getByRole('menuitem', { name: 'Pin Alpha panel' })).toBeTruthy()
     // FORK ruling: the ⋯ menu keeps full reachability — pins filter the rail launchers only.
-    expect(rows.getAllByRole('menuitem').map(row => row.textContent)).toEqual(['New Session', 'Beta panel', 'Alpha panel',
+    expect(rows.getAllByRole('menuitem').map(row => row.textContent)).toEqual(['Sign in to MiMo', 'New Session', 'Beta panel', 'Alpha panel',
       'Open Beta panel', 'Unpin Beta panel', 'Open Alpha panel', 'Pin Alpha panel', 'Dismiss'])
     fireEvent.click(rows.getByRole('menuitem', { name: 'Pin Alpha panel' }))
     expect(rows.getByRole('menuitem', { name: 'Unpin Alpha panel' })).toBeTruthy()
@@ -473,6 +475,29 @@ describe('sidebar entry actions in the footer menu', () => {
     fireEvent.click(view.getByRole('menuitem', { name: 'Open removed panel' }))
     expect(layout.selectPanel).not.toHaveBeenCalled()
   })
+
+  it('leads the ⋯ menu with the MiMo sign-in row and opens the re-login page in a new tab (FORK mimo-login-cta moved, 2026-10-30)', async () => {
+    const { runtime, locale, layout, startSession, view } = await bench()
+    await mountPanels(runtime, locale)
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+    try {
+      const { menu } = await openPanelsMenu(view)
+      // Always-on: the row leads the menu regardless of balance state (no render gate).
+      expect(within(menu).getAllByRole('menuitem')[0]?.textContent).toBe('Sign in to MiMo')
+      fireEvent.click(within(menu).getByRole('menuitem', { name: 'Sign in to MiMo' }))
+      expect(open).toHaveBeenCalledExactlyOnceWith('/api/mimo-relogin/page', '_blank', 'noopener,noreferrer')
+      // It is neither a session start nor a panel selection, and the menu closes.
+      expect(startSession).not.toHaveBeenCalled()
+      expect(layout.selectPanel).not.toHaveBeenCalled()
+      await waitFor(() => { expect(view.queryByRole('menu')).toBeNull() })
+    } finally {
+      open.mockRestore()
+    }
+    // The zh copy renames the row alongside the rest of the shell chrome.
+    act(() => { locale.setLocale('zh') })
+    const { menu: zhMenu } = await openPanelsMenu(view, '更多')
+    expect(within(zhMenu).getByRole('menuitem', { name: '登录MiMo' })).toBeTruthy()
+  })
 })
 
 describe('sidebar entry click analytics', () => {
@@ -485,7 +510,7 @@ describe('sidebar entry click analytics', () => {
     return { ...b, track }
   }
 
-  it('reports the More trigger and the New Session head row first', async () => {
+  it('reports the More trigger and the New Session row first among reportable entries (the MiMo sign-in row reports nothing)', async () => {
     const { runtime, track, view, startSession } = await analyticsBench()
     await mountProbeActions(runtime)
     const trigger = await view.findByRole('button', { name: 'More' })

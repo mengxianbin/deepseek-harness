@@ -113,6 +113,22 @@ export interface SessionPersistenceStatOptions {
 export interface SessionPersistenceListOptions {
   /** Optional cancellation for backend listing work. */
   readonly signal?: AbortSignal
+  /**
+      Session ids skipped from this listing before any header read or stat: the
+      backend excludes them from the directory enumeration alone (the session
+      directory name encodes the id), so an excluded session costs no open, no
+      decompression, and no stat. The corpus revision of a historical listing
+      still spans every physical member.
+  */
+  readonly excludeSessionIds?: ReadonlySet<SessionId>
+  /**
+      Post-header listing predicate: a stored session whose read header the
+      predicate rejects is dropped before its stat and never reaches the
+      result. Origin-only distinctions (for example `subagent`) can only be
+      made here, because the header is the first place they exist. Pending
+      (not-yet-materialized) sessions are held to the same predicate.
+  */
+  readonly select?: (header: SessionHeader) => boolean
 }
 
 declare module '@deepseek-ai/cordis' {

@@ -243,6 +243,31 @@ export interface SkillListValue {
 /** Session list request. */
 export interface SessionListRequest {
   readonly cursor?: string
+  /**
+      Archived row scope. Omitted or true, the listing keeps the pre-f5
+      full-corpus contract and returns archived Sessions as rows. Only an
+      explicit false excludes the registry's archived ids from the directory
+      scan before any header read, so that listing never opens, decompresses,
+      or stats an archived session.
+  */
+  readonly includeArchived?: boolean
+  /**
+      Subagent-origin row scope. Omitted or true, the listing keeps the pre-f5
+      full-corpus contract and returns subagent-origin Sessions as rows. Only
+      an explicit false drops a subagent row the moment its header reveals
+      `origin`, before its stat. The two flags are independent: the thin
+      first-party listing passes both false, full-corpus consumers omit both.
+  */
+  readonly includeSubagents?: boolean
+  /**
+      Trim the display-heavy projection keys (`tokenUsage`, `contextPressure`,
+      `contextBreakdown`, `sessionStats`, `inbox`, `turnOutline`) from list
+      hints. Omitted or false, list hints carry every value their source holds
+      (the pre-f5 contract); only an explicit true opts into the thin column
+      set the main-page listing passes. Cold-row authorities (`title`,
+      `subagentCatalog`, `goal`, `agentPreset`) are kept either way.
+  */
+  readonly trimHeavyProjections?: boolean
 }
 
 /** Session list response value. */

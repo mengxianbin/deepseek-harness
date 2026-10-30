@@ -289,8 +289,11 @@ export type WorkspaceBrowserInjected = {
    * FORK dsh-local (f5-list-states): start a new `session.list` pull — the
    * error surface's retry after a failed refresh (pulls are single-shot per
    * connection generation, so a failure otherwise waits for a reconnect).
+   * `includeArchived` follows the archived view: the default view cuts
+   * archived rows with an explicit `false`, so `show`/`only` refetches with
+   * them and returning to the default view refetches with the explicit cut.
    */
-  refreshSessions: () => void
+  refreshSessions: (options?: { readonly includeArchived?: boolean }) => void
   /** Open the Session rename dialog (a row title double-click); the rename action entry raises the same request. */
   requestSessionRename: (sessionId: SessionId, currentTitle: string) => void
   /** Tell the user an archived row cannot be opened (a click on it). */

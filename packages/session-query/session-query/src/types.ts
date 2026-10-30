@@ -35,6 +35,27 @@ export interface SessionRecord {
   formatStatus?: 'current' | 'migration-required'
 }
 
+/**
+ * Optional listing filters for a corpus scan. Both apply to every source of
+ * the listing — persisted artifacts and live sessions alike — so an excluded
+ * id never reaches the caller through either path.
+ */
+export interface SessionListQueryOptions {
+  /**
+      Session ids skipped before any persistence header read: the backend
+      excludes them from the directory enumeration alone, so an excluded
+      session costs no open, no decompression, and no stat.
+  */
+  readonly excludeSessionIds?: ReadonlySet<SessionId>
+  /**
+      Post-header predicate: a session whose header the predicate rejects is
+      dropped before its stat. Origin-only distinctions (for example
+      `subagent`) can only be made here, because the header is the first
+      place they exist.
+  */
+  readonly select?: (header: SessionHeader) => boolean
+}
+
 /** One atomic live-preferred observation of a session's current model surface. */
 export interface SessionSurfaceSnapshot {
   /** Cloned session header selected from the same corpus observation as `events`. */

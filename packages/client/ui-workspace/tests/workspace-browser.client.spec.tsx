@@ -515,6 +515,24 @@ describe('WorkspaceBrowser', () => {
     expect(screen.getByText('stored')).toBeTruthy()
   })
 
+  it('the archived view refetches its rows and leaving it refetches without them (row-cut)', () => {
+    // The default view cuts archived rows through an explicit
+    // `includeArchived: false` (f5-contract-a2-1030), so show/only must ask
+    // for them and the default view must ask again with the explicit cut to
+    // keep later pulls thin.
+    const b = mount({
+      useSessions: hook(sessionState([summary('kept', 2), summary('stored', 1)])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['kept', 'stored'])], [sid('stored')])),
+    })
+    fireEvent.click(screen.getByRole('button', { name: '视图选项' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '全部对话（显示已归档）' }))
+    expect(b.props.refreshSessions).toHaveBeenLastCalledWith({ includeArchived: true })
+
+    fireEvent.click(screen.getByRole('button', { name: '视图选项' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '隐藏已归档' }))
+    expect(b.props.refreshSessions).toHaveBeenLastCalledWith({ includeArchived: false })
+  })
+
   it('the archived filters are one exclusive choice and re-picking keeps it', () => {
     const b = mount({
       useSessions: hook(sessionState([summary('kept', 2), summary('stored', 1)])),

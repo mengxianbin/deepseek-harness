@@ -23,7 +23,7 @@ import { useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
   FishLogo, IconEllipsisOutlineRegular, IconNewChatOutlineMedium, IconNewChatOutlineRegular,
-  IconPanelLeftOutlineRegular, isDarwinDesktop, Menu, ShortcutKeys, Tooltip,
+  IconPanelLeftOutlineRegular, IconUserOutlineMedium, isDarwinDesktop, Menu, ShortcutKeys, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
@@ -102,6 +102,17 @@ type PanelMoreProps =
 /** The New Session row's menu id (an action, not a registered main panel). */
 const NEW_SESSION_ITEM = 'new-session'
 
+/** The MiMo sign-in row's menu id (an action, not a registered main panel). */
+const MIMO_LOGIN_ITEM = 'mimo-login'
+
+/**
+ * The re-login kit's page the MiMo sign-in row opens (FORK mimo-login-cta
+ * moved here 2026-10-30 用户指示): same-origin relative, mirroring the glance
+ * overview route — the kit is served by the same origin that serves this
+ * shell.
+ */
+const MIMO_RELOGIN_PAGE = '/api/mimo-relogin/page'
+
 /**
  * The expanded sidebar's one footer ⋯ menu.
  * FORK dsh-local (sidebar-layout, 2026-10-14): the top rows are reserved for
@@ -120,6 +131,14 @@ const NEW_SESSION_ITEM = 'new-session'
  * entirely), reports official-entry clicks as `sidebar_more`, and renders
  * the `sidebar.panellist.actions` registrations (entry-customization's
  * Install/Create plugin rows) after the data rows when any exist.
+ *
+ * FORK mimo-login-cta moved (2026-10-30 用户指示): the standing MiMo
+ * re-login entry — formerly the balance row's inline `重新登录` link — leads
+ * this menu as its first item, renamed `登录MiMo` (`panels.mimoLogin`), and
+ * opens `/api/mimo-relogin/page` in a new tab. Always-on survives the move:
+ * the item renders in every balance state and before the first load. It
+ * reports no analytics (same as the inline link it replaces;
+ * `SidebarAnalyticsEntry` carries no login dimension).
  * @param props - panel metadata plus the shell's action/render shares.
  * @returns the ⋯ anchor with its menu.
  */
@@ -134,6 +153,9 @@ function PanelMore({
       open={open}
       onClose={onDismiss}
       items={[
+        // FORK mimo-login-cta moved (2026-10-30): the MiMo sign-in row leads
+        // the menu — always-on, no render gate, same-origin page in a new tab.
+        { id: MIMO_LOGIN_ITEM, label: t('panels.mimoLogin'), icon: <IconUserOutlineMedium size={16} /> },
         { id: NEW_SESSION_ITEM, label: t('session.new'), icon: <IconNewChatOutlineMedium size={16} /> },
         ...(panels.length > 0
           ? [
@@ -158,7 +180,11 @@ function PanelMore({
       // check would crowd the cell beside the glyph.
       selection="fill"
       onSelect={(id) => {
-        if (id === NEW_SESSION_ITEM) {
+        if (id === MIMO_LOGIN_ITEM) {
+          // The re-login kit's page opens externally; no navigation and no
+          // analytics (the inline link it replaces reported nothing either).
+          window.open(MIMO_RELOGIN_PAGE, '_blank', 'noopener,noreferrer')
+        } else if (id === NEW_SESSION_ITEM) {
           trackEntryClick({ menu_name: 'new_session', position: 'sidebar' })
           startSession()
         } else {

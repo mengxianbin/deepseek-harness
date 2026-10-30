@@ -4,7 +4,7 @@ import type { Context, Fiber } from '@deepseek-ai/cordis'
 import type { Session, SessionEvent, SessionHeader, SessionId , SessionLogOffset } from '@deepseek-ai/dsh-session'
 import type SessionPersistence from '@deepseek-ai/dsh-session-persistence'
 import type { SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence'
-import type { SessionRecord } from './types.ts'
+import type { SessionListQueryOptions, SessionRecord } from './types.ts'
 import { SessionQueryError } from './config.ts'
 import { readColdSessionLog, type ColdSessionLog } from './cold-read.ts'
 import { assertSessionHeadersCompatible } from './sources.ts'
@@ -57,12 +57,16 @@ export class SessionCorpus {
   /**
    * List the complete logical corpus with live precedence and cloned headers.
    * @param signal - optional cancellation for persistence listing.
+   * @param options - optional listing filters (pre-excluded ids and a
+   * post-header predicate), applied to persisted and live sources alike.
    * @returns records in deterministic newest-first order.
    */
-  async listSessions(signal?: AbortSignal): Promise<SessionRecord[]> {
+  async listSessions(signal?: AbortSignal, options?: SessionListQueryOptions): Promise<SessionRecord[]> {
     signal?.throwIfAborted()
+    const excludeSessionIds = options?.excludeSessionIds
+    const select = options?.select
     const persistence = this._persistence
-    const persisted = persistence === undefined ? [] : await listPersisted(persistence, signal)
+    const persisted = persistence === undefined ? [] : await listPersisted(persistence, signal, options)
     signal?.throwIfAborted()
     const records = new Map<SessionId, SessionRecord>()
     for (const { header, formatStatus } of persisted) {
@@ -74,6 +78,10 @@ export class SessionCorpus {
       })
     }
     for (const session of this._ctx.sessions.list()) {
+      // The listing filters govern the whole result, so a live session an
+      // excluded id or a rejected header names never enters through this path.
+      if (excludeSessionIds?.has(session.id)) continue
+      if (select !== undefined && !select(session.header)) continue
       const durable = records.get(session.id)
       if (durable !== undefined) assertSessionHeadersCompatible(session.header, durable.header)
       records.set(session.id, {
@@ -264,9 +272,10 @@ function orderedResults<Value>(
 async function listPersisted(
   persistence: SessionPersistence,
   signal?: AbortSignal,
+  options?: SessionListQueryOptions,
 ): Promise<readonly SessionPersistenceSnapshot[]> {
   try {
-    return await persistence.list(signal === undefined ? undefined : { signal })
+    return await persistence.list({ ...options, ...(signal === undefined ? {} : { signal }) })
   } catch (error: unknown) {
     if (signal?.aborted) signal.throwIfAborted()
     throw new SessionQueryError(

@@ -408,9 +408,11 @@ abstract searchEvents( request: SessionEventSearchRequest, exec?: SessionSearchE
 /**
  * List the complete logical corpus using live-preferred records.
  * @param signal - optional cancellation for persistence listing.
+ * @param options - optional listing filters (pre-excluded ids and a
+ * post-header predicate), applied to persisted and live sources alike.
  * @returns deterministic newest-first cloned session records.
  */
-listSessions(signal?: AbortSignal): Promise<SessionRecord[]>
+listSessions(signal?: AbortSignal, options?: SessionListQueryOptions): Promise<SessionRecord[]>
 
 /**
  * Read and replay-validate one complete logical session log without making it live.

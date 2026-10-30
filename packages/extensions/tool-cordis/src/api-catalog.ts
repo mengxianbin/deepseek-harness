@@ -2614,7 +2614,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       {
         signature: '@Remote(\'list\') async list(_request: SessionListRequest, signal: AbortSignal): Promise<SessionListValue>',
         description: 'Read all visible Session rows without resuming an Agent.',
-        parameters: [{ name: '_request', description: 'reserved empty list request.' }, { name: 'signal', description: 'cancellation for persistence reads and summary generation.' }],
+        parameters: [{ name: '_request', description: 'row-scope request: omission keeps the pre-f5 full-corpus contract (archived rows, subagent rows, untrimmed hints); an explicit `includeArchived: false` / `includeSubagents: false` cuts those rows and `trimHeavyProjections: true` trims the heavy hint columns for the thin main-page listing.' }, { name: 'signal', description: 'cancellation for persistence reads and summary generation.' }],
         returns: 'visible Session summaries ordered by activity.',
       },
       {
@@ -2970,9 +2970,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'matching event hits and their target header from one indexed generation.',
       },
       {
-        signature: 'listSessions(signal?: AbortSignal): Promise<SessionRecord[]>',
+        signature: 'listSessions(signal?: AbortSignal, options?: SessionListQueryOptions): Promise<SessionRecord[]>',
         description: 'List the complete logical corpus using live-preferred records.',
-        parameters: [{ name: 'signal', description: 'optional cancellation for persistence listing.' }],
+        parameters: [{ name: 'signal', description: 'optional cancellation for persistence listing.' }, { name: 'options', description: 'optional listing filters (pre-excluded ids and a post-header predicate), applied to persisted and live sources alike.' }],
         returns: 'deterministic newest-first cloned session records.',
       },
       {
@@ -8304,8 +8304,12 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type SessionLineageTrace = {\n    target: SessionRecord;\n    ancestors: SessionRecord[];\n    descendants: SessionLineageNode[];\n} & ({\n    complete: true;\n    root: SessionRecord;\n} | {\n    complete: false;\n    unresolvedParentId: SessionId;\n});',
   },
   {
+    name: 'SessionListQueryOptions',
+    declaration: 'export interface SessionListQueryOptions {\n    readonly excludeSessionIds?: ReadonlySet<SessionId>;\n    readonly select?: (header: SessionHeader) => boolean;\n}',
+  },
+  {
     name: 'SessionListRequest',
-    declaration: 'export interface SessionListRequest {\n    readonly cursor?: string;\n}',
+    declaration: 'export interface SessionListRequest {\n    readonly cursor?: string;\n    readonly includeArchived?: boolean;\n    readonly includeSubagents?: boolean;\n    readonly trimHeavyProjections?: boolean;\n}',
   },
   {
     name: 'SessionListValue',
@@ -8389,7 +8393,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionPersistenceListOptions',
-    declaration: 'export interface SessionPersistenceListOptions {\n    readonly signal?: AbortSignal;\n}',
+    declaration: 'export interface SessionPersistenceListOptions {\n    readonly signal?: AbortSignal;\n    readonly excludeSessionIds?: ReadonlySet<SessionId>;\n    readonly select?: (header: SessionHeader) => boolean;\n}',
   },
   {
     name: 'SessionPersistenceOpenOptions',

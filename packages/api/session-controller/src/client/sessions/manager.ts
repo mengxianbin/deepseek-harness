@@ -7,6 +7,7 @@ import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import type {
   SessionControlBaseline,
   SessionControlFrame,
+  SessionListRequest,
   SessionProjectionHints,
   SessionRenameValue,
   SessionSummary,
@@ -45,6 +46,20 @@ export type SessionListPhase = 'pending' | 'ready'
 export interface SessionSearchResultItem {
   sessionId: SessionId
   snippet: string
+}
+
+/**
+ * Row-scope options for a list refresh. `includeArchived` moves with the
+ * archived view in both directions (fetch archived rows, then drop them again
+ * on return to the default view). `includeSubagents` is widen-only: once a
+ * hydration trigger asks for subagent rows they stay for this page
+ * generation, because the subagent catalog chains read them as their
+ * fallback layer. Every pull states the scope explicitly on the wire
+ * (f5-contract-a2-1030: the server default is the full pre-f5 corpus).
+ */
+export interface SessionListScopeOptions {
+  readonly includeArchived?: boolean
+  readonly includeSubagents?: boolean
 }
 
 /** Immutable session-list snapshot for useSessionList. */
@@ -112,6 +127,15 @@ export class SessionManager {
   private listInflight: Promise<void> | null = null
   /** Active list request's mutation log; its identity also fences completion after reconnect. */
   private listMutations: SessionListMutation[] | null = null
+  /**
+   * Row scope of the list request. Both row flags start false and every pull
+   * states them explicitly (f5-contract-a2-1030: only an explicit false cuts
+   * server-side, so an omitted flag would fetch the full pre-f5 corpus);
+   * archived flips with the archived view, subagents widen on hydration
+   * triggers. Projection hints stay trimmed for this page generation — the
+   * main page is the thin-column consumer.
+   */
+  private listScope: { archived: boolean; subagents: boolean } = { archived: false, subagents: false }
   private readonly addresses = new Map<SessionId, SubagentAddress>()
   private readonly projectionLoads = new Map<SessionId, ProjectionLoad>()
   private readonly projectionInflight = new Map<SessionId, ProjectionInflight>()
@@ -420,9 +444,24 @@ export class SessionManager {
 
   // ---- List API ----
 
-  /** Full refresh via session.list (single-flight within one Host generation). */
-  refreshList(): Promise<void> {
+  /**
+   * Full refresh via session.list (single-flight within one Host generation).
+   * @param options - row-scope options; a widening that arrives while a pull
+   * is in flight lands in an immediate follow-up pull (see the finally below).
+   * @returns completion of the current or newly started baseline pull.
+   */
+  refreshList(options?: SessionListScopeOptions): Promise<void> {
+    this.applyListScope(options)
     if (this.listInflight !== null) return this.listInflight
+    const scope = { ...this.listScope }
+    // Explicit by contract (f5-contract-a2-1030): the server serves the full
+    // pre-f5 corpus unless a caller states otherwise, so this main-page pull
+    // names its row cuts and the heavy-column trim on every request.
+    const request: SessionListRequest = {
+      includeArchived: scope.archived,
+      includeSubagents: scope.subagents,
+      trimHeavyProjections: true,
+    }
     this.listState = 'loading'
     this.listError = null
     const established = this.summaries
@@ -431,7 +470,7 @@ export class SessionManager {
     this.notifier.markDirty()
     this.listInflight = (async () => {
       try {
-        const result = await this.remote.session.list({})
+        const result = await this.remote.session.list(request)
         if (this.listMutations !== mutations) return
         if (result.ok) {
           const baseline: SessionSummary[] = this.listPhase === 'pending'
@@ -467,6 +506,14 @@ export class SessionManager {
           for (const s of result.value.items) {
             if (s.projections !== undefined) this.applyListBlock(s.sessionId, s.projections)
           }
+          // Hydration trigger: a listed row that carries a subagent catalog
+          // means subagent rows exist only this listing can deliver (cold
+          // child titles, running seeds, unknown-mode addresses). Widen the
+          // scope; the finally below pulls again with the wider request.
+          if (!this.listScope.subagents
+            && result.value.items.some(s => (s.projections?.values.subagentCatalog?.length ?? 0) > 0)) {
+            this.applyListScope({ includeSubagents: true })
+          }
         } else {
           this.listState = 'error'
           this.listError = result.error
@@ -481,10 +528,34 @@ export class SessionManager {
           this.listMutations = null
           this.listInflight = null
           this.notifier.markDirty()
+          // A scope change that arrived while this pull ran its original
+          // request: land it now instead of waiting for the next trigger.
+          if (scope.archived !== this.listScope.archived || scope.subagents !== this.listScope.subagents) {
+            void this.refreshList().catch(() => undefined)
+          }
         }
       }
     })()
     return this.listInflight
+  }
+
+  /**
+   * Apply requested list-scope changes.
+   * @param options - `includeArchived` moves in both directions;
+   * `includeSubagents` only widens (hydration stays for the page generation).
+   * @returns whether the scope changed.
+   */
+  private applyListScope(options?: SessionListScopeOptions): boolean {
+    let changed = false
+    if (options?.includeArchived !== undefined && options.includeArchived !== this.listScope.archived) {
+      this.listScope = { ...this.listScope, archived: options.includeArchived }
+      changed = true
+    }
+    if (options?.includeSubagents === true && !this.listScope.subagents) {
+      this.listScope = { ...this.listScope, subagents: true }
+      changed = true
+    }
+    return changed
   }
 
   /**
@@ -608,6 +679,11 @@ export class SessionManager {
   private mergeSummary(summary: SessionSummary): void {
     this.recordMutation({ kind: 'upsert', summary })
     this.updateParentAvailability()
+    // A Host-added subagent row would be dropped by the next default pull
+    // (its id is cut server-side): widen the scope so the next pull —
+    // including a mid-flight pull's follow-up — carries it. No eager pull
+    // while idle: the row already exists in this snapshot.
+    if (summary.origin === 'subagent') this.applyListScope({ includeSubagents: true })
   }
 
   /** Apply immediately and retain for replay when a list response is in flight. */

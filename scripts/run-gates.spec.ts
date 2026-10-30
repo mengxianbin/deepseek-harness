@@ -688,7 +688,11 @@ describe('gate graph validation', () => {
     // so a step added to one cannot silently leave the other. The lane sets
     // DSH_COVERAGE_TEST_TIMEOUT_MS; vitest.config.ts reads it per inline
     // project (coverageTestTimeoutOptions), so the gate passes no budget flag.
-    const [nativeBuild, unitRun, ...rest] = (scripts.test ?? '').split(' && ')
+    // FORK dsh-local (heavy-gate-b-1030): the bare `test` path is gated now, so
+    // unwrap the gate prefix before splitting — segment identity is unchanged,
+    // only the delivery wrapper grew a prefix.
+    const ungatedTest = (scripts.test ?? '').replace(/^tsx scripts\/heavy-io-gate\.ts "(.+)"$/, '$1')
+    const [nativeBuild, unitRun, ...rest] = ungatedTest.split(' && ')
     expect(rest).toEqual([])
     for (const budget of ['15000', undefined]) {
       const gates = withEnv('DSH_COVERAGE_TEST_TIMEOUT_MS', budget, () =>

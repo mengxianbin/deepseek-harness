@@ -249,6 +249,12 @@ async function installControllers(
       resources: { register: () => dispose },
     } as never)
   }
+  if (ctx.get('workspaceRegistry') === undefined) {
+    // An explicit session/list row cut (includeArchived: false) pre-excludes
+    // this set before any header read (f5-contract-a2-1030); tests without a
+    // workspace registry mean "nothing is archived".
+    ctx.provide('workspaceRegistry', { archivedSessionIds: [] } as never)
+  }
   if (ctx.get('agentDefaultModel') === undefined) {
     ctx.provide('agentDefaultModel', {
       currentSelection: defaults.defaultModelSelection,
