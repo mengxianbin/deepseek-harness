@@ -19,8 +19,18 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const DEFAULT_POLL_INTERVAL_MS = 2_000
-const DEFAULT_WAIT_BOUND_MS = 15 * 60 * 1000
-const DEFAULT_STALE_AFTER_MS = 30 * 60 * 1000
+// A full-repo `pnpm run test` runs ~38 min on this host (m-note
+// worktree-governance §5.7 cost anchor), so a 15 min wait bound let the second
+// job fail-open and race it — the gate only ever saw one heavy job at a time by
+// luck. 45 min puts a whole full test inside one waiter's bound.
+const DEFAULT_WAIT_BOUND_MS = 45 * 60 * 1000
+// Stale-after must outlive the longest job the gate ever holds, or a waiter
+// breaks a live owner's lock mid-run and the two jobs race anyway. 30 min was
+// shorter than a full test; 90 min clears the 45 min wait bound with headroom.
+// A dead owner is still broken immediately via `isProcessAlive`, so crash
+// recovery is unaffected — this bound only governs how long a live owner is
+// trusted.
+const DEFAULT_STALE_AFTER_MS = 90 * 60 * 1000
 
 /**
  * Resolve the default lock directory.
