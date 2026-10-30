@@ -27,11 +27,13 @@ const SESSION_SEARCH_QUERY_MAX_CHARS = 500
 const MESSAGE_TYPES = new Set(['user/message', 'assistant/message'])
 
 /**
- * Projection keys a list summary omits: every reader of these keys opens its
- * Session first (an exact `session/projections` baseline then carries them),
- * so a listing never needs to pay their bytes. `title`, `subagentCatalog`,
- * `goal`, `agentPreset`, `subagent`, and `subagentTiming` are deliberately
- * absent from this set — cold rows are their only source.
+ * Projection keys a `trimHeavyProjections` list omits: every reader of these
+ * keys opens its Session first (an exact `session/projections` baseline then
+ * carries them), so a thin listing never needs to pay their bytes. The trim
+ * is opt-in (f5-contract-a2-1030): an untrimmed listing keeps them all.
+ * `title`, `subagentCatalog`, `goal`, `agentPreset`, `subagent`, and
+ * `subagentTiming` are deliberately absent from this set — cold rows are
+ * their only source.
  */
 const SESSION_LIST_OMITTED_PROJECTION_KEYS: ReadonlySet<string> = new Set([
   'contextBreakdown',
@@ -125,10 +127,13 @@ export class ApiSessionList {
   /**
    * Build one current attached-Session summary.
    * @param session - attached Session to summarize.
+   * @param trimHeavyProjections - when true, drop the display-heavy projection
+   *   keys from the list hints; omitted keeps every value the source holds
+   *   (the pre-f5 full-column contract, also used by live summary events).
    * @returns current list metadata and available projections.
    */
-  summaryFor(session: Session): SessionSummary {
-    const projections = this.projectionsFor(session.header, session)
+  summaryFor(session: Session, trimHeavyProjections = false): SessionSummary {
+    const projections = this.projectionsFor(session.header, session, trimHeavyProjections)
     const metadata = projections?.values.sessionListMetadata
     return {
       sessionId: session.id,
@@ -144,17 +149,24 @@ export class ApiSessionList {
 
   /**
    * Read every visible attached and persisted Session without activating an Agent.
-   * @param request - row-scope request: `includeArchived` restores archived
-   * rows (excluded from the directory scan before any header read by default)
-   * and `includeSubagents` restores subagent-origin rows (dropped right after
-   * their header read by default); the flags are independent.
+   * @param request - row-scope request: the pre-f5 full corpus is the default
+   *   again (f5-contract-a2-1030) — omitted flags return archived rows,
+   *   subagent-origin rows, and untrimmed hints. An explicit
+   *   `includeArchived: false` excludes archived ids from the directory scan
+   *   before any header read, an explicit `includeSubagents: false` drops
+   *   subagent rows right after their header read, and
+   *   `trimHeavyProjections: true` trims the heavy hint columns; the flags are
+   *   independent and the thin main-page listing passes all three.
    * @param signal - optional cancellation for persistence reads and summary generation.
    * @returns visible Session summaries ordered by activity.
    */
   async list(request?: SessionListRequest, signal?: AbortSignal): Promise<SessionSummary[]> {
     signal?.throwIfAborted()
-    const includeArchived = request?.includeArchived === true
-    const includeSubagents = request?.includeSubagents === true
+    // A2 contract (f5-contract-a2-1030): only an explicit `false` cuts rows
+    // and only an explicit `true` trims columns; omission is the full corpus.
+    const includeArchived = request?.includeArchived !== false
+    const includeSubagents = request?.includeSubagents !== false
+    const trimHeavyProjections = request?.trimHeavyProjections === true
     // One consistent archived snapshot serves both the directory-level
     // pre-exclusion and every record the listing merges.
     const archivedSessionIds = includeArchived
@@ -174,7 +186,7 @@ export class ApiSessionList {
       signal?.throwIfAborted()
       const live = this.ctx.sessions.get(record.header.id)
       if (live !== undefined) {
-        items.push(this.summaryFor(live))
+        items.push(this.summaryFor(live, trimHeavyProjections))
       } else if (record.header.cwd !== undefined) {
         cold.push(record)
       }
@@ -186,7 +198,7 @@ export class ApiSessionList {
     }
     for (const record of cold) {
       signal?.throwIfAborted()
-      items.push(this.summarizeCold(record))
+      items.push(this.summarizeCold(record, trimHeavyProjections))
       if (performance.now() >= yieldDeadline) {
         await scheduler.yield()
         signal?.throwIfAborted()
@@ -198,8 +210,11 @@ export class ApiSessionList {
     return items
   }
 
-  private summarizeCold({ header, formatStatus }: SessionRecord): SessionSummary {
-    const projections = this.projectionsFor(header, undefined)
+  private summarizeCold(
+    { header, formatStatus }: SessionRecord,
+    trimHeavyProjections = false,
+  ): SessionSummary {
+    const projections = this.projectionsFor(header, undefined, trimHeavyProjections)
     const metadata = projections?.values.sessionListMetadata
     return {
       sessionId: header.id,
@@ -325,18 +340,23 @@ export class ApiSessionList {
   private projectionsFor(
     header: SessionHeader,
     session: Session | undefined,
+    trimHeavyProjections = false,
   ): SessionProjectionHints | undefined {
     try {
       if (session !== undefined) {
         // The live registry computed the block for this Session: its watermark
         // shares the sequence space of the Session's baselines and frames.
-        return hintsOf('sequenced', this.ctx.sessionProjections.cachedSnapshot(session))
+        return hintsOf('sequenced', this.ctx.sessionProjections.cachedSnapshot(session), trimHeavyProjections)
       }
       // A cold row reads the persisted cache by header alone; the cache serves
       // seeded and unseeded lifecycles alike because a listing never seeds a
       // fold. The watermark is the stored record's own.
       const cache = this.ctx.get('sessionProjectionCache')
-      return hintsOf('cached', cache?.cachedSnapshot(header) ?? cache?.cachedPredecessorTitle(header))
+      return hintsOf(
+        'cached',
+        cache?.cachedSnapshot(header) ?? cache?.cachedPredecessorTitle(header),
+        trimHeavyProjections,
+      )
     } catch (error) {
       this.ctx.logger.warn(
         `api-session.list: projection column for "${header.id}" failed; serving the row without it: ${String(error)}`,
@@ -350,14 +370,23 @@ export class ApiSessionList {
  * Wrap one projection block as Session-list hints of the named sequence space.
  * @param kind - which sequence space the block's watermark belongs to.
  * @param block - the block, or `undefined` when no source served one.
+ * @param trimHeavyProjections - when true, drop the display-heavy keys (see
+ *   `SESSION_LIST_OMITTED_PROJECTION_KEYS`); omitted keeps every value the
+ *   source holds — the pre-f5 full-column contract.
  * @returns the hints, or `undefined` when the block is absent or carries no
  * value the list keeps (see `SESSION_LIST_OMITTED_PROJECTION_KEYS`).
  */
 function hintsOf(
   kind: SessionProjectionHints['kind'],
   block: ProjectionSnapshot | undefined,
+  trimHeavyProjections = false,
 ): SessionProjectionHints | undefined {
   if (block === undefined || Object.keys(block.values).length === 0) return undefined
+  if (!trimHeavyProjections) {
+    // Listing hints contain every wire value the source currently holds but
+    // remain partial: missing cells and cache rows are never materialized here.
+    return { kind, asOfSeq: block.asOfSeq, values: block.values as SessionProjectionValues }
+  }
   // Listing hints remain partial: missing cells and cache rows are never
   // materialized here. The display-heavy keys are filtered into a fresh
   // object — the source block is shared with the projection stores and must

@@ -2089,7 +2089,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       {
         signature: '@Remote(\'list\') async list(_request: SessionListRequest, signal: AbortSignal): Promise<SessionListValue>',
         description: 'Read all visible Session rows without resuming an Agent.',
-        parameters: [{ name: '_request', description: 'row-scope request: `includeArchived` restores archived rows and `includeSubagents` restores subagent-origin rows; both default to omitted, which keeps the listing to active first-party rows.' }, { name: 'signal', description: 'cancellation for persistence reads and summary generation.' }],
+        parameters: [{ name: '_request', description: 'row-scope request: omission keeps the pre-f5 full-corpus contract (archived rows, subagent rows, untrimmed hints); an explicit `includeArchived: false` / `includeSubagents: false` cuts those rows and `trimHeavyProjections: true` trims the heavy hint columns for the thin main-page listing.' }, { name: 'signal', description: 'cancellation for persistence reads and summary generation.' }],
         returns: 'visible Session summaries ordered by activity.',
       },
       {
@@ -7279,7 +7279,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionListRequest',
-    declaration: 'export interface SessionListRequest {\n    readonly cursor?: string;\n    readonly includeArchived?: boolean;\n    readonly includeSubagents?: boolean;\n}',
+    declaration: 'export interface SessionListRequest {\n    readonly cursor?: string;\n    readonly includeArchived?: boolean;\n    readonly includeSubagents?: boolean;\n    readonly trimHeavyProjections?: boolean;\n}',
   },
   {
     name: 'SessionListValue',

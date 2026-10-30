@@ -117,8 +117,10 @@ export interface ISessions {
   /**
    * Refresh the Host-authoritative Session list.
    * @param options - row-scope options: `includeArchived` follows the
-   * archived view (archived rows in both directions), `includeSubagents`
-   * widens to subagent rows for this page generation.
+   *   archived view (archived rows in both directions), `includeSubagents`
+   *   widens to subagent rows for this page generation. Every refresh states
+   *   the row scope and the heavy-column trim explicitly on the wire
+   *   (f5-contract-a2-1030: the server default is the full pre-f5 corpus).
    * @returns completion of the current or newly started Session-list refresh.
    */
   refresh(options?: SessionListScopeOptions): Promise<void>

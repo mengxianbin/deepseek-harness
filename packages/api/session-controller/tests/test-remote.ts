@@ -248,9 +248,9 @@ function installControllers(
     } as never)
   }
   if (ctx.get('workspaceRegistry') === undefined) {
-    // The default session/list pre-excludes this set before any header read
-    // (f5-list-thin-1029); tests without a workspace registry mean "nothing
-    // is archived".
+    // An explicit session/list row cut (includeArchived: false) pre-excludes
+    // this set before any header read (f5-contract-a2-1030); tests without a
+    // workspace registry mean "nothing is archived".
     ctx.provide('workspaceRegistry', { archivedSessionIds: [] } as never)
   }
   if (ctx.get('agentDefaultModel') === undefined) {

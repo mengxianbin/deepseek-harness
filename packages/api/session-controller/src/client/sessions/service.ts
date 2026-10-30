@@ -362,8 +362,9 @@ export class ClientSessions implements ISessions {
   /**
    * Refresh the real Session baseline, reusing an in-flight pull.
    * @param options - row-scope options: `includeArchived` follows the
-   * archived view (archived rows in both directions), `includeSubagents`
-   * widens to subagent rows for this page generation.
+   *   archived view (archived rows in both directions), `includeSubagents`
+   *   widens to subagent rows for this page generation; the pull states the
+   *   scope and the heavy-column trim explicitly on the wire.
    * @returns completion of the current or newly started baseline pull.
    */
   refresh(options?: SessionListScopeOptions): Promise<void> {

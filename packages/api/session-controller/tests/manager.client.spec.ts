@@ -1621,8 +1621,12 @@ describe('running facts without UI reminders', () => {
   })
 })
 
-describe('list row scope (f5-list-thin-1029)', () => {
-  it('pulls thin by default and hydrates subagent rows once a catalog lands', async ({ mock, remote }) => {
+describe('list row scope (f5-contract-a2-1030)', () => {
+  // The server default is the full pre-f5 corpus, so every main-page pull
+  // states its scope explicitly: both row cuts plus the heavy-column trim.
+  const THIN = { includeArchived: false, includeSubagents: false, trimHeavyProjections: true } as const
+
+  it('pulls thin explicitly and hydrates subagent rows once a catalog lands', async ({ mock, remote }) => {
     remote.session.list.mockResolvedValue(ok({
       items: [{
         agentAvailable: true,
@@ -1642,10 +1646,10 @@ describe('list row scope (f5-list-thin-1029)', () => {
 
     await manager.refreshList()
 
-    // First pull carries no flags (active first-party rows only); the landed
-    // catalog widens the scope and a follow-up pull asks for subagent rows.
-    expect(remote.session.list).toHaveBeenNthCalledWith(1, {})
-    expect(remote.session.list).toHaveBeenNthCalledWith(2, { includeSubagents: true })
+    // First pull names the thin scope; the landed catalog widens the row
+    // scope and a follow-up pull asks for subagent rows.
+    expect(remote.session.list).toHaveBeenNthCalledWith(1, THIN)
+    expect(remote.session.list).toHaveBeenNthCalledWith(2, { ...THIN, includeSubagents: true })
   })
 
   it('widens the next pull when the host adds a subagent row mid-generation', async ({ mock, remote }) => {
@@ -1653,25 +1657,25 @@ describe('list row scope (f5-list-thin-1029)', () => {
     const manager = makeManager(mock, remote)
     onTestFinished(() => manager.dispose())
     await manager.refreshList()
-    expect(remote.session.list).toHaveBeenLastCalledWith({})
+    expect(remote.session.list).toHaveBeenLastCalledWith(THIN)
 
     // No eager pull while idle — the row already exists in this snapshot —
     // but the next pull must ask for subagent rows so it survives the merge.
     manager.handleSessionAdded(summary(S2, { origin: 'subagent', parentSessionId: S1 }))
     expect(remote.session.list).toHaveBeenCalledTimes(1)
     await manager.refreshList()
-    expect(remote.session.list).toHaveBeenLastCalledWith({ includeSubagents: true })
+    expect(remote.session.list).toHaveBeenLastCalledWith({ ...THIN, includeSubagents: true })
   })
 
-  it('passes includeArchived through and drops back on the default view', async ({ mock, remote }) => {
+  it('passes includeArchived through and drops back to the explicit cut', async ({ mock, remote }) => {
     remote.session.list.mockResolvedValue(ok({ items: [] }))
     const manager = makeManager(mock, remote)
     onTestFinished(() => manager.dispose())
 
     await manager.refreshList({ includeArchived: true })
-    expect(remote.session.list).toHaveBeenLastCalledWith({ includeArchived: true })
+    expect(remote.session.list).toHaveBeenLastCalledWith({ ...THIN, includeArchived: true })
 
     await manager.refreshList({ includeArchived: false })
-    expect(remote.session.list).toHaveBeenLastCalledWith({})
+    expect(remote.session.list).toHaveBeenLastCalledWith(THIN)
   })
 })
