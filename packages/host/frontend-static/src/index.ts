@@ -8,9 +8,11 @@
  * authentication and renders for the browser Peer; an in-process read renders
  * for the Peer its caller admitted. Both renders go through the webserver's
  * index render (structured injection rows, then raw taps). Non-index assets
- * stay public; every file other than the index carries a weak ETag with
- * `cache-control: no-cache` and answers a matching `If-None-Match` with 304,
- * while the index carries no cache headers. The dist location is workspace
+ * stay public; a content-hash-named build asset carries
+ * `cache-control: public, max-age=31536000, immutable`, every other file
+ * carries a weak ETag with `cache-control: no-cache` and answers a matching
+ * `If-None-Match` with 304, while the index carries no cache headers. The dist
+ * location is workspace
  * knowledge of the composing application, so `distIndex` is typically
  * supplied through a `!!js` expression, never hardcoded by a deployment.
  * @module @deepseek-ai/dsh-host-frontend-static
@@ -18,7 +20,7 @@
 
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
-import { dirname, extname, join, normalize, resolve, sep } from 'node:path'
+import { basename, dirname, extname, join, normalize, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-client-connection'
@@ -64,6 +66,20 @@ const STATIC_MISS_CODES: ReadonlySet<string | undefined> = new Set([
   'ENOTDIR',
 ])
 
+/** Strong one-year immutable cache served to a content-hash-named build asset. */
+const IMMUTABLE_CACHE = 'public, max-age=31536000, immutable'
+
+/**
+ * A build-asset file name carrying Rollup/Vite's 8-character base64url content
+ * hash (`index-CY-5k6-C.js`, `vendor-7utBqO4o.js`, `KaTeX_Main-Bold-Cx986IdX.woff2`,
+ * `index-CY-5k6-C.js.map`). The hash covers the bytes, so a renamed file is a
+ * changed file: the URL is content-addressed and may be cached immutably. Any
+ * name without that hash (index, favicons, manifest, `icon-192`) can change in
+ * place and must keep revalidating — a blindly immutable no-hash URL would pin
+ * stale bytes for a year.
+ */
+const CONTENT_HASHED_NAME = /-[A-Za-z0-9_-]{8}(\.[A-Za-z0-9]+)*$/
+
 /** A Response body that is `bytes` itself, without the copy a buffer body gets. */
 function bytesBody(bytes: Uint8Array): ReadableStream<Uint8Array> {
   return new ReadableStream<Uint8Array>({
@@ -86,9 +102,11 @@ function bytesBody(bytes: Uint8Array): ReadableStream<Uint8Array> {
  * @param renderIndex - turns the raw index.html body into the served document
  * for the dist root and configured index path.
  * @returns the dist response; a HEAD response carries the GET status and
- * headers without a body. A file other than the index carries
- * `cache-control: no-cache` and a weak ETag from a SHA-1 of its bytes, and a
- * request whose `If-None-Match` equals that ETag receives an empty 304.
+ * headers without a body. A content-hash-named build asset carries
+ * `cache-control: public, max-age=31536000, immutable`; any other file other
+ * than the index carries `cache-control: no-cache` and a weak ETag from a
+ * SHA-1 of its bytes, and a request whose `If-None-Match` equals that ETag
+ * receives an empty 304.
  */
 async function serveStatic(
   request: Request, distRoot: string, distIndex: string,
@@ -110,10 +128,22 @@ async function serveStatic(
       headers = { 'content-type': HTML_MIME }
     } else {
       body = await readFile(target)
-      // Weak: gzip changes the transferred bytes.
-      const cache = { 'cache-control': 'no-cache', etag: `W/"${createHash('sha1').update(body).digest('base64url')}"` }
-      if (request.headers.get('if-none-match') === cache.etag) return new Response(null, { status: 304, headers: cache })
-      headers = { 'content-type': MIME[extname(target)] ?? 'application/octet-stream', ...cache }
+      if (CONTENT_HASHED_NAME.test(basename(target))) {
+        // Content-addressed: the file name pins the bytes, so the browser and
+        // the V8 code cache may hold this for a year without revalidating —
+        // this is what skips the per-navigation recompile of the build's JS.
+        // No entity tag: an immutable response is never revalidated. Mirrors
+        // the `/plugins` route's immutable answer.
+        headers = {
+          'content-type': MIME[extname(target)] ?? 'application/octet-stream',
+          'cache-control': IMMUTABLE_CACHE,
+        }
+      } else {
+        // Weak: gzip changes the transferred bytes.
+        const cache = { 'cache-control': 'no-cache', etag: `W/"${createHash('sha1').update(body).digest('base64url')}"` }
+        if (request.headers.get('if-none-match') === cache.etag) return new Response(null, { status: 304, headers: cache })
+        headers = { 'content-type': MIME[extname(target)] ?? 'application/octet-stream', ...cache }
+      }
     }
   } catch (error) {
     // Only absent or non-file targets are 404; other filesystem failures reach
