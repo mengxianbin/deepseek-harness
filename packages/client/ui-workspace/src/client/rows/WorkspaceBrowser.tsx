@@ -39,6 +39,7 @@ import {
   pinCurrentBlank, reconcileManualOrder, sessionMemberIds, UNGROUPED_KEY,
 } from '../tree.ts'
 import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
+import { HealthShield } from './HealthShield.tsx'
 import { FLAT_SESSION_ORDER_KEY, type SessionGroupBy } from '../stores.ts'
 import { WorkspacePickFlow } from '../WorkspacePicker.tsx'
 import css from './WorkspaceBrowser.module.css'
@@ -1686,6 +1687,16 @@ export function WorkspaceBrowser({
               </button>
             </Tooltip>
           )}
+          {/* FORK dsh-local (collab-step4-c5, marker: healthShield): the
+              安康位 shield takes the header cluster's right end (step3 §3.3;
+              placement = user ruling 2026-11-01, ask 回执 id=shield-placement
+              A 案 — the top-strip seat squeezed UsageGlance out of its clipped
+              row, and this badge audits the list this header heads): faint
+              green while the sweep books balance, steady red with the
+              click-expanded difference detail when they don't, the shared
+              dashed ring when the health chain itself goes silent (step3 §5.2
+              自指 fail-closed). */}
+          {wide && <HealthShield useSessionHealth={useSessionHealth} t={t} />}
         </div>
         {/* Add flow + its error dialog (same package — direct composition). */}
         <WorkspacePickFlow

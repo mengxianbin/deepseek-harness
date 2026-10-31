@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
-const css = readFileSync(fileURLToPath(new URL('../src/client/HealthShield.module.css', import.meta.url)), 'utf8')
+const css = readFileSync(fileURLToPath(new URL('../src/client/rows/HealthShield.module.css', import.meta.url)), 'utf8')
 
 describe('HealthShield.module.css vocabulary', () => {
   it('mirrors the shared dashed stale ring (step3 §5.1 vocabulary)', () => {

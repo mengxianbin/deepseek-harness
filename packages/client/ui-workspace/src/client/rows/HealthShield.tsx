@@ -1,23 +1,28 @@
 /**
  * The 安康位 shield badge (FORK dsh-local, collab-step4-c5, marker:
- * healthShield): the wide top strip's right-end occupant, reading the
- * ui-session health hook. Collab step3 §3.3/§5.2 (step4b 接力批2 件C5): an
- * even reconciliation paints the shield faint green — the quiet-trust
- * 本体 ("no badge reading = nothing to do"); a broken one burns red steady
- * and expands the per-invariant difference detail on click (哪条不变量、哪些
- * 会话); and a chain the client stops hearing overlays the SAME amber dashed
- * stale ring the session rows use (step3 §5.1 vocabulary, 自指 fail-closed) —
- * the last known verdict stays painted under it (未知不吞已知) while the
- * tooltip counts the interruption up. The 安康位 alarm additionally cuts into
- * the 「要我拿主意」 queue segment at P0/P1 level (ui-workspace's queue
- * health alert); this badge is the always-on global seat.
+ * healthShield): the 工作区 section header's right-end occupant (last of the
+ * 🔍 / view-options / add cluster), reading the ui-session health hook.
+ * Placement = user ruling 2026-11-01 (ask 回执 id=`shield-placement`, A 案
+ * 工作区行右端): the first seat — the wide top strip beside UsageGlance —
+ * squeezed the usage text out of the clipped row, and this badge audits the
+ * very list the header heads, so the reading and the audited face share one
+ * glance (step3 §3.3 措辞随该裁定修订). Collab step3 §3.3/§5.2 (step4b 接力批2
+ * 件C5): an even reconciliation paints the shield faint green — the
+ * quiet-trust 本体 ("no badge reading = nothing to do"); a broken one burns
+ * red steady and expands the per-invariant difference detail on click (哪条
+ * 不变量、哪些会话); and a chain the client stops hearing overlays the SAME
+ * amber dashed stale ring the session rows use (step3 §5.1 vocabulary, 自指
+ * fail-closed) — the last known verdict stays painted under it (未知不吞已知)
+ * while the tooltip counts the interruption up. The 安康位 alarm additionally
+ * cuts into the 「要我拿主意」 queue segment at P0/P1 level (the queue health
+ * alert below); this badge is the always-on global seat.
  */
 import { useState } from 'react'
 import clsx from 'clsx'
 import { IconShieldOutlineMedium, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SessionHealthState, UseSessionHealth } from '@deepseek-ai/dsh-client-ui-session/client'
-import type { SidebarKey } from './locales.ts'
-import type { SidebarRootComponentProps } from './contract/slots.ts'
+import type { WorkspaceKey } from '../locales.ts'
+import type { WorkspaceBrowserProps } from '../contract/slots.ts'
 import css from './HealthShield.module.css'
 
 /** One broken invariant as this seat names it (derived from the wire report). */
@@ -28,7 +33,7 @@ const INVARIANT_KEYS = {
   'total-partition': 'health.invariant.totalPartition',
   unclassified: 'health.invariant.unclassified',
   unreadable: 'health.invariant.unreadable',
-} as const satisfies Record<HealthInvariant, SidebarKey>
+} as const satisfies Record<HealthInvariant, WorkspaceKey>
 
 type HealthShieldProps = {
   /**
@@ -38,7 +43,7 @@ type HealthShieldProps = {
    * props — the seat renders nothing.
    */
   useSessionHealth: UseSessionHealth | undefined
-  t: SidebarRootComponentProps['t']
+  t: WorkspaceBrowserProps['t']
 }
 
 /**

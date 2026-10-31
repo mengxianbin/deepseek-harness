@@ -33,13 +33,9 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
-// Type-only: pulls the Session root standard-hook merge (`useSessionHealth`
-// rides the global standard props seat, collab-step4-c5).
-import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {
   SidebarPanelMetadata, SidebarRootComponentProps, SidebarRootInjected,
 } from './contract/slots.ts'
-import { HealthShield } from './HealthShield.tsx'
 import { UsageGlance } from './UsageGlance.tsx'
 import { FIXED_PANEL_ID } from './panel-pins.ts'
 import css from './SidebarRoot.module.css'
@@ -274,7 +270,6 @@ export function SidebarRoot({
   useFooterActions,
   useShortcuts,
   usePanelInfo,
-  useSessionHealth,
   t,
   renderSlot,
 }: SidebarRootComponentProps) {
@@ -423,12 +418,6 @@ export function SidebarRoot({
             </>
           )
         })()}
-        {/* FORK dsh-local (collab-step4-c5, marker: healthShield): the 安康位
-            shield takes the wide strip's right end (step3 §3.3) — faint green
-            while the sweep books balance, steady red with a click-expanded
-            difference detail when they don't, and the shared dashed ring when
-            the health chain itself goes silent (step3 §5.2 自指 fail-closed). */}
-        {wide && <HealthShield useSessionHealth={useSessionHealth} t={t} />}
         {!darwinDesktop && toggle}
       </div>
 
