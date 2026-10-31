@@ -376,6 +376,18 @@ export class ClientSessions implements ISessions {
   }
 
   /**
+   * FORK dsh-local (f5-list-parallel-1031): best-effort catalog head start
+   * fired at apply before any connection generation exists — `session.list`
+   * is a plain cookie-authed HTTP dispatch, so the first pull need not wait
+   * behind the Remote generation (see {@link SessionManager.prefetchList};
+   * a failure before the first arrival stays off the error surface).
+   * @returns completion of the current or newly started pull.
+   */
+  prefetch(): Promise<void> {
+    return this.manager.prefetchList()
+  }
+
+  /**
    * Search the Host's visible message-content index. Results stay
    * request-local; the list snapshot remains the metadata authority.
    * @param query - non-blank literal phrase.

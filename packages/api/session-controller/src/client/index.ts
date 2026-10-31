@@ -132,6 +132,19 @@ export function apply(ctx: Context): void {
     sessions.handleSessionError(sessionId, message)
   })
 
+  // FORK dsh-local (f5-list-parallel-1031): the list pull is a plain
+  // cookie-authed HTTP dispatch, so the first pull need not wait for the
+  // Remote generation (the demand pull used to fire only ~2ms after the
+  // workspace baseline frame — the measured serial segment). Best-effort: a
+  // pre-generation failure stays off the error surface, and handleConnected
+  // fences or adopts this head start. A Host already connected at apply
+  // skips it: handleConnected below owns the pull, as it always did.
+  if (connection.generation.getSnapshot() === undefined) {
+    void sessions.prefetch().catch((reason: unknown) => {
+      console.warn('session list prefetch rejected:', reason)
+    })
+  }
+
   const control = createSessionControlStream(remotes, {
     accept: (frame) => { sessions.handleControlFrame(frame) },
     failed: (error) => { console.error('[session-controller] control stream failed:', error) },

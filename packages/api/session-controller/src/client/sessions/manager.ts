@@ -74,6 +74,13 @@ export interface SessionListSnapshot {
 }
 
 /**
+ * Pull disposition: `demand` owns the user-visible failure surface; a
+ * `prefetch` is the best-effort pre-generation head start whose failure the
+ * generation's own demand pull supersedes.
+ */
+type SessionListPullKind = 'demand' | 'prefetch'
+
+/**
  * Every projection value the store currently holds, with the summary mark
  * stripped, and the lifecycle of its explicit baseline read. This is the full
  * attached-Session set, not a list row's summary contract (see
@@ -127,6 +134,10 @@ export class SessionManager {
   private listInflight: Promise<void> | null = null
   /** Active list request's mutation log; its identity also fences completion after reconnect. */
   private listMutations: SessionListMutation[] | null = null
+  /** Disposition of the active pull; a demand caller joining a prefetch upgrades it (its failure must surface). */
+  private listPullKind: SessionListPullKind = 'demand'
+  /** A generation adopted the still-in-flight prefetch; its settle queues the authoritative re-pull. */
+  private repullAfterSettle = false
   /**
    * Row scope of the list request. Both row flags start false and every pull
    * states them explicitly (f5-contract-a2-1030: only an explicit false cuts
@@ -452,7 +463,38 @@ export class SessionManager {
    */
   refreshList(options?: SessionListScopeOptions): Promise<void> {
     this.applyListScope(options)
+    if (this.listInflight !== null) {
+      // A demand caller joining a still-running pull takes over its failure
+      // disposition: the user-facing retry/error surface must see it.
+      this.listPullKind = 'demand'
+      return this.listInflight
+    }
+    return this.startListPull('demand')
+  }
+
+  /**
+   * FORK dsh-local (f5-list-parallel-1031): best-effort head start on the
+   * catalog pull, fired at apply before any connection generation exists.
+   * `session.list` rides the plain cookie-authed HTTP dispatch, so the pull
+   * has no transport-side reason to wait behind the Remote generation — this
+   * removes the measured serial segment (the demand pull used to fire ~2ms
+   * after the workspace baseline frame). The generation's own {@link
+   * handleConnected} refresh fences or merges this one exactly like any
+   * earlier pull: a response landing before the generation is discarded
+   * there, a landed catalog is merged over by the generation's re-pull. A
+   * failure before the first arrival stays off the error surface (back to
+   * idle): the generation's demand pull owns surfacing it.
+   * @returns completion of the current or newly started pull.
+   */
+  prefetchList(): Promise<void> {
+    // A landed catalog means the generation pull already owns freshness.
+    if (this.listPhase === 'ready') return Promise.resolve()
     if (this.listInflight !== null) return this.listInflight
+    return this.startListPull('prefetch')
+  }
+
+  /** Start one catalog pull over the current scope; `listInflight` carries the single-flight identity. */
+  private startListPull(kind: SessionListPullKind): Promise<void> {
     const scope = { ...this.listScope }
     // Explicit by contract (f5-contract-a2-1030): the server serves the full
     // pre-f5 corpus unless a caller states otherwise, so this main-page pull
@@ -462,6 +504,7 @@ export class SessionManager {
       includeSubagents: scope.subagents,
       trimHeavyProjections: true,
     }
+    this.listPullKind = kind
     this.listState = 'loading'
     this.listError = null
     const established = this.summaries
@@ -515,28 +558,48 @@ export class SessionManager {
             this.applyListScope({ includeSubagents: true })
           }
         } else {
-          this.listState = 'error'
-          this.listError = result.error
+          this.setPullFailure(result.error)
         }
       } catch (error) {
         if (!isRemoteFailure(error)) throw error
         if (this.listMutations !== mutations) return
-        this.listState = 'error'
-        this.listError = error
+        this.setPullFailure(error)
       } finally {
         if (this.listMutations === mutations) {
           this.listMutations = null
           this.listInflight = null
           this.notifier.markDirty()
-          // A scope change that arrived while this pull ran its original
-          // request: land it now instead of waiting for the next trigger.
-          if (scope.archived !== this.listScope.archived || scope.subagents !== this.listScope.subagents) {
+          if (this.repullAfterSettle) {
+            // FORK dsh-local (f5-list-parallel-1031): the adopted prefetch
+            // settled; close its pre-event-stream window with the
+            // authoritative pull (demand — a failure here must surface).
+            this.repullAfterSettle = false
+            void this.refreshList().catch(() => undefined)
+          } else if (scope.archived !== this.listScope.archived || scope.subagents !== this.listScope.subagents) {
+            // A scope change that arrived while this pull ran its original
+            // request: land it now instead of waiting for the next trigger.
             void this.refreshList().catch(() => undefined)
           }
         }
       }
     })()
     return this.listInflight
+  }
+
+  /**
+   * Fold one pull's failure into the pull-activity axis. A best-effort
+   * pre-generation prefetch failure returns to idle instead of raising the
+   * error surface — the generation's demand pull owns surfacing a real
+   * outage, so the skeleton simply keeps waiting.
+   * @param error - the pull's Remote failure.
+   */
+  private setPullFailure(error: RemoteFailure): void {
+    if (this.listPullKind === 'prefetch' && this.listPhase === 'pending') {
+      this.listState = 'idle'
+      return
+    }
+    this.listState = 'error'
+    this.listError = error
   }
 
   /**
@@ -848,9 +911,22 @@ export class SessionManager {
    */
   handleConnected(): void {
     for (const store of this.projectionStores.values()) store.clear()
-    this.listMutations = null
-    this.listInflight = null
-    void this.refreshList()
+    if (this.listInflight !== null && this.listPullKind === 'prefetch') {
+      // FORK dsh-local (f5-list-parallel-1031): adopt the in-flight
+      // pre-generation prefetch instead of fencing it — its HTTP request is
+      // already past the cookie gate (fencing it in a busy window would
+      // restart the whole serial wait this head start exists to remove), its
+      // response is a fresh Host snapshot, and event mutations arriving
+      // meanwhile replay onto it exactly like a demand pull's. The event
+      // stream only flows from this moment, so the snapshot may miss changes
+      // between its server-side read and this generation: queue the
+      // authoritative re-pull behind its settle.
+      this.repullAfterSettle = true
+    } else {
+      this.listMutations = null
+      this.listInflight = null
+      void this.refreshList()
+    }
     const parents = new Set(this.projectionLoads.keys())
     for (const id of this.sessions.keys()) {
       const address = this.addresses.get(id)

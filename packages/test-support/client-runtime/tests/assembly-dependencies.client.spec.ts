@@ -30,7 +30,9 @@ describe('bundle dependency closures', () => {
     expect(client.ctx.get('fileUpload')).toBeDefined()
     await vi.waitFor(() => {
       expect(client.ctx.sessions.list.getSnapshot().phase).toBe('ready')
-      expect(mock.log.calls('session/list')).toHaveLength(1)
+      // FORK dsh-local (f5-list-parallel-1031): the pre-generation prefetch plus
+      // the generation's authoritative re-pull — two pulls, no longer one serial wait.
+      expect(mock.log.calls('session/list')).toHaveLength(2)
       expect(mock.log.streams('session/control')).toHaveLength(1)
     })
   }, 60_000)
