@@ -718,10 +718,14 @@ export interface QueueSegment {
 /**
  * Derive the 「要我拿主意」 hard top segment (collab step3 §一 裁定 C · 混合):
  * P0 holds awaiting-interaction rows, P1 holds unread failed stops awaiting a
- * ruling. P2 (泄漏) and P3 (没在跑) keep no mechanical carrier on this list yet
- * (step3 §3.1 marks both 无现行), so they populate nothing rather than guess.
- * Within a tier rows order by recency — severity is a hover/color label and
- * never a queue key (step1 §2.3 终态收敛). Archived and blank rows never queue.
+ * ruling. P1 skips rows currently running (2026-10-31 在跑出队裁定): a re-run
+ * is already being handled, yet its previous failure's durable projection only
+ * flips when the new turn ends, which used to strand a live run in the segment
+ * for its whole duration. P0 keeps its rows regardless — 等回话 outranks. P2
+ * (泄漏) and P3 (没在跑) keep no mechanical carrier on this list yet (step3
+ * §3.1 marks both 无现行), so they populate nothing rather than guess. Within a
+ * tier rows order by recency — severity is a hover/color label and never a
+ * queue key (step1 §2.3 终态收敛). Archived and blank rows never queue.
  * @param list - sessions list snapshot.
  * @param statuses - unified UI status by Session.
  * @param archivedIds - registry-global archive set.
@@ -741,7 +745,9 @@ export function deriveQueue(
     if (s === undefined || s.blank || archived.has(id)) continue
     const node = sessionNode(s, list, statuses, pinned, archived)
     if (node.pendingInteraction !== undefined) p0.push(node)
-    else if (node.completed && node.completionOutcome === 'failed') p1.push(node)
+    // 在跑不出队 (2026-10-31 裁定): a live re-run is being handled, not
+    // awaiting a ruling; an unknown running state keeps the row visible.
+    else if (!node.running && node.completed && node.completionOutcome === 'failed') p1.push(node)
   }
   const byRecency = (left: SessionNode, right: SessionNode): number => right.updatedAt - left.updatedAt
   p0.sort(byRecency)

@@ -1042,6 +1042,25 @@ describe('deriveQueue (collab step3 §一, q1-placement)', () => {
     expect(queue.queued).toEqual(new Set([sid('ask')]))
   })
 
+  it('keeps a re-running failed row out of P1 while P0 keeps its awaiting row (2026-10-31 在跑出队裁定)', () => {
+    const sessions = list(
+      summary('running-failed', 30), summary('stopped-failed', 20), summary('running-ask', 10),
+    )
+    const statuses: SessionStatusSnapshot = new Map([
+      [sid('running-failed'), status(undefined, { running: true, completionUnread: true, completionOutcome: 'failed' })],
+      [sid('stopped-failed'), status(undefined, { completionUnread: true, completionOutcome: 'failed' })],
+      [sid('running-ask'), status(
+        { key: 'question:1', kind: 'question', sessionId: sid('running-ask') } as SessionPendingInteraction,
+        { running: true },
+      )],
+    ])
+    const queue = deriveQueue(sessions, statuses, [])
+    expect(queue.tiers.map(tier => tier.tier)).toEqual(['p0', 'p1'])
+    expect(queue.tiers[0]!.sessions.map(node => node.id)).toEqual([sid('running-ask')])
+    expect(queue.tiers[1]!.sessions.map(node => node.id)).toEqual([sid('stopped-failed')])
+    expect(queue.queued).toEqual(new Set([sid('running-ask'), sid('stopped-failed')]))
+  })
+
   it('drops queued rows from their groups and counts, leaving empty tiers unrendered', () => {
     const sessions = list(summary('ask', 10), summary('resting', 5))
     const statuses: SessionStatusSnapshot = new Map([
