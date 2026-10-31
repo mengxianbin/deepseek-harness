@@ -1,7 +1,10 @@
 /* FORK dsh-local (collab-step4-c5, marker: healthShield): the 安康位 shield
    seat at the 工作区 section header's right end (collab step3 §3.3; placement
    = user ruling 2026-11-01, ask 回执 id=shield-placement A 案 — the first seat
-   in the wide top strip squeezed UsageGlance out of the clipped row). State
+   in the wide top strip squeezed UsageGlance out of the clipped row). Seat
+   rule (1101 裁切复修): the header's actions cluster is a fixed 60px
+   overflow-hidden clip window — this seat lives OUTSIDE it, as the header's
+   own child, or it is clipped away whole. State
    rides data-health-state — ok = faint green (the quiet-trust 本体), broken =
    steady red — and the stale overlay reuses the row vocabulary: the SAME
    amber dashed ring (step3 §5.1, mirrored from ui-workspace

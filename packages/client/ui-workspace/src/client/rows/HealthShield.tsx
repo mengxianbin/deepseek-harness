@@ -1,7 +1,9 @@
 /**
  * The 安康位 shield badge (FORK dsh-local, collab-step4-c5, marker:
- * healthShield): the 工作区 section header's right-end occupant (last of the
- * 🔍 / view-options / add cluster), reading the ui-session health hook.
+ * healthShield): the 工作区 section header's right-end seat — a sibling AFTER
+ * the 🔍 / view-options / add cluster, never inside it (the cluster's fixed
+ * 60px overflow-hidden clip window swallows a third child whole, 1101 裁切
+ * 复修), reading the ui-session health hook.
  * Placement = user ruling 2026-11-01 (ask 回执 id=`shield-placement`, A 案
  * 工作区行右端): the first seat — the wide top strip beside UsageGlance —
  * squeezed the usage text out of the clipped row, and this badge audits the

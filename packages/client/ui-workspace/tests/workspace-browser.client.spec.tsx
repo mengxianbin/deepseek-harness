@@ -2963,4 +2963,19 @@ describe('Workspace tree grouping', () => {
     fireEvent.click(alert.querySelector('button') as HTMLElement)
     expect(screen.getByText('安康位自身读不到：盾已亮虚线圈，读数恢复即自动清除')).toBeTruthy()
   })
+
+  it('seats the shield outside the actions cluster clip window (件C5 裁切复修1101)', () => {
+    const balanced: SessionHealthReport = {
+      ok: true, total: 1, counts: { running: 1, awaiting: 0, failed: 0, rest: 0 }, issues: [],
+    }
+    mount({ useSessionHealth: hook({ report: balanced }) })
+    const shield = document.querySelector('[data-health-state]') as HTMLElement
+    expect(shield).toBeTruthy()
+    // The actions cluster is a fixed 60px overflow-hidden clip window sized
+    // for exactly two buttons (1101 生产实测: an in-cluster third child renders
+    // in the DOM and is clipped away whole). The seat therefore lives as the
+    // section header's own child, right after the cluster — never inside it.
+    expect(shield.closest('[class*="headerActions"]')).toBeNull()
+    expect(shield.closest('[class*="sectionHeader"]')).not.toBeNull()
+  })
 })
