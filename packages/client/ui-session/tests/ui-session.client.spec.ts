@@ -730,6 +730,49 @@ describe('UiSession status', () => {
     expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('failed')
   })
 
+  it('lights the durable clean completion after a reload clears the map (绿点耐久, ruling 2026-11-01)', () => {
+    const ctx = new Context()
+    const bench = createSessionsBench(ctx)
+    const id = sessionId('durable-green')
+    bench.binding(id)
+    const service = createUiSession(ctx, bench)
+
+    // The Host folds a clean end into the projection: the green mark lights
+    // with no in-memory stop at all — the F5 / restart scenario.
+    bench.list.update((draft) => {
+      draft.byId[id]!.projectionValues = { lastTurnOutcome: { kind: 'completed', at: 5 } }
+    })
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(true)
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('completed')
+
+    // Aborted and blocked ends read green too — every non-error end reason.
+    bench.list.update((draft) => {
+      draft.byId[id]!.projectionValues = { lastTurnOutcome: { kind: 'aborted', at: 6 } }
+    })
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('completed')
+
+    // A live in-memory failure outranks the stale clean projection — the
+    // observation is the fresher fact.
+    bench.emitStatus(id, true)
+    bench.emitError(id, 'Connection error')
+    bench.emitStatus(id, false)
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('failed')
+
+    // A rerun clears the live map; the projection's exception receipt then
+    // refines its durable clean end into the red ! (待收讫·例外, step3 §3.1).
+    // The baseline row rides along so the reconcile pass sees a live run, not
+    // a fresh stop (the Host list summary keeps pace with the running state).
+    bench.emitStatus(id, true)
+    bench.list.update((draft) => {
+      draft.byId[id]!.running = true
+      draft.byId[id]!.projectionValues = {
+        lastTurnOutcome: { kind: 'completed', at: 7 },
+        lastReceipt: { verdict: 'exception', summary: 'two 机检红留人工', at: 7 },
+      }
+    })
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('failed')
+  })
+
   it('arms the 已阅 check on a pending question and drops it when the question settles (新事件自动清)', () => {
     const ctx = new Context()
     const bench = createSessionsBench(ctx)
