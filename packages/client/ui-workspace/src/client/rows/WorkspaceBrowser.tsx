@@ -39,6 +39,7 @@ import {
   pinCurrentBlank, reconcileManualOrder, sessionMemberIds, UNGROUPED_KEY,
 } from '../tree.ts'
 import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
+import { HealthShield } from './HealthShield.tsx'
 import { FLAT_SESSION_ORDER_KEY, type SessionGroupBy } from '../stores.ts'
 import { WorkspacePickFlow } from '../WorkspacePicker.tsx'
 import css from './WorkspaceBrowser.module.css'
@@ -1687,6 +1688,23 @@ export function WorkspaceBrowser({
             </Tooltip>
           )}
         </div>
+        {/* FORK dsh-local (collab-step4-c5, marker: healthShield): the 安康位
+            shield seats the section header's right end — as the header's own
+            child, AFTER the actions cluster, never inside it (step3 §3.3;
+            placement = user ruling 2026-11-01, ask 回执 id=shield-placement
+            A 案 — the top-strip seat squeezed UsageGlance out of its clipped
+            row, and this badge audits the list this header heads). The
+            cluster carries a fixed 60px overflow-hidden clip window sized for
+            exactly two buttons: a third in-cluster child is clipped away
+            whole (1101 生产实测：DOM 在、视觉零) — the same fixed-chrome clip
+            family that pushed the first seat out of the top strip. As a
+            sibling the flex row re-flows to fit it, and the always-on seat
+            stays lit while the cluster collapses under an expanded search.
+            Faint green while the sweep books balance, steady red with the
+            click-expanded difference detail when they don't, the shared
+            dashed ring when the health chain itself goes silent (step3 §5.2
+            自指 fail-closed). */}
+        {wide && <HealthShield useSessionHealth={useSessionHealth} t={t} />}
         {/* Add flow + its error dialog (same package — direct composition). */}
         <WorkspacePickFlow
           t={t}

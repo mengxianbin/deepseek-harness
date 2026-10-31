@@ -12,11 +12,11 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SessionHealthState } from '@deepseek-ai/dsh-client-ui-session/client'
-import type { SidebarRootComponentProps } from '../src/client/contract/slots.ts'
-import { HealthShield } from '../src/client/HealthShield.tsx'
+import type { WorkspaceBrowserProps } from '../src/client/contract/slots.ts'
+import { HealthShield } from '../src/client/rows/HealthShield.tsx'
 import { zh } from '../src/client/locales.ts'
 
-const t = makeTranslate(zh) as SidebarRootComponentProps['t']
+const t = makeTranslate(zh) as WorkspaceBrowserProps['t']
 
 const balanced: SessionHealthState = {
   report: { ok: true, total: 1, counts: { running: 1, awaiting: 0, failed: 0, rest: 0 }, issues: [] },

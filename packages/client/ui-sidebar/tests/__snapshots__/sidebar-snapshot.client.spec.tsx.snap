@@ -183,24 +183,6 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
           style="display: contents;"
         />
       </span>
-      <span
-        class="shield ok"
-        data-health-state="ok"
-      >
-        <button
-          aria-label="Health: books balance"
-          class="button"
-          type="button"
-        >
-          <svg
-            aria-hidden="true"
-            data-content="4e22362c"
-            data-icon="dsw-icon-shield-outline-medium"
-            height="16"
-            width="16"
-          />
-        </button>
-      </span>
       <button
         aria-label="Collapse sidebar"
         class="iconButton toggle"
@@ -464,24 +446,6 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
           style="display: contents;"
         />
       </span>
-      <span
-        class="shield ok"
-        data-health-state="ok"
-      >
-        <button
-          aria-label="Health: books balance"
-          class="button"
-          type="button"
-        >
-          <svg
-            aria-hidden="true"
-            data-content="4e22362c"
-            data-icon="dsw-icon-shield-outline-medium"
-            height="16"
-            width="16"
-          />
-        </button>
-      </span>
       <button
         aria-label="Collapse sidebar"
         class="iconButton toggle"
@@ -630,24 +594,6 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
           data-slot="sidebar.brand.name"
           style="display: contents;"
         />
-      </span>
-      <span
-        class="shield ok"
-        data-health-state="ok"
-      >
-        <button
-          aria-label="安康位：对账平"
-          class="button"
-          type="button"
-        >
-          <svg
-            aria-hidden="true"
-            data-content="4e22362c"
-            data-icon="dsw-icon-shield-outline-medium"
-            height="16"
-            width="16"
-          />
-        </button>
       </span>
       <button
         aria-label="收起侧边栏"
