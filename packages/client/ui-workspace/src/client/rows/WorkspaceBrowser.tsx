@@ -14,7 +14,7 @@
  * are slot entries with their own behavior, so this component threads no
  * action callbacks and hosts no action surface.
  */
-import { Fragment, type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
   AnimatedRows, Button, HoverCardGroup, IconArchiveCheckOutlineRegular, IconArchiveOffOutlineRegular, IconArchiveOutlineRegular,
@@ -325,11 +325,13 @@ type SessionTreeProps = Pick<
 /**
  * FORK dsh-local (collab-step4b-c1, marker: queueSegment): the hard
  * 「要我拿主意」 top segment (collab step3 §一, q1-placement). P0
- * awaiting-interaction rows lead P1 unread failed stops; each tier's label
- * rides the segment head, never the rows (step3 §3.2 档位标只在段头). The
- * empty segment stays visible with its 「无待办」 line (step3 判据①.4 空段
- * 可见不藏), and queued rows render without drag — the segment's order is the
- * state's, not the user's.
+ * awaiting-interaction rows lead P1 unread failed stops. The segment head and
+ * the per-tier labels were cut (queue-headers-cut-1101, 2026-11-01): the rows
+ * carry the state on their own, while two label lines per segment cost list
+ * height that small screens need for rows. The empty segment keeps its
+ * 「无待办」 line (step3 判据①.4 空段可见不藏), and queued rows render without
+ * drag — the segment's order is the state's, not the user's. Tier order (P0
+ * before P1) is unchanged; it just reads as one continuous run of rows now.
  */
 /** Props of the hard 「要我拿主意」 top segment, shared by the grouped and flat bodies. */
 type QueueSectionProps = {
@@ -350,35 +352,25 @@ function QueueSection({ queue, currentId, onOpen, onSessionRenameRequest, render
   const now = Date.now()
   return (
     <div className={css.queueSection} data-row-key="queue" role="tree" aria-label={t('queue.title')}>
-      <div className={css.queueHeader}>
-        <span className={css.queueTitle}>{t('queue.title')}</span>
-      </div>
       {queue.tiers.length === 0
         ? <div className={css.queueEmpty}>{t('queue.empty')}</div>
-        : queue.tiers.map(tier => (
-          <Fragment key={tier.tier}>
-            <div className={css.queueTier} data-row-key={`queue-tier-${tier.tier}`}>
-              {t(tier.tier === 'p0' ? 'queue.tier.p0' : 'queue.tier.p1')}
-            </div>
-            {tier.sessions.map(node => (
-              <SessionNodeItem
-                key={node.id}
-                node={node}
-                currentId={currentId}
-                now={now}
-                onOpen={onOpen}
-                onRenameRequest={onSessionRenameRequest}
-                onReveal={node.id === revealSessionId
-                  ? () => { onSessionRevealed(node.id) }
-                  : undefined}
-                renderSlot={renderSlot}
-                home={home}
-                t={t}
-                watchSessionJobs={watchSessionJobs}
-                useSessionAccess={useSessionAccess}
-              />
-            ))}
-          </Fragment>
+        : queue.tiers.flatMap(tier => tier.sessions).map(node => (
+          <SessionNodeItem
+            key={node.id}
+            node={node}
+            currentId={currentId}
+            now={now}
+            onOpen={onOpen}
+            onRenameRequest={onSessionRenameRequest}
+            onReveal={node.id === revealSessionId
+              ? () => { onSessionRevealed(node.id) }
+              : undefined}
+            renderSlot={renderSlot}
+            home={home}
+            t={t}
+            watchSessionJobs={watchSessionJobs}
+            useSessionAccess={useSessionAccess}
+          />
         ))}
     </div>
   )
