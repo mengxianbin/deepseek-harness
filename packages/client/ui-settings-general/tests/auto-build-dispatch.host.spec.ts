@@ -4,6 +4,11 @@
  * dispatches one detached build per minimum interval, BUILD_FAILED backs off
  * exponentially (and retries past the backoff), and the heavy-io lock defers
  * the dispatch so the save chain stays the single build dispatcher.
+ *
+ * Build-trigger hardening (2026-11-01): INIT no longer aborts into a
+ * deadlock — a quiet marker-free INIT dispatches one bootstrap build, an
+ * in-flight build marker defers to outcome checks, a failure marker arms the
+ * same backoff, and every dispatch decision lands in the journal.
  */
 import { Context } from '@deepseek-ai/cordis'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -37,6 +42,11 @@ function judgment(state: RestartSignalState, face?: string): RestartSignalJudgme
   return { state, detail: 'fixture', ...(face === undefined ? {} : { facts: facts(face) }) }
 }
 
+/** An INIT judgment shaped like production's: facts attached, no host face yet. */
+function initJudgment(config = 'cfg'): RestartSignalJudgment {
+  return { state: 'INIT', detail: 'fixture', facts: { currentHostFace: undefined, configStamp: config } }
+}
+
 /** One dispatcher over controllable seams and a scriptable collect. */
 function harness(env: Record<string, string | undefined> = {}) {
   const ctx = new Context()
@@ -47,21 +57,27 @@ function harness(env: Record<string, string | undefined> = {}) {
   })
   const launch = vi.fn((_commandLine: string, _options: unknown) => stubChild())
   const warn = vi.fn<(message: string) => void>()
+  const journal = vi.fn<(line: string) => void>()
   const lockHeld = vi.fn(() => false)
   const heldFlag = vi.fn(() => false)
+  const buildingMarker = vi.fn(() => false)
+  const failedMarker = vi.fn(() => false)
   registerAutoBuild(ctx, {
     subscribe: (l) => { listener = l; return () => { listener = undefined } },
     collect,
     launch,
     warn,
+    journal,
     lockHeld,
     heldFlag,
+    buildingMarker,
+    failedMarker,
     command: 'build-cmd',
     env,
   })
   const emit = (judgment: RestartSignalJudgment): void => { listener?.(judgment) }
   const settle = async (ms: number): Promise<void> => { await vi.advanceTimersByTimeAsync(ms) }
-  return { emit, settle, collect, launch, warn, lockHeld, heldFlag }
+  return { emit, settle, collect, launch, warn, journal, lockHeld, heldFlag, buildingMarker, failedMarker }
 }
 
 beforeEach(() => {
@@ -284,13 +300,68 @@ describe('auto-build dispatch throttle', () => {
     expect(h.launch).toHaveBeenCalledOnce()
   })
 
-  it('aborts on INIT without a baseline and stays quiet', async () => {
+  it('bootstraps a missing baseline: quiet marker-free INIT dispatches one build after the stability window', async () => {
     const h = harness()
-    h.collect.mockImplementation(async () => judgment('INIT'))
-    h.emit(judgment('NEED_BUILD', 'h1'))
-    await h.settle(10 * 60_000)
+    h.collect.mockImplementation(async () => initJudgment())
+    h.emit(initJudgment())
+    await h.settle(14_000)
     expect(h.launch).not.toHaveBeenCalled()
-    expect(h.warn).toHaveBeenCalledWith(expect.stringContaining('INIT'))
+    await h.settle(2_000)
+    expect(h.launch).toHaveBeenCalledOnce()
+    expect(h.journal).toHaveBeenCalledWith(expect.stringContaining('dispatch reason=init-bootstrap'))
+  })
+
+  it('skips the INIT bootstrap while a build marker sits in the tree (foreign build in flight)', async () => {
+    const h = harness()
+    h.collect.mockImplementation(async () => initJudgment())
+    h.buildingMarker.mockReturnValue(true)
+    h.emit(initJudgment())
+    await h.settle(5 * 60_000)
+    expect(h.launch).not.toHaveBeenCalled()
+    // The marker clears: the next armed fire bootstraps.
+    h.buildingMarker.mockReturnValue(false)
+    await h.settle(60_000)
+    expect(h.launch).toHaveBeenCalledOnce()
+  })
+
+  it('arms the exponential backoff on a failed INIT bootstrap and retries past it', async () => {
+    const h = harness()
+    h.collect.mockImplementation(async () => initJudgment())
+    h.emit(initJudgment())
+    await h.settle(16_000)
+    expect(h.launch).toHaveBeenCalledOnce()
+    // The bootstrap failed: the failure marker is on disk (INIT outranks
+    // BUILD_FAILED in the judgment, so the dispatcher reads the marker).
+    h.failedMarker.mockReturnValue(true)
+    await h.settle(60_000)
+    expect(h.launch).toHaveBeenCalledOnce()
+    expect(h.journal).toHaveBeenCalledWith(expect.stringContaining('backoff failures=1'))
+    await h.settle(298_000)
+    expect(h.launch).toHaveBeenCalledOnce()
+    // Past the backoff the retry re-dispatches even though the failure marker
+    // is still on disk (the retry's own opening clears it, production shape).
+    await h.settle(3_000)
+    expect(h.launch).toHaveBeenCalledTimes(2)
+    expect(h.journal).toHaveBeenCalledWith(expect.stringContaining('dispatch reason=init-retry'))
+  })
+
+  it('journals every dispatch decision (need-build path included)', async () => {
+    const h = harness()
+    h.collect.mockImplementation(async () => judgment('NEED_BUILD', 'h1'))
+    h.emit(judgment('NEED_BUILD', 'h1'))
+    await h.settle(16_000)
+    expect(h.launch).toHaveBeenCalledOnce()
+    expect(h.journal).toHaveBeenCalledWith(expect.stringContaining('dispatch reason=need-build'))
+  })
+
+  it('journals a heavy-io deferral once per episode and its give-up', async () => {
+    const h = harness()
+    h.collect.mockImplementation(async () => judgment('NEED_BUILD', 'h1'))
+    h.emit(judgment('NEED_BUILD', 'h1'))
+    h.lockHeld.mockReturnValue(true)
+    await h.settle(15 * 60_000 + 40_000)
+    const defers = h.journal.mock.calls.map(([line]) => line).filter((line): line is string => line.startsWith('defer'))
+    expect(defers).toEqual(['defer heavy-io-lock-held', 'defer-giveup held-past-bound'])
   })
 
   it('reports a spawn failure through the backoff instead of a hot retry loop', async () => {

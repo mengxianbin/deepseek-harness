@@ -1,7 +1,7 @@
 /**
  * Auto-build dispatcher (P3, design §四 build 节流): rides the state machine's
- * judgment stream and turns a persistent `NEED_BUILD` into one gated build
- * dispatch — never a storm.
+ * judgment stream and turns a persistent `NEED_BUILD` — or a missing build
+ * baseline (`INIT`) — into one gated build dispatch, never a storm.
  *
  * Throttle, in order: a stability window (the source stamps must have been
  * quiet for `stableMs`, default 15s), a minimum interval between dispatches
@@ -14,18 +14,33 @@
  * in flight defers this one and vice versa. `DSH_HEAVY_IO_HELD=1` in this
  * process (we are inside someone else's gated run) also defers.
  *
+ * INIT bootstrap (2026-11-01, closes the chicken-and-egg deadlock): the
+ * judgment masks BUILDING/BUILD_FAILED behind INIT, so a missing baseline
+ * used to abort forever — "waiting for a fresh signal" that INIT can never
+ * produce. The dispatcher now bootstraps: INIT with a quiet source and no
+ * build markers dispatches the same gated build, which writes the baseline
+ * on success; a failed bootstrap is read from the machine's own failure
+ * record and arms the same exponential backoff (INIT outranks the failure
+ * marker in the judgment, so this module reads the marker directly).
+ *
  * Dispatches are detached spawns: the build outlives this process and writes
  * its own start/failure markers (P0 build-stamp hooks), so the state machine
  * — not this dispatcher — remains the single truth for BUILDING/BUILD_FAILED.
  * A post-dispatch outcome check re-collects after the minimum interval to
  * observe success (state moves on; backoff resets) or failure (backoff arms).
+ *
+ * Every dispatch decision (dispatch / defer / backoff / error / episode
+ * reset) is journalled to `.dsh-build/auto-build.log` beside the manifest —
+ * stderr dies with the console, the journal is the durable "did the machine
+ * even try?" record (build-trigger hardening 2026-11-01, 洞③).
  */
 import { spawn } from 'node:child_process'
 import type { SpawnOptions } from 'node:child_process'
 import type { Context } from '@deepseek-ai/cordis'
-import { readFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { defaultRepositoryRoot } from './restart-stamp.ts'
 import { collectRestartSignal, onRestartSignalJudgment, type RestartSignalFacts, type RestartSignalJudgment } from './restart-signal.ts'
 
 /** Environment variable tuning the stability window; default 15s (design §四). */
@@ -48,6 +63,23 @@ const DEFAULT_BACKOFF_MS = 5 * 60_000
 
 /** Backoff ceiling: one retry per hour at worst. */
 const BACKOFF_CAP_MS = 60 * 60_000
+
+/** Gitignored directory holding the per-tree build markers (mirrors the
+ * state-machine-side constants: INIT outranks the markers in the judgment,
+ * so the bootstrap path reads them directly). */
+const STAMP_DIR = '.dsh-build'
+
+/** Build-start capture file name inside the stamp directory. */
+const START_CAPTURE_FILE = 'restart-stamp.start.json'
+
+/** Build-failure record file name inside the stamp directory. */
+const FAILURE_FILE = 'restart-stamp.failed.json'
+
+/** Journal file beside the manifest; rotated past this size (best-effort observability). */
+const JOURNAL_FILE = 'auto-build.log'
+
+/** Journal rotation threshold: keep the last ~512KB of dispatch decisions. */
+const JOURNAL_CAP_BYTES = 512 * 1024
 
 /** Delay before re-probing a held heavy-io lock. */
 const LOCK_RETRY_MS = 30_000
@@ -132,6 +164,31 @@ export type BuildLauncher = (commandLine: string, options: SpawnOptions) => {
   readonly on: (event: 'error', listener: (error: Error) => void) => void
 }
 
+/**
+ * The durable decision journal: one line per dispatch / defer / backoff /
+ * error / episode-reset beside the manifest (`.dsh-build/auto-build.log`),
+ * rotated past {@link JOURNAL_CAP_BYTES}. Best-effort by design — a journal
+ * failure must never take the dispatcher down, so writes swallow their own
+ * errors after the rotation attempt.
+ * @param repositoryRoot - Harness tree whose stamp directory holds the journal.
+ * @returns A line sink safe to call from any dispatcher path.
+ */
+export function defaultAutoBuildJournalLine(repositoryRoot: string = defaultRepositoryRoot()): (line: string) => void {
+  const directory = join(repositoryRoot, STAMP_DIR)
+  const path = join(directory, JOURNAL_FILE)
+  return (line: string): void => {
+    try {
+      mkdirSync(directory, { recursive: true })
+      if (existsSync(path) && statSync(path).size > JOURNAL_CAP_BYTES) {
+        renameSync(path, `${path}.old`)
+      }
+      appendFileSync(path, `${new Date().toISOString()} ${line}\n`)
+    } catch {
+      // Observability only: never propagate into the dispatch path.
+    }
+  }
+}
+
 /** Injection seams for one registration; production defaults come from this process. */
 export interface AutoBuildInternals {
   /** Judgment subscription; defaults to the state machine's observer seam. */
@@ -154,6 +211,14 @@ export interface AutoBuildInternals {
   readonly env?: { readonly [name: string]: string | undefined }
   /** Failure sink; defaults to one stderr line. */
   readonly warn?: (message: string) => void
+  /** Decision journal sink; defaults to the rotating file beside the manifest. */
+  readonly journal?: (line: string) => void
+  /** Build-start marker probe (INIT bootstrap: the judgment masks BUILDING
+   * behind INIT); defaults to the harness tree's start capture file. */
+  readonly buildingMarker?: () => boolean
+  /** Build-failure marker probe (INIT bootstrap: the judgment masks
+   * BUILD_FAILED behind INIT); defaults to the harness tree's failure record. */
+  readonly failedMarker?: () => boolean
 }
 
 function sameFacts(left: RestartSignalFacts | undefined, right: RestartSignalFacts | undefined): boolean {
@@ -164,11 +229,11 @@ function sameFacts(left: RestartSignalFacts | undefined, right: RestartSignalFac
 /**
  * Register the throttled auto-build dispatcher on the host context. It
  * observes fresh judgments; a moved source arms the stability window, a
- * persistent NEED_BUILD dispatches one detached build when every gate is
- * clear, BUILD_FAILED arms the exponential backoff (and a retry past the
- * backoff re-dispatches — the new build's opening clears the failure
- * marker), and any success-shaped judgment resets the backoff. Disposal
- * cancels timers and unsubscribes.
+ * persistent NEED_BUILD — or a missing baseline (INIT, the bootstrap) —
+ * dispatches one detached build when every gate is clear, BUILD_FAILED arms
+ * the exponential backoff (and a retry past the backoff re-dispatches — the
+ * new build's opening clears the failure marker), and any success-shaped
+ * judgment resets the backoff. Disposal cancels timers and unsubscribes.
  * @param ctx - Host context carrying the effect lifetime.
  * @param internals - Injectable seams for tests.
  */
@@ -183,6 +248,11 @@ export function registerAutoBuild(ctx: Context, internals: AutoBuildInternals = 
   const heldFlag = internals.heldFlag ?? ((): boolean => env.DSH_HEAVY_IO_HELD === '1')
   const command = internals.command ?? DEFAULT_BUILD_COMMAND
   const cwd = internals.cwd
+  const journal = internals.journal ?? defaultAutoBuildJournalLine()
+  const buildingMarker = internals.buildingMarker
+    ?? ((): boolean => existsSync(join(defaultRepositoryRoot(), STAMP_DIR, START_CAPTURE_FILE)))
+  const failedMarker = internals.failedMarker
+    ?? ((): boolean => existsSync(join(defaultRepositoryRoot(), STAMP_DIR, FAILURE_FILE)))
   const subscribe = internals.subscribe
     ?? ((listener: (judgment: RestartSignalJudgment) => void): (() => void) => onRestartSignalJudgment(listener))
 
@@ -227,15 +297,17 @@ export function registerAutoBuild(ctx: Context, internals: AutoBuildInternals = 
     failures += 1
     failureRecorded = true
     backoffUntil = now() + Math.min(timings.backoffMs * 2 ** (failures - 1), BACKOFF_CAP_MS)
+    journal(`backoff failures=${failures} until=${new Date(backoffUntil).toISOString()}`)
   }
 
   const resetFailure = (): void => {
+    if (failures > 0) journal(`episode-reset after ${String(failures)} failure(s)`)
     failures = 0
     failureRecorded = false
     backoffUntil = 0
   }
 
-  const dispatchBuild = (): void => {
+  const dispatchBuild = (reason: string): void => {
     lastDispatchAt = now()
     // The next failure observed belongs to the next episode: it must grow
     // the backoff instead of reusing this dispatch's count.
@@ -254,11 +326,13 @@ export function registerAutoBuild(ctx: Context, internals: AutoBuildInternals = 
     child.on('error', (error: Error) => {
       if (isDisposed()) return
       warn(`ui-settings-general: auto-build dispatch failed: ${error.message}`)
+      journal(`dispatch-error ${error.message}`)
       recordFailure()
       scheduleAt(backoffUntil)
     })
     child.unref()
     warn(`ui-settings-general: auto-build dispatched (${command})`)
+    journal(`dispatch reason=${reason} cmd=${command}`)
     // Outcome check: the state machine — via its markers — reports success
     // (the signal moves on) or failure (BUILD_FAILED arms the backoff).
     scheduleAt(now() + timings.intervalMs)
@@ -269,9 +343,11 @@ export function registerAutoBuild(ctx: Context, internals: AutoBuildInternals = 
     fireTimer = undefined
     if (heldFlag() || lockHeld()) {
       const startedAt = lockDeferralStartedAt ?? now()
+      if (lockDeferralStartedAt === undefined) journal('defer heavy-io-lock-held')
       lockDeferralStartedAt = startedAt
       if (now() - startedAt >= LOCK_DEFER_BOUND_MS) {
         warn('ui-settings-general: auto-build deferred: heavy-io lock held past the deferral bound; waiting for the next source move')
+        journal('defer-giveup held-past-bound')
         lockDeferralStartedAt = undefined
         return
       }
@@ -281,9 +357,40 @@ export function registerAutoBuild(ctx: Context, internals: AutoBuildInternals = 
     const fresh = await collect()
     if (isDisposed()) return
     switch (fresh.state) {
-      case 'INIT':
-        warn('ui-settings-general: auto-build aborted: no build baseline (INIT); waiting for a fresh signal')
+      case 'INIT': {
+        // The bootstrap (build-trigger hardening 2026-11-01, 洞①): INIT can
+        // never produce a "fresh signal" on its own — the judgment outranks
+        // BUILDING/BUILD_FAILED — so aborting here was a deadlock that left
+        // the tree unbuilt until a human noticed the lamp. Read the machine's
+        // markers directly instead: a build in flight dissolves into an
+        // outcome check, a recorded failure arms the same exponential
+        // backoff, and a quiet marker-free tree gets the one gated build
+        // that writes the missing baseline. A bootstrap of a mid-edit tree
+        // is self-correcting: the manifest records sStart, so the final
+        // state still judges NEED_BUILD and the normal dispatch rebuilds.
+        if (buildingMarker()) {
+          scheduleAt(now() + timings.intervalMs)
+          return
+        }
+        ownBuildPending = false
+        if (failedMarker()) {
+          recordFailure()
+          if (now() < backoffUntil) {
+            scheduleAt(backoffUntil)
+            return
+          }
+          dispatchBuild('init-retry')
+          return
+        }
+        if (!sameFacts(fresh.facts, lastSeenFacts)) {
+          lastSeenFacts = fresh.facts
+          lastMoveAt = now()
+          arm()
+          return
+        }
+        dispatchBuild('init-bootstrap')
         return
+      }
       case 'BUILDING':
         // The fire-time collect saw a build in flight — ours or the save
         // chain's — so this attempt dissolves into a later outcome check.
@@ -298,7 +405,8 @@ export function registerAutoBuild(ctx: Context, internals: AutoBuildInternals = 
         }
         // Past the backoff the retry itself is the recovery: the new build's
         // opening clears the failure marker (P0 build-stamp semantics).
-        break
+        dispatchBuild('failed-retry')
+        return
       }
       case 'NEED_BUILD': {
         // The stability window is measured against the collect-time truth:
@@ -312,7 +420,8 @@ export function registerAutoBuild(ctx: Context, internals: AutoBuildInternals = 
           arm()
           return
         }
-        break
+        dispatchBuild('need-build')
+        return
       }
       default:
         // NEED_RESTART / OK / CLIENT_UPDATED: nothing to build; a success-
@@ -321,7 +430,6 @@ export function registerAutoBuild(ctx: Context, internals: AutoBuildInternals = 
         resetFailure()
         return
     }
-    dispatchBuild()
   }
 
   const unsubscribe = subscribe((judgment) => {
@@ -342,16 +450,16 @@ export function registerAutoBuild(ctx: Context, internals: AutoBuildInternals = 
         resetFailure()
         cancelTimer()
         return
+      case 'INIT':
       case 'NEED_BUILD': {
+        // INIT arms the same throttle as NEED_BUILD: the bootstrap dispatch
+        // in fire() is the only act that can ever leave the INIT state.
         const moved = !sameFacts(judgment.facts, lastSeenFacts)
         lastSeenFacts = judgment.facts
         if (moved) lastMoveAt = now()
         arm()
         return
       }
-      default:
-        // INIT: nothing to throttle until a baseline exists.
-        return
     }
   })
 
