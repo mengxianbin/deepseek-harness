@@ -14,7 +14,7 @@
  * are slot entries with their own behavior, so this component threads no
  * action callbacks and hosts no action surface.
  */
-import { Fragment, type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
   AnimatedRows, Button, HoverCardGroup, IconArchiveCheckOutlineRegular, IconArchiveOffOutlineRegular, IconArchiveOutlineRegular,
@@ -333,15 +333,18 @@ type SessionTreeProps = Pick<
 /**
  * FORK dsh-local (collab-step4b-c1, marker: queueSegment): the hard
  * 「要我拿主意」 top segment (collab step3 §一, q1-placement). P0
- * awaiting-interaction rows lead P1 unread failed stops; each tier's label
- * rides the segment head, never the rows (step3 §3.2 档位标只在段头). The
- * empty segment stays visible with its 「无待办」 line (step3 判据①.4 空段
- * 可见不藏), and queued rows render without drag — the segment's order is the
- * state's, not the user's. FORK dsh-local (collab-step4-c5, marker:
- * healthShield): the 安康位 alarm auto cuts into this segment at P0/P1 level
- * (step3 §5.2 插队, step2 §4.3 机制自动巡检) — a red row when the Host sweep's
- * books stop balancing, an amber dashed row when the health chain itself goes
- * silent; the click expands the same difference detail the shield shows.
+ * awaiting-interaction rows lead P1 unread failed stops. The segment head and
+ * the per-tier labels were cut (queue-headers-cut-1101, 2026-11-01): the rows
+ * carry the state on their own, while two label lines per segment cost list
+ * height that small screens need for rows. The empty segment keeps its
+ * 「无待办」 line (step3 判据①.4 空段可见不藏), and queued rows render without
+ * drag — the segment's order is the state's, not the user's. Tier order (P0
+ * before P1) is unchanged; it just reads as one continuous run of rows now.
+ * FORK dsh-local (collab-step4-c5, marker: healthShield): the 安康位 alarm auto
+ * cuts into this segment at P0/P1 level (step3 §5.2 插队, step2 §4.3 机制自动
+ * 巡检) — a red row when the Host sweep's books stop balancing, an amber dashed
+ * row when the health chain itself goes silent; the click expands the same
+ * difference detail the shield shows.
  */
 /** One broken invariant as this segment names it (derived from the wire report). */
 type HealthInvariant = NonNullable<SessionHealthState['report']>['issues'][number]['invariant']
@@ -416,38 +419,28 @@ function QueueSection({ queue, currentId, onOpen, onSessionRenameRequest, render
   const health = useSessionHealth?.(state => state)
   return (
     <div className={css.queueSection} data-row-key="queue" role="tree" aria-label={t('queue.title')}>
-      <div className={css.queueHeader}>
-        <span className={css.queueTitle}>{t('queue.title')}</span>
-      </div>
       {health !== undefined && (health.stale === true || health.report?.ok === false) && (
         <HealthQueueAlert health={health} t={t} />
       )}
       {queue.tiers.length === 0
         ? <div className={css.queueEmpty}>{t('queue.empty')}</div>
-        : queue.tiers.map(tier => (
-          <Fragment key={tier.tier}>
-            <div className={css.queueTier} data-row-key={`queue-tier-${tier.tier}`}>
-              {t(tier.tier === 'p0' ? 'queue.tier.p0' : 'queue.tier.p1')}
-            </div>
-            {tier.sessions.map(node => (
-              <SessionNodeItem
-                key={node.id}
-                node={node}
-                currentId={currentId}
-                now={now}
-                onOpen={onOpen}
-                onRenameRequest={onSessionRenameRequest}
-                onReveal={node.id === revealSessionId
-                  ? () => { onSessionRevealed(node.id) }
-                  : undefined}
-                renderSlot={renderSlot}
-                home={home}
-                t={t}
-                watchSessionJobs={watchSessionJobs}
-                useSessionAccess={useSessionAccess}
-              />
-            ))}
-          </Fragment>
+        : queue.tiers.flatMap(tier => tier.sessions).map(node => (
+          <SessionNodeItem
+            key={node.id}
+            node={node}
+            currentId={currentId}
+            now={now}
+            onOpen={onOpen}
+            onRenameRequest={onSessionRenameRequest}
+            onReveal={node.id === revealSessionId
+              ? () => { onSessionRevealed(node.id) }
+              : undefined}
+            renderSlot={renderSlot}
+            home={home}
+            t={t}
+            watchSessionJobs={watchSessionJobs}
+            useSessionAccess={useSessionAccess}
+          />
         ))}
     </div>
   )

@@ -674,10 +674,11 @@
   }
 }
 
-/* FORK dsh-local (collab-step4b-c1, marker: queueSegment): the hard
-   「要我拿主意」 top segment — its own block above the animated list, with the
-   tier label riding the segment head (never the rows) and an always-visible
-   empty line, so "nothing needs me" reads as an answer, not an absence. */
+/* FORK dsh-local (collab-step4b-c1, marker: queueSegment; headers cut
+   queue-headers-cut-1101): the hard 「要我拿主意」 top segment — its rows sit
+   directly at the list head with no segment or tier label lines (small-screen
+   height budget), and an always-visible empty line, so "nothing needs me"
+   still reads as an answer, not an absence. */
 .queueSection {
   position: relative;
   padding-bottom: 4px;
@@ -685,29 +686,6 @@
 
 .queueSection + :global(*) {
   margin-top: 0;
-}
-
-.queueHeader {
-  display: flex;
-  align-items: center;
-  height: 28px;
-  padding: 0 8px 0 12px;
-}
-
-.queueTitle {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--dsw-alias-label-secondary);
-  letter-spacing: 0.02em;
-}
-
-.queueTier {
-  display: flex;
-  align-items: center;
-  height: 20px;
-  padding: 0 8px 0 20px;
-  font-size: 10px;
-  color: var(--dsw-alias-label-tertiary);
 }
 
 .queueEmpty {
