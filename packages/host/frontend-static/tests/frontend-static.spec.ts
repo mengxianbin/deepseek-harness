@@ -41,6 +41,9 @@ async function loadComposition(): Promise<Context> {
   await writeFile(join(dist, 'blob.bin'), 'BLOB')
   await writeFile(join(dist, 'manifest.webmanifest'), '{}')
   await writeFile(join(dist, 'icon-192.png'), 'PNG')
+  // A Vite/Rollup content-hash-named build asset: `name-<8 base64url>.ext`.
+  await writeFile(join(dist, 'index-CY-5k6-C.js'), 'export const hashed = true')
+  await writeFile(join(dist, 'vendor-DV2921Zo.css'), 'body{}')
   await mkdir(join(dist, 'empty'))
   const configPath = join(root, 'cordis.yml')
   await writeFile(configPath, [
@@ -301,5 +304,48 @@ describe('real Loader composition', () => {
     expect(await html.text()).toBe('<body>preview</body>')
     const index = await loaded.webServer.readResource(new Request(`${base}/`), reader)
     expect([index.status, index.headers.get('cache-control'), index.headers.get('etag')]).toEqual([200, null, null])
+  })
+
+  it('serves content-hash-named assets immutably while no-hash names keep revalidating', { timeout: 60_000 }, async () => {
+    const loaded = await loadComposition()
+    const base = `http://127.0.0.1:${String(loaded.webServer.port)}`
+    const reader = { principal: { kind: 'owner' } } as Connection.PeerScope
+
+    // A Vite/Rollup content-hash-named asset is immutable for a year and carries
+    // no ETag (an immutable response is never revalidated).
+    for (const path of ['/index-CY-5k6-C.js', '/vendor-DV2921Zo.css']) {
+      const got = await fetch(`${base}${path}`)
+      expect(got.status).toBe(200)
+      expect(got.headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
+      expect(got.headers.get('etag')).toBeNull()
+    }
+    expect(await (await fetch(`${base}/index-CY-5k6-C.js`)).text()).toBe('export const hashed = true')
+
+    // HEAD carries the same immutable headers without a body.
+    const head = await fetch(`${base}/index-CY-5k6-C.js`, { method: 'HEAD' })
+    expect([head.status, head.headers.get('cache-control'), head.headers.get('etag')]).toEqual([
+      200,
+      'public, max-age=31536000, immutable',
+      null,
+    ])
+    expect(await head.text()).toBe('')
+    // An in-process read serves the same immutable headers.
+    const read = await loaded.webServer.readResource(new Request(`${base}/index-CY-5k6-C.js`), reader)
+    expect([read.status, read.headers.get('cache-control')]).toEqual([200, 'public, max-age=31536000, immutable'])
+
+    // NEGATIVE: a no-hash URL must NOT be immutable — it revalidates, so a rebuild
+    // under the same name is picked up instead of pinning stale bytes for a year.
+    for (const path of ['/app.js', '/icon-192.png', '/manifest.webmanifest', '/preview.html']) {
+      const got = await fetch(`${base}${path}`)
+      expect(got.status).toBe(200)
+      expect(got.headers.get('cache-control')).toBe('no-cache')
+      expect(got.headers.get('cache-control')).not.toContain('immutable')
+      expect(got.headers.get('etag')).toMatch(/^W\/"[A-Za-z0-9_-]+"$/)
+    }
+    // A no-hash file rebuilt under the same name still revalidates to fresh bytes.
+    await writeFile(join(root!, 'dist', 'app.js'), 'export const rebuilt = true')
+    const rebuilt = await fetch(`${base}/app.js`)
+    expect(rebuilt.headers.get('cache-control')).toBe('no-cache')
+    expect(await rebuilt.text()).toBe('export const rebuilt = true')
   })
 })
