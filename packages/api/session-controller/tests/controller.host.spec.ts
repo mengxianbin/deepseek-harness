@@ -164,7 +164,7 @@ describe('SessionController facade', () => {
       content: [{ type: 'text', text: 'browser prompt' }],
       source: { kind: 'user', rpcId: 'controller-rpc' as never },
     }), { surfaceOp: 'append' })
-    expect(status).toHaveBeenCalledWith(sessionId, true, undefined)
+    expect(status).toHaveBeenCalledWith(sessionId, true)
     expect(failure).toHaveBeenCalledWith(sessionId, expect.stringContaining('fixture failure'))
     expect(activity).toHaveBeenCalledWith(sessionId, expect.any(Number))
     session.append('request/header', {
@@ -351,9 +351,11 @@ describe('SessionController attention status', () => {
 
     // The question settles without an Agent status flip: the projection change
     // stream is the trigger that refreshes attention.
+    // The settled question omits the attention argument entirely (86d9091a28:
+    // an explicit `undefined` arg is not lossless JSON for the Remote forwarder).
     questionActive = false
     listener?.(session, 'userQuestions')
-    expect(status).toHaveBeenLastCalledWith(sessionId, true, undefined)
+    expect(status).toHaveBeenLastCalledWith(sessionId, true)
 
     // Other projection keys never re-emit status.
     const emissions = status.mock.calls.length

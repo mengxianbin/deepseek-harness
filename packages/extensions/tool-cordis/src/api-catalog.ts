@@ -4744,6 +4744,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [{ name: 'sessionId', description: 'Agent and Session identity.' }, { name: 'message', description: 'user-safe failure chain.' }],
   },
   {
+    name: 'api-session/health',
+    mode: 'emit',
+    signature: '\'api-session/health\'(report: SessionHealthReport): void',
+    summary: 'One 安康位 sweep audit (collab step2 §4.3, step4b 接力批2 件C5): the heartbeat sweep\'s same traversal folds its Session set into the three-invariant reconciliation (总数 = 各态和 / 无未分类 / 无读不到) and publishes this frame every cadence — no sequence number, no replay, so a client that stops hearing it flags the shield itself unreadable (step3 §5.2 自指 fail-closed).',
+    description: 'One 安康位 sweep audit (collab step2 §4.3, step4b 接力批2 件C5): the heartbeat sweep\'s same traversal folds its Session set into the three-invariant reconciliation (总数 = 各态和 / 无未分类 / 无读不到) and publishes this frame every cadence — no sequence number, no replay, so a client that stops hearing it flags the shield itself unreadable (step3 §5.2 自指 fail-closed). Global: no Session resource; Sessions appear only as issue witnesses.',
+    parameters: [{ name: 'report', description: 'the audit verdict over the sweep\'s Session set.' }],
+  },
+  {
     name: 'api-session/removed',
     mode: 'emit',
     signature: '\'api-session/removed\'(sessionId: SessionId): void',
@@ -8282,6 +8290,22 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SessionHeader',
     declaration: 'export interface SessionHeader {\n    readonly version: typeof SESSION_FORMAT_VERSION;\n    readonly id: SessionId;\n    readonly createdAt: number;\n    readonly cwd?: string;\n    readonly parentSession?: SessionId;\n    readonly isSeeded: boolean;\n    readonly origin?: \'subagent\';\n    readonly delegationDepth?: number;\n    readonly agentPreset?: string;\n}',
+  },
+  {
+    name: 'SessionHealthCounts',
+    declaration: 'export interface SessionHealthCounts {\n    readonly running: number;\n    readonly awaiting: number;\n    readonly failed: number;\n    readonly rest: number;\n}',
+  },
+  {
+    name: 'SessionHealthInvariant',
+    declaration: 'export type SessionHealthInvariant = \'total-partition\' | \'unclassified\' | \'unreadable\';',
+  },
+  {
+    name: 'SessionHealthIssue',
+    declaration: 'export interface SessionHealthIssue {\n    readonly invariant: SessionHealthInvariant;\n    readonly sessionIds: readonly SessionId[];\n}',
+  },
+  {
+    name: 'SessionHealthReport',
+    declaration: 'export interface SessionHealthReport {\n    readonly ok: boolean;\n    readonly total: number;\n    readonly counts: SessionHealthCounts;\n    readonly issues: readonly SessionHealthIssue[];\n}',
   },
   {
     name: 'SessionHistoryRecord',

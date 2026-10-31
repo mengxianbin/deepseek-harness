@@ -26,11 +26,13 @@ import {
 import type {
   SessionListState, SessionSearchResultItem,
 } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { SessionHealthState } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import { workspaceDisplayTitle } from '@deepseek-ai/dsh-api-workspace-controller/default-workspace'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkspaceBrowserProps } from '../contract/slots.ts'
+import type { WorkspaceKey } from '../locales.ts'
 import type { ArchivedFilter, GroupNode, QueueSegment, SessionNode, SessionOrderBy, SessionRowState } from '../tree.ts'
 import {
   deriveFlat, deriveGroups, deriveQueue, deriveSearchResults, orderByRecency, owningGroupKey, owningParentFolder,
@@ -278,6 +280,12 @@ type SessionTreeProps = Pick<
    * rejects passing an explicitly-undefined optional down; the row owns absence.
    */
   watchSessionJobs: WorkspaceBrowserProps['watchSessionJobs']
+  /**
+   * The ui-session health hook (global standard prop), threaded the same
+   * way: required as a slot with `undefined` in it; the queue section owns
+   * absence (collab-step4-c5 安康位).
+   */
+  useSessionHealth: WorkspaceBrowserProps['useSessionHealth']
 } & PropsRenderSlots<
   | 'sidebar.workspaces.session.menu.item'
   | 'sidebar.workspaces.session.row.action'
@@ -329,8 +337,58 @@ type SessionTreeProps = Pick<
  * rides the segment head, never the rows (step3 §3.2 档位标只在段头). The
  * empty segment stays visible with its 「无待办」 line (step3 判据①.4 空段
  * 可见不藏), and queued rows render without drag — the segment's order is the
- * state's, not the user's.
+ * state's, not the user's. FORK dsh-local (collab-step4-c5, marker:
+ * healthShield): the 安康位 alarm auto cuts into this segment at P0/P1 level
+ * (step3 §5.2 插队, step2 §4.3 机制自动巡检) — a red row when the Host sweep's
+ * books stop balancing, an amber dashed row when the health chain itself goes
+ * silent; the click expands the same difference detail the shield shows.
  */
+/** One broken invariant as this segment names it (derived from the wire report). */
+type HealthInvariant = NonNullable<SessionHealthState['report']>['issues'][number]['invariant']
+
+/** The invariant labels this namespace's language table carries. */
+const QUEUE_INVARIANT_KEYS = {
+  'total-partition': 'health.invariant.totalPartition',
+  unclassified: 'health.invariant.unclassified',
+  unreadable: 'health.invariant.unreadable',
+} as const satisfies Record<HealthInvariant, WorkspaceKey>
+
+/** The 安康位 alarm's row in the hard top segment (collab step3 §5.2 插队 P0/P1). */
+function HealthQueueAlert({ health, t }: { health: SessionHealthState; t: SessionTreeProps['t'] }) {
+  const [expanded, setExpanded] = useState(false)
+  const broken = health.report?.ok === false
+  return (
+    <div className={css.queueHealth} data-row-key="queue-health" data-health-alert={broken ? 'broken' : 'stale'}>
+      <button
+        type="button"
+        className={css.queueHealthButton}
+        aria-expanded={expanded}
+        onClick={() => { setExpanded(value => !value) }}
+      >
+        {broken
+          ? t('queue.health.broken')
+          : t('queue.health.stale', { s: health.staleSeconds ?? 0 })}
+      </button>
+      {expanded && (
+        <div className={css.queueHealthDetail} data-health-alert-detail="">
+          {/* `broken` (aliased from `health.report?.ok === false`) already
+              narrows the report to present. */}
+          {broken
+            ? health.report.issues.map(issue => (
+              <div key={issue.invariant} className={css.queueHealthIssue} data-health-invariant={issue.invariant}>
+                <span className={css.queueHealthInvariant}>{t(QUEUE_INVARIANT_KEYS[issue.invariant])}</span>
+                <span className={css.queueHealthSessions}>
+                  {issue.sessionIds.length === 0 ? '—' : issue.sessionIds.join(', ')}
+                </span>
+              </div>
+            ))
+            : t('queue.health.staleHint')}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** Props of the hard 「要我拿主意」 top segment, shared by the grouped and flat bodies. */
 type QueueSectionProps = {
   queue: QueueSegment
@@ -341,18 +399,29 @@ type QueueSectionProps = {
   home: string | undefined
   t: SessionTreeProps['t']
   watchSessionJobs: SessionTreeProps['watchSessionJobs']
+  /**
+   * The ui-session health hook (global standard prop), threaded like
+   * `watchSessionJobs`: required as a slot in the type (with `undefined` in
+   * it) because `exactOptionalPropertyTypes` rejects passing an
+   * explicitly-undefined optional down; the segment owns absence.
+   */
+  useSessionHealth: WorkspaceBrowserProps['useSessionHealth']
   revealSessionId?: SessionId | undefined
   onSessionRevealed: SessionTreeProps['onSessionRevealed']
 } & Pick<WorkspaceBrowserProps, 'useSessionAccess'>
 
 function QueueSection({ queue, currentId, onOpen, onSessionRenameRequest, renderSlot, home, t, watchSessionJobs,
-  revealSessionId, onSessionRevealed, useSessionAccess }: QueueSectionProps) {
+  useSessionHealth, revealSessionId, onSessionRevealed, useSessionAccess }: QueueSectionProps) {
   const now = Date.now()
+  const health = useSessionHealth?.(state => state)
   return (
     <div className={css.queueSection} data-row-key="queue" role="tree" aria-label={t('queue.title')}>
       <div className={css.queueHeader}>
         <span className={css.queueTitle}>{t('queue.title')}</span>
       </div>
+      {health !== undefined && (health.stale === true || health.report?.ok === false) && (
+        <HealthQueueAlert health={health} t={t} />
+      )}
       {queue.tiers.length === 0
         ? <div className={css.queueEmpty}>{t('queue.empty')}</div>
         : queue.tiers.map(tier => (
@@ -451,7 +520,7 @@ function SessionListError({ onRetry, t }: { onRetry: () => void; t: SessionTreeP
 
 /** The scrolling session tree; unmounting drops the sessions subscription and the session watermarks. */
 function SessionTree({
-  list, useSessionStatus, startSession, open, workspaces, ungroupedSessionIds,
+  list, useSessionStatus, useSessionHealth, startSession, open, workspaces, ungroupedSessionIds,
   rowState, onLeaveArchivedOnly,
   workspaceReady, animationResetKey, usePanelInfo, useRemoteAccess, useSessionAccess, useWorkspaceAccess,
   onRenameRequest, onDeleteRequest, onSessionRenameRequest,
@@ -847,6 +916,7 @@ function SessionTree({
         home={home}
         t={t}
         watchSessionJobs={watchSessionJobs}
+        useSessionHealth={useSessionHealth}
         revealSessionId={revealSessionId}
         onSessionRevealed={onSessionRevealed}
         useSessionAccess={useSessionAccess}
@@ -872,12 +942,13 @@ function SessionTree({
 
 /** The flat "In one list" body: every session is one draggable top-level row. */
 function FlatList({
-  list, sessionIds, rowState, onLeaveArchivedOnly, useSessionStatus, useSessionAccess, open, onSessionRenameRequest,
-  usePanelInfo, setSessionOrder, workspaceReady, animationResetKey,
+  list, sessionIds, rowState, onLeaveArchivedOnly, useSessionStatus, useSessionHealth, useSessionAccess, open,
+  onSessionRenameRequest, usePanelInfo, setSessionOrder, workspaceReady, animationResetKey,
   revealSessionId, onSessionRevealed, renderSlot, home, t, watchSessionJobs,
 }: Pick<
   SessionTreeProps,
   | 'useSessionStatus'
+  | 'useSessionHealth'
   | 'useSessionAccess'
   | 'open'
   | 'onSessionRenameRequest'
@@ -940,6 +1011,7 @@ function FlatList({
         home={home}
         t={t}
         watchSessionJobs={watchSessionJobs}
+        useSessionHealth={useSessionHealth}
         revealSessionId={revealSessionId}
         onSessionRevealed={onSessionRevealed}
         useSessionAccess={useSessionAccess}
@@ -1125,6 +1197,7 @@ export function WorkspaceBrowser({
   expandSidebar,
   useSessions,
   useSessionStatus,
+  useSessionHealth,
   useRemoteAccess,
   useSessionAccess,
   useWorkspaceAccess,
@@ -1700,6 +1773,7 @@ export function WorkspaceBrowser({
                   workspaceReady={workspaceReady}
                   animationResetKey={`${groupBy}/${orderBy}/${archivedFilter}`}
                   useSessionStatus={useSessionStatus}
+                  useSessionHealth={useSessionHealth}
                   open={guardedOpen}
                   onSessionRenameRequest={requestSessionRename}
                   renderSlot={renderSlot}
@@ -1720,6 +1794,7 @@ export function WorkspaceBrowser({
                   list={list}
                   shortcuts={shortcuts}
                   useSessionStatus={useSessionStatus}
+                  useSessionHealth={useSessionHealth}
                   onSessionRenameRequest={requestSessionRename}
                   renderSlot={renderSlot}
                   workspaces={orderedWorkspaces}

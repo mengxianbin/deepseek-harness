@@ -10,6 +10,7 @@ import type {
   SessionSummary,
   UseProjection,
 } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { SessionHealthReport } from '@deepseek-ai/dsh-api-session-controller/types'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { IJobs, JobView } from '@deepseek-ai/dsh-api-job-controller/client'
 import type { ConnectionHandle, ConnectionStateSource } from '@deepseek-ai/dsh-client-connection/client'
@@ -156,6 +157,36 @@ export interface SessionDeliverableReceipt {
   readonly evidence?: readonly string[]
 }
 
+/**
+ * 安康位 state as the UI carries it (collab step3 §3.3/§5.2, step4b 接力批2
+ * 件C5): the shield badge reads the Host sweep's three-invariant audit, and
+ * the frame's own silence becomes a signal about the shield itself.
+ */
+export interface SessionHealthState {
+  /** The Host's latest sweep audit; absent until the first frame lands. */
+  readonly report: SessionHealthReport | undefined
+  /**
+   * The health frames stopped arriving (step3 §5.2 执法者纪律, 自指
+   * fail-closed): more than twice the Host sweep cadence since the last one —
+   * or since this client subscribed, so a page load never rings for a Host
+   * that is simply between sweeps. The shield keeps the last known verdict
+   * painted under the ring (未知不吞已知) and counts the interruption up.
+   */
+  readonly stale?: true
+  /** Rounded seconds since the last confirmed frame behind `stale`. */
+  readonly staleSeconds?: number
+}
+
+/** Selector hook over the 安康位 shield state. */
+export type UseSessionHealth = SnapshotSelectorHook<SessionHealthState>
+
+/**
+ * Silence after which the 安康位 frame is flagged unreadable: twice the
+ * Host's sweep cadence (15s, `SESSION_STATUS_SWEEP_MS`) — the same 2×
+ * relationship the per-Session heartbeat ring uses (step3 §5.1/§5.2).
+ */
+export const SESSION_HEALTH_STALE_MS = 30_000
+
 /** Current UI status indexed by Session identity. */
 export type SessionStatusSnapshot = ReadonlyMap<SessionId, SessionStatus>
 /** Selector hook over the unified Session UI status snapshot. */
@@ -259,6 +290,13 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * root props (direct-render tests, minimal assemblies) simply lacks it.
      */
     watchSessionJobs?: (sessionId: SessionId) => () => void
+    /**
+     * The 安康位 shield state (collab step3 §3.3, step4b 接力批2 件C5): the
+     * sidebar top strip's shield badge and the queue segment's auto cut-in
+     * alert read it. Optional: a composition without ui-session's root props
+     * (direct-render tests, minimal assemblies) simply lacks it.
+     */
+    useSessionHealth?: UseSessionHealth
   }
 
   interface SessionStandardProps {
@@ -433,6 +471,25 @@ export class UiSession extends Service {
       return () => { this.statusListeners.delete(listener) }
     },
   }
+  /**
+   * The Host's latest 安康位 audit and the wall-clock of the frame that
+   * carried it (step4b 接力批2 件C5). The clock arms when the subscription
+   * installs, so a fresh page waits one grace window before calling the
+   * chain unreadable; every frame — changed or not — re-arms it.
+   */
+  private healthReport: SessionHealthReport | undefined
+  private lastHealthFrame = ''
+  private lastHealthAt = Date.now()
+  private healthSnapshot: SessionHealthState = { report: undefined }
+  private readonly healthListeners = new Set<() => void>()
+  /** Root source over the 安康位 shield facts (last audit plus self-staleness). */
+  readonly sessionHealth: HostObservable<SessionHealthState> = {
+    getSnapshot: () => this.healthSnapshot,
+    subscribe: (listener) => {
+      this.healthListeners.add(listener)
+      return () => { this.healthListeners.delete(listener) }
+    },
+  }
   /** Renderer-facing adapter for `session` and `session-maybe` scopes. */
   readonly adapter: SlotScopeAdapter
 
@@ -467,6 +524,11 @@ export class UiSession extends Service {
       const disposeRemoteError = ctx.remote.$on('api-session/error', (sessionId) => {
         this.observeFailure(sessionId)
       })
+      // The 安康位 frame (step4b 接力批2 件C5): one audit per Host sweep
+      // cadence; the subscription start arms the self-staleness clock.
+      const disposeRemoteHealth = ctx.remote.$on('api-session/health', (report: SessionHealthReport) => {
+        this.observeHealth(report)
+      })
       // Optional read-only sources: their snapshot changes re-fold the status
       // facts that read them (job counts, the stale flag).
       const disposeJobs = this.jobs?.state.subscribe(() => { this.publishStatus() })
@@ -474,10 +536,12 @@ export class UiSession extends Service {
       // Heartbeat staleness is a function of elapsed time, so it needs a tick
       // of its own: without one a quiet Host would only surface on the next
       // unrelated event. publishStatus de-duplicates, so an idle tick costs a
-      // comparison per row.
-      const heartbeatTick = setInterval(() => { this.publishStatus() }, SESSION_HEARTBEAT_TICK_MS)
+      // comparison per row. The 安康位 shield's staleness rides the same tick
+      // (one 5s fold per surface, no second timer).
+      const heartbeatTick = setInterval(() => { this.publishStatus(); this.publishHealth() }, SESSION_HEARTBEAT_TICK_MS)
       this.publishMain()
       this.reconcileStatus()
+      this.publishHealth()
       return () => {
         this.active = false
         clearInterval(heartbeatTick)
@@ -485,6 +549,7 @@ export class UiSession extends Service {
         disposeStatus()
         disposeRemoteStatus()
         disposeRemoteError()
+        disposeRemoteHealth()
         disposeJobs?.()
         disposeConnection?.()
         this.disposeMainRetain()
@@ -722,6 +787,39 @@ export class UiSession extends Service {
    */
   private observeFailure(sessionId: SessionId): void {
     this.observedFailures.add(sessionId)
+  }
+
+  /**
+   * Record one Host 安康位 frame (step4b 接力批2 件C5): an unchanged audit
+   * still proves the chain is alive, so the clock records before the
+   * equality shortcut.
+   * @param report - the sweep's three-invariant audit.
+   */
+  private observeHealth(report: SessionHealthReport): void {
+    this.lastHealthAt = Date.now()
+    const frame = JSON.stringify(report)
+    if (frame === this.lastHealthFrame) return
+    this.lastHealthFrame = frame
+    this.healthReport = report
+    this.publishHealth()
+  }
+
+  /** Re-fold the shield facts: the last audit under the elapsed-time stale flag. */
+  private publishHealth(): void {
+    const now = Date.now()
+    const stale = now - this.lastHealthAt > SESSION_HEALTH_STALE_MS ? true : undefined
+    const previous = this.healthSnapshot
+    const next: SessionHealthState = {
+      report: this.healthReport,
+      ...(stale === undefined
+        ? {}
+        : { stale, staleSeconds: Math.round((now - this.lastHealthAt) / 1000) }),
+    }
+    if (previous.report === next.report
+      && previous.stale === next.stale
+      && previous.staleSeconds === next.staleSeconds) return
+    this.healthSnapshot = next
+    notifySubscribers(this.healthListeners, '[ui-session] Session health')
   }
 
   private reconcileStatus(): void {
@@ -1016,6 +1114,7 @@ export function apply(ctx: Context): void {
     hooks: {
       sessions: ctx.sessions.list,
       sessionStatus: service.sessionStatus,
+      sessionHealth: service.sessionHealth,
     },
     keyedHooks: {
       sessionRetainInfo: key => ctx.sessions.retainInfo(key as SessionId),

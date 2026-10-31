@@ -1264,6 +1264,29 @@ Types: [SessionId](core.md)
 
 Source: [`packages/api/session-controller/src/types.ts`](../../packages/api/session-controller/src/types.ts)
 
+<a id="api-sessionhealth--emit"></a>
+
+#### `api-session/health` — emit
+
+One 安康位 sweep audit (collab step2 §4.3, step4b 接力批2 件C5): the heartbeat sweep's same traversal folds its Session set into the three-invariant reconciliation (总数 = 各态和 / 无未分类 / 无读不到) and publishes this frame every cadence — no sequence number, no replay, so a client that stops hearing it flags the shield itself unreadable (step3 §5.2 自指 fail-closed). Global: no Session resource; Sessions appear only as issue witnesses.
+
+```ts cordis-catalog
+/**
+ * One 安康位 sweep audit (collab step2 §4.3, step4b 接力批2 件C5): the
+ * heartbeat sweep's same traversal folds its Session set into the
+ * three-invariant reconciliation (总数 = 各态和 / 无未分类 / 无读不到) and
+ * publishes this frame every cadence — no sequence number, no replay, so
+ * a client that stops hearing it flags the shield itself unreadable
+ * (step3 §5.2 自指 fail-closed). Global: no Session resource; Sessions
+ * appear only as issue witnesses.
+ * @mode emit
+ * @param report - the audit verdict over the sweep's Session set.
+ */
+'api-session/health'(report: SessionHealthReport): void
+```
+
+Source: [`packages/api/session-controller/src/types.ts`](../../packages/api/session-controller/src/types.ts)
+
 <a id="api-sessionremoved--emit"></a>
 
 #### `api-session/removed` — emit

@@ -34,6 +34,13 @@ export const zh = {
   'version.copied': '版本号复制成功',
   'glance.source.pollError': '控制器轮询异常',
   'glance.source.frozen': 'dsh 已自动切至 MiMo 官方',
+  'health.ok.label': '安康位：对账平',
+  'health.broken.label': '安康位：对账对不上，点击展开差异明细',
+  'health.stale.label': '安康位：对账读数中断',
+  'health.stale.tooltip': '安康位心跳中断 {s}s：显示最后已知读数，不可信',
+  'health.invariant.totalPartition': '总数 ≠ 各态和',
+  'health.invariant.unclassified': '有未分类会话',
+  'health.invariant.unreadable': '有读不到的会话',
 } satisfies Record<string, string>
 
 /** The sidebar namespace key union. */
@@ -73,6 +80,13 @@ export const en = {
   'version.copied': 'Version copied',
   'glance.source.pollError': 'Controller poll failing',
   'glance.source.frozen': 'dsh auto-switched to MiMo official',
+  'health.ok.label': 'Health: books balance',
+  'health.broken.label': 'Health: reconciliation broken — click for the differences',
+  'health.stale.label': 'Health: readings stopped',
+  'health.stale.tooltip': 'Health heartbeat lost {s}s: showing the last known reading, unconfirmable',
+  'health.invariant.totalPartition': 'total ≠ sum of states',
+  'health.invariant.unclassified': 'unclassified Sessions',
+  'health.invariant.unreadable': 'unreadable Sessions',
 } satisfies Record<SidebarKey, string>
 
 /** Japanese copy, checked against the English keys. */
@@ -108,6 +122,13 @@ export const ja = {
   'version.copied': 'バージョンをコピーしました',
   'glance.source.pollError': 'コントローラーのポーリング異常',
   'glance.source.frozen': 'dsh は自動で MiMo 公式に切り替わりました',
+  'health.ok.label': '安康ポイント：照合一致',
+  'health.broken.label': '安康ポイント：照合不一致 — クリックで差分を表示',
+  'health.stale.label': '安康ポイント：読み取り途絶',
+  'health.stale.tooltip': '安康位ハートビート途絶 {s} 秒：最後に確認できた読み取りを表示中、信頼できません',
+  'health.invariant.totalPartition': '総数 ≠ 状態の合計',
+  'health.invariant.unclassified': '未分類のセッション',
+  'health.invariant.unreadable': '読み取り不能なセッション',
 } satisfies Record<keyof typeof en, string>
 
 /** Spanish dictionary, checked against the English keys. */
@@ -143,6 +164,13 @@ export const es = {
   'version.copied': 'Versión copiada',
   'glance.source.pollError': 'Error de sondeo del controlador',
   'glance.source.frozen': 'dsh cambió automáticamente a MiMo oficial',
+  'health.ok.label': 'Salud: las cuentas cuadran',
+  'health.broken.label': 'Salud: reconciliación rota — haz clic para ver las diferencias',
+  'health.stale.label': 'Salud: lecturas detenidas',
+  'health.stale.tooltip': 'Latido de salud perdido hace {s}s: mostrando la última lectura conocida, no confiable',
+  'health.invariant.totalPartition': 'total ≠ suma de estados',
+  'health.invariant.unclassified': 'sesiones sin clasificar',
+  'health.invariant.unreadable': 'sesiones ilegibles',
 } satisfies Record<keyof typeof en, string>
 
 /** French dictionary, checked against the English keys. */
@@ -178,6 +206,13 @@ export const fr = {
   'version.copied': 'Version copiée',
   'glance.source.pollError': 'Échec de l’interrogation du contrôleur',
   'glance.source.frozen': 'dsh est passé automatiquement à MiMo officiel',
+  'health.ok.label': 'Santé : comptes équilibrés',
+  'health.broken.label': 'Santé : réconciliation rompue — cliquez pour les différences',
+  'health.stale.label': 'Santé : lectures interrompues',
+  'health.stale.tooltip': 'Battement de santé perdu depuis {s}s : affichage de la dernière lecture connue, non fiable',
+  'health.invariant.totalPartition': 'total ≠ somme des états',
+  'health.invariant.unclassified': 'sessions non classées',
+  'health.invariant.unreadable': 'sessions illisibles',
 } satisfies Record<keyof typeof en, string>
 
 /** German dictionary, checked against the English keys. */
@@ -213,6 +248,13 @@ export const de = {
   'version.copied': 'Version kopiert',
   'glance.source.pollError': 'Controller-Abfrage fehlerhaft',
   'glance.source.frozen': 'dsh hat automatisch auf MiMo offiziell umgeschaltet',
+  'health.ok.label': 'Gesundheit: Bücher stimmen',
+  'health.broken.label': 'Gesundheit: Abgleich zerbrochen — klicken für die Differenzen',
+  'health.stale.label': 'Gesundheit: Ablesung ausgefallen',
+  'health.stale.tooltip': 'Gesundheits-Herzschlag seit {s}s verloren: zeigt die letzte bekannte Ablesung, unbestätigt',
+  'health.invariant.totalPartition': 'Summe ≠ Zustandssumme',
+  'health.invariant.unclassified': 'unklassifizierte Sitzungen',
+  'health.invariant.unreadable': 'unlesbare Sitzungen',
 } satisfies Record<keyof typeof en, string>
 
 /** Russian dictionary, checked against the English keys. */
@@ -248,6 +290,13 @@ export const ru = {
   'version.copied': 'Версия скопирована',
   'glance.source.pollError': 'Сбой опроса контроллера',
   'glance.source.frozen': 'dsh автоматически переключился на официальный MiMo',
+  'health.ok.label': 'Самочувствие: сходится',
+  'health.broken.label': 'Самочувствие: сверка разорвана — нажмите для расхождений',
+  'health.stale.label': 'Самочувствие: показания пропали',
+  'health.stale.tooltip': 'Сигнал самочувствия потерян {s} с: показано последнее известное показание, неподтверждено',
+  'health.invariant.totalPartition': 'итог ≠ сумма состояний',
+  'health.invariant.unclassified': 'несортированные сессии',
+  'health.invariant.unreadable': 'нечитаемые сессии',
 } satisfies Record<keyof typeof en, string>
 
 /** Portuguese dictionary, checked against the English keys. */
@@ -283,4 +332,11 @@ export const pt = {
   'version.copied': 'Versão copiada',
   'glance.source.pollError': 'Falha na sondagem do controlador',
   'glance.source.frozen': 'dsh mudou automaticamente para MiMo oficial',
+  'health.ok.label': 'Saúde: contas batem',
+  'health.broken.label': 'Saúde: reconciliação quebrada — clique para ver as diferenças',
+  'health.stale.label': 'Saúde: leituras interrompidas',
+  'health.stale.tooltip': 'Batimento da saúde perdido há {s}s: mostrando a última leitura conhecida, não confiável',
+  'health.invariant.totalPartition': 'total ≠ soma dos estados',
+  'health.invariant.unclassified': 'sessões não classificadas',
+  'health.invariant.unreadable': 'sessões ilegíveis',
 } satisfies Record<keyof typeof en, string>

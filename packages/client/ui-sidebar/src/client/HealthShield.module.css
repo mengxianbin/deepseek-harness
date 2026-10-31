@@ -1,0 +1,91 @@
+/* FORK dsh-local (collab-step4-c5, marker: healthShield): the 安康位 shield
+   seat at the wide top strip's right end (collab step3 §3.3). State rides
+   data-health-state — ok = faint green (the quiet-trust 本体), broken =
+   steady red — and the stale overlay reuses the row vocabulary: the SAME
+   amber dashed ring (step3 §5.1, mirrored from ui-workspace
+   Rows.module.css .staleRing), so "the enforcer itself lost its chain"
+   (自指 fail-closed, step3 §5.2) reads exactly like a session row gone
+   unreadable. Unknown never swallows known: the last verdict's color stays
+   painted under the ring. */
+.shield {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.button {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  padding: 0;
+  background: transparent;
+  cursor: default;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.shield.broken .button {
+  cursor: pointer;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+/* Faint green while the books balance: present enough to trust, quiet enough
+   to ignore — "没显 = 不用管" made visible without demanding attention. */
+.shield.ok .button {
+  color: var(--dsw-alias-state-success-primary);
+  opacity: 0.55;
+}
+
+/* 未知不吞已知 (step3 §5.1): the dashed ring overlays, never replaces. */
+.staleRing::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  corner-shape: round;
+  border: 1px dashed var(--dsw-alias-state-warn-primary);
+  pointer-events: none;
+}
+
+/* The click-expanded difference detail (哪条不变量、哪些会话): viewport-layer
+   fixed panel — the top strip clips its overflow, so the detail must not
+   live inside the row's box. */
+.detail {
+  position: fixed;
+  z-index: 1000;
+  min-width: 220px;
+  max-width: 360px;
+  padding: 6px 8px;
+  border: 1px solid var(--dsw-alias-border-l);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-surface-overlay);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.issue {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 2px 0;
+}
+
+.issueLabel {
+  flex: none;
+  color: var(--dsw-alias-state-error-primary);
+  font-weight: 600;
+}
+
+.issueSessions {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--dsw-alias-label-tertiary);
+}

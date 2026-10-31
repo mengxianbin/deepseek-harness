@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { allowAllAccess, bindSnapshotSelector, makeTranslate, RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { SessionHealthReport } from '@deepseek-ai/dsh-api-session-controller/types'
 import type {
   WorkspaceId, WorkspaceSnapshot, WorkspaceView,
 } from '@deepseek-ai/dsh-api-workspace-controller/client'
@@ -2927,5 +2928,39 @@ describe('Workspace tree grouping', () => {
     fireEvent.dragEnd(alpha)
     expect(b.props.insertWorkspaceBefore).toHaveBeenCalledOnce()
     expect(b.props.insertWorkspaceBefore).toHaveBeenCalledWith(wid('alpha'), wid('gamma'))
+  })
+
+  it('cuts the 安康位 alarm into the queue segment head and expands the difference detail (件C5)', () => {
+    const brokenReport: SessionHealthReport = {
+      ok: false,
+      total: 2,
+      counts: { running: 1, awaiting: 0, failed: 0, rest: 0 },
+      issues: [{ invariant: 'unreadable', sessionIds: [sid('ghost')] }],
+    }
+    mount({ useSessionHealth: hook({ report: brokenReport }) })
+    // The alarm row rides the segment head (插队 P0/P1), red-flagged broken.
+    const alert = screen.getByText('安康位告警：对账对不上，点开看明细')
+      .closest('[data-row-key="queue-health"]') as HTMLElement
+    expect(alert.getAttribute('data-health-alert')).toBe('broken')
+    // The click expands the same detail the shield shows: which invariant, which Sessions.
+    fireEvent.click(alert.querySelector('button') as HTMLElement)
+    expect(screen.getByText('有读不到的会话')).toBeTruthy()
+    expect(screen.getByText('ghost')).toBeTruthy()
+  })
+
+  it('stays quiet on a balanced 安康位 and shows the stale alarm when the chain goes silent (件C5)', () => {
+    const balanced: SessionHealthReport = {
+      ok: true, total: 1, counts: { running: 1, awaiting: 0, failed: 0, rest: 0 }, issues: [],
+    }
+    const healthy = mount({ useSessionHealth: hook({ report: balanced }) })
+    expect(document.querySelector('[data-row-key="queue-health"]')).toBeNull()
+    healthy.view.unmount()
+
+    mount({ useSessionHealth: hook({ report: balanced, stale: true as const, staleSeconds: 35 }) })
+    const alert = screen.getByText('安康位告警：读数中断 35s，执法者失联')
+      .closest('[data-row-key="queue-health"]') as HTMLElement
+    expect(alert.getAttribute('data-health-alert')).toBe('stale')
+    fireEvent.click(alert.querySelector('button') as HTMLElement)
+    expect(screen.getByText('安康位自身读不到：盾已亮虚线圈，读数恢复即自动清除')).toBeTruthy()
   })
 })

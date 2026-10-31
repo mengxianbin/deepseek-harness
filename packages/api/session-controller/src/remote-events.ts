@@ -3,6 +3,7 @@ type SessionControllerRemoteEvent =
   | 'api-session/activity'
   | 'api-session/added'
   | 'api-session/error'
+  | 'api-session/health'
   | 'api-session/removed'
   | 'api-session/status'
 

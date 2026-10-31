@@ -17,8 +17,10 @@ import { StaticRemoteAccess } from '@deepseek-ai/dsh-client-test-runtime'
 import type { HostObservable, RootStandardSourceContribution } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { SessionHealthReport } from '@deepseek-ai/dsh-api-session-controller/types'
 import {
   apply,
+  SESSION_HEALTH_STALE_MS,
   SESSION_HEARTBEAT_STALE_MS,
   type SessionPendingInteractionBase,
   UiSession,
@@ -37,6 +39,7 @@ interface SessionsBench {
   setRetainInfo(id: SessionId, count: number): void
   emitStatus(id: SessionId, running: boolean, attention?: 'question'): void
   emitError(id: SessionId, message: string): void
+  emitHealth(report: SessionHealthReport): void
   release(id: SessionId): Promise<void>
 }
 
@@ -186,6 +189,9 @@ function createSessionsBench(ctx: Context): SessionsBench {
     },
     emitError(id, message) {
       remoteListener('api-session/error')(id, message)
+    },
+    emitHealth(report) {
+      ;(remoteListener('api-session/health') as unknown as (report: SessionHealthReport) => void)(report)
     },
     async release(id) {
       bindings.delete(id)
@@ -788,6 +794,53 @@ describe('UiSession status', () => {
     }
   })
 
+  it('folds 安康位 frames, rings the shield itself after 2× sweep cadence silence, and keeps the last verdict (件C5)', () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
+    try {
+      const balanced: SessionHealthReport = {
+        ok: true, total: 2, counts: { running: 1, awaiting: 0, failed: 0, rest: 1 }, issues: [],
+      }
+      const broken: SessionHealthReport = {
+        ok: false,
+        total: 2,
+        counts: { running: 1, awaiting: 0, failed: 0, rest: 0 },
+        issues: [{ invariant: 'unreadable', sessionIds: [sessionId('ghost')] }],
+      }
+      const ctx = new Context()
+      const bench = createSessionsBench(ctx)
+      const service = createUiSession(ctx, bench)
+
+      // No frame yet: nothing known, nothing claimed.
+      expect(service.sessionHealth.getSnapshot()).toEqual({ report: undefined })
+
+      // The Host's frame lands: the shield reads the verdict.
+      bench.emitHealth(balanced)
+      expect(service.sessionHealth.getSnapshot().report).toEqual(balanced)
+      expect(service.sessionHealth.getSnapshot().stale).toBeUndefined()
+
+      // An unchanged frame keeps the clock armed without a snapshot change.
+      const armed = service.sessionHealth.getSnapshot()
+      bench.emitHealth(balanced)
+      expect(service.sessionHealth.getSnapshot()).toBe(armed)
+
+      // Past 2× the sweep cadence with silence, the 自指 ring lights — the
+      // last known verdict stays painted under it (未知不吞已知).
+      vi.advanceTimersByTime(SESSION_HEALTH_STALE_MS + 5_000)
+      const stale = service.sessionHealth.getSnapshot()
+      expect(stale.stale).toBe(true)
+      expect(stale.staleSeconds).toBeGreaterThanOrEqual(SESSION_HEALTH_STALE_MS / 1000)
+      expect(stale.report).toEqual(balanced)
+
+      // The next frame proves the chain alive again and carries new truth.
+      bench.emitHealth(broken)
+      const recovered = service.sessionHealth.getSnapshot()
+      expect(recovered.stale).toBeUndefined()
+      expect(recovered.report).toEqual(broken)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('lights 待收讫 from the durable done receipt, the live stop outranking it (件A)', () => {
     const ctx = new Context()
     const bench = createSessionsBench(ctx)
@@ -1129,6 +1182,7 @@ describe('ui-session apply', () => {
       hooks: {
         sessions: bench.sessions.list,
         sessionStatus: ctx.uiSession.sessionStatus,
+        sessionHealth: ctx.uiSession.sessionHealth,
       },
       keyedHooks: { sessionRetainInfo: retainInfoMatcher, sessionAccess: sessionAccessMatcher },
       props: { watchSessionJobs: watcherMatcher },

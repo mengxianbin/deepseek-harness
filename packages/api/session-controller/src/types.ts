@@ -751,6 +751,53 @@ export type SessionProjectionFrame =
   | { readonly type: 'ready' }
   | SessionProjectionChange
 
+/** One invariant the 安康位 sweep accounting must satisfy (collab step1 §2.2). */
+export type SessionHealthInvariant =
+  /** The swept total equals the sum of the state buckets. */
+  | 'total-partition'
+  /** Every readable Session landed in a state bucket (none left unplaced). */
+  | 'unclassified'
+  /** Every swept id resolved to a live Session whose facts were readable. */
+  | 'unreadable'
+
+/** One broken invariant's detail: the check that failed and the Sessions it names. */
+export interface SessionHealthIssue {
+  readonly invariant: SessionHealthInvariant
+  /** Witness Session identities; empty only if a future invariant names none. */
+  readonly sessionIds: readonly SessionId[]
+}
+
+/** The sweep's mutually-exclusive state buckets (等回话 outranks 在跑; a failure残局 only while stopped). */
+export interface SessionHealthCounts {
+  readonly running: number
+  readonly awaiting: number
+  readonly failed: number
+  readonly rest: number
+}
+
+/** One complete sweep audit (collab step2 §4.3 安康位): the verdict plus the accounting behind it. */
+export interface SessionHealthReport {
+  readonly ok: boolean
+  /** Every id the sweep had published status for — the accounting's total. */
+  readonly total: number
+  readonly counts: SessionHealthCounts
+  readonly issues: readonly SessionHealthIssue[]
+}
+
+/** One swept Session's facts exactly as that sweep traversal read them. */
+export interface SessionHealthRow {
+  readonly id: SessionId
+  /** The live Session registry still resolved this id. */
+  readonly live: boolean
+  /** The projection channel (attention, durable outcome) was readable this tick. */
+  readonly projected: boolean
+  readonly running: boolean
+  /** The objective blocked-on-the-user kind; absent when none was active. */
+  readonly attention?: SessionAttentionKind
+  /** The durable last turn ended in failure. */
+  readonly failed: boolean
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Events {
     /**
@@ -776,6 +823,18 @@ declare module '@deepseek-ai/cordis' {
      *   every connected client renders it the same way regardless of which view is open.
      */
     'api-session/status'(sessionId: SessionId, running: boolean, attention?: SessionAttentionKind): void
+    /**
+     * One 安康位 sweep audit (collab step2 §4.3, step4b 接力批2 件C5): the
+     * heartbeat sweep's same traversal folds its Session set into the
+     * three-invariant reconciliation (总数 = 各态和 / 无未分类 / 无读不到) and
+     * publishes this frame every cadence — no sequence number, no replay, so
+     * a client that stops hearing it flags the shield itself unreadable
+     * (step3 §5.2 自指 fail-closed). Global: no Session resource; Sessions
+     * appear only as issue witnesses.
+     * @mode emit
+     * @param report - the audit verdict over the sweep's Session set.
+     */
+    'api-session/health'(report: SessionHealthReport): void
     /**
      * One user-authored durable message advanced Session list activity.
      * @mode emit

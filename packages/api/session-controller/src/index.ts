@@ -31,6 +31,7 @@ import { buildModelCatalog, hasProviderApiKey } from './catalog.ts'
 import { SessionSkillCatalog } from './skill-catalog.ts'
 import { SessionMediaReferences } from './media-references.ts'
 import { ArchivedSessionGate } from './archived-session-gate.ts'
+import { reconcileSessionHealth } from './health.ts'
 import type {
   ModelCatalog,
   SessionWorkspacePathApplication,
@@ -45,6 +46,7 @@ import type {
   SessionCreateValue,
   SessionFollowFrame,
   SessionFollowRequest,
+  SessionHealthRow,
   SessionForkRequest,
   SessionForkValue,
   SessionListRequest,
@@ -315,17 +317,44 @@ export class SessionController extends TypertRemoteService {
     // statically wrong until the next full list pull. Re-emitting the current
     // truth on a fixed cadence bounds that staleness to one interval, and the
     // client turns a missed sweep into a dashed ring after two.
+    // The SAME traversal — same data source, same period, zero new planes
+    // (step2 §4.3) — folds the 安康位 three-invariant reconciliation (step1
+    // §2.2: 总数 = 各态和 / 无未分类 / 无读不到) over exactly the set it just
+    // swept and publishes one global `api-session/health` frame per tick. The
+    // client's shield badge renders the verdict, and a client that stops
+    // hearing frames rings the shield itself (step3 §5.2 自指 fail-closed).
     ctx.effect(() => {
       const timer = setInterval(() => {
+        const rows: SessionHealthRow[] = []
         for (const sessionId of [...sweepSessions]) {
-          if (ctx.sessions.get(sessionId) === undefined) {
+          const session = ctx.sessions.get(sessionId)
+          if (session === undefined) {
+            // Bookkeeping held an id the registry no longer resolves: the
+            // audit reads it `unreadable` before the row drops out of the set.
             sweepSessions.delete(sessionId)
+            rows.push({ id: sessionId, live: false, projected: false, running: false, failed: false })
             continue
           }
           const running = runningBySession.get(sessionId)
             ?? ctx.agents.get(sessionId)?.status === 'running'
+          const attention = attentionFor(sessionId)
+          // `attentionFor` folds to undefined when the projection registry is
+          // not injected; the row then reports the channel unreadable rather
+          // than silently "no attention" (fail-closed, step3 §5.2).
+          const outcome = projections === undefined
+            ? undefined
+            : projections.stateOf(session, 'lastTurnOutcome') as { readonly kind?: string } | null | undefined
+          rows.push({
+            id: sessionId,
+            live: true,
+            projected: projections !== undefined,
+            running,
+            ...(attention === undefined ? {} : { attention }),
+            failed: outcome?.kind === 'error',
+          })
           emitStatus(sessionId, running)
         }
+        ctx.emit('api-session/health', reconcileSessionHealth(rows))
       }, SESSION_STATUS_SWEEP_MS)
       timer.unref()
       return () => {

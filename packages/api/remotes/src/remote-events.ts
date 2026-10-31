@@ -29,6 +29,9 @@ export const API_REMOTE_FORWARDED_EVENTS = [
   { event: 'api-session/activity', mode: 'emit', resources: { session: (sessionId): SessionId => sessionId } },
   { event: 'api-session/added', mode: 'emit', resources: { session: (summary): SessionId => summary.sessionId } },
   { event: 'api-session/error', mode: 'emit', resources: { session: (sessionId): SessionId => sessionId } },
+  // The 安康位 sweep audit (collab step2 §4.3): a global frame — no Session
+  // resource; Sessions appear only as issue witnesses.
+  { event: 'api-session/health', mode: 'emit' },
   { event: 'api-session/removed', mode: 'emit', resources: { session: (sessionId): SessionId => sessionId } },
   { event: 'api-session/status', mode: 'emit', resources: { session: (sessionId): SessionId => sessionId } },
   { event: 'commands/change', mode: 'emit' },

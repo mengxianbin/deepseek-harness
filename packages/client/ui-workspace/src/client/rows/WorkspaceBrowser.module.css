@@ -715,3 +715,60 @@
   font-size: 11px;
   color: var(--dsw-alias-label-tertiary);
 }
+
+/* FORK dsh-local (collab-step4-c5, marker: healthShield): the 安康位 alarm's
+   auto cut-in row at the segment head (step3 §5.2 插队 P0/P1) — red steady
+   while the sweep books don't balance, amber with the shared dashed vocabulary
+   when the health chain itself goes silent (自指 fail-closed). The click
+   expands the same difference detail the top-strip shield shows. */
+.queueHealth {
+  margin: 0 8px 4px 12px;
+  border-radius: var(--dsw-radius-sm);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 12%, transparent);
+}
+
+.queueHealth[data-health-alert='stale'] {
+  border: 1px dashed var(--dsw-alias-state-warn-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 10%, transparent);
+}
+
+.queueHealthButton {
+  display: block;
+  width: 100%;
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.queueHealth[data-health-alert='stale'] .queueHealthButton {
+  color: var(--dsw-alias-state-warn-primary);
+}
+
+.queueHealthDetail {
+  padding: 0 8px 4px;
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.queueHealthIssue {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 1px 0;
+}
+
+.queueHealthInvariant {
+  flex: none;
+  font-weight: 600;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.queueHealthSessions {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
