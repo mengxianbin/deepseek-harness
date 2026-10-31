@@ -265,7 +265,16 @@ export class SessionController extends TypertRemoteService {
     const sweepSessions = new Set<SessionId>()
     const emitStatus = (sessionId: SessionId, running: boolean): void => {
       sweepSessions.add(sessionId)
-      ctx.emit('api-session/status', sessionId, running, attentionFor(sessionId))
+      // `attention` is optional in the event contract, and `undefined` is not
+      // lossless JSON: the Remote forwarder's `assertJsonArgs` rejects an
+      // explicit `undefined` arg, and a throw inside the sweep's timer
+      // callback is uncaught and takes the whole Host process down
+      // (api-session/status arg2 crash, 2026-10-31). Omit the argument
+      // entirely when there is no attention so listeners still see
+      // `attention === undefined`.
+      const attention = attentionFor(sessionId)
+      if (attention === undefined) ctx.emit('api-session/status', sessionId, running)
+      else ctx.emit('api-session/status', sessionId, running, attention)
     }
     ctx.on('agent/status', ({ agent, status }) => {
       const running = status === 'running'
@@ -315,7 +324,7 @@ export class SessionController extends TypertRemoteService {
           }
           const running = runningBySession.get(sessionId)
             ?? ctx.agents.get(sessionId)?.status === 'running'
-          ctx.emit('api-session/status', sessionId, running, attentionFor(sessionId))
+          emitStatus(sessionId, running)
         }
       }, SESSION_STATUS_SWEEP_MS)
       timer.unref()
