@@ -779,6 +779,34 @@ describe('UiSession status', () => {
     expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('failed')
   })
 
+  it('lights the durable red mark after a crash-interrupted turn (任务已停止红点, ruling 2026-11-01)', () => {
+    const ctx = new Context()
+    const bench = createSessionsBench(ctx)
+    const id = sessionId('durable-interrupted')
+    bench.binding(id)
+    const service = createUiSession(ctx, bench)
+
+    // The Host closes the crash-orphaned turn with the `interrupted` closer;
+    // the projection carries it and the row lights red with no in-memory
+    // stop at all — the restart scenario where the map is empty.
+    bench.list.update((draft) => {
+      draft.byId[id]!.projectionValues = { lastTurnOutcome: { kind: 'interrupted', at: 5 } }
+    })
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(true)
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('failed')
+
+    // A live in-memory clean stop still wins — the observation is fresher.
+    bench.emitStatus(id, true)
+    bench.emitStatus(id, false)
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('completed')
+
+    // A rerun clears the in-memory map only; the durable interruption keeps
+    // the row red until a later turn/end supersedes the projection.
+    bench.emitStatus(id, true)
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(true)
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('failed')
+  })
+
   it('arms the 已阅 check on a pending question and drops it when the question settles (新事件自动清)', () => {
     const ctx = new Context()
     const bench = createSessionsBench(ctx)

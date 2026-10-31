@@ -54,8 +54,14 @@ export interface SessionListMetadata {
   readonly lastPromptAt: number | null
 }
 
-/** Turn-end reasons the row marker reads; plugin-merged variants are not folded into the projection. */
-export type SessionLastTurnOutcomeKind = 'completed' | 'error' | 'aborted' | 'blocked'
+/**
+ * Turn-end reasons the row marker reads; plugin-merged variants are not folded
+ * into the projection. `interrupted` — the closer resume recovery appends for a
+ * turn the DSH process left open — reads red like `error`: the reply never
+ * finished and its tool results are unknown, so the row has to say so instead
+ * of staying silent across the restart.
+ */
+export type SessionLastTurnOutcomeKind = 'completed' | 'error' | 'aborted' | 'blocked' | 'interrupted'
 
 /** Durable record of how the last turn ended, or `null` when no turn has ended yet. */
 export interface SessionLastTurnOutcome {

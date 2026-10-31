@@ -350,7 +350,10 @@ export class SessionController extends TypertRemoteService {
             projected: projections !== undefined,
             running,
             ...(attention === undefined ? {} : { attention }),
-            failed: outcome?.kind === 'error',
+            // `interrupted` counts with `error`: the crash closer leaves the
+            // same stopped残局 the row dot marks red, and the shield's failed
+            // bucket must not undercount what the rows light.
+            failed: outcome?.kind === 'error' || outcome?.kind === 'interrupted',
           })
           emitStatus(sessionId, running)
         }

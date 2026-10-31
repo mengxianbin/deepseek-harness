@@ -886,10 +886,11 @@ export class UiSession extends Service {
       const remembered = this.unreadStops.get(id)
       // The Host folds the last turn's end reason into a durable projection
       // (collab step2 §7.2; 绿点耐久裁定 2026-11-01): every end reason rides
-      // it now — a failure reads red and any clean end (completed / aborted /
-      // blocked) reads green — so both marks survive a refresh and a restart
-      // until a later turn supersedes them. The in-memory unread map still
-      // wins while it holds, being the live observation.
+      // it now — a failure or a crash interruption reads red and any clean
+      // end (completed / aborted / blocked) reads green — so both marks
+      // survive a refresh and a restart until a later turn supersedes them.
+      // The in-memory unread map still wins while it holds, being the live
+      // observation.
       const durableKind = list.byId[id]?.projectionValues?.lastTurnOutcome?.kind
       // The done receipt (collab step2 §二 亮灯层, step4b 件A) rides its own
       // durable projection: the Host folds `deliverables/receipt` from the
@@ -913,8 +914,15 @@ export class UiSession extends Service {
       const receiptOutcome = deliverableReceipt === undefined
         ? undefined
         : deliverableReceipt.verdict === 'exception' ? 'failed' as const : 'completed' as const
-      const durableFailed = durableKind === 'error' ? 'failed' as const : undefined
-      const durableClean = durableKind === undefined || durableKind === 'error'
+      // `interrupted` — the crash closer for a turn the DSH process left open
+      // — reads red with `error`: the chat face already shows its task-stopped
+      // row, and a row that stayed silent through the restart hid that残局.
+      const durableFailed = durableKind === 'error' || durableKind === 'interrupted'
+        ? 'failed' as const
+        : undefined
+      const durableClean = durableKind === undefined
+        || durableKind === 'error'
+        || durableKind === 'interrupted'
         ? undefined
         : 'completed' as const
       const outcome = remembered ?? durableFailed ?? receiptOutcome ?? durableClean

@@ -50,8 +50,13 @@ const sessionListMetadataSchema: z.ZodType<SessionListMetadata> = z.object({
   lastPromptAt: z.number().nullable(),
 })
 
-/** End reasons the row marker has a stable meaning for; plugin-merged variants stay folded away. */
-const LAST_TURN_OUTCOME_KINDS = ['completed', 'error', 'aborted', 'blocked'] as const
+/**
+ * End reasons the row marker has a stable meaning for; plugin-merged variants stay folded away.
+ * `interrupted` reads red with `error`: the crash closer ends a reply that
+ * never finished (chat renders its task-stopped row), so a row that stayed
+ * silent through the restart hid exactly the残局 the marker exists to surface.
+ */
+const LAST_TURN_OUTCOME_KINDS = ['completed', 'error', 'aborted', 'blocked', 'interrupted'] as const
 
 const lastTurnOutcomeSchema: z.ZodType<SessionLastTurnOutcome | null> = z.object({
   kind: z.enum(LAST_TURN_OUTCOME_KINDS),
@@ -214,7 +219,10 @@ export class ApiSessionList {
       init: () => null,
       apply: applyLastTurnOutcome,
       wire: { viewSchema: lastTurnOutcomeSchema, view: state => state },
-      stateVersion: 1,
+      // v2 (task-stopped red dot): the fold now advances on `interrupted`
+      // instead of passing the previous outcome through, so v1 rows — which
+      // keep the pre-crash value — must refold from the log once.
+      stateVersion: 2,
     })
     await this.ctx.sessionProjections.register<'lastReceipt', SessionLastReceipt | null>({
       key: 'lastReceipt',
