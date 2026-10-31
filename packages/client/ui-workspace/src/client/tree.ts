@@ -65,6 +65,16 @@ export interface SessionNode {
   statusStale?: true
   /** The Host's status heartbeat went quiet for this Session: the shown status is the last one heard. */
   heartbeatStale?: true
+  /** Wall-clock of that last confirmed frame — the stale ring's hover names the interruption's floor age. */
+  heartbeatStaleSeconds?: number
+  /** The user opened this row while it showed signals: a secondary row-end 已阅 check, never a signal clearer. */
+  readMarked?: true
+  /**
+   * The Session's latest done receipt (collab step2 §二 亮灯层, step4b 件A):
+   * verdict plus its 判据自证 for the hover card's third channel; the row dot
+   * itself already carries the verdict through `completionOutcome`.
+   */
+  deliverableReceipt?: { verdict: 'pass' | 'exception'; summary: string; evidence?: readonly string[] }
   /** In the registry-global pin set: leads its section, reorderable only among pinned rows. */
   pinned: boolean
   /** In the registry-global archive set: shown grayed in place and not openable. */
@@ -118,6 +128,8 @@ export interface SearchResultNode {
   statusStale?: true
   /** The Host's status heartbeat went quiet for this Session: the shown status is the last one heard. */
   heartbeatStale?: true
+  /** Wall-clock of that last confirmed frame — the stale ring's hover names the interruption's floor age. */
+  heartbeatStaleSeconds?: number
   /** In the registry-global archive set: shown grayed and not openable. */
   archived: boolean
   snippet?: string
@@ -417,6 +429,9 @@ function sessionNode(
   const pendingWakeup = status?.pendingWakeup
   const statusStale = status?.statusStale
   const heartbeatStale = status?.heartbeatStale
+  const heartbeatStaleSeconds = status?.heartbeatStaleSeconds
+  const readMarked = status?.readMarked
+  const deliverableReceipt = status?.deliverableReceipt
   return {
     id: s.id,
     title: sessionTitle(s),
@@ -429,6 +444,9 @@ function sessionNode(
     ...(pendingWakeup === undefined ? {} : { pendingWakeup }),
     ...(statusStale === undefined ? {} : { statusStale }),
     ...(heartbeatStale === undefined ? {} : { heartbeatStale }),
+    ...(heartbeatStaleSeconds === undefined ? {} : { heartbeatStaleSeconds }),
+    ...(readMarked === undefined ? {} : { readMarked }),
+    ...(deliverableReceipt === undefined ? {} : { deliverableReceipt }),
     pinned: !archived.has(s.id) && pinned.has(s.id),
     archived: archived.has(s.id),
     updatedAt: s.updatedAt,
@@ -451,6 +469,9 @@ function sessionNode(
  * @param rowState - registry-global pin and archive sets plus the archived filter.
  * @param statuses - unified UI status by Session.
  * @param view - local expansion arrays.
+ * @param queued - Sessions owned by the 「要我拿主意」 hard segment; their
+ *   groups drop the rows and the counts (collab step3 §一, q1-placement), so
+ *   each queued Session shows once, at the top.
  * @returns group sections in render order.
  */
 export function deriveGroups(
@@ -459,6 +480,7 @@ export function deriveGroups(
   rowState: SessionRowState,
   statuses: SessionStatuses,
   view: TreeView,
+  queued: ReadonlySet<SessionId> = new Set(),
 ): GroupNode[] {
   const archived = new Set(rowState.archivedSessionIds)
   const pinned = new Set(rowState.pinnedSessionIds)
@@ -470,17 +492,18 @@ export function deriveGroups(
   const groups: GroupNode[] = []
   for (const g of groupByWorkspace(list, workspaces, archived, rowState.archivedFilter, view.ungroupedOrder)) {
     const expanded = expandedGroups.has(g.key)
+    const members = queued.size === 0 ? g.sessions : g.sessions.filter(s => !queued.has(s.id))
     groups.push({
       key: g.key,
       workspaceId: g.workspaceId,
       cwd: g.cwd,
       createdAt: g.createdAt,
       label: g.label,
-      sessionCount: g.sessions.length,
+      sessionCount: members.length,
       expanded,
       containsCurrent: g.key === currentGroup,
       sessions: expanded
-        ? sectionMembers(g.sessions, pinned, archived)
+        ? sectionMembers(members, pinned, archived)
           .map(session => sessionNode(session, list, statuses, pinned, archived))
         : [],
     })
@@ -640,6 +663,7 @@ export function deriveSearchResults(
         ...(pendingWakeup === undefined ? {} : { pendingWakeup }),
         ...(statusStale === undefined ? {} : { statusStale }),
         ...(heartbeatStale === undefined ? {} : { heartbeatStale }),
+        ...(status?.heartbeatStaleSeconds === undefined ? {} : { heartbeatStaleSeconds: status.heartbeatStaleSeconds }),
         archived: archived.has(summary.id),
         ...match === undefined ? {} : { snippet: match.snippet },
       }
@@ -673,4 +697,85 @@ export function owningParentFolder(path: string, parents: readonly string[]): st
     }
   }
   return owner
+}
+
+/** One tier of the 「要我拿主意」 hard top segment (collab step3 §一, q1-placement). */
+export interface QueueTier {
+  /** Human-queue tier label key: `'p0'` (等回话·被卡) or `'p1'` (死局/验收例外). */
+  tier: 'p0' | 'p1'
+  /** Tier rows ordered by recency; severity deliberately stays out of the order. */
+  sessions: readonly SessionNode[]
+}
+
+/** The queue segment plus the ids it took out of the group sections. */
+export interface QueueSegment {
+  /** Populated tiers in tier order (P0 before P1); absent tiers never render headers. */
+  tiers: readonly QueueTier[]
+  /** Every queued Session id: their group rows defer to the segment. */
+  queued: ReadonlySet<SessionId>
+}
+
+/**
+ * Derive the 「要我拿主意」 hard top segment (collab step3 §一 裁定 C · 混合):
+ * P0 holds awaiting-interaction rows, P1 holds unread failed stops awaiting a
+ * ruling. P2 (泄漏) and P3 (没在跑) keep no mechanical carrier on this list yet
+ * (step3 §3.1 marks both 无现行), so they populate nothing rather than guess.
+ * Within a tier rows order by recency — severity is a hover/color label and
+ * never a queue key (step1 §2.3 终态收敛). Archived and blank rows never queue.
+ * @param list - sessions list snapshot.
+ * @param statuses - unified UI status by Session.
+ * @param archivedIds - registry-global archive set.
+ * @returns the populated tiers plus the queued id set.
+ */
+export function deriveQueue(
+  list: SessionListState,
+  statuses: SessionStatuses,
+  archivedIds: readonly SessionId[],
+): QueueSegment {
+  const archived = new Set(archivedIds)
+  const pinned = new Set<SessionId>()
+  const p0: SessionNode[] = []
+  const p1: SessionNode[] = []
+  for (const id of list.ids) {
+    const s = list.byId[id]
+    if (s === undefined || s.blank || archived.has(id)) continue
+    const node = sessionNode(s, list, statuses, pinned, archived)
+    if (node.pendingInteraction !== undefined) p0.push(node)
+    else if (node.completed && node.completionOutcome === 'failed') p1.push(node)
+  }
+  const byRecency = (left: SessionNode, right: SessionNode): number => right.updatedAt - left.updatedAt
+  p0.sort(byRecency)
+  p1.sort(byRecency)
+  const tiers: QueueTier[] = []
+  const queued = new Set<SessionId>()
+  if (p0.length > 0) {
+    tiers.push({ tier: 'p0', sessions: p0 })
+    for (const node of p0) queued.add(node.id)
+  }
+  if (p1.length > 0) {
+    tiers.push({ tier: 'p1', sessions: p1 })
+    for (const node of p1) queued.add(node.id)
+  }
+  return { tiers, queued }
+}
+
+/**
+ * Weighted placement of the non-queue rows (collab step3 §6.2, q6-attr): pin
+ * leads, then task priority, then recency — 置顶 > 优先级 > 活跃度. Pure: the
+ * caller feeds attributes and holds no second state. The priority plane has no
+ * carrier yet, so every row defaults to P2 and the comparator degenerates to
+ * 置顶 > 活跃度 — which the pinned-leading group order already realizes; the
+ * named function pins the contract the future attribute supply plugs into.
+ * Manual drag order stays the caller's business (this comparator ranks rows
+ * handed to it unsorted).
+ * @param left - left row facts.
+ * @param right - right row facts.
+ * @returns the sort rank: negative when left leads.
+ */
+export function compareRestingRows(
+  left: { readonly pinned: boolean; readonly updatedAt: number },
+  right: { readonly pinned: boolean; readonly updatedAt: number },
+): number {
+  if (left.pinned !== right.pinned) return left.pinned ? -1 : 1
+  return right.updatedAt - left.updatedAt
 }

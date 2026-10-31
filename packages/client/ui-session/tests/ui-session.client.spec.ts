@@ -19,6 +19,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   apply,
+  SESSION_HEARTBEAT_STALE_MS,
   type SessionPendingInteractionBase,
   UiSession,
 } from '../src/client/index.ts'
@@ -632,7 +633,7 @@ describe('UiSession status', () => {
     expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(true)
   })
 
-  it('records non-main completions and lets main-view activity acknowledge them', () => {
+  it('keeps completions lit through main-view entry and records stops that happen there (点名不改态)', () => {
     const ctx = new Context()
     const bench = createSessionsBench(ctx)
     const id = sessionId('s1')
@@ -651,33 +652,39 @@ describe('UiSession status', () => {
     bench.list.update((draft) => { draft.byId[id]!.running = false })
     expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(true)
     expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('completed')
+    // 点名不改态 (collab step3 §四): opening the row keeps the reminder lit and
+    // arms only the secondary 已阅 check.
     bench.setMainView(id, 1)
-    expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(false)
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(true)
+    expect(service.sessionStatus.getSnapshot().get(id)?.readMarked).toBe(true)
     bench.setMainView(id, 0)
 
+    // A stop observed while the row is open records there too — opening never
+    // suppresses the acknowledgment it used to — and drops the earlier check.
     bench.emitStatus(id, true)
+    expect(service.sessionStatus.getSnapshot().get(id)?.readMarked).toBeUndefined()
     bench.emitStatus(id, false)
     expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(true)
 
+    // Re-opening re-arms the check; the next signed change drops it again.
     bench.setMainView(id, 1)
-    expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(false)
-    bench.emitStatus(id, true)
-    bench.emitStatus(id, false)
-    expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(false)
-
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(true)
+    expect(service.sessionStatus.getSnapshot().get(id)?.readMarked).toBe(true)
     bench.setMainView(id, 0)
-    bench.emitStatus(id, false)
-    expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(false)
     bench.emitStatus(id, true)
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(false)
     bench.emitStatus(id, false)
     expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(true)
+    expect(service.sessionStatus.getSnapshot().get(id)?.readMarked).toBeUndefined()
+
+    // A rerun clears the reminder without any main-view involvement.
     bench.emitStatus(id, true)
     expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(false)
     expect(changed).toHaveBeenCalled()
     off()
   })
 
-  it('marks a stop whose run reported a failure as failed until the Session opens or reruns', () => {
+  it('marks a stop whose run reported a failure as failed until a rerun clears it (点名不改态 keeps it lit)', () => {
     const ctx = new Context()
     const bench = createSessionsBench(ctx)
     const id = sessionId('f1')
@@ -695,21 +702,129 @@ describe('UiSession status', () => {
       completionOutcome: 'failed',
     })
 
-    // Opening the Session acknowledges the failure reminder.
+    // 点名不改态 (collab step3 §四): opening keeps the failure lit and arms
+    // only the secondary 已阅 check.
     bench.setMainView(id, 1)
-    expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(false)
-    expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBeUndefined()
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(true)
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('failed')
+    expect(service.sessionStatus.getSnapshot().get(id)?.readMarked).toBe(true)
     bench.setMainView(id, 0)
 
-    // A failure observed only mid-run cannot outlive that run's clean stop.
+    // A rerun clears the reminder and the check alike (重跑开始 = the legal channel).
+    bench.emitStatus(id, true)
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(false)
+    expect(service.sessionStatus.getSnapshot().get(id)?.readMarked).toBeUndefined()
+
+    // A failure report with no open run cannot upgrade the next clean stop.
+    bench.emitStatus(id, false)
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('completed')
     bench.emitError(id, 'stale failure without its stop')
     bench.emitStatus(id, false)
-    expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(false)
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(true)
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('completed')
     bench.emitStatus(id, true)
+
+    // A failure observed while the run is open marks that run's stop failed.
     bench.emitError(id, 'Connection error')
+    bench.emitStatus(id, false)
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('failed')
+  })
+
+  it('arms the 已阅 check on a pending question and drops it when the question settles (新事件自动清)', () => {
+    const ctx = new Context()
+    const bench = createSessionsBench(ctx)
+    const id = sessionId('ask1')
+    bench.binding(id)
+    const service = createUiSession(ctx, bench)
+
+    // A host attention frame (card-free question) signs the row.
+    bench.emitStatus(id, false, 'question')
+    expect(service.sessionStatus.getSnapshot().get(id)?.pendingInteraction).toBeDefined()
+    bench.setMainView(id, 1)
+    expect(service.sessionStatus.getSnapshot().get(id)?.pendingInteraction).toBeDefined()
+    expect(service.sessionStatus.getSnapshot().get(id)?.readMarked).toBe(true)
+    bench.setMainView(id, 0)
+
+    // The question settling is the legal clear channel; the check drops with it.
+    bench.emitStatus(id, false)
+    expect(service.sessionStatus.getSnapshot().get(id)?.pendingInteraction).toBeUndefined()
+    expect(service.sessionStatus.getSnapshot().get(id)?.readMarked).toBeUndefined()
+  })
+
+  it('never rings a baseline-only idle row and rings a framed row whose heartbeats stop (件E)', () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
+    try {
+      const ctx = new Context()
+      const bench = createSessionsBench(ctx)
+      const idle = sessionId('idle-baseline')
+      const framed = sessionId('framed')
+      bench.list.update((draft) => {
+        draft.byId[idle] = { id: idle, displayTitle: idle, running: false, retainedBy: {}, blank: false, updatedAt: 0 }
+        draft.byId[framed] = { id: framed, displayTitle: framed, running: true, retainedBy: {}, blank: false, updatedAt: 0 }
+        draft.ids.push(idle, framed)
+      })
+      const service = createUiSession(ctx, bench)
+
+      // The baseline adopts both rows' running state without arming the stale
+      // clock (件E A案): a never-run idle row must not ring 30s after load.
+      expect(service.sessionStatus.getSnapshot().get(idle)?.running).toBe(false)
+      expect(service.sessionStatus.getSnapshot().get(framed)?.running).toBe(true)
+      expect(service.sessionStatus.getSnapshot().get(idle)?.heartbeatStale).toBeUndefined()
+
+      // One real frame arms that row's clock; past the interval with silence
+      // the ring lights, and the age counts up on the re-fold tick.
+      bench.emitStatus(framed, true)
+      vi.advanceTimersByTime(SESSION_HEARTBEAT_STALE_MS + 5_000)
+      expect(service.sessionStatus.getSnapshot().get(idle)?.heartbeatStale).toBeUndefined()
+      expect(service.sessionStatus.getSnapshot().get(framed)?.heartbeatStale).toBe(true)
+      expect(service.sessionStatus.getSnapshot().get(framed)?.heartbeatStaleSeconds)
+        .toBeGreaterThanOrEqual(SESSION_HEARTBEAT_STALE_MS / 1000)
+
+      // The next heartbeat confirms again and clears the ring.
+      bench.emitStatus(framed, true)
+      expect(service.sessionStatus.getSnapshot().get(framed)?.heartbeatStale).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('lights 待收讫 from the durable done receipt, the live stop outranking it (件A)', () => {
+    const ctx = new Context()
+    const bench = createSessionsBench(ctx)
+    const id = sessionId('receipt1')
+    bench.binding(id)
+    const service = createUiSession(ctx, bench)
+
+    // The Host folds a pass receipt into the projection: 绿点 ✓ (待收讫·通过).
+    bench.list.update((draft) => {
+      draft.byId[id]!.projectionValues = {
+        lastReceipt: { verdict: 'pass', summary: 'commit 1a2b3c4; gates green', evidence: ['1a2b3c4'], at: 5 },
+      }
+    })
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(true)
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('completed')
+    expect(service.sessionStatus.getSnapshot().get(id)?.deliverableReceipt).toMatchObject({
+      verdict: 'pass', summary: 'commit 1a2b3c4; gates green', evidence: ['1a2b3c4'],
+    })
+
+    // An exception verdict maps to the red ! (待收讫·例外, step3 §3.1).
+    bench.list.update((draft) => {
+      draft.byId[id]!.projectionValues = {
+        lastReceipt: { verdict: 'exception', summary: 'two 机检红留人工', at: 6 },
+      }
+    })
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('failed')
+    expect(service.sessionStatus.getSnapshot().get(id)?.deliverableReceipt).toMatchObject({ verdict: 'exception' })
+
+    // A live in-memory stop outranks the receipt — the fresh fact wins.
     bench.emitStatus(id, true)
     bench.emitStatus(id, false)
     expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('completed')
+    // …and a fresh failure report marks that stop failed over the receipt.
+    bench.emitStatus(id, true)
+    bench.emitError(id, 'Connection error')
+    bench.emitStatus(id, false)
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('failed')
   })
 
   it('records an idle event before the initial catalog baseline and retires absent status later', () => {

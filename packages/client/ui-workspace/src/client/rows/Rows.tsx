@@ -15,7 +15,7 @@ import type { RefObject } from 'react'
 import clsx from 'clsx'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import {
-  HoverCard, IconArchiveOutlineRegular, IconEditOutlineRegular,
+  HoverCard, IconArchiveOutlineRegular, IconCheckOutlineRegular, IconEditOutlineRegular,
   IconEllipsisOutlineRegular, IconFolderCloseRegular, IconFolderOpenRegular,
   IconNewChatOutlineRegular, IconPinFillRegular, IconSettingsOutlineRegular,
   IconSleepOutlineRegular, IconTrashOutlineRegular,
@@ -397,6 +397,20 @@ function assertNever(value: never): never {
 /** One row-cell glyph drawn where the dot would go; secondary statuses never carry one. */
 type StatusGlyph = { kind: 'jobs'; count: number } | { kind: 'wakeup' }
 
+/**
+ * Shape-channel badges (collab step3 §3.1, q3-visual): the dot's color carries
+ * the base state and this superscript carries the semantic variant — ✓ 待收讫
+ * passed, ! awaiting an exception ruling, ✕ reserved for the dead-end state.
+ */
+type StatusMark = 'check' | 'bang' | 'cross'
+
+/**
+ * The unreadable-confirmation overlay (collab step3 §5.1, q5-failclosed):
+ * confirmation went quiet, so the last-known state stays painted inside a
+ * dashed ring — 未知不吞已知, the unreadable never replaces the known.
+ */
+type StatusStaleRing = { kind: 'connection' } | { kind: 'heartbeat' }
+
 interface SessionStatus {
   state: StateDotState
   label: string
@@ -404,11 +418,20 @@ interface SessionStatus {
   trailingLabel?: string
   /** Glyph drawn in place of the dot on the row's leading cell. */
   glyph?: StatusGlyph
+  /** Shape-channel badge rendered beside the dot, colored by the primary state. */
+  mark?: StatusMark
+  /** Confirmation overlay: the dot keeps the last-known state inside a dashed ring. */
+  staleRing?: StatusStaleRing
+  /** Hover text naming the stale overlay's interruption and the shown last-known state. */
+  staleLabel?: string
 }
 
 /** Whether this status owns the row's leading cell (dot or glyph) instead of offering it to the seat. */
 function ownsLeadingCell(status: SessionStatus): boolean {
-  return status.state !== 'idle' || status.glyph !== undefined
+  // A ringed status keeps the cell too (collab step3 §5.1, q5): the dashed
+  // ring rides the last-known state's dot, so even a confirmed-nothing dot
+  // holds the cell while its confirmation is unreadable.
+  return status.state !== 'idle' || status.glyph !== undefined || status.staleRing !== undefined
 }
 
 /**
@@ -424,10 +447,10 @@ function ownsLeadingCell(status: SessionStatus): boolean {
  * swallow the red dot whole and leave a dead session looking merely sleepy.
  * A clean completion keeps its ③-tier place below every ②-tier arrangement.
  */
-function sessionStatuses(
+function sessionBaseStatuses(
   node: Pick<SessionNode, 'pendingInteraction' | 'running' | 'runningSubagentCount'
     | 'completed' | 'completionOutcome' | 'activeJobCount' | 'pendingWakeup'
-    | 'statusStale' | 'heartbeatStale'>,
+    | 'statusStale' | 'heartbeatStale' | 'heartbeatStaleSeconds'>,
   t: RowTranslate,
 ): readonly [SessionStatus, ...SessionStatus[]] {
   const subagents: SessionStatus | undefined = node.runningSubagentCount === 0
@@ -494,18 +517,55 @@ function sessionStatuses(
   if (subagents !== undefined) return ranked(subagents, jobs, wakeup)
   if (jobs !== undefined) return ranked(jobs, wakeup)
   // 失败例外: a failed stop outranks the wake-up weak mark; the mark keeps its
-  // seat in the hover card so the goal is still visible underneath.
+  // seat in the hover card so the goal is still visible underneath. The bang is
+  // the shape channel of 待收讫·例外 (collab step3 §3.1, q3-visual).
   if (node.completed && node.completionOutcome === 'failed') {
-    return ranked({ state: 'error', label: t('status.turnFailed') }, wakeup)
+    return ranked({ state: 'error', label: t('status.turnFailed'), mark: 'bang' }, wakeup)
   }
   if (wakeup !== undefined) return ranked(wakeup)
-  if (node.completed) return [{ state: 'done', label: t('status.completed') }]
-  // ④ splits: a confirmed nothing stays blank; a status neither the connection
-  // nor the heartbeat can confirm wears the gray dashed ring instead
-  // (真无事 = 空白 / 读不到 = 虚线圈).
-  if (node.statusStale !== undefined) return [{ state: 'stale', label: t('status.notSynced') }]
-  if (node.heartbeatStale !== undefined) return [{ state: 'stale', label: t('status.heartbeatStale') }]
+  // 待收讫·通过 carries the check shape channel (q3-visual).
+  if (node.completed) return [{ state: 'done', label: t('status.completed'), mark: 'check' }]
+  // ④ splits: a confirmed nothing stays blank. Unreadability no longer swaps in
+  // here — the wrapper below rings whatever state this chain landed on
+  // (未知不吞已知, collab step3 §5.1 q5).
   return [{ state: 'idle', label: t('status.idle') }]
+}
+
+/**
+ * The confirmation-overlay wrapper (collab step3 §5.1, q5-failclosed 裁定): a
+ * status that can no longer be confirmed — the connection dropped, or this
+ * Session's heartbeat went quiet — never swaps the shown state for a
+ * placeholder. The chain's last-known state stays primary inside a dashed
+ * ring, and a trailing line carries the interruption's wording on the hover
+ * card (第三通道) and to screen readers.
+ * @param node - row status facts, staleness flags included.
+ * @param t - the browser root's locale seat.
+ * @returns the primary status (ringed while unconfirmable) plus every secondary line.
+ */
+function sessionStatuses(
+  node: Pick<SessionNode, 'pendingInteraction' | 'running' | 'runningSubagentCount'
+    | 'completed' | 'completionOutcome' | 'activeJobCount' | 'pendingWakeup'
+    | 'statusStale' | 'heartbeatStale' | 'heartbeatStaleSeconds'>,
+  t: RowTranslate,
+): readonly [SessionStatus, ...SessionStatus[]] {
+  const base = sessionBaseStatuses(node, t)
+  const kind: StatusStaleRing['kind'] | undefined = node.statusStale !== undefined
+    ? 'connection'
+    : node.heartbeatStale !== undefined
+      ? 'heartbeat'
+      : undefined
+  if (kind === undefined) return base
+  const primary = base[0]
+  const staleLabel = kind === 'connection'
+    ? t('status.staleLastKnown', { state: primary.label })
+    : node.heartbeatStaleSeconds === undefined
+      ? t('status.heartbeatStaleLastKnown', { state: primary.label })
+      : t('status.heartbeatStaleSince', { s: node.heartbeatStaleSeconds, state: primary.label })
+  return [
+    { ...primary, staleRing: { kind }, staleLabel },
+    ...base.slice(1),
+    { state: 'stale', label: staleLabel },
+  ]
 }
 
 /**
@@ -531,14 +591,38 @@ function StatusGlyphMark({ glyph }: { glyph: StatusGlyph }) {
   )
 }
 
+/** Shape-channel characters rendered beside the dot (q3-visual). */
+const STATUS_MARK_GLYPHS: Readonly<Record<StatusMark, string>> = {
+  check: '✓', bang: '!', cross: '✕',
+}
+
 /** Primary status dot (or glyph) plus every status's screen-reader label, shared by the search and session rows. */
 function SessionStatusDots({ statuses }: { statuses: readonly [SessionStatus, ...SessionStatus[]] }) {
-  const glyph = statuses[0].glyph
+  const primary = statuses[0]
+  const dot = primary.glyph === undefined
+    ? <StateDot state={primary.state} />
+    : <StatusGlyphMark glyph={primary.glyph} />
   return (
     <>
-      {glyph === undefined
-        ? <StateDot state={statuses[0].state} />
-        : <StatusGlyphMark glyph={glyph} />}
+      {primary.staleRing === undefined
+        ? dot
+        : (
+          <span
+            className={css.staleRing}
+            data-stale-kind={primary.staleRing.kind}
+            title={primary.staleLabel}
+          >{dot}</span>
+        )}
+      {primary.mark === undefined
+        ? null
+        : (
+          <span
+            className={css.statusMark}
+            data-status-mark={primary.mark}
+            data-state={primary.state}
+            aria-hidden="true"
+          >{STATUS_MARK_GLYPHS[primary.mark]}</span>
+        )}
       {statuses.map(status => (
         <span className={css.visuallyHidden} key={status.label}>{status.label}</span>
       ))}
@@ -552,6 +636,23 @@ function PinnedIndicator({ t }: { t: RowTranslate }) {
   return (
     <span className={css.pinIndicator} role="img" aria-label={label} title={label}>
       <IconPinFillRegular size={14} />
+    </span>
+  )
+}
+
+/**
+ * Non-interactive 已阅 check (collab step3 §四, q4-readmark 裁定): the pure-
+ * observation receipt of opening a row that showed signals. The signals stay
+ * lit — 点名不改态 — and any new event drops this mark automatically; the
+ * enclosing row remains the only action.
+ * @param props.t - the browser root's locale seat.
+ * @returns the row-end check marker.
+ */
+function ReadMarkIndicator({ t }: { t: RowTranslate }) {
+  const label = t('row.readMarked')
+  return (
+    <span className={css.readMark} role="img" aria-label={label} title={label}>
+      <IconCheckOutlineRegular size={12} />
     </span>
   )
 }
@@ -581,6 +682,13 @@ function SessionHoverContent({ node, cwd, now, renderSlot, t }: {
       {/* Same placeholder rule as the row's trailing cell: no timestamp
           before the first prompt. */}
       {!node.blank && <div className={css.hoverTime}>{hoverTimeLabel(node.updatedAt, now, t)}</div>}
+      {/* 属性缺省的 fail-closed 分级 (collab step3 §6.3, q6-attr): the
+          attribute plane carries no supply yet, so the card names the default
+          placement in weak gray — never a ring, since 属性缺 ≠ 会话态不可信. */}
+      <div className={css.hoverAttributes}>
+        <span>{t('row.priorityDefault')}</span>
+        <span className={css.hoverAttributesNote}>{t('row.attributesDefault')}</span>
+      </div>
       {renderSlot('sidebar.session.row.hover', { sessionId: node.id })}
       {statuses.map(status => (
         <div className={css.hoverStatus} key={status.label}>
@@ -588,6 +696,17 @@ function SessionHoverContent({ node, cwd, now, renderSlot, t }: {
           <span>{status.label}</span>
         </div>
       ))}
+      {/* The done receipt's 判据自证 (collab step2 §二 亮灯层, step4b 件A):
+          the row dot carries the verdict; the hover card is the third channel
+          that names what landed and how it proved itself. */}
+      {node.deliverableReceipt !== undefined && (
+        <div className={css.hoverReceipt}>
+          <span className={css.hoverReceiptSummary}>{node.deliverableReceipt.summary}</span>
+          {node.deliverableReceipt.evidence !== undefined && (
+            <span className={css.hoverReceiptEvidence}>{node.deliverableReceipt.evidence.join(' · ')}</span>
+          )}
+        </div>
+      )}
       {node.archived && (
         <div className={clsx(css.hoverStatus, css.hoverArchived)}>
           <IconArchiveOutlineRegular size={14} />
@@ -815,10 +934,11 @@ export function SessionNodeItem({
         }}
     >
       {/* Pending interaction and own or descendant activity outrank the
-          finished-but-unviewed reminder, which returns after activity stops
-          and is cleared by opening the session. Archived rows keep the slot
-          blank — the grayed row carries the archived look — and their live
-          status stays on the hover card only. */}
+          finished-but-unviewed reminder, which returns after activity stops.
+          Opening the session never clears it (点名不改态, collab step3 §四):
+          the row-end 已阅 check records the look instead. Archived rows keep
+          the slot blank — the grayed row carries the archived look — and their
+          live status stays on the hover card only. */}
       <span className={css.slot}>
         {!row.archived && !row.blank && (showStatus
           ? <SessionStatusDots statuses={statuses} />
@@ -859,6 +979,7 @@ export function SessionNodeItem({
             {primaryStatus.trailingLabel ?? timeLabel(row.updatedAt, now, t)}
           </span>
           {renderSlot('sidebar.session.row.trailing', { sessionId: node.id })}
+          {row.readMarked === true && !row.archived && <ReadMarkIndicator t={t} />}
           {row.pinned && !row.archived && <PinnedIndicator t={t} />}
         </span>
       )}

@@ -53,6 +53,9 @@
       "path": "../../core/session"
     },
     {
+      "path": "../../deliverables/tool-present"
+    },
+    {
       "path": "../../context/file-reference"
     },
     {

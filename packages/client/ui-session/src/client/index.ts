@@ -117,9 +117,43 @@ export interface SessionStatus {
    * The Host's periodic status heartbeat stopped arriving for this Session
    * (collab step2 §4.2): the shown status is the last one that did arrive and
    * can no longer be confirmed. Present for the stale Session alone, absent
-   * while heartbeats keep arriving.
+   * while heartbeats keep arriving — and never for a row that has received no
+   * frame at all in this connection (collab step4b 件E: a never-run idle row's
+   * baseline is "nothing to confirm", not "unconfirmable").
    */
   readonly heartbeatStale?: true
+  /**
+   * Rounded seconds since the last confirmed Host frame behind `heartbeatStale`
+   * (collab step3 §5.1: the hover names how long the shown last-known state has
+   * gone unconfirmable). Re-folded on the heartbeat tick, so the age counts up
+   * without any other event.
+   */
+  readonly heartbeatStaleSeconds?: number
+  /**
+   * The user opened this Session's row (点名) while its signals were showing, a
+   * pure observation with zero state side effects (collab step1 §2.6, step3
+   * §四): the signals stay lit and only this secondary row-end check records
+   * "I saw it". Drops the moment any signed fact changes — a new event clears
+   * the read mark automatically.
+   */
+  readonly readMarked?: true
+  /**
+   * The Session's latest done receipt (collab step2 §二 亮灯层, step4b 件A):
+   * the Host folds `deliverables/receipt` from the transcript, so the 待收讫
+   * light survives refreshes and restarts; the board row `[x]` stays the
+   * authority layer. Carried with its 判据自证 for the hover card.
+   */
+  readonly deliverableReceipt?: SessionDeliverableReceipt
+}
+
+/** One Session's latest done receipt as the UI status carries it (collab step2 §二). */
+export interface SessionDeliverableReceipt {
+  /** 验章 attribute: AI 初验通过, or an exception awaiting a human ruling. */
+  readonly verdict: 'pass' | 'exception'
+  /** One-line 判据自证 the Session declared at close-out. */
+  readonly summary: string
+  /** Structured evidence anchors (commit hashes, gate names); absent when none were supplied. */
+  readonly evidence?: readonly string[]
 }
 
 /** Current UI status indexed by Session identity. */
@@ -361,14 +395,31 @@ export class UiSession extends Service {
   private readonly attention = new Map<SessionId, string>()
   private readonly running = new Map<SessionId, boolean>()
   /**
-   * Wall-clock of the most recent Host truth for each Session — a status frame
-   * or a list row whose `running` the baseline adopted. Drives the per-Session
-   * heartbeat staleness flag (collab step2 §4.2): past the interval the shown
-   * status is the last one heard and can no longer be confirmed.
+   * Wall-clock of the most recent Host status frame for each Session — an
+   * `api-session/status` event, or a list-pull divergence read off Host truth.
+   * Drives the per-Session heartbeat staleness flag (collab step2 §4.2): past
+   * the interval the shown status is the last one heard and can no longer be
+   * confirmed. A never-run idle row's baseline adoption deliberately does NOT
+   * arm this clock (collab step4b 件E, A案): the Host sweep only re-sends
+   * status for Sessions it has already published status for, so arming at
+   * baseline would ring idle rows 30s after every load while nothing is
+   * unread — noise that reads "unconfirmable" over "nothing to confirm".
    */
   private readonly lastStatusAt = new Map<SessionId, number>()
   private readonly unreadStops = new Map<SessionId, SessionCompletionOutcome>()
   private readonly observedFailures = new Set<SessionId>()
+  /**
+   * Read marks (已阅勾标): set when a row becomes the main view while showing
+   * signals — the pure-observation receipt of collab step3 §四's read-mark
+   * ruling (点名不改态; the check is a secondary row-end glyph, never a signal
+   * clearer). The value is the signed-fact signature at mark time; a later
+   * signature mismatch drops the mark, so a new event clears it automatically.
+   */
+  private readonly readMarks = new Map<SessionId, string>()
+  /** Rows whose main-view entry just happened; the next snapshot folds them into read marks. */
+  private readonly pendingReadMarks = new Set<SessionId>()
+  /** Main-view identities as of the last reconcile; membership transitions arm a read mark. */
+  private readonly knownMainIds = new Set<SessionId>()
   private statusSnapshot: SessionStatusSnapshot = new Map()
   private readonly statusListeners = new Set<() => void>()
   private mainRetainId: SessionId | undefined
@@ -655,7 +706,10 @@ export class UiSession extends Service {
       const stopped = previous === true || (previous === undefined && beforeBaseline)
       // The failure report arrives before the stop it ends, so the stop reads it here.
       const failed = this.observedFailures.delete(sessionId)
-      if (stopped && !this.isMain(sessionId)) {
+      // The stop fact records for every view, the main one included (collab
+      // step3 §四 点名不改态): opening a Session never was a legal signal
+      // clearer, so the acknowledgment it used to suppress now lights there too.
+      if (stopped) {
         this.unreadStops.set(sessionId, failed ? 'failed' : 'completed')
       }
     }
@@ -677,16 +731,23 @@ export class UiSession extends Service {
     for (const id of list.ids) {
       const row = list.byId[id] as SessionSummary
       const previous = this.running.get(id)
-      // The list pull is Host truth just as much as a status frame, so it also
-      // restarts the heartbeat clock (a row pulled a moment ago is confirmed).
-      if (previous === undefined) {
-        this.running.set(id, row.running)
-        this.lastStatusAt.set(id, Date.now())
-      }
+      // The list pull establishes the shown running state but does NOT arm
+      // the heartbeat clock (collab step4b 件E, A案): the Host sweep only
+      // re-sends status for Sessions it has already published status for, so
+      // a never-run idle row baselined here would go permanently
+      // "unconfirmable" 30s after every load. The clock arms on the row's
+      // first frame; until then the baseline stands ring-free.
+      if (previous === undefined) this.running.set(id, row.running)
       else if (previous !== row.running) this.observeRunning(id, row.running)
     }
+    // 点名不改态 (collab step3 §四): becoming the main view arms a read mark
+    // and clears no signal — the row keeps its lit facts and gains only the
+    // secondary "I saw it" check the snapshot arms below.
     for (const id of present) {
-      if (this.isMain(id)) this.unreadStops.delete(id)
+      if (this.isMain(id)) {
+        if (!this.knownMainIds.has(id)) this.pendingReadMarks.add(id)
+        this.knownMainIds.add(id)
+      } else this.knownMainIds.delete(id)
     }
     if (list.phase === 'ready') {
       for (const id of this.running.keys()) {
@@ -696,6 +757,9 @@ export class UiSession extends Service {
         this.observedFailures.delete(id)
         this.attention.delete(id)
         this.lastStatusAt.delete(id)
+        this.readMarks.delete(id)
+        this.pendingReadMarks.delete(id)
+        this.knownMainIds.delete(id)
       }
     }
     this.publishStatus()
@@ -729,7 +793,28 @@ export class UiSession extends Service {
       const durableOutcome = list.byId[id]?.projectionValues?.lastTurnOutcome?.kind === 'error'
         ? 'failed' as const
         : undefined
-      const outcome = remembered ?? durableOutcome
+      // The done receipt (collab step2 §二 亮灯层, step4b 件A) rides its own
+      // durable projection: the Host folds `deliverables/receipt` from the
+      // transcript, so the 待收讫 light survives refreshes and restarts while
+      // the board row stays the authority. The live in-memory stop and the
+      // turn-end failure both outrank it (they are the fresher facts); the
+      // receipt fills the gap after a reload clears the map. The verdict maps
+      // onto the outcome vocabulary the row already renders: pass → 绿点 ✓
+      // (待收讫·通过), exception → 红点 ! (待收讫·例外, step3 §3.1).
+      const receiptValue = list.byId[id]?.projectionValues?.lastReceipt
+      const deliverableReceipt: SessionDeliverableReceipt | undefined = receiptValue == null
+        ? undefined
+        : {
+          verdict: receiptValue.verdict,
+          summary: receiptValue.summary,
+          ...(receiptValue.evidence === undefined || receiptValue.evidence.length === 0
+            ? {}
+            : { evidence: receiptValue.evidence }),
+        }
+      const receiptOutcome = deliverableReceipt === undefined
+        ? undefined
+        : deliverableReceipt.verdict === 'exception' ? 'failed' as const : 'completed' as const
+      const outcome = remembered ?? durableOutcome ?? receiptOutcome
       const roster = this.jobs?.state.getSnapshot().rows[String(id)]
       const activeJobCount = roster === undefined
         ? 0
@@ -740,10 +825,33 @@ export class UiSession extends Service {
         : undefined
       // A heartbeat that never arrived leaves the shown status unconfirmable;
       // a row with no Host truth at all is still loading, not stale.
-      const heartbeatStale: true | undefined = this.lastStatusAt.get(id) !== undefined
-        && now - (this.lastStatusAt.get(id) as number) > SESSION_HEARTBEAT_STALE_MS
+      const lastStatusAt = this.lastStatusAt.get(id)
+      const heartbeatStale: true | undefined = lastStatusAt !== undefined
+        && now - lastStatusAt > SESSION_HEARTBEAT_STALE_MS
         ? true
         : undefined
+      // 已阅勾标 (collab step3 §四, q4-readmark): a mark armed on main-view
+      // entry survives while every signed fact stands still and drops the
+      // moment any of them changes — a new event clears the read receipt
+      // automatically. Only acknowledgement-worthy facts (a pending
+      // interaction, an unread stop, a live job roster) earn a mark; running
+      // and the wake-up weak mark are self-evident and stay check-free.
+      const signature = sessionStatusSignature(
+        this.running.get(id),
+        this.pendingSnapshot.get(id),
+        outcome,
+        activeJobCount,
+        pendingWakeup,
+      )
+      const signs = this.pendingSnapshot.get(id) !== undefined
+        || outcome !== undefined
+        || activeJobCount > 0
+      if (this.pendingReadMarks.delete(id)) {
+        if (signs) this.readMarks.set(id, signature)
+      } else {
+        const marked = this.readMarks.get(id)
+        if (marked !== undefined && marked !== signature) this.readMarks.delete(id)
+      }
       next.set(id, {
         running: this.running.get(id),
         pendingInteraction: this.pendingSnapshot.get(id),
@@ -753,6 +861,11 @@ export class UiSession extends Service {
         ...(pendingWakeup === undefined ? {} : { pendingWakeup }),
         ...(statusStale === undefined ? {} : { statusStale }),
         ...(heartbeatStale === undefined ? {} : { heartbeatStale }),
+        ...(heartbeatStale === undefined || lastStatusAt === undefined
+          ? {}
+          : { heartbeatStaleSeconds: Math.round((now - lastStatusAt) / 1000) }),
+        ...(this.readMarks.has(id) ? { readMarked: true as const } : {}),
+        ...(deliverableReceipt === undefined ? {} : { deliverableReceipt }),
       })
     }
     if (sameSessionStatus(this.statusSnapshot, next)) return
@@ -925,6 +1038,33 @@ export function apply(ctx: Context): void {
   })
 }
 
+/**
+ * Stable signature of one row's signed facts (collab step3 §四): the read mark
+ * stores it at 点名 time and drops on mismatch, so "new event clears the check"
+ * needs no event plumbing — the facts themselves are the channel.
+ * @param running - latest known running state.
+ * @param pendingInteraction - highest-precedence awaiting-interaction kind.
+ * @param outcome - acknowledged-stop outcome, present while one is unread.
+ * @param activeJobCount - live owned background-job count.
+ * @param pendingWakeup - the stopped-with-a-goal weak mark.
+ * @returns a stable comparison string for the signed facts.
+ */
+function sessionStatusSignature(
+  running: boolean | undefined,
+  pendingInteraction: SessionPendingInteraction | undefined,
+  outcome: SessionCompletionOutcome | undefined,
+  activeJobCount: number,
+  pendingWakeup: true | undefined,
+): string {
+  return JSON.stringify([
+    running ?? null,
+    pendingInteraction ?? null,
+    outcome ?? null,
+    activeJobCount === 0 ? null : activeJobCount,
+    pendingWakeup ?? null,
+  ])
+}
+
 function sameSessionStatus(left: SessionStatusSnapshot, right: SessionStatusSnapshot): boolean {
   if (left.size !== right.size) return false
   for (const [id, status] of left) {
@@ -937,7 +1077,11 @@ function sameSessionStatus(left: SessionStatusSnapshot, right: SessionStatusSnap
       || candidate.activeJobCount !== status.activeJobCount
       || candidate.pendingWakeup !== status.pendingWakeup
       || candidate.statusStale !== status.statusStale
-      || candidate.heartbeatStale !== status.heartbeatStale) return false
+      || candidate.heartbeatStale !== status.heartbeatStale
+      || candidate.heartbeatStaleSeconds !== status.heartbeatStaleSeconds
+      || candidate.readMarked !== status.readMarked
+      || candidate.deliverableReceipt?.verdict !== status.deliverableReceipt?.verdict
+      || candidate.deliverableReceipt?.summary !== status.deliverableReceipt?.summary) return false
   }
   return true
 }

@@ -9,7 +9,7 @@ const it = createClientTest({ roster: webApp.closure(['@deepseek-ai/dsh-client-u
 const parentId = 'status-parent' as SessionId
 const childId = 'status-child' as SessionId
 
-it('preserves unlisted child status through metadata updates and main view acknowledgement', async ({ mock, start }) => {
+it('preserves unlisted child status through metadata updates and keeps it lit through main-view entry (点名不改态)', async ({ mock, start }) => {
   mock.remote.session.list.mockResolvedValue(ok({ items: [{
     sessionId: parentId, updatedAt: 1, running: false, blank: false, agentAvailable: true,
   }] }))
@@ -65,10 +65,18 @@ it('preserves unlisted child status through metadata updates and main view ackno
   using reference = sessions.retain(childId, { source: 'mainView' })
   await reference.ready
   expect(sessions.list.getSnapshot().ids).not.toContain(childId)
+  // 点名不改态 (collab step3 §四): the row becoming main keeps the failure lit
+  // and arms only the secondary 已阅 check.
   await vi.waitFor(() => {
-    expect(ui.sessionStatus.getSnapshot().get(childId)).toMatchObject({ running: false, completionUnread: false })
+    expect(ui.sessionStatus.getSnapshot().get(childId)).toMatchObject({
+      running: false, completionUnread: true, completionOutcome: 'failed', readMarked: true,
+    })
   })
   reference.release()
   await client.flush()
-  expect(ui.sessionStatus.getSnapshot().get(childId)?.completionUnread).toBe(false)
+  // Navigating away changes nothing either: the failure and its check survive
+  // until a real transition supersedes them.
+  expect(ui.sessionStatus.getSnapshot().get(childId)?.completionUnread).toBe(true)
+  expect(ui.sessionStatus.getSnapshot().get(childId)?.completionOutcome).toBe('failed')
+  expect(ui.sessionStatus.getSnapshot().get(childId)?.readMarked).toBe(true)
 })

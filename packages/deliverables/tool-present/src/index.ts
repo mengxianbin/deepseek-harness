@@ -10,7 +10,6 @@ import type { PresentedFile } from './types.ts'
 
 /** Stable Loader identity. */
 export const name = 'tool-present'
-
 /** Per-call delivery limit. */
 export interface Config {
   /** Maximum number of files in one call. */
@@ -105,6 +104,85 @@ export function apply(ctx: Context, config: Config): void {
     const { session, turn, files } = delivery
     session.append('deliverables/presented', {
       turn, callId: exec.callId, files,
+    })
+  })
+
+  // FORK dsh-local (collab-step4b-a, marker: doneReceipt): the done-receipt
+  // light layer (collab step2 §二 ①). The Session declares its work 收口 —
+  // save done plus the 判据自证 — so the Host lights 待收讫 (绿✓ / 红！) in
+  // real time; the board row `[x]` stays the authority layer (②). The event
+  // rides the transcript, so restarts never drift the light.
+  const receiptPending = new WeakMap<ToolExecution, {
+    session: Session
+    turn: number
+    verdict: 'pass' | 'exception'
+    summary: string
+    evidence: readonly string[] | undefined
+  }>()
+  ctx.tools.register(defineTool({
+    name: 'receipt',
+    description: 'Declare this Session\'s task done: the work is saved (landed/committed) and its stated criteria proved themselves. '
+      + 'Call it once at close-out, after the save commit succeeds, with a one-line self-certification (what landed + how it proved itself, e.g. commit hash and gate results). '
+      + 'The verdict marks whether AI pre-verification passed (`pass`) or an acceptance exception needs a human ruling (`exception`). '
+      + 'This is the real-time 待收讫 light; the task-board row checkbox remains the authoritative record.',
+    parameters: {
+      verdict: {
+        type: 'string', required: true,
+        description: 'AI pre-verification result: "pass" (初验通过) or "exception" (验收例外, a human must rule).',
+        enum: ['pass', 'exception'] as const,
+      },
+      summary: {
+        type: 'string', required: true,
+        description: 'One-line 判据自证: what landed and how it proved itself (e.g. "commit 1a2b3c4; build exit 0; vitest 1706 passed").',
+      },
+      evidence: {
+        type: 'array',
+        description: 'Structured evidence anchors (commit hashes, gate names); shown on hover.',
+        items: { type: 'string' },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object', additionalProperties: false,
+        properties: {
+          turn: { type: 'integer' },
+          verdict: { type: 'string' },
+          summary: { type: 'string' },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.verdict === 'pass'
+          ? `Receipt recorded: 待收讫·通过 — ${value.summary}`
+          : `Receipt recorded: 待收讫·例外 (needs your ruling) — ${value.summary}`,
+      }],
+    },
+    execute(args, exec) {
+      if (exec.agent === undefined) throw new Error('receipt requires an agent Session')
+      const boundary = ctx.agents.turnBoundaryOf(exec.agent.session)
+      if (boundary.openTurnStartSeq === null) throw new Error('receipt requires an open turn')
+      receiptPending.set(exec, {
+        session: exec.agent.session,
+        turn: boundary.lastTurn,
+        verdict: args.verdict,
+        summary: args.summary,
+        evidence: args.evidence,
+      })
+      return Promise.resolve({ turn: boundary.lastTurn, verdict: args.verdict, summary: args.summary })
+    },
+  }))
+  ctx.on('tools/result', (exec, result) => {
+    const receipt = receiptPending.get(exec)
+    receiptPending.delete(exec)
+    if (receipt === undefined || result.isError) return
+    receipt.session.append('deliverables/receipt', {
+      turn: receipt.turn,
+      callId: exec.callId,
+      verdict: receipt.verdict,
+      summary: receipt.summary,
+      ...(receipt.evidence === undefined || receipt.evidence.length === 0
+        ? {}
+        : { evidence: [...receipt.evidence] }),
     })
   })
 }

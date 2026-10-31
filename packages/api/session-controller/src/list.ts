@@ -17,8 +17,8 @@ import {
   SESSION_SEARCH_SNIPPET_MAX_CODE_POINTS,
 } from './types.ts'
 import type {
-  SessionLastTurnOutcome, SessionLastTurnOutcomeKind, SessionListMetadata, SessionListRequest,
-  SessionProjectionHints, SessionProjectionValues,
+  SessionLastReceipt, SessionLastTurnOutcome, SessionLastTurnOutcomeKind, SessionListMetadata,
+  SessionListRequest, SessionProjectionHints, SessionProjectionValues,
   SessionSearchItem,
   SessionSearchValue, SessionSummary,
 } from './types.ts'
@@ -81,6 +81,53 @@ export function applyLastTurnOutcome(
   const outcomeKind = kind as SessionLastTurnOutcomeKind
   const next: SessionLastTurnOutcome = { kind: outcomeKind, at: event.time }
   return state !== null && state.kind === outcomeKind && state.at === next.at ? state : next
+}
+
+/** 验章 verdicts the receipt light has a stable rendering for. */
+const RECEIPT_VERDICTS = ['pass', 'exception'] as const
+
+const lastReceiptSchema = z.object({
+  verdict: z.enum(RECEIPT_VERDICTS),
+  summary: z.string(),
+  evidence: z.array(z.string()).optional(),
+  at: z.number(),
+}).nullable() as unknown as z.ZodType<SessionLastReceipt | null>
+
+/**
+ * Advance the durable done-receipt projection by one committed event
+ * (collab step2 §二 亮灯层, step4b 件A).
+ *
+ * The 待收讫 light has to survive a page refresh and a Host restart, which a
+ * client-side unread map cannot; folding `deliverables/receipt` makes the
+ * transcript the single source (板行 `[x]` stays the authority layer, this is
+ * only the light). A new receipt supersedes the old one; the next turn's start
+ * clears it — new work replaces the old close-out claim.
+ *
+ * @param state - receipt before the event.
+ * @param event - next committed Session event.
+ * @returns the original, advanced, or cleared receipt value.
+ */
+export function applyLastReceipt(
+  state: SessionLastReceipt | null,
+  event: SessionEvent,
+): SessionLastReceipt | null {
+  if (event.type === 'turn/start') return state === null ? state : null
+  if (event.type !== 'deliverables/receipt') return state
+  const { verdict, summary, evidence } = event.data
+  if (!(RECEIPT_VERDICTS as readonly string[]).includes(verdict)) return state
+  const next: SessionLastReceipt = {
+    verdict,
+    summary,
+    ...(evidence === undefined || evidence.length === 0 ? {} : { evidence: [...evidence] }),
+    at: event.time,
+  }
+  return state !== null
+    && state.verdict === next.verdict
+    && state.summary === next.summary
+    && state.at === next.at
+    && JSON.stringify(state.evidence ?? null) === JSON.stringify(next.evidence ?? null)
+    ? state
+    : next
 }
 
 const imageLimitsSchema = z.object({
@@ -167,6 +214,14 @@ export class ApiSessionList {
       init: () => null,
       apply: applyLastTurnOutcome,
       wire: { viewSchema: lastTurnOutcomeSchema, view: state => state },
+      stateVersion: 1,
+    })
+    await this.ctx.sessionProjections.register<'lastReceipt', SessionLastReceipt | null>({
+      key: 'lastReceipt',
+      stateSchema: lastReceiptSchema,
+      init: () => null,
+      apply: applyLastReceipt,
+      wire: { viewSchema: lastReceiptSchema, view: state => state },
       stateVersion: 1,
     })
   }

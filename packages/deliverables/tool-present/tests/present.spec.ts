@@ -199,3 +199,66 @@ it('refuses a file replaced by a directory after inspecting its final component'
   vi.spyOn(ctx.fs, 'stat').mockResolvedValueOnce(directory)
   expect((await execute([{ path: 'source' }])).isError).toBe(true)
 })
+
+// FORK dsh-local (collab-step4b-a, marker: doneReceipt): the done-receipt
+// light layer (collab step2 §二 ①) — the Session declares its work 收口 and
+// the transcript carries the structured receipt the Host folds.
+describe('receipt', () => {
+  const receiptExecute = (
+    ctx: Context,
+    owner: Agent,
+    args: { verdict: string; summary: string; evidence?: string[] },
+  ) => executeToolFixture(ctx, {
+    signal: new AbortController().signal, callId: ToolCallId(`call-${++callNumber}`),
+    name: 'receipt', arguments: args, agent: owner,
+  })
+
+  it('records a pass receipt with its self-certification after a successful result', async () => {
+    const { ctx, owner } = await setup()
+    owner.session.append('turn/start', { turn: 1 })
+    const result = await receiptExecute(ctx, owner, {
+      verdict: 'pass',
+      summary: 'commit 1a2b3c4; build exit 0; vitest 1706 passed',
+      evidence: ['1a2b3c4', 'build:lib'],
+    })
+    expect(result.isError).toBe(false)
+    const receipt = owner.session.snapshotEvents().find(event => event.type === 'deliverables/receipt')
+    expect(receipt?.data).toMatchObject({
+      turn: 1,
+      verdict: 'pass',
+      summary: 'commit 1a2b3c4; build exit 0; vitest 1706 passed',
+      evidence: ['1a2b3c4', 'build:lib'],
+    })
+  })
+
+  it('records an exception receipt and drops an empty evidence list', async () => {
+    const { ctx, owner } = await setup()
+    owner.session.append('turn/start', { turn: 1 })
+    const result = await receiptExecute(ctx, owner, {
+      verdict: 'exception',
+      summary: 'two机检红留人工',
+      evidence: [],
+    })
+    expect(result.isError).toBe(false)
+    const receipt = owner.session.snapshotEvents().find(event => event.type === 'deliverables/receipt')
+    expect(receipt?.data).toMatchObject({ verdict: 'exception', summary: 'two机检红留人工' })
+    expect(receipt?.data).not.toHaveProperty('evidence')
+  })
+
+  it('publishes no receipt when the result fails', async () => {
+    const { ctx, owner } = await setup()
+    owner.session.append('turn/start', { turn: 1 })
+    const failing = defineTool({
+      name: 'receipt', description: 'Scoped replacement.', parameters: {},
+      output: {
+        schema: { type: 'object', additionalProperties: false, properties: {} },
+        render: () => [],
+      },
+      execute: async () => ({}),
+    })
+    owner.ctx.tools.register(failing)
+    const result = await receiptExecute(ctx, owner, { verdict: 'pass', summary: 'should not land' })
+    expect(result.isError).toBe(false)
+    expect(owner.session.snapshotEvents().filter(event => event.type === 'deliverables/receipt')).toEqual([])
+  })
+})
