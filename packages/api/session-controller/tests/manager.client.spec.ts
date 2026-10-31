@@ -1708,3 +1708,129 @@ describe('list row scope (f5-contract-a2-1030)', () => {
     expect(remote.session.list).toHaveBeenLastCalledWith(THIN)
   })
 })
+
+describe('list prefetch (f5-list-parallel-1031)', () => {
+  it('pulls before any generation and lands the baseline', async ({ mock, remote }) => {
+    remote.session.list.mockResolvedValue(ok({ items: [summary(S1)] }))
+    const manager = makeManager(mock, remote)
+    onTestFinished(() => manager.dispose())
+
+    await manager.prefetchList()
+    expect(manager.getListSnapshot()).toMatchObject({ state: 'idle', phase: 'ready', error: null })
+    expect(manager.getListSnapshot().items.map(item => item.sessionId)).toEqual([S1])
+  })
+
+  // Best-effort by contract: a pre-generation failure must not raise the error
+  // surface the generation's demand pull owns.
+  it('keeps a pre-arrival prefetch failure off the error surface', async ({ mock, remote }) => {
+    remote.session.list.mockResolvedValueOnce(err(new RemoteError('gateway/internal', 'prefetch failed', {})))
+    const manager = makeManager(mock, remote)
+    onTestFinished(() => manager.dispose())
+
+    await manager.prefetchList()
+    expect(manager.getListSnapshot()).toMatchObject({ state: 'idle', phase: 'pending', error: null })
+
+    // The generation's demand pull still surfaces its own failure.
+    remote.session.list.mockResolvedValueOnce(err(new RemoteError('gateway/internal', 'demand failed', {})))
+    await manager.refreshList()
+    expect(manager.getListSnapshot()).toMatchObject({ state: 'error', phase: 'pending' })
+    expect(manager.getListSnapshot().error).toMatchObject({ code: 'gateway/internal' })
+  })
+
+  // The busy-window win: a generation arriving mid-prefetch adopts the in-flight
+  // pull (fencing it would restart the whole serial wait) and closes the
+  // pre-event-stream window with one authoritative re-pull after it settles.
+  it('adopts an in-flight prefetch on connect and repulls after it settles', async ({ mock, remote }) => {
+    const prefetch = Promise.withResolvers<Awaited<ReturnType<typeof remote.session.list>>>()
+    const repull = Promise.withResolvers<Awaited<ReturnType<typeof remote.session.list>>>()
+    remote.session.list
+      .mockReturnValueOnce(prefetch.promise)
+      .mockReturnValueOnce(repull.promise)
+    const manager = makeManager(mock, remote)
+    onTestFinished(() => manager.dispose())
+
+    const pulling = manager.prefetchList()
+    manager.handleConnected()
+    // Adopted: no second request started while the prefetch is in flight.
+    expect(remote.session.list).toHaveBeenCalledTimes(1)
+
+    manager.handleSessionStatus(S1, true)
+    prefetch.resolve(ok({ items: [summary(S1), summary(S2)] }))
+    await pulling
+    // The adopted response landed with the mid-flight mutation replayed…
+    expect(manager.getListSnapshot().items.map(item => item.sessionId)).toEqual([S1, S2])
+    expect(manager.getListSnapshot().items.find(item => item.sessionId === S1)?.running).toBe(true)
+    // …and its settle queued the authoritative re-pull.
+    await vi.waitFor(() => { expect(remote.session.list).toHaveBeenCalledTimes(2) })
+    repull.resolve(ok({ items: [summary(S2)] }))
+    await vi.waitFor(() => {
+      expect(manager.getListSnapshot()).toMatchObject({ state: 'idle', error: null })
+      expect(manager.getListSnapshot().items.map(item => item.sessionId)).toEqual([S2])
+    })
+  })
+
+  // A demand caller joining the adopted prefetch takes over its failure
+  // disposition — the user-facing error surface must see it.
+  it('upgrades an adopted prefetch when a demand refresh joins it', async ({ mock, remote }) => {
+    const prefetch = Promise.withResolvers<Awaited<ReturnType<typeof remote.session.list>>>()
+    remote.session.list.mockReturnValueOnce(prefetch.promise)
+    const manager = makeManager(mock, remote)
+    onTestFinished(() => manager.dispose())
+
+    const pulling = manager.prefetchList()
+    const demand = manager.refreshList()
+    expect(demand).toBe(pulling)
+    expect(remote.session.list).toHaveBeenCalledTimes(1)
+
+    prefetch.resolve(err(new RemoteError('gateway/internal', 'shared failure', {})))
+    await demand
+    expect(manager.getListSnapshot()).toMatchObject({ state: 'error', phase: 'pending' })
+  })
+
+  // A landed prefetch is a generation-0 baseline; the next connect fences and
+  // repulls exactly like any later generation.
+  it('fences a landed prefetch response on the next generation', async ({ mock, remote }) => {
+    remote.session.list.mockResolvedValueOnce(ok({ items: [summary(S1)] }))
+    const manager = makeManager(mock, remote)
+    onTestFinished(() => manager.dispose())
+    await manager.prefetchList()
+
+    const reconnect = Promise.withResolvers<Awaited<ReturnType<typeof remote.session.list>>>()
+    remote.session.list.mockReturnValueOnce(reconnect.promise)
+    manager.handleConnected()
+    expect(remote.session.list).toHaveBeenCalledTimes(2)
+    expect(manager.getListSnapshot()).toMatchObject({ state: 'loading' })
+
+    reconnect.resolve(ok({ items: [summary(S2)] }))
+    await vi.waitFor(() => {
+      expect(manager.getListSnapshot()).toMatchObject({ state: 'idle', phase: 'ready' })
+      expect(manager.getListSnapshot().items.map(item => item.sessionId)).toEqual([S2])
+    })
+  })
+
+  // Single-flight holds across kinds: a prefetch joining a demand pull just awaits it.
+  it('reuses an in-flight demand pull for a prefetch', async ({ mock, remote }) => {
+    const demand = Promise.withResolvers<Awaited<ReturnType<typeof remote.session.list>>>()
+    remote.session.list.mockReturnValueOnce(demand.promise)
+    const manager = makeManager(mock, remote)
+    onTestFinished(() => manager.dispose())
+
+    const refreshing = manager.refreshList()
+    expect(manager.prefetchList()).toBe(refreshing)
+    expect(remote.session.list).toHaveBeenCalledTimes(1)
+
+    demand.resolve(ok({ items: [summary(S1)] }))
+    await refreshing
+    expect(manager.getListSnapshot()).toMatchObject({ state: 'idle', phase: 'ready' })
+  })
+
+  it('no-ops a prefetch once the catalog landed', async ({ mock, remote }) => {
+    remote.session.list.mockResolvedValue(ok({ items: [summary(S1)] }))
+    const manager = makeManager(mock, remote)
+    onTestFinished(() => manager.dispose())
+    await manager.prefetchList()
+
+    await manager.prefetchList()
+    expect(remote.session.list).toHaveBeenCalledTimes(1)
+  })
+})

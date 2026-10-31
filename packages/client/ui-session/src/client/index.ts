@@ -885,20 +885,21 @@ export class UiSession extends Service {
     for (const id of ids) {
       const remembered = this.unreadStops.get(id)
       // The Host folds the last turn's end reason into a durable projection
-      // (collab step2 §7.2): a failure stays on the row across a refresh, a
-      // restart, and the row being open, until a later turn ends some other
-      // way. The in-memory unread map still drives the clean-stop green mark.
-      const durableOutcome = list.byId[id]?.projectionValues?.lastTurnOutcome?.kind === 'error'
-        ? 'failed' as const
-        : undefined
+      // (collab step2 §7.2; 绿点耐久裁定 2026-11-01): every end reason rides
+      // it now — a failure reads red and any clean end (completed / aborted /
+      // blocked) reads green — so both marks survive a refresh and a restart
+      // until a later turn supersedes them. The in-memory unread map still
+      // wins while it holds, being the live observation.
+      const durableKind = list.byId[id]?.projectionValues?.lastTurnOutcome?.kind
       // The done receipt (collab step2 §二 亮灯层, step4b 件A) rides its own
       // durable projection: the Host folds `deliverables/receipt` from the
       // transcript, so the 待收讫 light survives refreshes and restarts while
       // the board row stays the authority. The live in-memory stop and the
       // turn-end failure both outrank it (they are the fresher facts); the
-      // receipt fills the gap after a reload clears the map. The verdict maps
-      // onto the outcome vocabulary the row already renders: pass → 绿点 ✓
-      // (待收讫·通过), exception → 红点 ! (待收讫·例外, step3 §3.1).
+      // receipt in turn refines a clean durable end — an exception verdict
+      // turns the durable green into the red ! (待收讫·例外, step3 §3.1).
+      // The verdict maps onto the outcome vocabulary the row already renders:
+      // pass → 绿点 ✓ (待收讫·通过), exception → 红点 !.
       const receiptValue = list.byId[id]?.projectionValues?.lastReceipt
       const deliverableReceipt: SessionDeliverableReceipt | undefined = receiptValue == null
         ? undefined
@@ -912,7 +913,11 @@ export class UiSession extends Service {
       const receiptOutcome = deliverableReceipt === undefined
         ? undefined
         : deliverableReceipt.verdict === 'exception' ? 'failed' as const : 'completed' as const
-      const outcome = remembered ?? durableOutcome ?? receiptOutcome
+      const durableFailed = durableKind === 'error' ? 'failed' as const : undefined
+      const durableClean = durableKind === undefined || durableKind === 'error'
+        ? undefined
+        : 'completed' as const
+      const outcome = remembered ?? durableFailed ?? receiptOutcome ?? durableClean
       const roster = this.jobs?.state.getSnapshot().rows[String(id)]
       const activeJobCount = roster === undefined
         ? 0
