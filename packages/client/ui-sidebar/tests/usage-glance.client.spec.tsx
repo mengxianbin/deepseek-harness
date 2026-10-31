@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
-import { deriveGlance, formatBalanceFigure, formatCompactTokens, formatRefreshStamp, openUsageSection, readSourceBadge, sourceBadgeName, UsageGlance, type GlanceWindowRow, type UsageOverviewView } from '../src/client/UsageGlance.tsx'
+import { deriveGlance, formatBalanceFigure, formatCompactTokens, formatRefreshStamp, openUsageSection, readSourceBadge, resetGlanceCache, sourceBadgeName, UsageGlance, type GlanceWindowRow, type UsageOverviewView } from '../src/client/UsageGlance.tsx'
 import { en } from '../src/client/locales.ts'
 
 const t = makeTranslate({ ...commonEn, ...en })
@@ -85,6 +85,9 @@ function dayKey(at: Date): string {
 
 afterEach(() => {
   cleanup()
+  // The remount cache (FORK usage-glance-swr-1031) is module scope and
+  // deliberately survives cleanup() in the app; each spec starts empty.
+  resetGlanceCache()
   document.body.replaceChildren()
   vi.unstubAllGlobals()
   vi.useRealTimers()
@@ -847,5 +850,85 @@ describe('current-source badge (auto-route, exception-only v2)', () => {
     const { container } = render(<UsageGlance t={t} />)
     expect(await screen.findByText('85%')).toBeTruthy()
     expect(container.querySelectorAll('[class*="glanceSourceDot"]')).toHaveLength(0)
+  })
+})
+
+describe('remount cache — stale-while-revalidate (FORK usage-glance-swr-1031)', () => {
+  /** A single-window overview the remount fixtures paint (month row only). */
+  const cached = (percent: number): UsageOverviewView => ({
+    current: { provider: 'opencode-go' },
+    providers: [{ provider: 'opencode-go', plan: { windows: [{ key: 'month', percent, resetsAt: '2026-10-17T10:25:48Z' }] } }],
+  })
+
+  it('paints the cached readings at once on remount, then lands the revalidation', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => cached(42) })))
+    const first = render(<UsageGlance t={t} />)
+    await screen.findByText('42%')
+    first.unmount()
+    // The remount's revalidation hangs in flight — the cached reading must
+    // paint NOW (the collapse→expand toggle never shows placeholders again).
+    let release: ((value: unknown) => void) | undefined
+    vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { release = resolve })))
+    render(<UsageGlance t={t} />)
+    expect(screen.getByText('42%')).toBeTruthy()
+    // The revalidation still runs and replaces the stale reading.
+    await act(async () => {
+      release?.({ status: 200, ok: true, json: async () => cached(44) })
+      await Promise.resolve()
+    })
+    expect(await screen.findByText('44%')).toBeTruthy()
+    expect(screen.queryByText('42%')).toBeNull()
+  })
+
+  it('keeps the cached readings when the remount revalidation fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => cached(42) })))
+    const first = render(<UsageGlance t={t} />)
+    await screen.findByText('42%')
+    first.unmount()
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 500, ok: false, json: async () => ({}) })))
+    render(<UsageGlance t={t} />)
+    await flush()
+    // The transport-failure contract is unchanged: keep the last snapshot.
+    expect(screen.getByText('42%')).toBeTruthy()
+  })
+
+  it('stays hidden through a remount while the host half is off, then recovers', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 404, ok: false, json: async () => ({}) })))
+    const first = render(<UsageGlance t={t} />)
+    await flush()
+    expect(first.container.textContent).toBe('')
+    first.unmount()
+    // The host half came back. The cached host-off flag seeds the remount
+    // hidden (a stale "no routes" must not flash readings), and the
+    // same-tick revalidation reveals the fresh overview.
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => cached(42) })))
+    const second = render(<UsageGlance t={t} />)
+    expect(second.container.textContent).toBe('')
+    expect(await screen.findByText('42%')).toBeTruthy()
+  })
+
+  it('re-seeds the glance rows and the badge dot from the cache while revalidation hangs', async () => {
+    const STATUS_ROUTE = '/api/auto-route/status'
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (url === STATUS_ROUTE
+      ? { status: 200, ok: true, json: async () => ({ ok: true, policy: { phase: 'baseline', effectiveSource: 'opencode-go', lastPoll: { at: NOW, ok: false, error: 'meter source unreachable' } } }) }
+      : { status: 200, ok: true, json: async () => OVERVIEW })))
+    const first = render(<UsageGlance t={t} />)
+    await screen.findByText('85%')
+    expect(first.container.querySelector('[class*="glanceSourceDotError"]')).toBeTruthy()
+    first.unmount()
+    // One hanging promise per load cycle: the overview leg is released below,
+    // the badge leg (created only after it settles) never is — the cached
+    // dot must therefore survive the whole cycle.
+    let release: ((value: unknown) => void) | undefined
+    vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { release = resolve })))
+    render(<UsageGlance t={t} />)
+    expect(screen.getByText('85%')).toBeTruthy()
+    expect(document.querySelector('[class*="glanceSourceDotError"]')).toBeTruthy()
+    await act(async () => {
+      release?.({ status: 500, ok: false, json: async () => ({}) })
+      await Promise.resolve()
+    })
+    expect(screen.getByText('85%')).toBeTruthy()
+    expect(document.querySelector('[class*="glanceSourceDotError"]')).toBeTruthy()
   })
 })

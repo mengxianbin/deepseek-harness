@@ -38,8 +38,11 @@
  *
  * Data is the dsh-usage host half's same-origin overview — the plugin this
  * fork's settings section belongs to — read once on mount and refreshed on a
- * relaxed cadence while the tab is visible. A 404 (host half off, plugin
- * disabled) hides the control entirely; transport failures keep the last
+ * relaxed cadence while the tab is visible; a remount seeds itself from the
+ * module-scope snapshot and revalidates immediately (FORK
+ * usage-glance-swr-1031, see the note at the bottom of this header). A 404
+ * (host half off, plugin disabled) hides the control entirely; transport
+ * failures keep the last
  * snapshot and retry on the next tick. The whole control degrades to silence,
  * so the shell never depends on it.
  *
@@ -106,6 +109,21 @@
  * line; **triggered** → no dot at all, the Go window rows simply dim (they
  * stopped describing dsh's live spend) and the button tooltip spells the
  * switch. Baseline + healthy renders the pre-badge layout untouched.
+ *
+ * Remount cache (FORK usage-glance-swr-1031, 2026-10-31 用户要求「先读缓存
+ * 再更新」): the sidebar's wide content unmounts when a collapse settles and
+ * remounts right away on expand (SidebarRoot's settle gate), so a per-mount
+ * load cycle blanked this control back to placeholders on every toggle and
+ * cost a fresh round trip each time. The last snapshot — glance state,
+ * host-off flag, refresh stamp, and the badge — now ALSO lives at module
+ * scope and seeds the initial state, so a remount paints the stale readings
+ * at once and revalidates in the same tick (stale-while-revalidate). The
+ * load cadence, the timeout, and every failure contract are unchanged: a
+ * failed revalidation keeps the cached snapshot exactly like it kept the
+ * per-mount one, and the stamp still reads the last SUCCESSFUL load (the
+ * cached stamp keeps saying when its data actually arrived). The cache lives
+ * per JS realm — a fresh page load or a new window starts empty, identical to
+ * a first mount. `resetGlanceCache` is the test seam, not a runtime API.
  * @module ui-sidebar/client/UsageGlance
  */
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
@@ -675,6 +693,32 @@ export function openUsageSection(): void {
   window.setTimeout(attempt, 0)
 }
 
+/**
+ * The last load's snapshot at MODULE scope (FORK usage-glance-swr-1031): it
+ * outlives the component's mount, so the sidebar's collapse→expand unmount
+ * remounts onto stale-while-revalidate instead of placeholders. Absent fields
+ * read as the pre-first-load state.
+ */
+const glanceCache: {
+  state?: GlanceState
+  refreshedAt?: number
+  hostOff?: boolean
+  /** Widened to `| undefined`: an absent controller writes the value through. */
+  sourceBadge?: SourceBadgeView | undefined
+} = {}
+
+/**
+ * Test seam (FORK usage-glance-swr-1031): drop the module-scope snapshot so
+ * each spec mounts its own world. Within an app session the cache
+ * deliberately survives `cleanup()` — that is the behavior under test.
+ */
+export function resetGlanceCache(): void {
+  delete glanceCache.state
+  delete glanceCache.refreshedAt
+  delete glanceCache.hostOff
+  delete glanceCache.sourceBadge
+}
+
 /** Props: the sidebar namespace translator the shell owns. */
 export interface UsageGlanceProps {
   /** Sidebar-namespace translator. */
@@ -689,16 +733,21 @@ export interface UsageGlanceProps {
  * refresh stamp included). A v3 triggered row (water line
  * >= 85%) reds its percent figure; the week/month rows also paint the fill
  * solid red and append the switch hint to the tooltip. Nothing renders while
- * the host half is off. Rows the host does not report are absent; before the first load the
- * control shows only the token column's placeholders.
+ * the host half is off. Rows the host does not report are absent; with no cached snapshot the
+ * control shows only the token column's placeholders, and a remount seeds
+ * from the module cache then revalidates (FORK usage-glance-swr-1031).
  * @param props - the shell's locale translator.
  * @returns the glance button, or null when the usage host serves no routes.
  */
 export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
-  const [state, setState] = useState<GlanceState | null>(null)
-  const [hostOff, setHostOff] = useState(false)
-  const [refreshedAt, setRefreshedAt] = useState<number | undefined>(undefined)
-  const [sourceBadge, setSourceBadge] = useState<SourceBadgeView | undefined>(undefined)
+  // Seed from the module-scope snapshot (FORK usage-glance-swr-1031): a
+  // sidebar re-expand paints the last readings at once; the effect below
+  // revalidates them in the same tick. No cache reads exactly like the
+  // pre-fork first mount.
+  const [state, setState] = useState<GlanceState | null>(glanceCache.state ?? null)
+  const [hostOff, setHostOff] = useState(glanceCache.hostOff === true)
+  const [refreshedAt, setRefreshedAt] = useState<number | undefined>(glanceCache.refreshedAt)
+  const [sourceBadge, setSourceBadge] = useState<SourceBadgeView | undefined>(glanceCache.sourceBadge)
 
   useEffect(() => {
     let alive = true
@@ -712,14 +761,25 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
           signal: AbortSignal.timeout(GLANCE_TIMEOUT_MS),
         })
         if (response.status === 404) {
-          if (alive && mine === seq) setHostOff(true)
+          if (alive && mine === seq) {
+            glanceCache.hostOff = true
+            setHostOff(true)
+          }
           return
         }
         if (!response.ok) throw new Error('overview ' + String(response.status))
         const overview = await response.json() as UsageOverviewView
         if (!alive || mine !== seq) return
-        setState(deriveGlance(overview))
-        setRefreshedAt(Date.now())
+        // Every successful load writes THROUGH to the module cache (FORK
+        // usage-glance-swr-1031): the next remount seeds from exactly the
+        // snapshot this state now holds.
+        const derived = deriveGlance(overview)
+        const stamp = Date.now()
+        glanceCache.state = derived
+        glanceCache.refreshedAt = stamp
+        glanceCache.hostOff = false
+        setState(derived)
+        setRefreshedAt(stamp)
         setHostOff(false)
       } catch {
         // Keep the last snapshot; the next tick retries.
@@ -735,11 +795,14 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
         })
         if (!alive || mine !== seq) return
         if (badgeResponse.status === 404) {
+          glanceCache.sourceBadge = undefined
           setSourceBadge(undefined)
           return
         }
         if (!badgeResponse.ok) throw new Error('auto-route status ' + String(badgeResponse.status))
-        setSourceBadge(readSourceBadge(await badgeResponse.json()))
+        const badge = readSourceBadge(await badgeResponse.json())
+        glanceCache.sourceBadge = badge
+        setSourceBadge(badge)
       } catch {
         // Keep the last badge; the next tick retries.
       }
