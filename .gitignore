@@ -49,6 +49,7 @@ worktrees/
 native/system/test/bin/
 /dsh-start.log
 /dsh-web.log
+/dsh-restart.log
 /.tmp-ask/
 /undefined/
 /.wt/
