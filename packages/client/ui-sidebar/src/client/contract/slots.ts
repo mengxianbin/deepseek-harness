@@ -4,9 +4,10 @@
  * owns column geometry, the brand row, New Session, and global panel rows;
  * everything between the workspace section header and the list bottom is the
  * `sidebar.workspaces` registrant's (ui-workspace), and the foot is the
- * `sidebar.settings` registrant's (ui-settings), followed by optional footer
- * actions in `sidebar.footer.action` — low-frequency actions fold into the
- * footer ⋯ menu through `sidebar.more.action` (rail keeps them in the foot).
+ * `sidebar.settings` registrant's (ui-settings). Optional footer actions in
+ * `sidebar.footer.action` and low-frequency actions in `sidebar.more.action`
+ * both fold INTO the footer ⋯ menu as rows (FORK footer-into-more-1031): the
+ * seat renders there in both column states, never beside Settings.
  */
 import type { InjectFace, PropsLocale, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
@@ -51,16 +52,19 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      */
     'sidebar.settings': { kind: 'single'; scope: 'root'; owner: SidebarSettingsOwnerProps }
     /**
-     * Optional actions beside Settings at the sidebar foot. Declared by this
-     * package's 'sidebar' entry; each action receives only the column state.
+     * Optional actions rendered as rows of the footer ⋯ menu (FORK
+     * footer-into-more-1031: they left the foot row beside Settings). Declared
+     * by this package's 'sidebar' entry; each action receives the column
+     * state, and renders a full-width row through the ⋯-menu action styling.
      */
     'sidebar.footer.action': { kind: 'list'; scope: 'root'; owner: SidebarFooterActionOwnerProps }
     /**
      * Low-frequency actions folded INTO the footer ⋯ menu (user ruling
      * sidebar-footer-ui-1026: phone pairing + remote access leave the foot
      * row). Declared by this package's 'sidebar' entry; each action receives
-     * the same column state as the foot seat — the collapsed rail has no ⋯
-     * menu, so the shell keeps these entries reachable in the rail foot.
+     * the same column state as the foot seat — the collapsed rail hosts the
+     * SAME ⋯ menu (FORK rail-more-sync-1030), so these rows stay reachable
+     * in both column states.
      */
     'sidebar.more.action': { kind: 'list'; scope: 'root'; owner: SidebarMoreActionOwnerProps }
   }
@@ -147,13 +151,13 @@ export interface SidebarSettingsOwnerProps {
   wide: boolean
 }
 
-/** Owner share of an action rendered beside Settings at the sidebar foot. */
+/** Owner share of an action rendered as a row of the footer ⋯ menu. */
 export interface SidebarFooterActionOwnerProps {
   /** Whether the sidebar renders wide content (false = 56px rail). */
   wide: boolean
 }
 
-/** Owner share of an action folded into the footer ⋯ menu (rail: foot icons). */
+/** Owner share of an action folded into the footer ⋯ menu. */
 export interface SidebarMoreActionOwnerProps {
   /** Whether the sidebar renders wide content (false = 56px rail). */
   wide: boolean
@@ -192,6 +196,8 @@ export type SidebarRootInjected = {
     entryActions: ObservableSnapshot<boolean>
     /** Registration ids of the ⋯-menu action seat (drives the menu's group separator). */
     moreActions: ObservableSnapshot<readonly string[]>
+    /** Registration ids of the folded footer-action seat (also drives the group separator). */
+    footerActions: ObservableSnapshot<readonly string[]>
   }
 }
 

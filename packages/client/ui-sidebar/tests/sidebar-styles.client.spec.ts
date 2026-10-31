@@ -26,11 +26,14 @@ function declarations(selector: string): Map<string, string> | undefined {
 }
 
 describe('SidebarRoot.module.css', () => {
-  it('gives the rail ⋯ anchor wrapper its vertical-stack seat (FORK rail-more-sync-1030)', () => {
+  it('gives the rail ⋯ anchor wrapper its foot-stack seat (FORK footer-into-more-1031)', () => {
+    // The anchor now sits in the rail foot below Settings/Restart, so it
+    // separates itself with a top margin (the old under-New-Session seat
+    // pushed with a bottom one).
     const railAnchor = declarations('.panelMoreRail')
     expect(railAnchor?.get('display')).toBe('flex')
     expect(railAnchor?.get('flex')).toBe('none')
-    expect(railAnchor?.get('margin-bottom')).toBe('12px')
+    expect(railAnchor?.get('margin-top')).toBe('12px')
   })
 
   it('shares and cancels the wide shell trailing padding structurally', () => {

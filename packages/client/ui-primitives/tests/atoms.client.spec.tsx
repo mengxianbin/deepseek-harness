@@ -247,6 +247,24 @@ describe('Menu', () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 
+  it('pointerdown inside a portalled aria-modal dialog does not close (FORK footer-into-more-1031)', () => {
+    // A menu row may portal a modal panel to the body (the update /
+    // remote-access panels). The panel is outside both the anchor and the
+    // list subtrees, but pointer traffic inside it belongs to the panel:
+    // dismissing here would unmount the row's own panel before its click.
+    const onClose = vi.fn()
+    render(
+      <>
+        <Menu open anchor={<span>trigger</span>} items={items} onSelect={() => {}} onClose={onClose} />
+        <div role="dialog" aria-modal="true"><button type="button">Inside panel</button></div>
+      </>)
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Inside panel' }))
+    expect(onClose).not.toHaveBeenCalled()
+    // A pointerdown outside both the menu and the dialog still dismisses.
+    fireEvent.pointerDown(document.body)
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
   it('window blur closes only when focus moved into an iframe', () => {
     const onClose = vi.fn()
     render(

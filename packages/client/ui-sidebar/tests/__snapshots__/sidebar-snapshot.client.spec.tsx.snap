@@ -53,28 +53,6 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
         </span>
       </span>
     </button>
-    <span
-      class="root panelMoreSlot panelMoreRail"
-    >
-      <button
-        aria-expanded="false"
-        aria-haspopup="menu"
-        aria-label="More"
-        class="iconButton panelMore"
-        type="button"
-      >
-        <svg
-          aria-hidden="true"
-          data-content="d1c61540"
-          fill="none"
-          height="16"
-          stroke-width="1"
-          viewBox="0 0 16 16"
-          width="16"
-          xmlns="http://www.w3.org/2000/svg"
-        />
-      </button>
-    </span>
     <div
       class="regionArea"
     >
@@ -87,14 +65,6 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
       class="footArea"
     >
       <div
-        class="footerActions"
-      >
-        <div
-          data-slot="sidebar.footer.action"
-          style="display: contents;"
-        />
-      </div>
-      <div
         class="settingsArea"
       >
         <div
@@ -102,6 +72,25 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
           style="display: contents;"
         />
       </div>
+      <span
+        class="root panelMoreSlot panelMoreRail"
+      >
+        <button
+          aria-expanded="false"
+          aria-haspopup="menu"
+          aria-label="More"
+          class="iconButton panelMore"
+          type="button"
+        >
+          <svg
+            aria-hidden="true"
+            data-content="ce3185ff"
+            data-icon="dsw-icon-ellipsis-outline-regular"
+            height="16"
+            width="16"
+          />
+        </button>
+      </span>
     </div>
   </div>
 </div>
@@ -231,14 +220,6 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
             style="display: contents;"
           />
         </div>
-        <div
-          class="footerActions"
-        >
-          <div
-            data-slot="sidebar.footer.action"
-            style="display: contents;"
-          />
-        </div>
         <span
           class="root panelMoreSlot"
         >
@@ -335,28 +316,6 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
         </span>
       </span>
     </button>
-    <span
-      class="root panelMoreSlot panelMoreRail"
-    >
-      <button
-        aria-expanded="false"
-        aria-haspopup="menu"
-        aria-label="More"
-        class="iconButton panelMore"
-        type="button"
-      >
-        <svg
-          aria-hidden="true"
-          data-content="d1c61540"
-          fill="none"
-          height="16"
-          stroke-width="1"
-          viewBox="0 0 16 16"
-          width="16"
-          xmlns="http://www.w3.org/2000/svg"
-        />
-      </button>
-    </span>
     <div
       class="regionArea"
     >
@@ -369,14 +328,6 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
       class="footArea"
     >
       <div
-        class="footerActions"
-      >
-        <div
-          data-slot="sidebar.footer.action"
-          style="display: contents;"
-        />
-      </div>
-      <div
         class="settingsArea"
       >
         <div
@@ -384,6 +335,25 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
           style="display: contents;"
         />
       </div>
+      <span
+        class="root panelMoreSlot panelMoreRail"
+      >
+        <button
+          aria-expanded="false"
+          aria-haspopup="menu"
+          aria-label="More"
+          class="iconButton panelMore"
+          type="button"
+        >
+          <svg
+            aria-hidden="true"
+            data-content="ce3185ff"
+            data-icon="dsw-icon-ellipsis-outline-regular"
+            height="16"
+            width="16"
+          />
+        </button>
+      </span>
     </div>
   </div>
 </div>
@@ -510,14 +480,6 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
         >
           <div
             data-slot="sidebar.settings"
-            style="display: contents;"
-          />
-        </div>
-        <div
-          class="footerActions"
-        >
-          <div
-            data-slot="sidebar.footer.action"
             style="display: contents;"
           />
         </div>
@@ -667,14 +629,6 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
         >
           <div
             data-slot="sidebar.settings"
-            style="display: contents;"
-          />
-        </div>
-        <div
-          class="footerActions"
-        >
-          <div
-            data-slot="sidebar.footer.action"
             style="display: contents;"
           />
         </div>

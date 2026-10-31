@@ -85,6 +85,9 @@ describe('ui-sidebar apply', () => {
     expect(injected.hooks.panels.getSnapshot()).toEqual([])
     expect(injected.hooks.entryPins.getSnapshot()).toEqual([])
     expect(injected.hooks.entryActions.getSnapshot()).toBe(false)
+    // FORK footer-into-more-1031: the folded footer-action seat reports its
+    // registrations so the ⋯ menu can draw the group separator.
+    expect(injected.hooks.footerActions.getSnapshot()).toEqual([])
     expect(b.slots.entries('main')).toEqual([])
     // Both arms delegate to the Workspace UI's shared New Session action.
     injected.startSession('workspace' as never)

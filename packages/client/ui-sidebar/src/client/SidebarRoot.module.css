@@ -81,9 +81,12 @@
   margin-top: 6px;
 }
 
-/* FORK rail-more-sync-1030: the rail ⋯ anchor (.panelMoreSlot) joins the
+/* FORK rail-more-sync-1030: the rail ⋯ anchor (.panelMoreSlot) joined the
    hidden stack with the region and foot — the Windows caption collapse keeps
-   only the toggle and New Session in the caption row. */
+   only the toggle and New Session in the caption row. FORK
+   footer-into-more-1031: the anchor now lives INSIDE .footArea, so hiding
+   the foot hides it; the standalone selector stays as a belt-and-braces for
+   any future out-of-foot anchor. */
 :global([data-windows-titlebar]) .collapsed .panelMoreSlot,
 :global([data-windows-titlebar]) .collapsed .regionArea,
 :global([data-windows-titlebar]) .collapsed .footArea {
@@ -155,16 +158,17 @@
    rail right edge over the remaining 150ms of the AppFrame track transition.
    The bottom-pinned settings seat shares their opacity timeline but stays
    horizontally fixed. Only a live collapse gets .railIn; a cold collapsed
-   render stays static. */
+   render stays static. FORK footer-into-more-1031: the rail ⋯ anchor rides
+   the foot's opacity fade now (it lives inside .footArea), so it drops out
+   of the translate list. */
 .railIn .iconButton,
 .railIn .newSession,
-.railIn .panelMoreRail,
 .railIn .regionArea {
   animation: rail-in 150ms var(--ds-ease-in-out) backwards;
 }
 
-/* The rail ⋯ trigger is an .iconButton INSIDE the animated anchor wrapper —
-   animating both would stack the translation (wrapper + child both shift). */
+/* The rail ⋯ trigger is an .iconButton INSIDE the foot — cancel the
+   .iconButton translate so it only fades with its foot container. */
 .railIn .panelMoreRail .iconButton {
   animation: none;
 }
@@ -555,31 +559,28 @@
   padding-left: 0;
 }
 
-/* Footer seats: additive actions stack above Settings. Each occupant owns its
-   button geometry and hover chrome. */
+/* Footer seats: the settings seat owns its geometry. FORK
+   footer-into-more-1031: the footer-action seat (update trigger) no longer
+   renders here — it lives inside the ⋯ menu as rows. */
 .footArea {
   flex: none;
   display: flex;
   flex-direction: column;
 }
 
-.settingsArea,
-.footerActions {
+.settingsArea {
   flex: none;
   min-width: 0;
   width: 100%;
 }
 
-.footerActions {
-  display: flex;
-}
-
 /* FORK dsh-local (sidebar-layout round 3): the wide foot is ONE row —
-   Settings, the footer actions, then the ⋯ menu (user ruling order,
-   sidebar-footer-ui-1026) — while the width:100% seats above keep the rail's
-   stack. The dsh-usage glance card is REMOVED (usage-glance ruling,
+   Settings, then the ⋯ menu (user ruling order, sidebar-footer-ui-1026).
+   The dsh-usage glance card is REMOVED (usage-glance ruling,
    2026-10-15): its content moved to the logo-row plan glance beside the whale
-   mark, so nothing rides above this row. */
+   mark, so nothing rides above this row. FORK footer-into-more-1031: the
+   footer-action seat left the row — the ⋯ menu hosts it as rows now, so the
+   row reads Settings → ⋯. */
 .footRow {
   display: flex;
   align-items: center;
@@ -587,22 +588,16 @@
   width: 100%;
 }
 
-.footRow .settingsArea,
-.footRow .footerActions {
-  width: auto;
-}
-
 .footRow .settingsArea {
+  width: auto;
   flex: none;
 }
 
 /* FORK dsh-local (sidebar-layout round 3b): dsh-web-all's shipped CSS orders
    [class*=settingsArea] (order:3) inside its own foot scheme; pin the row to
-   the ruled order. FORK dsh-local (sidebar-footer-ui-1026): the ruling order
-   is Settings (3, plugin) → footer actions (4) → ⋯ menu (5) — the ⋯ menu sits
-   RIGHT OF the update badge, and the phone-pairing / remote-access actions
-   left the foot row for inside the menu. Without the plugin every order falls
-   back to 0 = DOM order, same result. */
+   the ruled order. FORK footer-into-more-1031: only two seats remain and the
+   ⋯ anchor keeps the trailing order pin, so a plugin CSS that reorders
+   settingsArea can never push ⋯ ahead of it. */
 /* FORK dsh-local (sidebar-layout round 3c): the ⋯ button sits inside the
    Menu primitive's anchor SPAN — the span is the flex item, so the ruled row
    order rides this class (via Menu's className), not the button. */
@@ -610,23 +605,19 @@
   order: 5;
 }
 
-.footRow .footerActions {
-  order: 4;
-}
-
 .panelMore {
   flex: none;
 }
 
-/* FORK rail-more-sync-1030: the collapsed rail's ⋯ anchor wrapper — a plain
-   vertical-stack item under the New Session icon (the foot-row order pin
-   above only applies inside .footRow). The trigger button itself picks up
+/* FORK footer-into-more-1031: the collapsed rail's ⋯ anchor wrapper — the
+   LAST item of the foot stack (Settings/Restart above it), no longer an
+   upper-group item under New Session. The trigger button itself picks up
    the rail's 36px icon geometry and primary ink from `.collapsed
    .iconButton`. */
 .panelMoreRail {
   display: flex;
   flex: none;
-  margin-bottom: 12px;
+  margin-top: 12px;
 }
 
 /* FORK dsh-local (sidebar-footer-ui-1026): the ⋯-menu action seat renders
@@ -672,9 +663,16 @@
      above, so the label rode that absolute geometry — out of flow, flush past
      the card's left edge (first glyph clipped) while the icon sat centered.
      The label box belongs to this rule too: keep it a normal in-flow flex
-     item so it trims with the ellipsis below. */
+     item so it trims with the ellipsis below. FORK footer-into-more-1031:
+     the update trigger paints an 8px badge dot on the same pseudo — the row
+     label takes the whole box, so width/height/background/border yield as
+     well (the label copy already carries the "new version" signal). */
   position: static;
   inset: auto;
+  width: auto;
+  height: auto;
+  background: none;
+  border: none;
   border-radius: 0;
   min-width: 0;
   overflow: hidden;
@@ -695,8 +693,9 @@
   align-items: center;
 }
 
-.collapsed .settingsArea,
-.collapsed .footerActions {
+/* FORK footer-into-more-1031: the rail foot stacks Settings/Restart (the
+   settings seat's own rail row) then the ⋯ anchor, all centered. */
+.collapsed .settingsArea {
   display: flex;
   justify-content: center;
   width: auto;
@@ -974,7 +973,6 @@
   .fading > *,
   .railIn .iconButton,
   .railIn .newSession,
-  .railIn .panelMoreRail,
   .railIn .footArea,
   .railIn .regionArea,
   .glanceFill {

@@ -8,15 +8,17 @@
  * same top-down order) on one fade that ends with the slide. The bottom-pinned
  * settings control only fades. The workspace/session browsing region between
  * global panel rows and the foot is the `sidebar.workspaces` registrant's,
- * and the foot holds `sidebar.settings` plus `sidebar.footer.action`; the shell
- * hands them the wide flag (plus an expand request callback for the browser).
+ * and the foot holds `sidebar.settings` plus the ⋯ menu; the shell hands them
+ * the wide flag (plus an expand request callback for the browser).
  * Low-frequency actions fold into the footer ⋯ menu through
- * `sidebar.more.action` (user ruling sidebar-footer-ui-1026). FORK
+ * `sidebar.more.action` (user ruling sidebar-footer-ui-1026), and the
+ * `sidebar.footer.action` seat joins them in the SAME menu (FORK
+ * footer-into-more-1031: the update trigger left the foot row). FORK
  * rail-more-sync-1030 (2026-10-30 用户裁定): the collapsed rail hosts the
- * SAME ⋯ menu as the wide foot — its per-panel icon column and its foot's
- * action rows are gone, so the rail mirrors the wide layout's folded entries
- * instead of outlisting them (the rail keeps only its New Session icon on top
- * of the menu anchor).
+ * SAME ⋯ menu as the wide foot — its per-panel icon column is gone, and the
+ * rail keeps only its New Session icon on top while the ⋯ anchor sits in the
+ * rail foot below Settings/Restart (FORK footer-into-more-1031: the anchor
+ * moved out of the rail's upper group).
  *
  * The column also owns whether the scroll regions nested in it draw a
  * scrollbar at all: the shell tracks the pointer and rebinds ui-theme's
@@ -58,7 +60,7 @@ function officialEntry(id: string): 'plugin' | 'cron' | undefined {
 type PanelMoreProps =
   Pick<SidebarRootComponentProps, 'usePanelInfo' | 't'>
   & Pick<InjectFace<SidebarRootInjected>, 'selectPanel' | 'startSession' | 'trackEntryClick' | 'setPinned'>
-  & Pick<PropsRenderSlots<'sidebar.panellist' | 'sidebar.panellist.actions' | 'sidebar.more.action'>, 'renderSlot'>
+  & Pick<PropsRenderSlots<'sidebar.panellist' | 'sidebar.panellist.actions' | 'sidebar.more.action' | 'sidebar.footer.action'>, 'renderSlot'>
   & { readonly panels: readonly SidebarPanelMetadata[] }
   & { readonly unpinned: readonly string[] }
   & { readonly hasEntryActions: boolean }
@@ -68,9 +70,18 @@ type PanelMoreProps =
   }
   & {
     /**
-     * Anchor placement: the wide foot row, or the collapsed rail's top seat
-     * (FORK rail-more-sync-1030) — the menu body is identical, only the
-     * anchor's row geometry and tooltip side differ.
+     * Whether the folded footer-action seat (FORK footer-into-more-1031: it
+     * renders here now, not beside Settings) has registrants — it shares the
+     * group separator with the more-action seat.
+     */
+    readonly hasFooterActions: boolean
+  }
+  & {
+    /**
+     * Anchor placement: the wide foot row, or the collapsed rail's foot
+     * below Settings/Restart (FORK footer-into-more-1031: the anchor left the
+     * rail's upper group) — the menu body is identical, only the anchor's
+     * row geometry and tooltip side differ.
      */
     readonly rail: boolean
   }
@@ -110,10 +121,17 @@ const MIMO_RELOGIN_PAGE = '/api/mimo-relogin/page'
  * Install/Create plugin rows) after the data rows when any exist.
  *
  * FORK rail-more-sync-1030 (2026-10-30 用户裁定): the collapsed rail renders
- * this SAME menu from its own anchor (rail top, under New Session) — the
- * rail's per-panel icon column and foot action rows are retired so both
- * states list identical entries through one component. The menu body is
- * state-independent; only the anchor's placement differs.
+ * this SAME menu from its own anchor — the rail's per-panel icon column and
+ * foot action rows are retired so both states list identical entries through
+ * one component. The menu body is state-independent; only the anchor's
+ * placement differs.
+ *
+ * FORK footer-into-more-1031 (2026-10-31 用户指示): the `sidebar.footer.action`
+ * seat (the update trigger) renders its registrants as full-width rows in
+ * this menu's action group, ahead of the `sidebar.more.action` rows — it no
+ * longer owns a button beside Settings in either column state. The rail
+ * anchor also moved out of the rail's upper group into the foot, so the rail
+ * reads New Session on top, Settings/Restart/⋯ at the bottom.
  *
  * FORK mimo-login-cta moved (2026-10-30 用户指示): the standing MiMo
  * re-login entry — formerly the balance row's inline `重新登录` link — leads
@@ -126,7 +144,7 @@ const MIMO_RELOGIN_PAGE = '/api/mimo-relogin/page'
  * @returns the ⋯ anchor with its menu.
  */
 function PanelMore({
-  panels, unpinned, hasEntryActions, hasMoreActions, rail,
+  panels, unpinned, hasEntryActions, hasMoreActions, hasFooterActions, rail,
   usePanelInfo, selectPanel, startSession, setPinned, trackEntryClick, renderSlot, t,
 }: PanelMoreProps) {
   const [open, setOpen] = useState(false)
@@ -153,9 +171,10 @@ function PanelMore({
           : []),
         // FORK dsh-local (sidebar-footer-ui-1026): low-frequency foot actions
         // (phone pairing, remote access) fold into this menu as component
-        // rows after the data items; the separator only draws while the seat
-        // actually has registrants.
-        ...(hasMoreActions
+        // rows after the data items. FORK footer-into-more-1031: the
+        // footer-action seat (the update trigger) joins them in the same
+        // group — the separator draws while EITHER action seat has rows.
+        ...(hasMoreActions || hasFooterActions
           ? [{ type: 'separator' as const, id: 'more-action-separator' }]
           : []),
       ]}
@@ -217,8 +236,12 @@ function PanelMore({
         onPinnedChange: setPinned,
         onDismiss,
       })}
-      {hasMoreActions && (
+      {(hasMoreActions || hasFooterActions) && (
         <div className={css.moreActions}>
+          {/* FORK footer-into-more-1031: the footer-action seat (the update
+              trigger) renders as menu rows here, ahead of the more-action
+              rows — both share the full-width row styling. */}
+          {hasFooterActions && renderSlot('sidebar.footer.action', { wide: true })}
           {renderSlot('sidebar.more.action', { wide: true })}
         </div>
       )}
@@ -244,6 +267,7 @@ export function SidebarRoot({
   useEntryPins,
   useEntryActions,
   useMoreActions,
+  useFooterActions,
   useShortcuts,
   usePanelInfo,
   t,
@@ -253,6 +277,7 @@ export function SidebarRoot({
   const unpinned = useEntryPins(ids => ids)
   const hasEntryActions = useEntryActions(registered => registered)
   const moreActions = useMoreActions(snapshot => snapshot)
+  const footerActions = useFooterActions(snapshot => snapshot)
   const shortcut = useShortcuts(rows => rows.find(row => row.id === 'sidebar.left.toggle'))
   const newShortcut = useShortcuts(rows => rows.find(row => row.id === 'session.new'))
   // A page whose access snapshot excludes starting a Session offers no New Session affordance.
@@ -423,28 +448,11 @@ export function SidebarRoot({
           </button>
         </Tooltip>
       )}
-      {/* FORK rail-more-sync-1030 (2026-10-30 用户裁定): the rail's per-panel
-          icon column is RETIRED — the rail anchors the same ⋯ menu the wide
-          foot renders, so both states list identical entries through one
-          component. rc.3 pins had already stopped filtering this launcher;
-          with the column gone the pin list no longer shapes any rail
-          surface. */}
-      {!wide && (
-        <PanelMore
-          panels={panels}
-          unpinned={unpinned}
-          hasEntryActions={hasEntryActions}
-          hasMoreActions={moreActions.length > 0}
-          rail
-          usePanelInfo={usePanelInfo}
-          selectPanel={selectPanel}
-          startSession={startSession}
-          setPinned={setPinned}
-          trackEntryClick={trackEntryClick}
-          renderSlot={renderSlot}
-          t={t}
-        />
-      )}
+      {/* FORK footer-into-more-1031 (2026-10-31 用户指示): the rail's ⋯
+          anchor left the upper group — the rail top now carries only New
+          Session, and the anchor sits in the foot below Settings/Restart.
+          It hosts the SAME menu the wide foot renders, so both states list
+          identical entries through one component. */}
 
       {/* The browsing region fills the column between the controls and the
           foot in both states; its rail icon column rides the same slot. */}
@@ -456,14 +464,14 @@ export function SidebarRoot({
       </div>
 
       {/* FORK dsh-local (sidebar-layout round 3): the wide foot is ONE row —
-          Settings, the footer actions, then the ⋯ menu (user ruling order,
-          sidebar-footer-ui-1026: ⋯ sits right of the update badge; phone
-          pairing + remote access moved INTO the ⋯ menu). The dsh-usage glance
-          card is removed (usage-glance ruling, 2026-10-15): the plan cycle
-          pair now lives in the logo row beside the whale mark (UsageGlance),
-          so nothing injects above this row. FORK rail-more-sync-1030: the
-          rail foot no longer renders the ⋯-menu action seat either — the
-          rail's ⋯ anchor (top) hosts those rows in its menu, same as wide. */}
+          Settings, then the ⋯ menu (user ruling order, sidebar-footer-ui-1026).
+          The dsh-usage glance card is removed (usage-glance ruling,
+          2026-10-15): the plan cycle pair now lives in the logo row beside the
+          whale mark (UsageGlance), so nothing injects above this row.
+          FORK footer-into-more-1031 (2026-10-31 用户指示): the
+          footer-action seat (the update trigger) left BOTH feet — it renders
+          as rows inside the ⋯ menu; the rail foot is Settings/Restart then
+          the ⋯ anchor, in that order. */}
       <div className={css.footArea}>
         {wide
           ? (
@@ -471,14 +479,12 @@ export function SidebarRoot({
               <div className={css.settingsArea}>
                 {renderSlot('sidebar.settings', { wide })}
               </div>
-              <div className={css.footerActions}>
-                {renderSlot('sidebar.footer.action', { wide })}
-              </div>
               <PanelMore
                 panels={panels}
                 unpinned={unpinned}
                 hasEntryActions={hasEntryActions}
                 hasMoreActions={moreActions.length > 0}
+                hasFooterActions={footerActions.length > 0}
                 rail={false}
                 usePanelInfo={usePanelInfo}
                 selectPanel={selectPanel}
@@ -492,12 +498,24 @@ export function SidebarRoot({
           )
           : (
             <>
-              <div className={css.footerActions}>
-                {renderSlot('sidebar.footer.action', { wide })}
-              </div>
               <div className={css.settingsArea}>
                 {renderSlot('sidebar.settings', { wide })}
               </div>
+              <PanelMore
+                panels={panels}
+                unpinned={unpinned}
+                hasEntryActions={hasEntryActions}
+                hasMoreActions={moreActions.length > 0}
+                hasFooterActions={footerActions.length > 0}
+                rail
+                usePanelInfo={usePanelInfo}
+                selectPanel={selectPanel}
+                startSession={startSession}
+                setPinned={setPinned}
+                trackEntryClick={trackEntryClick}
+                renderSlot={renderSlot}
+                t={t}
+              />
             </>
           )}
       </div>

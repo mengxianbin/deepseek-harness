@@ -46,6 +46,7 @@ function mountColumn(): { column: HTMLElement; quiet: () => boolean } {
       useEntryActions={selector => selector(false)} setPinned={vi.fn()}
       useShortcuts={selector => selector([])}
       useMoreActions={selector => selector([])}
+      useFooterActions={selector => selector([])}
       useResource={useResource} useWorkspaces={neverHook}
       {...allowAllAccess}
       startSession={vi.fn()} toggleSidebar={vi.fn()} trackEntryClick={vi.fn()} t={t}

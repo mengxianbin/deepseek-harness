@@ -339,6 +339,12 @@ export function Menu({ open, anchor, items = [], children, selectedId, selectedI
       // The portaled list is outside the anchor subtree; check both.
       if (rootRef.current?.contains(e.target) === true) return
       if (listRef.current?.contains(e.target) === true) return
+      // FORK footer-into-more-1031: a row may portal an aria-modal dialog to
+      // the body (the update / remote-access panels). That dialog is not part
+      // of either subtree, but pointerdowns inside it belong to the dialog —
+      // dismissing here would unmount the row's own panel mid-interaction,
+      // before its click handler could run.
+      if (e.target instanceof Element && e.target.closest('[role="dialog"][aria-modal="true"]') !== null) return
       onClose()
     }
     const onKeyDown = (e: KeyboardEvent) => {

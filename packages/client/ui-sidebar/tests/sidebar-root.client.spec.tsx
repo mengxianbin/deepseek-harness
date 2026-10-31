@@ -36,10 +36,12 @@ type AttentionSnapshot = Parameters<Parameters<SidebarRootComponentProps['useSes
 const noAttention: AttentionSnapshot = new Map()
 const useSessionStatus: SidebarRootComponentProps['useSessionStatus'] = selector => selector(noAttention)
 
-function mountShell({ collapsed = false, width = 300, shortcuts = [] }: {
+function mountShell({ collapsed = false, width = 300, shortcuts = [], footerActions = ['update'] }: {
   collapsed?: boolean
   width?: number
   shortcuts?: readonly ShortcutCatalogEntry[]
+  /** Registration ids of the folded footer-action seat (empty = no occupant). */
+  footerActions?: readonly string[]
 } = {}) {
   const startSession = vi.fn()
   const toggleSidebar = vi.fn()
@@ -56,6 +58,7 @@ function mountShell({ collapsed = false, width = 300, shortcuts = [] }: {
       useSessions={neverHook} useSessionStatus={useSessionStatus} useSessionRetainInfo={neverHook}
       usePanelInfo={usePanelInfo} selectPanel={() => {}} usePanels={selector => selector([])} useShortcuts={selector => selector(shortcuts)}
       useMoreActions={selector => selector([])}
+      useFooterActions={selector => selector(footerActions)}
       useEntryPins={selector => selector([])} useEntryActions={selector => selector(false)} setPinned={() => {}}
       useResource={useResource} useWorkspaces={neverHook}
       {...allowAllAccess}
@@ -126,6 +129,7 @@ describe('SidebarRoot shell', () => {
       {...allowAllAccess}
       usePanels={select => select([])} useEntryPins={select => select([])} useEntryActions={select => select(false)}
       useMoreActions={select => select([])}
+      useFooterActions={select => select([])}
       useShortcuts={select => select([shortcut])} />)
     const button = screen.getByRole('button', { name: 'New session' })
     expect(button.getAttribute('aria-keyshortcuts')).toBe('Control+N')
@@ -170,6 +174,7 @@ describe('SidebarRoot shell', () => {
       useEntryActions={selector => selector(false)} setPinned={vi.fn()}
       useShortcuts={selector => selector([])}
       useMoreActions={selector => selector([])}
+      useFooterActions={selector => selector([])}
       useResource={useResource} useWorkspaces={neverHook}
       {...allowAllAccess}
       useRemoteAccess={useRemoteAccess}
@@ -202,6 +207,7 @@ describe('SidebarRoot shell', () => {
       useSessions={neverHook} useSessionStatus={useSessionStatus} useSessionRetainInfo={neverHook}
       usePanelInfo={usePanelInfo} selectPanel={() => {}} usePanels={selector => selector([])} useShortcuts={selector => selector([])}
       useMoreActions={selector => selector([])}
+      useFooterActions={selector => selector([])}
       useEntryPins={selector => selector([])} useEntryActions={selector => selector(false)} setPinned={() => {}}
       useResource={useResource} useWorkspaces={neverHook}
       {...allowAllAccess}
@@ -230,6 +236,7 @@ describe('SidebarRoot shell', () => {
       useSessions={neverHook} useSessionStatus={useSessionStatus} useSessionRetainInfo={neverHook}
       usePanelInfo={usePanelInfo} selectPanel={() => {}} usePanels={selector => selector([])} useShortcuts={selector => selector([])}
       useMoreActions={selector => selector([])}
+      useFooterActions={selector => selector([])}
       useEntryPins={selector => selector([])} useEntryActions={selector => selector(false)} setPinned={() => {}}
       useResource={useResource} useWorkspaces={neverHook}
       {...allowAllAccess}
@@ -250,6 +257,7 @@ describe('SidebarRoot shell', () => {
       useSessions={neverHook} useSessionStatus={useSessionStatus} useSessionRetainInfo={neverHook}
       usePanelInfo={usePanelInfo} selectPanel={() => {}} usePanels={selector => selector([])} useShortcuts={selector => selector([])}
       useMoreActions={selector => selector([])}
+      useFooterActions={selector => selector([])}
       useEntryPins={selector => selector([])} useEntryActions={selector => selector(false)} setPinned={() => {}}
       useResource={useResource} useWorkspaces={neverHook}
       {...allowAllAccess}
@@ -270,10 +278,36 @@ describe('SidebarRoot shell', () => {
     expect(b.regionOwner().wide).toBe(true)
     // The settings seat rides the same wide flag (ui-settings renders the row).
     expect(b.settingsOwner().wide).toBe(true)
-    expect(b.footerActionOwner().wide).toBe(true)
     // Expanded: the request is a no-op (no accidental collapse).
     b.regionOwner().expandSidebar()
     expect(b.toggleSidebar).not.toHaveBeenCalled()
+  })
+
+  it('folds the footer-action seat into the ⋯ menu instead of the foot row', () => {
+    const b = mountShell()
+    // FORK footer-into-more-1031: no occupant renders beside Settings — the
+    // seat only exists inside the open menu, always in wide row form.
+    expect(screen.queryByTestId('footer-action-seat')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'More' }))
+    expect(b.footerActionOwner().wide).toBe(true)
+    expect(screen.getByTestId('footer-action-seat')).toBeTruthy()
+    // Both action seats share the group; the separator renders above them.
+    expect(screen.getByTestId('more-action-seat')).toBeTruthy()
+    expect(screen.getAllByRole('separator').length).toBeGreaterThan(0)
+  })
+
+  it('draws the action-group separator while either action seat has registrations', () => {
+    cleanup()
+    const withFooterOnly = mountShell({ footerActions: ['update'] })
+    fireEvent.click(screen.getByRole('button', { name: 'More' }))
+    expect(withFooterOnly.footerActionOwner().wide).toBe(true)
+    cleanup()
+    // No registrants in either seat: the group (and its separator) is gone.
+    mountShell({ footerActions: [] })
+    fireEvent.click(screen.getByRole('button', { name: 'More' }))
+    expect(screen.queryByTestId('footer-action-seat')).toBeNull()
+    expect(screen.queryByTestId('more-action-seat')).toBeNull()
+    expect(screen.queryByRole('separator')).toBeNull()
   })
 
   it('keeps the region mounted through collapse and expands on its request', () => {
@@ -285,8 +319,11 @@ describe('SidebarRoot shell', () => {
     vi.advanceTimersByTime(200)
     b.rerender({})
     expect(b.regionOwner().wide).toBe(false)
-    expect(b.footerActionOwner().wide).toBe(false)
     expect(screen.getByTestId('region')).toBeTruthy()
+    // FORK footer-into-more-1031: in the rail the folded seat renders from
+    // the foot's ⋯ menu — still wide row form (the menu body is state-independent).
+    fireEvent.click(screen.getByRole('button', { name: 'More' }))
+    expect(b.footerActionOwner().wide).toBe(true)
     b.regionOwner().expandSidebar()
     expect(b.toggleSidebar).toHaveBeenCalledOnce()
   })
@@ -304,6 +341,7 @@ describe('SidebarRoot shell', () => {
       useSessions={neverHook} useSessionStatus={useSessionStatus} useSessionRetainInfo={neverHook}
       usePanelInfo={usePanelInfo} selectPanel={() => {}} usePanels={selector => selector([])} useShortcuts={selector => selector([])}
       useMoreActions={selector => selector([])}
+      useFooterActions={selector => selector([])}
       useEntryPins={selector => selector([])} useEntryActions={selector => selector(false)} setPinned={() => {}}
       useResource={useResource} useWorkspaces={neverHook}
       {...allowAllAccess}

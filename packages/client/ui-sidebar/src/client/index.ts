@@ -81,6 +81,18 @@ export function apply(ctx: ClientContext): void {
   }
   ctx.effect(() => ctx.slots.subscribe('sidebar.more.action', syncMoreActions), 'ui-sidebar: more-action entries')
 
+  // FORK footer-into-more-1031: the footer-action seat (e.g. the update
+  // trigger) folds into the same ⋯ menu, so the shell needs its occupancy
+  // too — the group separator draws while EITHER action seat has rows.
+  const footerActions = createSnapshotStore<readonly string[]>([])
+  const syncFooterActions = (): void => {
+    const next = ctx.slots.entriesOfSlot('sidebar.footer.action').map(({ options }) => String(options.id))
+    const previous = footerActions.getSnapshot()
+    if (previous.length === next.length && previous.every((id, index) => id === next[index])) return
+    footerActions.set(next)
+  }
+  ctx.effect(() => ctx.slots.subscribe('sidebar.footer.action', syncFooterActions), 'ui-sidebar: footer-action entries')
+
   const injectProps = (): SidebarRootInjected => ({
     // The shell's New Session button rides the Workspace UI's shared action
     // (current Session Workspace, then recent Workspace).
@@ -89,7 +101,7 @@ export function apply(ctx: ClientContext): void {
     selectPanel: (id) => { ctx.layout.selectPanel(id) },
     setPinned: panelPins.setPinned,
     trackEntryClick: (attributes) => { ctx.get('productAnalytics')?.track('sidebar_menu_click', attributes) },
-    hooks: { panels, shortcuts: ctx.shortcuts.catalog, entryPins: panelPins.unpinned, entryActions, moreActions },
+    hooks: { panels, shortcuts: ctx.shortcuts.catalog, entryPins: panelPins.unpinned, entryActions, moreActions, footerActions },
   })
   ctx.slots.inject('sidebar', () => ctx.slots.register({
     name: 'sidebar',
@@ -118,4 +130,5 @@ export function apply(ctx: ClientContext): void {
   }, HeaderLeadingControls))
   syncPanels()
   syncMoreActions()
+  syncFooterActions()
 }
