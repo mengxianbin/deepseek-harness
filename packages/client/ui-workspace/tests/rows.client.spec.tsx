@@ -583,23 +583,87 @@ describe('workspace browser rows', () => {
     view.unmount()
   })
 
-  it('ranks the wake-up glyph over the unread completion, and both over the stale ring', () => {
+  it('ranks the wake-up glyph over the unread completion, and rings the last-known state when confirmation drops', () => {
     const wake = renderStatusRow({ completed: true, pendingWakeup: true })
     expect(screen.getByRole('treeitem').querySelector('[data-status-glyph="wakeup"]')).not.toBeNull()
     expect(screen.getByRole('treeitem').querySelector('[data-state="done"]')).toBeNull()
     expect(screen.getByText('待唤醒')).toBeTruthy()
     wake.unmount()
 
+    // 未知不吞已知 (collab step3 §5.1, q5): an unreadable confirmation rings
+    // the last-known state instead of replacing it — a confirmed-nothing row
+    // keeps its idle dot inside the dashed ring.
     const stale = renderStatusRow({ statusStale: true })
-    expect(screen.getByRole('treeitem').querySelector('[data-state="stale"]')).not.toBeNull()
-    expect(screen.getByText('状态未同步')).toBeTruthy()
+    const staleRow = screen.getByRole('treeitem')
+    expect(staleRow.querySelector('[data-state="idle"]')).not.toBeNull()
+    expect(staleRow.querySelector('[data-stale-kind="connection"]')).not.toBeNull()
+    expect(staleRow.querySelector('[data-state="stale"]')).toBeNull()
+    expect(screen.getByText('连接中断：显示为最后已知态（空闲），不可信')).toBeTruthy()
     stale.unmount()
 
-    // A known signal survives the outage: the reminder stays, no dashed ring.
+    // A known signal stays painted under the ring.
     const known = renderStatusRow({ completed: true, statusStale: true })
     expect(screen.getByRole('treeitem').querySelector('[data-state="done"]')).not.toBeNull()
-    expect(screen.getByRole('treeitem').querySelector('[data-state="stale"]')).toBeNull()
+    expect(screen.getByRole('treeitem').querySelector('[data-stale-kind="connection"]')).not.toBeNull()
     known.unmount()
+
+    // The heartbeat variant names the interruption's age (第三通道, 件C4).
+    const beat = renderStatusRow({ running: true, heartbeatStale: true, heartbeatStaleSeconds: 45 })
+    expect(screen.getByRole('treeitem').querySelector('[data-stale-kind="heartbeat"]')).not.toBeNull()
+    expect(screen.getByText('心跳中断 45s：显示为最后已知态（进行中），不可信')).toBeTruthy()
+    beat.unmount()
+  })
+
+  it('carries the shape channel beside the dot: check for the pass, bang for the failed stop (q3-visual)', () => {
+    const pass = renderStatusRow({ completed: true })
+    let row = screen.getByRole('treeitem')
+    expect(row.querySelector('[data-state="done"]')).not.toBeNull()
+    expect(row.querySelector('[data-status-mark="check"]')?.textContent).toBe('✓')
+    pass.unmount()
+
+    const failed = renderStatusRow({ completed: true, completionOutcome: 'failed' })
+    row = screen.getByRole('treeitem')
+    expect(row.querySelector('[data-state="error"]')).not.toBeNull()
+    expect(row.querySelector('[data-status-mark="bang"]')?.textContent).toBe('!')
+    failed.unmount()
+
+    // A queued wake-up rides secondary; the shape stays on the primary cell.
+    const wakeup = renderStatusRow({ completed: true, completionOutcome: 'failed', pendingWakeup: true })
+    row = screen.getByRole('treeitem')
+    expect(row.querySelector('[data-status-mark="bang"]')).not.toBeNull()
+    expect(screen.getByText('待唤醒')).toBeTruthy()
+    wakeup.unmount()
+  })
+
+  it('shows the row-end 已阅 check while the mark stands (点名不改态, q4-readmark)', () => {
+    const marked = renderStatusRow({ completed: true, readMarked: true })
+    let row = screen.getByRole('treeitem')
+    // The signal dot keeps its cell; the check rides the row end.
+    expect(row.querySelector('[data-state="done"]')).not.toBeNull()
+    expect(screen.getByLabelText('已读')).toBeTruthy()
+    marked.unmount()
+
+    const fresh = renderStatusRow({ completed: true })
+    row = screen.getByRole('treeitem')
+    expect(screen.queryByLabelText('已读')).toBeNull()
+    fresh.unmount()
+  })
+
+  it('carries the done receipt’s 判据自证 on the hover card (件A, step2 §二)', () => {
+    vi.useFakeTimers()
+    try {
+      const receipt = renderStatusRow({
+        completed: true,
+        deliverableReceipt: { verdict: 'pass', summary: 'commit 1a2b3c4; gates green', evidence: ['1a2b3c4', 'build:lib'] },
+      })
+      fireEvent.pointerEnter(screen.getByRole('treeitem').parentElement as HTMLElement)
+      act(() => { vi.advanceTimersByTime(800) })
+      expect(screen.getByText('commit 1a2b3c4; gates green')).toBeTruthy()
+      expect(screen.getByText('1a2b3c4 · build:lib')).toBeTruthy()
+      receipt.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('keeps background jobs behind live activity and descendant activity', () => {
@@ -1634,11 +1698,14 @@ describe('session row decoration seats', () => {
     expect(renderSlot).not.toHaveBeenCalledWith('sidebar.session.row.leading', expect.anything())
   })
 
-  it('keeps the stale ring in the leading cell instead of offering the seat', () => {
+  it('keeps the ringed last-known dot in the leading cell instead of offering the seat', () => {
     const renderSlot = seatSpy()
     renderRow({ ...idle, statusStale: true }, renderSlot)
     const row = screen.getByRole('treeitem')
-    expect(row.firstElementChild?.querySelector('[data-state="stale"]')).toBeTruthy()
+    // 未知不吞已知 (q5): even the confirmed-nothing dot holds the cell while
+    // ringed — the unreadable overlays, never vacates, the known.
+    expect(row.firstElementChild?.querySelector('[data-state="idle"]')).toBeTruthy()
+    expect(row.firstElementChild?.querySelector('[data-stale-kind="connection"]')).toBeTruthy()
     expect(row.querySelector('[data-seat="sidebar.session.row.leading"]')).toBeNull()
     expect(renderSlot).not.toHaveBeenCalledWith('sidebar.session.row.leading', expect.anything())
   })
@@ -1689,7 +1756,10 @@ describe('session row decoration seats', () => {
       expect(renderSlot).toHaveBeenCalledWith('sidebar.session.row.hover', { sessionId: idle.id })
       const section = document.querySelector('[data-seat="sidebar.session.row.hover"]')
       expect(section).toBeTruthy()
-      expect(section?.previousElementSibling?.textContent).toBe('刚刚')
+      // The 属性缺省弱提示 line sits between the time and the hover seat
+      // (collab step3 §6.3, q6-attr): default placement named in gray.
+      expect(section?.previousElementSibling?.textContent).toBe('优先级 P2（默认）属性未读到，按默认摆位')
+      expect(section?.previousElementSibling?.previousElementSibling?.textContent).toBe('刚刚')
       expect(section?.nextElementSibling?.textContent).toBe('空闲')
     } finally {
       vi.useRealTimers()

@@ -14,7 +14,7 @@
  * are slot entries with their own behavior, so this component threads no
  * action callbacks and hosts no action surface.
  */
-import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
   AnimatedRows, Button, HoverCardGroup, IconArchiveCheckOutlineRegular, IconArchiveOffOutlineRegular, IconArchiveOutlineRegular,
@@ -31,9 +31,9 @@ import { workspaceDisplayTitle } from '@deepseek-ai/dsh-api-workspace-controller
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkspaceBrowserProps } from '../contract/slots.ts'
-import type { ArchivedFilter, GroupNode, SessionNode, SessionOrderBy, SessionRowState } from '../tree.ts'
+import type { ArchivedFilter, GroupNode, QueueSegment, SessionNode, SessionOrderBy, SessionRowState } from '../tree.ts'
 import {
-  deriveFlat, deriveGroups, deriveSearchResults, orderByRecency, owningGroupKey, owningParentFolder,
+  deriveFlat, deriveGroups, deriveQueue, deriveSearchResults, orderByRecency, owningGroupKey, owningParentFolder,
   pinCurrentBlank, reconcileManualOrder, sessionMemberIds, UNGROUPED_KEY,
 } from '../tree.ts'
 import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
@@ -322,6 +322,68 @@ type SessionTreeProps = Pick<
   onSessionRevealed: (sessionId: SessionId) => void
 }
 
+/**
+ * FORK dsh-local (collab-step4b-c1, marker: queueSegment): the hard
+ * 「要我拿主意」 top segment (collab step3 §一, q1-placement). P0
+ * awaiting-interaction rows lead P1 unread failed stops; each tier's label
+ * rides the segment head, never the rows (step3 §3.2 档位标只在段头). The
+ * empty segment stays visible with its 「无待办」 line (step3 判据①.4 空段
+ * 可见不藏), and queued rows render without drag — the segment's order is the
+ * state's, not the user's.
+ */
+/** Props of the hard 「要我拿主意」 top segment, shared by the grouped and flat bodies. */
+type QueueSectionProps = {
+  queue: QueueSegment
+  currentId: string | undefined
+  onOpen: (id: SessionId) => void
+  onSessionRenameRequest: SessionTreeProps['onSessionRenameRequest']
+  renderSlot: SessionTreeProps['renderSlot']
+  home: string | undefined
+  t: SessionTreeProps['t']
+  watchSessionJobs: SessionTreeProps['watchSessionJobs']
+  revealSessionId?: SessionId | undefined
+  onSessionRevealed: SessionTreeProps['onSessionRevealed']
+} & Pick<WorkspaceBrowserProps, 'useSessionAccess'>
+
+function QueueSection({ queue, currentId, onOpen, onSessionRenameRequest, renderSlot, home, t, watchSessionJobs,
+  revealSessionId, onSessionRevealed, useSessionAccess }: QueueSectionProps) {
+  const now = Date.now()
+  return (
+    <div className={css.queueSection} data-row-key="queue" role="tree" aria-label={t('queue.title')}>
+      <div className={css.queueHeader}>
+        <span className={css.queueTitle}>{t('queue.title')}</span>
+      </div>
+      {queue.tiers.length === 0
+        ? <div className={css.queueEmpty}>{t('queue.empty')}</div>
+        : queue.tiers.map(tier => (
+          <Fragment key={tier.tier}>
+            <div className={css.queueTier} data-row-key={`queue-tier-${tier.tier}`}>
+              {t(tier.tier === 'p0' ? 'queue.tier.p0' : 'queue.tier.p1')}
+            </div>
+            {tier.sessions.map(node => (
+              <SessionNodeItem
+                key={node.id}
+                node={node}
+                currentId={currentId}
+                now={now}
+                onOpen={onOpen}
+                onRenameRequest={onSessionRenameRequest}
+                onReveal={node.id === revealSessionId
+                  ? () => { onSessionRevealed(node.id) }
+                  : undefined}
+                renderSlot={renderSlot}
+                home={home}
+                t={t}
+                watchSessionJobs={watchSessionJobs}
+                useSessionAccess={useSessionAccess}
+              />
+            ))}
+          </Fragment>
+        ))}
+    </div>
+  )
+}
+
 /** The list-empty placeholder — a glyph over the text; the archived-only view names its filter and offers the way back. */
 function EmptySessions({ rowState, onLeaveArchivedOnly, t }: Pick<SessionTreeProps, 'rowState' | 'onLeaveArchivedOnly' | 't'>) {
   const archivedOnly = rowState.archivedFilter === 'only'
@@ -461,12 +523,19 @@ function SessionTree({
     return [...workspaces.map(workspace => workspace.workspaceId), UNGROUPED_KEY]
       .filter(key => groupExpansion[key] ?? ancestorKeys.has(key))
   }, [groupExpansion, parents, workspaces])
+  // FORK dsh-local (collab-step4b-c1, marker: queueSegment): the hard
+  // 「要我拿主意」 segment owns its rows; the groups below drop them (and their
+  // counts) so each queued Session shows once, at the top (step3 §一).
+  const queue = useMemo(
+    () => deriveQueue(list, statuses, rowState.archivedSessionIds),
+    [list, statuses, rowState.archivedSessionIds],
+  )
   const groups = useMemo(
     () => deriveGroups(list, workspaces, rowState, statuses, {
       expandedGroups,
       ungroupedOrder: ungroupedSessionIds,
-    }),
-    [list, workspaces, rowState, statuses, expandedGroups, ungroupedSessionIds],
+    }, queue.queued),
+    [list, workspaces, rowState, statuses, expandedGroups, ungroupedSessionIds, queue.queued],
   )
   useEffect(() => {
     for (let key = revealGroup; key !== undefined; key = parents.get(key)) {
@@ -764,6 +833,24 @@ function SessionTree({
   const groupRows = rootGroups.map(group => renderGroup(group, 0))
   return (
     <HoverCardGroup className={clsx(css.treeBody, css.wide)} containerRef={treeBodyRef}>
+      {/* FORK dsh-local (collab-step4b-c1, marker: queueSegment): the hard
+          「要我拿主意」 segment leads the list (队列段恒在置顶之前) and stays
+          outside the animated list — its rows are state-owned, not reorderable.
+          The list-start drop marker follows it: a workspace drop lands before
+          the first workspace, not before the queue. */}
+      <QueueSection
+        queue={queue}
+        currentId={current}
+        onOpen={open}
+        onSessionRenameRequest={onSessionRenameRequest}
+        renderSlot={renderSlot}
+        home={home}
+        t={t}
+        watchSessionJobs={watchSessionJobs}
+        revealSessionId={revealSessionId}
+        onSessionRevealed={onSessionRevealed}
+        useSessionAccess={useSessionAccess}
+      />
       {workspaceDropAtListStart && <span className={css.listTopDropIndicator} aria-hidden="true" />}
       <AnimatedRows
         className={clsx(css.list, workspaceDropAtListStart && css.listTopDropActive)}
@@ -812,9 +899,19 @@ function FlatList({
 }) {
   const panelActive = usePanelInfo(info => info.activePanelId !== null)
   const statuses = useSessionStatus(s => s)
-  const rows = useMemo(
+  // FORK dsh-local (collab-step4b-c1, marker: queueSegment): the flat view
+  // carries the same hard top segment; its rows leave the flat flow below.
+  const queue = useMemo(
+    () => deriveQueue(list, statuses, rowState.archivedSessionIds),
+    [list, statuses, rowState.archivedSessionIds],
+  )
+  const allRows = useMemo(
     () => deriveFlat(list, sessionIds, rowState, statuses),
     [list, sessionIds, rowState, statuses],
+  )
+  const rows = useMemo(
+    () => queue.queued.size === 0 ? allRows : allRows.filter(row => !queue.queued.has(row.id)),
+    [allRows, queue.queued],
   )
   const [drag, setDrag] = useState<DragState | null>(null)
   const dropCommitted = useRef(false)
@@ -832,6 +929,21 @@ function FlatList({
   const now = Date.now()
   return (
     <HoverCardGroup className={clsx(css.treeBody, css.wide)}>
+      {/* FORK dsh-local (collab-step4b-c1, marker: queueSegment): the flat view
+          leads with the same hard segment; its rows leave the flow below. */}
+      <QueueSection
+        queue={queue}
+        currentId={currentId}
+        onOpen={open}
+        onSessionRenameRequest={onSessionRenameRequest}
+        renderSlot={renderSlot}
+        home={home}
+        t={t}
+        watchSessionJobs={watchSessionJobs}
+        revealSessionId={revealSessionId}
+        onSessionRevealed={onSessionRevealed}
+        useSessionAccess={useSessionAccess}
+      />
       <AnimatedRows
         className={clsx(css.list, css.flatList)}
         role="tree"
@@ -840,7 +952,9 @@ function FlatList({
         ready={list.phase === 'ready' && workspaceReady && drag === null}
         resetKey={animationResetKey}
       >
-        {rows.length === 0 && (
+        {/* The empty placeholder names a list with nothing at all — a list
+            emptied into the queue segment is not empty. */}
+        {allRows.length === 0 && (
           <EmptySessions rowState={rowState} onLeaveArchivedOnly={onLeaveArchivedOnly} t={t} />
         )}
         {rows.map((node) => {

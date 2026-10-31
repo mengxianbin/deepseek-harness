@@ -905,7 +905,11 @@ describe('WorkspaceBrowser', () => {
     rerender(b, { useSessionStatus: status('session-7', {
       pendingInteraction: { key: 'question:1', kind: 'plan-review', sessionId: sid('session-7') } as SessionPendingInteraction,
     }) })
-    expectVisible(7)
+    // FORK dsh-local (collab-step4b-c1): an awaiting-interaction row leaves
+    // its group for the hard top segment and leads the list there; the group
+    // keeps the rows the watermark shows (队列段恒在置顶之前).
+    expect(screen.getAllByRole('treeitem').map(row => within(row).getByText(/^(alpha|session-\d+)$/u).textContent))
+      .toEqual(['session-7', 'alpha', ...items.slice(0, 5).map(item => item.displayTitle)])
     rerender(b, { useSessionStatus: status('session-8', { completionUnread: true }) })
     expectVisible(8)
     fireEvent.click(screen.getByRole('button', { name: '展开其余 4 个会话' }))
@@ -959,8 +963,13 @@ describe('WorkspaceBrowser', () => {
       ])),
     })
     expect(screen.queryByText('session-6')).toBeNull()
-    for (const id of ['session-53', 'session-55', 'session-56', 'session-57']) expect(screen.queryByText(id)).toBeNull()
+    for (const id of ['session-53', 'session-55', 'session-56']) expect(screen.queryByText(id)).toBeNull()
+    // FORK dsh-local (collab-step4b-c1): the awaiting-interaction row leaves
+    // the capped group and renders in the hard top segment instead — 要我拿主意
+    // stays reachable even past the automatic-raise ceiling.
+    expect(screen.getByText('session-57')).toBeTruthy()
     rerender(b, { useSessionStatus: running('session-50', 'session-55') })
+    expect(screen.queryByText('session-57')).toBeNull()
     expect(screen.getByText('session-50')).toBeTruthy()
     expect(screen.queryByText('session-51')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '展开其余 10 个会话' }))

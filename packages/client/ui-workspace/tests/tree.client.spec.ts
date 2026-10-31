@@ -11,8 +11,10 @@ import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { SessionProjectionSnapshot } from '@deepseek-ai/dsh-api-session-controller/client'
 import {
   type ArchivedFilter,
-  deriveFlat, deriveGroups, deriveSearchResults, orderByRecency, owningGroupKey, owningParentFolder,
-  pinCurrentBlank, reconcileManualOrder, sessionMemberIds, visibleSessionIds, workspaceLabel, UNGROUPED_KEY,
+  compareRestingRows, deriveFlat, deriveGroups, deriveQueue, deriveSearchResults, orderByRecency,
+  owningGroupKey, owningParentFolder,
+  pinCurrentBlank, reconcileManualOrder, sessionMemberIds, visibleSessionIds, workspaceLabel,
+  UNGROUPED_KEY,
 } from '../src/client/tree.ts'
 import { createWorkspaceViewStore } from '../src/client/stores.ts'
 
@@ -1001,4 +1003,67 @@ it('leaves unnamed history titles empty for locale-owned row labels', () => {
   item.displayTitle = 'Default workspace'
   const sessions = list(item)
   expect(deriveFlat(sessions, [item.id], noRows, noAttention)[0]?.title).toBe('')
+})
+
+describe('deriveQueue (collab step3 §一, q1-placement)', () => {
+  it('leads P0 awaiting-interaction over P1 unread failed stops, each by recency', () => {
+    const sessions = list(
+      summary('failed-old', 10), summary('failed-new', 20),
+      summary('ask-old', 5), summary('ask-new', 8),
+      summary('resting', 30),
+    )
+    const statuses: SessionStatusSnapshot = new Map([
+      [sid('failed-old'), status(undefined, { completionUnread: true, completionOutcome: 'failed' })],
+      [sid('failed-new'), status(undefined, { completionUnread: true, completionOutcome: 'failed' })],
+      [sid('ask-old'), status({ key: 'question:1', kind: 'question', sessionId: sid('ask-old') } as SessionPendingInteraction)],
+      [sid('ask-new'), status({ key: 'question:2', kind: 'question', sessionId: sid('ask-new') } as SessionPendingInteraction)],
+      [sid('resting'), status(undefined)],
+    ])
+    const queue = deriveQueue(sessions, statuses, [])
+    expect(queue.tiers.map(tier => tier.tier)).toEqual(['p0', 'p1'])
+    expect(queue.tiers[0]!.sessions.map(node => node.id)).toEqual([sid('ask-new'), sid('ask-old')])
+    expect(queue.tiers[1]!.sessions.map(node => node.id)).toEqual([sid('failed-new'), sid('failed-old')])
+    expect(queue.queued).toEqual(new Set([sid('ask-old'), sid('ask-new'), sid('failed-old'), sid('failed-new')]))
+  })
+
+  it('skips archived and blank rows, and a clean completion never queues', () => {
+    const blankRow = { ...summary('blank', 40), blank: true }
+    const sessions = list(
+      blankRow, summary('archived-ask', 30), summary('clean', 20), summary('ask', 10),
+    )
+    const statuses: SessionStatusSnapshot = new Map([
+      [sid('archived-ask'), status({ key: 'question:1', kind: 'question', sessionId: sid('archived-ask') } as SessionPendingInteraction)],
+      [sid('clean'), status(undefined, { completionUnread: true, completionOutcome: 'completed' })],
+      [sid('ask'), status({ key: 'question:2', kind: 'question', sessionId: sid('ask') } as SessionPendingInteraction)],
+    ])
+    const queue = deriveQueue(sessions, statuses, [sid('archived-ask')])
+    expect(queue.tiers.map(tier => tier.tier)).toEqual(['p0'])
+    expect(queue.tiers[0]!.sessions.map(node => node.id)).toEqual([sid('ask')])
+    expect(queue.queued).toEqual(new Set([sid('ask')]))
+  })
+
+  it('drops queued rows from their groups and counts, leaving empty tiers unrendered', () => {
+    const sessions = list(summary('ask', 10), summary('resting', 5))
+    const statuses: SessionStatusSnapshot = new Map([
+      [sid('ask'), status({ key: 'question:1', kind: 'question', sessionId: sid('ask') } as SessionPendingInteraction)],
+      [sid('resting'), status(undefined)],
+    ])
+    const queue = deriveQueue(sessions, statuses, [])
+    expect(queue.tiers).toHaveLength(1)
+    const groups = deriveGroups(
+      sessions, [workspace('project', ['ask', 'resting'])], noRows, statuses, view(['project']), queue.queued,
+    )
+    expect(groups[0]!.sessionCount).toBe(1)
+    expect(groups[0]!.sessions.map(node => node.id)).toEqual([sid('resting')])
+  })
+})
+
+describe('compareRestingRows (collab step3 §6.2, q6-attr)', () => {
+  it('leads pinned rows, then the more recently active', () => {
+    const pinnedOld = { pinned: true, updatedAt: 1 }
+    const plainNew = { pinned: false, updatedAt: 10 }
+    expect(compareRestingRows(pinnedOld, plainNew)).toBeLessThan(0)
+    expect(compareRestingRows(plainNew, pinnedOld)).toBeGreaterThan(0)
+    expect(compareRestingRows({ pinned: false, updatedAt: 10 }, { pinned: false, updatedAt: 2 })).toBeLessThan(0)
+  })
 })

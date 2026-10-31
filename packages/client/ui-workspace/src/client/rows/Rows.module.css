@@ -441,6 +441,24 @@
   color: #CFD3D6;
 }
 
+/* 属性缺省弱提示 (collab step3 §6.3, q6-attr): the hover card names the
+   default placement while the attribute plane carries no supply — weak gray,
+   never a ring (属性缺 ≠ 会话态不可信). */
+.hoverAttributes {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.hoverAttributesNote {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  opacity: 0.75;
+}
+
 .hoverStatus {
   display: flex;
   align-items: center;
@@ -448,6 +466,23 @@
   font-size: 12px;
   line-height: 20px;
   color: #ADB2B8;
+}
+
+/* The done receipt's 判据自证 on the hover card (collab step2 §二, step4b 件A):
+   the summary reads as the close-out claim, the anchors as its proof. */
+.hoverReceipt {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.hoverReceiptEvidence {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
 }
 
 /* Archive glyph rides the status row's text color; slight inset aligns it with the 6px status dots. */
@@ -495,4 +530,62 @@
     animation: none;
     transition: none;
   }
+}
+
+/* 已阅 check (collab step3 §四, q4-readmark): a secondary row-end receipt of
+   opening a row that showed signals. The signals stay lit (点名不改态); any new
+   event drops this mark, which stays muted so it never outshouts the dot. */
+.readMark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  color: var(--dsw-alias-label-caption);
+}
+
+/* Shape-channel badge beside the status dot (collab step3 §3.1, q3-visual):
+   a superscript-weight glyph colored by the primary state, so the dot keeps
+   carrying base color while the badge carries the semantic variant. */
+.statusMark {
+  display: inline-block;
+  flex: none;
+  position: relative;
+  top: -4px;
+  margin-left: -3px;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.statusMark[data-state='done'] {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.statusMark[data-state='error'] {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.statusMark[data-state='warning'] {
+  color: var(--dsw-alias-state-warn-primary);
+}
+
+/* 未知不吞已知 (collab step3 §5.1, q5-failclosed): the last-known state's dot
+   stays painted inside an amber dashed ring — the unreadable overlays, never
+   replaces, the known. */
+.staleRing {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.staleRing::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  corner-shape: round;
+  border: 1px dashed var(--dsw-alias-state-warn-primary);
+  pointer-events: none;
 }

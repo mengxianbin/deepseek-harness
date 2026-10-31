@@ -2,6 +2,11 @@
 
 import type {} from '@deepseek-ai/dsh-agent/types'
 import type { NativeFileApplication } from '@deepseek-ai/dsh-native-command/types'
+// FORK dsh-local (collab-step4b-a, marker: doneReceipt): the done-receipt
+// event vocabulary lives with its writer (tool-present), like
+// `deliverables/presented`; this type-only import brings the module
+// augmentation into the Host projection's compilation.
+import type {} from '@deepseek-ai/dsh-tool-present/types'
 import type {
   ImageAttachmentLimits, ImageAttachmentRef, ImageMediaType,
 } from '@deepseek-ai/dsh-attachment'
@@ -24,6 +29,14 @@ declare module '@deepseek-ai/dsh-session-projection/types' {
      * (collab step2 §7.2). `null` until a turn has ended.
      */
     lastTurnOutcome: SessionLastTurnOutcome | null
+    /**
+     * The Session's latest done receipt (collab step2 §二 亮灯层, step4b 件A):
+     * folded from `deliverables/receipt` so the 待收讫 light survives a refresh
+     * and a restart; `null` until a receipt lands. Superseded by the next
+     * turn's start — new work replaces the old close-out claim — while the
+     * board row `[x]` stays the authority layer.
+     */
+    lastReceipt: SessionLastReceipt | null
     /**
      * Image-intake limits enforced by the Session prompt endpoint. Boot
      * constant, excluded from Session summary payloads: every Session shares
@@ -48,6 +61,20 @@ export type SessionLastTurnOutcomeKind = 'completed' | 'error' | 'aborted' | 'bl
 export interface SessionLastTurnOutcome {
   readonly kind: SessionLastTurnOutcomeKind
   /** Wall-clock time of the `turn/end` event that produced this record. */
+  readonly at: number
+}
+
+/** 验章 attribute of the latest done receipt: AI 初验通过, or an exception awaiting a human ruling. */
+export type SessionReceiptVerdict = 'pass' | 'exception'
+
+/** Durable record of the latest done receipt (collab step2 §二), or `null` while none stands. */
+export interface SessionLastReceipt {
+  readonly verdict: SessionReceiptVerdict
+  /** One-line 判据自证 the Session declared at close-out. */
+  readonly summary: string
+  /** Structured evidence anchors (commit hashes, gate names); absent when none were supplied. */
+  readonly evidence?: string[]
+  /** Wall-clock time of the `deliverables/receipt` event that produced this record. */
   readonly at: number
 }
 
