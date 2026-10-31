@@ -8,6 +8,7 @@
   --dsh-boot-brand: #0f1115;
 
   height: 100%;
+  position: relative; /* Anchors the FORK shell list skeleton column. */
   display: grid;
   place-items: center;
   background: var(--dsw-alias-bg-base, var(--dsh-boot-bg, Canvas));
@@ -100,4 +101,112 @@
   line-height: 18px;
   color: var(--dsw-alias-label-secondary, var(--dsh-boot-label-secondary));
   white-space: pre-wrap;
+}
+
+/* FORK dsh-local (f5-shell-skeleton, marker: data-dsh-shell-skeleton):
+   first-screen session-list placeholder column. It mirrors the live list's
+   chrome — default sidebar track (SIDEBAR_DEFAULT), the same row metrics and
+   skeleton pulse as WorkspaceBrowser's .skeletonRow — so the boot→app
+   hydration swap hands over without a visible jump. Theme tokens are not
+   guaranteed at boot (the page cannot depend on theme delivery), so every
+   color falls back to the boot palette and flips with body[data-ds-dark-theme]
+   exactly like the card above. Fixed row heights (48px) keep the placeholder
+   from shifting layout while it is up. */
+
+.skeletonColumn {
+  --dsh-shell-sidebar-fill: rgb(249, 250, 251);
+  --dsh-shell-skeleton-fill: rgb(0 0 0 / 4%);
+  --dsh-shell-column-border: rgb(0 0 0 / 12%);
+
+  position: absolute;
+  left: 0;
+  top: var(--dsh-windows-titlebar-height, 0px);
+  bottom: 0;
+  width: 280px;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  background: var(--dsw-specific-sidebar-fill, var(--dsh-shell-sidebar-fill));
+  border-right: 0.5px solid var(--dsw-alias-border-l3, var(--dsh-shell-column-border));
+}
+
+:global(body[data-ds-dark-theme]) .skeletonColumn {
+  --dsh-shell-sidebar-fill: rgb(27, 27, 28);
+  --dsh-shell-skeleton-fill: rgb(255 255 255 / 8%);
+  --dsh-shell-column-border: rgb(255 255 255 / 16%);
+}
+
+/* Below the auto-collapse breakpoint the live sidebar is an icon rail with no
+   list region, so the placeholder must vanish with it. */
+@media (max-width: 1023px) {
+  .skeletonColumn {
+    display: none;
+  }
+}
+
+.skeletonList {
+  /* Mirrors the live list's vertical start inside the root padding: logo row
+     60 + section header 36 + header margin 4. */
+  padding-top: 100px;
+}
+
+/* The Windows caption layout shortens the logo row to 40px, lifting the live
+   list by the same 20px. */
+:global([data-windows-titlebar]) .skeletonList {
+  padding-top: 80px;
+}
+
+.skeletonRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  box-sizing: border-box;
+  /* Fixed height, not min-height: the placeholder must not move layout. */
+  height: 48px;
+  padding: 6px 12px 7px;
+}
+
+.skeletonDot {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  corner-shape: round;
+}
+
+.skeletonBars {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.skeletonDot,
+.skeletonBar {
+  background: var(--dsw-alias-bg-skeleton, var(--dsh-shell-skeleton-fill));
+  animation: shell-skeleton 2s cubic-bezier(0.36, 0, 0.64, 1) infinite;
+}
+
+.skeletonBar {
+  width: 65%;
+  height: 16px;
+  border-radius: var(--dsw-radius-xs, 4px);
+}
+
+.skeletonBarWide {
+  width: 90%;
+  height: 13px;
+}
+
+@keyframes shell-skeleton {
+  0% { opacity: 1; }
+  40% { opacity: 0.6; }
+  80%, 100% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeletonDot,
+  .skeletonBar {
+    animation: none;
+  }
 }

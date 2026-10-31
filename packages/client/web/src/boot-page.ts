@@ -14,6 +14,47 @@ function div(className: string | undefined, text?: string): HTMLDivElement {
   return el
 }
 
+/**
+ * FORK dsh-local (f5-shell-skeleton, marker: data-dsh-shell-skeleton): the
+ * shell-level list skeleton column. The list skeleton used to first appear
+ * only when ui-workspace mounted (~2.4s into the plugin chain), leaving the
+ * first two seconds feedback-free; this column renders the same row shape
+ * (`data-list-state="loading"`, six fixed-height rows) from the first screen
+ * of JS instead. It lives INSIDE the boot root: `mountApp` snapshots
+ * `[data-dsh-boot].innerHTML` and hydrates over it, so only a descendant
+ * rides the atomic boot→app swap — a sibling would outlive the boot page and
+ * double-render against ui-workspace's own skeleton. The list data flow and
+ * the activation chain are untouched; ui-workspace's real
+ * `SessionListSkeleton` takes over in the same commit that removes this.
+ * Row metrics mirror `WorkspaceBrowser.module.css` `.skeletonRow` (48px row
+ * height, 16px dot, 65%/90% bars); the ~3px right-inset difference from
+ * the live scrollbar vars is imperceptible during a placeholder's lifetime.
+ */
+function buildListSkeleton(): HTMLDivElement {
+  const column = div(css.skeletonColumn)
+  column.dataset.dshShellSkeleton = ''
+  const list = div(css.skeletonList)
+  list.dataset.listState = 'loading'
+  list.setAttribute('role', 'status')
+  list.setAttribute('aria-label', 'Loading sessions…')
+  for (let i = 0; i < 6; i += 1) {
+    const row = div(css.skeletonRow)
+    row.setAttribute('aria-hidden', 'true')
+    const dot = document.createElement('span')
+    dot.className = css.skeletonDot ?? ''
+    const bars = div(css.skeletonBars)
+    const bar = document.createElement('span')
+    bar.className = css.skeletonBar ?? ''
+    const barWide = document.createElement('span')
+    barWide.className = `${css.skeletonBar ?? ''} ${css.skeletonBarWide ?? ''}`
+    bars.append(bar, barWide)
+    row.append(dot, bars)
+    list.append(row)
+  }
+  column.append(list)
+  return column
+}
+
 /** Kernel-owned page mounted below the application's root element. */
 export class BootPage {
   private readonly root: HTMLDivElement
@@ -21,6 +62,8 @@ export class BootPage {
   private readonly wordmark: HTMLDivElement
   private readonly spinner: HTMLDivElement
   private readonly hint: HTMLDivElement
+  /** FORK dsh-local (f5-shell-skeleton): first-screen list placeholder. */
+  private readonly listSkeleton: HTMLDivElement
   private readonly states = new Map<string, LoaderEntryState>()
   private readonly active = new Set<string>()
   private total = 0
@@ -40,6 +83,10 @@ export class BootPage {
     this.hint = div(css.hint, 'Loading plugins…')
     this.card.append(this.wordmark, this.spinner, this.hint)
     this.root.append(this.card)
+    // FORK dsh-local (f5-shell-skeleton): first-screen list placeholder; the
+    // boot→app hydration swap removes it together with the boot root.
+    this.listSkeleton = buildListSkeleton()
+    this.root.append(this.listSkeleton)
     container.append(this.root)
     this.updateProgress()
   }
@@ -88,6 +135,10 @@ export class BootPage {
       }
       return
     }
+    // FORK dsh-local (f5-shell-skeleton): a failure report replaces the boot
+    // card while the page stays up — the list placeholder must not keep
+    // claiming "loading" beside it.
+    this.listSkeleton.remove()
     const report = div(css.failed)
     report.append(div(css.failedTitle, 'Failed to load plugins'))
     for (const id of failed) report.append(div(css.failedItem, id))

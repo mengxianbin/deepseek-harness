@@ -84,6 +84,30 @@ describe('UI renderer plugin', () => {
     expect(records.some(record => record.target === boot)).toBe(false)
   })
 
+  // FORK dsh-local (f5-shell-skeleton, marker: data-dsh-shell-skeleton): the
+  // boot-owned list placeholder must leave in the same hydration swap that
+  // mounts the application — a leftover would double-render against
+  // ui-workspace's own skeleton, and a mismatched snapshot would warn.
+  it('swaps out the boot-owned shell list skeleton without leftovers or hydration errors', async () => {
+    const { ctx, slots } = await bench()
+    slots.register({ name: 'root' }, () => <div data-testid="root-probe" />)
+    const el = container()
+    el.innerHTML = '<div class="boot" data-dsh-boot=""><div class="card">HARNESS</div>'
+      + '<div class="skeletonColumn" data-dsh-shell-skeleton="">'
+      + '<div role="status" data-list-state="loading">'
+      + '<div aria-hidden="true"><span></span><span></span></div>'.repeat(6)
+      + '</div></div></div>'
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    act(() => { mounted.push(ctx.get('uiRenderer')!.mount(el)) })
+
+    expect(error).not.toHaveBeenCalled()
+    error.mockRestore()
+    expect(el.querySelector('[data-testid="root-probe"]')).toBeTruthy()
+    expect(el.querySelector('[data-dsh-shell-skeleton]')).toBeNull()
+    expect(el.querySelector('[data-dsh-boot]')).toBeNull()
+  })
+
   it('returns an unmount disposer', async () => {
     const { ctx, slots } = await bench()
     slots.register({ name: 'root' }, () => <div data-testid="root-probe" />)

@@ -59,3 +59,46 @@ describe('BootPage', () => {
     expect(el.childNodes).toHaveLength(0)
   })
 })
+
+// FORK dsh-local (f5-shell-skeleton, marker: data-dsh-shell-skeleton): the
+// first-screen list placeholder must ride the boot root (so the hydration
+// handoff swaps it out with the boot page instead of leaving it to double
+// render against ui-workspace's own skeleton), carry the shared
+// data-list-state="loading" probe semantics, and leave with a failure report.
+describe('BootPage shell list skeleton', () => {
+  it('renders six fixed-height rows with the shared loading marker inside the boot root', () => {
+    const { el } = mount()
+    const bootRoot = el.querySelector<HTMLElement>('[data-dsh-boot]')
+    const column = bootRoot?.querySelector<HTMLElement>('[data-dsh-shell-skeleton]')
+    expect(column).not.toBeNull()
+    const list = column!.querySelector<HTMLElement>('[data-list-state="loading"]')
+    expect(list).not.toBeNull()
+    expect(list!.getAttribute('role')).toBe('status')
+    const rows = list!.querySelectorAll('[aria-hidden="true"]')
+    expect(rows).toHaveLength(6)
+    for (const row of rows) {
+      expect(row.children).toHaveLength(2)
+    }
+  })
+
+  it('keeps the placeholder up while plugin states stay non-fatal', () => {
+    const { el, page } = mount()
+    page.setTotal(2)
+    page.setState('a', 'active')
+    page.setState('b', 'loading')
+    expect(el.querySelector('[data-dsh-shell-skeleton]')).not.toBeNull()
+  })
+
+  it('removes the placeholder when a failure report replaces the card', () => {
+    const { el, page } = mount()
+    page.setState('broken', 'failed')
+    expect(el.querySelector('[data-dsh-shell-skeleton]')).toBeNull()
+    expect(el.textContent).toContain('Failed to load plugins')
+  })
+
+  it('removes the placeholder on a terminal boot failure', () => {
+    const { el, page } = mount()
+    page.fail('web boot: module loader missing')
+    expect(el.querySelector('[data-dsh-shell-skeleton]')).toBeNull()
+  })
+})
