@@ -130,6 +130,39 @@ export interface SessionRowTrailingOwnerProps {
   readonly sessionId: SessionId
 }
 
+/**
+ * FORK archive-seal-light-1101: one Session's seal verdict as the row light
+ * reads it (contract C1, the same six-value vocabulary the archive gate fronts
+ * its click with). The lamp table that turns it green/red/dark is the design's
+ * §四 灯绿 — a different question from the gate's `isGreenSeal` 门绿, so the
+ * two stay separate tables (archive-seal-light.md §四, 两绿对照).
+ */
+export type SealLightSeal = SessionSealInfo
+
+/**
+ * FORK archive-seal-light-1101: the verdicts the row lights paint, keyed by
+ * the visible non-archived Session rows that carry one. A row absent from this
+ * map reads dark (行无数据 → 暗), and so does every row once the C1 channel
+ * fails (fail-dark, design §五 先建后联).
+ */
+export type SealLightSnapshot = ReadonlyMap<SessionId, SealLightSeal>
+
+/**
+ * FORK archive-seal-light-1101: the row-side observation channel the seal
+ * light drives, injected into the browser and threaded to its rows. `watch`
+ * registers one mounted light's row — the mounted set is exactly the id set
+ * the check requests — and returns its release; `reportRunning` carries that
+ * row's live `running` fact so a true→false flip, the moment a save can turn
+ * green, raises a check of its own. Neither call binds the Session: the row
+ * already carries its identity.
+ */
+export interface SealRowObserver {
+  /** Register a mounted light's row; the returned callback releases it. */
+  watch(sessionId: SessionId): () => void
+  /** Report the row's current running flag; true→false schedules a check. */
+  reportRunning(sessionId: SessionId, running: boolean): void
+}
+
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
     /** Directory-flow hole under the conversation empty-state picker (declared by the WorkspacePicker entry). */
@@ -258,7 +291,21 @@ export type WorkspaceBrowserInjected = {
     hostInfo: HostObservable<RemoteHostFacts>
     workspaceShortcuts: HostObservable<WorkspaceShortcutState>
     shortcuts: HostObservable<readonly ShortcutCatalogEntry[]>
+    /**
+     * FORK archive-seal-light-1101: the archive-seal verdicts (contract C1)
+     * the Session rows' lights paint — one snapshot of the rows currently
+     * carrying a verdict, republished by the store on every check. The
+     * endpoint being absent (单1 in flight) leaves it empty forever: every
+     * light stays dark, fail-dark by design (archive-seal-light.md §五).
+     */
+    sealLight: HostObservable<SealLightSnapshot>
   }
+  /**
+   * FORK archive-seal-light-1101: the row-side observation channel behind
+   * `sealLight` — the browser threads it to its rows so a mounted light
+   * joins the check's id set and its running flip raises the next one.
+   */
+  sealRows: SealRowObserver
   /** Open the browser search and focus its input. */
   requestSearch: () => void
   /** Request the existing directory picker. */

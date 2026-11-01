@@ -16,7 +16,9 @@ import type {
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
-import type { DirectoryFlowOwnerProps, WorkspaceBrowserProps } from '../src/client/contract/slots.ts'
+import type {
+  DirectoryFlowOwnerProps, SealLightSnapshot, WorkspaceBrowserProps,
+} from '../src/client/contract/slots.ts'
 import { createWorkspaceShortcutControls } from '../src/client/shortcuts.ts'
 import { createWorkspaceViewStore, FLAT_SESSION_ORDER_KEY } from '../src/client/stores.ts'
 import { UNGROUPED_KEY } from '../src/client/tree.ts'
@@ -142,6 +144,10 @@ function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
     useDirectoryFlow: bindSnapshotSelector({ getSnapshot: () => true, subscribe: () => () => {} }),
     useHostInfo: selector => selector({ home: undefined, isLoopback: true }),
     watchSessionJobs: vi.fn(() => () => {}),
+    // FORK archive-seal-light-1101: the row lamps read a dark snapshot and an
+    // inert observer unless a case mounts them with verdicts of their own.
+    useSealLight: hook(new Map() as SealLightSnapshot),
+    sealRows: { watch: vi.fn(() => () => {}), reportRunning: vi.fn() },
     renderSlot: renderDirectoryFlowOnly,
     t,
     ...overrides,

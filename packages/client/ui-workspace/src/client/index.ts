@@ -53,6 +53,9 @@ import {
   type SessionSealInfo,
 } from './session-actions/seal.ts'
 import { derive } from './session-actions/derived.ts'
+// FORK archive-seal-light-1101: the row lamps' C1 store (one handle created
+// here in apply, shared through the browser's inject face — no module-level handle).
+import { createSealLightStore } from './session-actions/seal-light.ts'
 import { ForkSessionMenuItem } from './session-actions/ForkSession.tsx'
 import { PinSessionMenuItem, PinSessionRowButton } from './session-actions/PinSession.tsx'
 import { RenameSessionMenuItem, SessionRenameDialog } from './session-actions/RenameSession.tsx'
@@ -125,6 +128,10 @@ export function apply(ctx: Context): void {
   const rowToast = createSnapshotStore<RowToastState | null>(null)
   let toastSeq = 0
   const notify = (toast: RowToast): void => { rowToast.set({ ...toast, seq: ++toastSeq }) }
+  // FORK archive-seal-light-1101: the archive-seal row lamps' store — the
+  // browser reads its verdict snapshot through the injected `sealLight` hook
+  // and threads its `sealRows` observer to the rows that mount lamps.
+  const sealLight = createSealLightStore()
   const uiWorkspace = new UiWorkspaceService(
     ctx, ctx.remote.directoryPicker, workspaces, sessions, viewInstance.actions, notify,
   )
@@ -371,7 +378,14 @@ export function apply(ctx: Context): void {
     requestAddWorkspace: shortcutControls.add,
     closeAddWorkspace: shortcutControls.closeAdd,
     setDirectoryBusy: shortcutControls.directoryBusy,
-    hooks: { directoryFlow: browserFlowSource, hostInfo, workspaceShortcuts: shortcutControls.state, shortcuts: ctx.shortcuts.catalog },
+    hooks: {
+      directoryFlow: browserFlowSource,
+      hostInfo,
+      workspaceShortcuts: shortcutControls.state,
+      shortcuts: ctx.shortcuts.catalog,
+      sealLight: sealLight.observable,
+    },
+    sealRows: sealLight.sealRows,
   })
   const pickerInjected = (): WorkspacePickerInjected => ({
     createWorkspace: input => workspaces.create(input),

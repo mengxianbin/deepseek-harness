@@ -589,3 +589,52 @@
   border: 1px dashed var(--dsw-alias-state-warn-primary);
   pointer-events: none;
 }
+
+/* The archive-seal row light (FORK archive-seal-light-1101, design §四 灯绿):
+   a lamp hung at the row's trailing edge, deliberately outside .rowResting —
+   that strip (and the trailing seat inside it) display:none while the row is
+   hovered, and this lamp's detail tooltip has to survive a hover to be read.
+   Deliberately not the leading cell either: StateDot owns that seat and the
+   lamp must read as its own channel — a bare 6px core at the row's head vs a
+   core inside a ring at the row's end. Lit green = save 收口完成 (DONE/N_A),
+   red = unsealed or unreadable (UNSEALED/UNKNOWN); NEUTRAL/LEGACY and a row
+   with no verdict render no lamp at all (fail-dark with the C1 channel). */
+.sealLight {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 20px;
+}
+
+/* The lamp's halo: present enough to read as lit, quiet enough to stay a
+   row-end badge rather than a second status dot. */
+.sealLight::before {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+  corner-shape: round;
+  opacity: 0.45;
+}
+
+.sealLight::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  corner-shape: round;
+  background: currentColor;
+}
+
+.sealLight[data-seal-tone='ready'] {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.sealLight[data-seal-tone='blocked'] {
+  color: var(--dsw-alias-state-error-primary);
+}

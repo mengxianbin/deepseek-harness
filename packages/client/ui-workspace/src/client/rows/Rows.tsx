@@ -26,8 +26,11 @@ import type { ShortcutCatalogEntry } from '@deepseek-ai/dsh-client-shortcuts/cli
 import type { StateDotState } from '@deepseek-ai/dsh-client-ui-primitives'
 import { abbreviateHomePath } from '@deepseek-ai/dsh-util-workspace-path'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
-import type { MenuOpenState, WorkspaceBrowserProps } from '../contract/slots.ts'
+import type {
+  MenuOpenState, SealLightSnapshot, SealRowObserver, WorkspaceBrowserProps,
+} from '../contract/slots.ts'
 import type { GroupNode, SearchResultNode, SessionNode } from '../tree.ts'
+import { SealLight } from './SealLight.tsx'
 import css from './Rows.module.css'
 
 /** Sidebar-owned layout values needed by row copies mounted outside the sidebar. */
@@ -824,7 +827,7 @@ export function SearchResultItem({
  */
 export function SessionNodeItem({
   node, currentId, now, onOpen, onRenameRequest, renderSlot, onReveal, drag, home, useSessionAccess,
-  t, watchSessionJobs,
+  t, watchSessionJobs, seals, sealRows,
 }: {
   node: SessionNode
   currentId: string | undefined
@@ -840,6 +843,18 @@ export function SessionNodeItem({
   home?: string | undefined
   /** Roster watcher for the row's Session; absent in direct-render tests and jobs-less compositions. */
   watchSessionJobs?: RowJobWatcher | undefined
+  /**
+   * FORK archive-seal-light-1101: the C1 verdict snapshot the row's
+   * archive-seal lamp paints from; absent in direct-render tests and
+   * compositions without the browser's inject face, where no lamp renders.
+   */
+  seals?: SealLightSnapshot | undefined
+  /**
+   * FORK archive-seal-light-1101: the row-side observation channel behind the
+   * lamp; absent alongside `seals`, so the row then neither renders a lamp nor
+   * joins the check's id set.
+   */
+  sealRows?: SealRowObserver | undefined
   t: RowTranslate
 } & Pick<WorkspaceBrowserProps, 'useSessionAccess'> & PropsRenderSlots<
   | 'sidebar.workspaces.session.menu.item'
@@ -1015,6 +1030,22 @@ export function SessionNodeItem({
           {renderSlot('sidebar.workspaces.session.row.action', { sessionId: node.id, displayTitle: row.title, blank: row.blank })}
         </span>
       </span>
+      {/* FORK archive-seal-light-1101: the archive-seal lamp hangs at the
+          row's trailing edge, AFTER the action strip and outside
+          `.rowResting` — that strip hides under a hover (and takes the
+          trailing seat inside it with it), and the lamp's detail tooltip has
+          to survive the hover to be read. Archived and blank rows render
+          neither lamp nor registration (design §六.6 归档态行不点灯), so
+          they never join the check's id set either. */}
+      {sealRows !== undefined && seals !== undefined && !row.blank && !row.archived && (
+        <SealLight
+          sessionId={node.id}
+          running={row.running}
+          seal={seals.get(node.id)}
+          sealRows={sealRows}
+          t={t}
+        />
+      )}
     </div>
   )
   return (

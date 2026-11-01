@@ -1,0 +1,124 @@
+/**
+ * The archive-seal row light (FORK archive-seal-light-1101): a lamp badge
+ * hung at a Session row's trailing edge — 「先读后归」的读面 (archive-seal-light.md
+ * §〇/§三) made one glance wide.
+ *
+ * Seat and form are both deliberate: it lives OUTSIDE `.rowResting`, because
+ * that strip (and the `sidebar.session.row.trailing` seat inside it) hides
+ * while the row is hovered on hover-capable devices, and a lamp whose detail
+ * tooltip can never be hovered is no read surface. It also never shares the
+ * leading cell: StateDot owns that seat, and the design demands visual
+ * separation — the dot is a bare 6px core at the row's head, this lamp is a
+ * ringed core at the row's end.
+ *
+ * Lamp table = design §四 (两绿对照, 刻意不同于归档门的 `isGreenSeal`):
+ * 🟢 `DONE` / `N_A` (save 收口完成 = 归档触发灯) · 🔴 `UNSEALED` / `UNKNOWN`
+ * (先处理) · dark = `NEUTRAL` / `LEGACY` / no verdict for the row — and the
+ * whole channel fails dark when contract C1's endpoint is absent or fails
+ * (单1 在途 = 当前预期常态), so an unlanded endpoint paints nothing and says
+ * nothing. Registration rides the component's mount, so an archived or blank
+ * row — which renders no lamp — never joins the check's id set either.
+ */
+import { useEffect } from 'react'
+import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { SealLightSeal, SealRowObserver, WorkspaceBrowserProps } from '../contract/slots.ts'
+import css from './Rows.module.css'
+
+/** The locale seat, prop-passed from the browser root (Rows' own alias). */
+type SealLightTranslate = WorkspaceBrowserProps['t']
+
+/** The lamp's two lit tones; no tone is the dark row (no lamp rendered). */
+export type SealLightTone = 'ready' | 'blocked'
+
+/**
+ * The design's lamp table (archive-seal-light.md §四 灯绿): save 收口完成
+ * lights the archive-trigger green, an unsealed or unreadable row lights red,
+ * and the two groups the machine cannot judge stay dark for the human.
+ * @param seal - the verdict C1 reported for this row.
+ * @returns the tone to paint, or nothing for a dark row.
+ */
+export function sealLightTone(seal: SealLightSeal): SealLightTone | undefined {
+  if (seal.verdict === 'DONE' || seal.verdict === 'N_A') return 'ready'
+  if (seal.verdict === 'UNSEALED' || seal.verdict === 'UNKNOWN') return 'blocked'
+  return undefined
+}
+
+/**
+ * The UNSEALED breakdown the tooltip's second line carries (the detail
+ * vocabulary seal.ts documents; a stale verdict folds its `followUpCount` in).
+ * A verdict the server broke down no further — a bare `DONE`/`N_A`, or an
+ * `UNKNOWN` with no named cause — adds no line: the head already names it.
+ * @param seal - the verdict C1 reported for this row.
+ * @param t - the browser root's locale seat.
+ * @returns the localized detail line, or nothing.
+ */
+function sealDetailLine(seal: SealLightSeal, t: SealLightTranslate): string | undefined {
+  switch (seal.detail) {
+    case 'sentinel-pending': return t('archive.seal.status.sentinel-pending')
+    case 'save-tail-no-sentinel': return t('archive.seal.status.save-tail-no-sentinel')
+    case 'save-trace-no-sentinel': return t('archive.seal.status.save-trace-no-sentinel')
+    case 'sentinel-stale': return t('archive.seal.status.sentinel-stale', { n: seal.followUpCount ?? 0 })
+    default: return undefined
+  }
+}
+
+/**
+ * The tooltip and screen-reader text: the tone's head line carrying the raw
+ * verdict token (traceable against a C1 report), plus the server-named detail
+ * when there is one. Copy rides the dictionary; only the separator is
+ * structural (verify-client-ui-i18n exempts it: no language character).
+ * @param seal - the verdict C1 reported for this row.
+ * @param tone - the lit tone behind this tooltip.
+ * @param t - the browser root's locale seat.
+ * @returns the complete label.
+ */
+function sealLightLabel(seal: SealLightSeal, tone: SealLightTone, t: SealLightTranslate): string {
+  const head = t(
+    tone === 'ready'
+      ? 'sealLight.ready'
+      : seal.verdict === 'UNKNOWN' ? 'sealLight.unreadable' : 'sealLight.blocked',
+    { v: seal.verdict },
+  )
+  const detail = sealDetailLine(seal, t)
+  return detail === undefined ? head : `${head} · ${detail}`
+}
+
+type SealLightProps = {
+  /** Session the row shows; the lamp addresses its C1 verdict by this id. */
+  sessionId: SessionId
+  /** The row's live running flag, reported to the observer (flip → check). */
+  running: boolean
+  /** The verdict the browser's snapshot holds for this row; absent = dark. */
+  seal: SealLightSeal | undefined
+  /** The row-side observation channel (the browser's injected `sealRows`). */
+  sealRows: SealRowObserver
+  /** The browser root's locale seat. */
+  t: SealLightTranslate
+}
+
+/**
+ * Render one row's lamp, or nothing while the row is dark. The registration
+ * effect runs before any early return, so a mounted-but-dark row still joins
+ * the check's id set — its verdict arriving is what lights it.
+ * @param props - the row identity, its verdict, the observer, and the locale seat.
+ * @returns the lamp element tree, or null for a dark row.
+ */
+export function SealLight({ sessionId, running, seal, sealRows, t }: SealLightProps) {
+  // Registration lives and dies with this lamp's mount: the mounted set is the
+  // check's id set (visible, non-archived, non-blank rows only — a row that
+  // renders no lamp asks nothing). The running fact rides its own effect so a
+  // flip reports in place instead of reading as an unmount/remount.
+  useEffect(() => sealRows.watch(sessionId), [sessionId, sealRows])
+  useEffect(() => {
+    sealRows.reportRunning(sessionId, running)
+  }, [sessionId, running, sealRows])
+  const tone = seal === undefined ? undefined : sealLightTone(seal)
+  if (seal === undefined || tone === undefined) return null
+  const label = sealLightLabel(seal, tone, t)
+  return (
+    <Tooltip label={label} delayMs={500} side="left">
+      <span className={css.sealLight} data-seal-tone={tone} role="img" aria-label={label} />
+    </Tooltip>
+  )
+}

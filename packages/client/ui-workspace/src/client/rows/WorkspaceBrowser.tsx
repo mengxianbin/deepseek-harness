@@ -31,7 +31,9 @@ import type { WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-
 import { workspaceDisplayTitle } from '@deepseek-ai/dsh-api-workspace-controller/default-workspace'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
-import type { WorkspaceBrowserProps } from '../contract/slots.ts'
+import type {
+  SealLightSnapshot, SealRowObserver, WorkspaceBrowserProps,
+} from '../contract/slots.ts'
 import type { WorkspaceKey } from '../locales.ts'
 import type { ArchivedFilter, GroupNode, QueueSegment, SessionNode, SessionOrderBy, SessionRowState } from '../tree.ts'
 import {
@@ -287,6 +289,17 @@ type SessionTreeProps = Pick<
    * absence (collab-step4-c5 安康位).
    */
   useSessionHealth: WorkspaceBrowserProps['useSessionHealth']
+  /**
+   * FORK archive-seal-light-1101: the C1 verdict snapshot the row lamps read,
+   * read once from the browser's bound `useSealLight` hook and threaded down
+   * as plain data — rows hold no subscription machinery of their own.
+   */
+  seals: SealLightSnapshot
+  /**
+   * FORK archive-seal-light-1101: the row-side observation channel behind the
+   * lamps — a mounted lamp joins the check's id set through it.
+   */
+  sealRows: SealRowObserver
 } & PropsRenderSlots<
   | 'sidebar.workspaces.session.menu.item'
   | 'sidebar.workspaces.session.row.action'
@@ -410,12 +423,15 @@ type QueueSectionProps = {
    * explicitly-undefined optional down; the segment owns absence.
    */
   useSessionHealth: WorkspaceBrowserProps['useSessionHealth']
+  /** FORK archive-seal-light-1101: the lamp snapshot and its observation channel (SessionTreeProps). */
+  seals: SessionTreeProps['seals']
+  sealRows: SessionTreeProps['sealRows']
   revealSessionId?: SessionId | undefined
   onSessionRevealed: SessionTreeProps['onSessionRevealed']
 } & Pick<WorkspaceBrowserProps, 'useSessionAccess'>
 
 function QueueSection({ queue, currentId, onOpen, onSessionRenameRequest, renderSlot, home, t, watchSessionJobs,
-  useSessionHealth, revealSessionId, onSessionRevealed, useSessionAccess }: QueueSectionProps) {
+  useSessionHealth, seals, sealRows, revealSessionId, onSessionRevealed, useSessionAccess }: QueueSectionProps) {
   const now = Date.now()
   const health = useSessionHealth?.(state => state)
   return (
@@ -440,6 +456,8 @@ function QueueSection({ queue, currentId, onOpen, onSessionRenameRequest, render
             home={home}
             t={t}
             watchSessionJobs={watchSessionJobs}
+            seals={seals}
+            sealRows={sealRows}
             useSessionAccess={useSessionAccess}
           />
         ))}
@@ -522,7 +540,7 @@ function SessionTree({
   insertWorkspaceBefore,
   nestWorkspaces, groupExpansion, setGroupExpanded,
   setSessionOrder, home, t,
-  revealSessionId, onSessionRevealed, shortcuts, watchSessionJobs,
+  revealSessionId, onSessionRevealed, shortcuts, watchSessionJobs, seals, sealRows,
 }: SessionTreeProps) {
   const panelActive = usePanelInfo(info => info.activePanelId !== null)
   const statuses = useSessionStatus(s => s)
@@ -861,6 +879,8 @@ function SessionTree({
               drag={dragProps}
               watchSessionJobs={watchSessionJobs}
               home={home}
+              seals={seals}
+              sealRows={sealRows}
               useSessionAccess={useSessionAccess}
               t={t}
             />
@@ -911,6 +931,8 @@ function SessionTree({
         t={t}
         watchSessionJobs={watchSessionJobs}
         useSessionHealth={useSessionHealth}
+        seals={seals}
+        sealRows={sealRows}
         revealSessionId={revealSessionId}
         onSessionRevealed={onSessionRevealed}
         useSessionAccess={useSessionAccess}
@@ -938,7 +960,7 @@ function SessionTree({
 function FlatList({
   list, sessionIds, rowState, onLeaveArchivedOnly, useSessionStatus, useSessionHealth, useSessionAccess, open,
   onSessionRenameRequest, usePanelInfo, setSessionOrder, workspaceReady, animationResetKey,
-  revealSessionId, onSessionRevealed, renderSlot, home, t, watchSessionJobs,
+  revealSessionId, onSessionRevealed, renderSlot, home, t, watchSessionJobs, seals, sealRows,
 }: Pick<
   SessionTreeProps,
   | 'useSessionStatus'
@@ -958,6 +980,8 @@ function FlatList({
   | 'home'
   | 't'
   | 'watchSessionJobs'
+  | 'seals'
+  | 'sealRows'
 > & {
   list: SessionListState
   sessionIds: readonly SessionId[]
@@ -1006,6 +1030,8 @@ function FlatList({
         t={t}
         watchSessionJobs={watchSessionJobs}
         useSessionHealth={useSessionHealth}
+        seals={seals}
+        sealRows={sealRows}
         revealSessionId={revealSessionId}
         onSessionRevealed={onSessionRevealed}
         useSessionAccess={useSessionAccess}
@@ -1041,6 +1067,8 @@ function FlatList({
                 : undefined}
               watchSessionJobs={watchSessionJobs}
               useSessionAccess={useSessionAccess}
+              seals={seals}
+              sealRows={sealRows}
               drag={{
                 start: () => {
                   dropCommitted.current = false
@@ -1221,8 +1249,15 @@ export function WorkspaceBrowser({
   renderSlot,
   t,
   watchSessionJobs,
+  useSealLight,
+  sealRows,
 }: WorkspaceBrowserProps) {
   const home = useHostInfo(info => info.home)
+  // FORK archive-seal-light-1101: the archive-seal verdicts (contract C1) the
+  // row lamps paint, read once here and threaded down as plain data — an
+  // endpoint that does not exist yet keeps this snapshot empty and every lamp
+  // dark (fail-dark), and the rows' own registration drives when it refreshes.
+  const seals = useSealLight(snapshot => snapshot)
   const shortcuts = useShortcuts(rows => rows)
   const searchShortcut = shortcuts.find(row => row.id === 'session.search')
   const addShortcut = shortcuts.find(row => row.id === 'workspace.add')
@@ -1793,6 +1828,8 @@ export function WorkspaceBrowser({
                   onSessionRevealed={acknowledgeSessionReveal}
                   watchSessionJobs={watchSessionJobs}
                   home={home}
+                  seals={seals}
+                  sealRows={sealRows}
                   t={t}
                 />
               )
@@ -1825,6 +1862,8 @@ export function WorkspaceBrowser({
                   onSessionRevealed={acknowledgeSessionReveal}
                   watchSessionJobs={watchSessionJobs}
                   home={home}
+                  seals={seals}
+                  sealRows={sealRows}
                   t={t}
                   onRenameRequest={(workspaceId, displayTitle) => {
                     setRenameTarget({
