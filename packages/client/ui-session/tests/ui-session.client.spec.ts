@@ -1016,6 +1016,42 @@ describe('UiSession wake-up, job-count, and stale status sources', () => {
     release()
   })
 
+  it('adopts a jobs service that resolves after construction, carrying pending row watches with it', () => {
+    const ctx = new Context()
+    const bench = createSessionsBench(ctx)
+    const id = sessionId('late-jobs')
+    bench.binding(id)
+    const jobsBench = createJobsBench()
+    ctx.provide('slots', { bindStoreScope: vi.fn() } as never)
+    // Constructed the way `apply` runs when its one-shot `ctx.get('jobs')`
+    // lost the boot-order race: no service, so no fold and no stream yet.
+    const service = new UiSession(ctx, bench.sessions)
+    const changed = vi.fn()
+    service.sessionStatus.subscribe(changed)
+
+    expect(service.sessionStatus.getSnapshot().get(id)?.activeJobCount).toBeUndefined()
+    const earlyRelease = service.watchSessionJobs(id)
+    expect(jobsBench.watched).toEqual([])
+    earlyRelease()
+
+    // A row still mounted keeps its watch pending; arrival starts the stream,
+    // arms the state subscription, and re-folds the roster that follows.
+    const heldRelease = service.watchSessionJobs(id)
+    service.attachJobs(jobsBench.jobs)
+    expect(jobsBench.watched).toEqual([id])
+    jobsBench.setRows(id, [statusJob({ owner: id })])
+    expect(service.sessionStatus.getSnapshot().get(id)?.activeJobCount).toBe(1)
+    expect(changed).toHaveBeenCalled()
+
+    heldRelease()
+    expect(jobsBench.released[0]).toBeDefined()
+
+    // Re-adopting the same instance is a no-op: no second stream starts.
+    const watchedBefore = jobsBench.watched.length
+    service.attachJobs(jobsBench.jobs)
+    expect(jobsBench.watched.length).toBe(watchedBefore)
+  })
+
   it('marks a goal-on-book stopped Session as pending wake-up until it runs, clears, or leaves', () => {
     const ctx = new Context()
     const bench = createSessionsBench(ctx)
@@ -1281,6 +1317,32 @@ describe('ui-session apply', () => {
     const guarded = vi.fn(() => () => {})
     expect(ctx.uiSession.whenAccess(sessionId('s1'), 'session/fork', guarded)).toBe(stopGuard)
     expect(remoteAccess.whenResourceAccess).toHaveBeenCalledWith('session', sessionId('s1'), 'session/fork', guarded)
+  })
+
+  it('arms a jobs service provided only after apply, so the row watch leaves pending and starts on arrival', async () => {
+    const ctx = new Context()
+    const bench = createSessionsBench(ctx)
+    ctx.provide('sessions', bench.sessions)
+    ctx.provide('slots', { provideRoot: vi.fn(), installScope: vi.fn(), bindStoreScope: vi.fn() } as never)
+    new StaticRemoteAccess(ctx)
+    apply(ctx)
+    const jobsBench = createJobsBench()
+    const id = sessionId('late-apply-jobs')
+    bench.binding(id)
+
+    // Boot-order race shape: `jobs` was absent at apply time, so the row's
+    // watch holds instead of dying as a no-op…
+    const release = ctx.uiSession.watchSessionJobs(id)
+    expect(jobsBench.watched).toEqual([])
+
+    // …and the waiter fiber adopts the service the moment it is provided.
+    ctx.provide('jobs', jobsBench.jobs)
+    await vi.waitFor(() => { expect(jobsBench.watched).toEqual([id]) })
+    jobsBench.setRows(id, [statusJob({ owner: id })])
+    expect(ctx.uiSession.sessionStatus.getSnapshot().get(id)?.activeJobCount).toBe(1)
+
+    release()
+    expect(jobsBench.released[0]).toBeDefined()
   })
 
   it('hangs Session-guarded effects on the calling plugin, so they leave when it unloads', async () => {
