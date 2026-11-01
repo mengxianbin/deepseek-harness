@@ -14,6 +14,12 @@
  * present, INIT can only name a linked repository's missing manifest, which
  * no build here can fix — the dispatcher journals the condition once and
  * dispatches nothing (the storm fix).
+ *
+ * Linked-split (2026-11-01, second loop): a NEED_BUILD judgment whose
+ * `facts.ownFaceMoved === false` names linked-only drift — the dispatch
+ * trigger scope is this tree's face (主仓面), so the dispatcher journals that
+ * condition once per episode and dispatches nothing; own moves and unknown
+ * scopes keep the normal dispatch, and the lamp itself stays NEED_BUILD.
  */
 import { Context } from '@deepseek-ai/cordis'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -39,12 +45,17 @@ function stubChild(): RestartChild {
   return { unref: vi.fn(), on: vi.fn() }
 }
 
-function facts(host: string, config = 'cfg'): RestartSignalFacts {
-  return { currentHostFace: host, configStamp: config }
+function facts(host: string, config = 'cfg', ownFaceMoved?: boolean): RestartSignalFacts {
+  return { currentHostFace: host, configStamp: config, ...(ownFaceMoved === undefined ? {} : { ownFaceMoved }) }
 }
 
 function judgment(state: RestartSignalState, face?: string): RestartSignalJudgment {
   return { state, detail: 'fixture', ...(face === undefined ? {} : { facts: facts(face) }) }
+}
+
+/** A NEED_BUILD shaped like production's linked-only drift: own face in sync. */
+function linkedDriftJudgment(face: string, config = 'cfg'): RestartSignalJudgment {
+  return { state: 'NEED_BUILD', detail: 'fixture', facts: facts(face, config, false) }
 }
 
 /** An INIT judgment shaped like production's: facts attached, no host face yet. */
@@ -378,6 +389,52 @@ describe('auto-build dispatch throttle', () => {
     await h.settle(60_000)
     expect(h.launch).toHaveBeenCalledOnce()
     expect(h.journal).toHaveBeenCalledWith(expect.stringContaining('dispatch reason=init-bootstrap'))
+  })
+
+  it('never dispatches when NEED_BUILD comes only from a linked repository drift (build trigger = 主仓面, acceptance ②)', async () => {
+    const h = harness()
+    const drift = linkedDriftJudgment('h1')
+    h.collect.mockImplementation(async () => drift)
+    h.emit(drift)
+    await h.settle(10 * 60_000)
+    // No build, one journal line for the whole episode, zero need-build dispatch lines.
+    expect(h.launch).not.toHaveBeenCalled()
+    const lines = h.journal.mock.calls.map(([line]) => line)
+    expect(lines.filter((line): line is string => line === 'defer linked-source-drift')).toHaveLength(1)
+    expect(lines.filter(line => line.includes('dispatch reason=need-build'))).toEqual([])
+    expect(h.warn).toHaveBeenCalledWith(expect.stringContaining('linked repository source drift'))
+  })
+
+  it('dispatches normally once the own face moves, even inside a linked-drift episode', async () => {
+    const h = harness()
+    const drift = linkedDriftJudgment('h1')
+    h.collect.mockImplementation(async () => drift)
+    h.emit(drift)
+    await h.settle(16_000)
+    expect(h.launch).not.toHaveBeenCalled()
+    // The own face moves too: the scope is no longer linked-only → normal dispatch.
+    const ownMove = judgment('NEED_BUILD', 'h2')
+    h.collect.mockImplementation(async () => ownMove)
+    h.emit(ownMove)
+    await h.settle(16_000)
+    expect(h.launch).toHaveBeenCalledOnce()
+    expect(h.journal).toHaveBeenCalledWith(expect.stringContaining('dispatch reason=need-build'))
+  })
+
+  it('journals the linked-drift defer once per episode, not once per recheck', async () => {
+    const h = harness()
+    const drift = linkedDriftJudgment('h1')
+    h.collect.mockImplementation(async () => drift)
+    h.emit(drift)
+    await h.settle(16_000)
+    // The judgment leaves the drift state (e.g. linked rebuilt → OK): episode ends.
+    h.emit(judgment('OK', 'h1'))
+    // Linked drifts again: a fresh episode gets its one line.
+    h.emit(drift)
+    await h.settle(16_000)
+    const defers = h.journal.mock.calls.map(([line]) => line).filter((line): line is string => line === 'defer linked-source-drift')
+    expect(defers).toHaveLength(2)
+    expect(h.launch).not.toHaveBeenCalled()
   })
 
   it('journals every dispatch decision (need-build path included)', async () => {

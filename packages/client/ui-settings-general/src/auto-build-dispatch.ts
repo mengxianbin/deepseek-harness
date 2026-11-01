@@ -33,6 +33,20 @@
  * console window). With the own manifest present the dispatcher reports the
  * linked condition once per episode in the journal and dispatches nothing;
  * a missing own manifest keeps the bootstrap path above.
+ * (linked-split 2026-11-01: `readRestartStamp` no longer INITs on linked
+ * absence at all, so that defer branch is defense-in-depth — kept, not
+ * removed, as the second guard in front of this dispatch path.)
+ *
+ * NEED_BUILD trigger scope (linked-split 2026-11-01, the second loop): the
+ * combined host-face comparison behind NEED_BUILD covers linked trees too, so
+ * a linked repository's moved source judges NEED_BUILD — and no build of THIS
+ * tree ever moves that half (the observed need-build loop: one dispatch per
+ * throttle cycle, forever, against an actively edited linked worktree). The
+ * judgment carries `facts.ownFaceMoved`; NEED_BUILD with `ownFaceMoved ===
+ * false` (this tree agrees with its own baseline) journals the condition once
+ * per episode and dispatches nothing, while an own-face move — or an unknown
+ * scope, stamps unavailable — keeps the normal dispatch. The lamp itself
+ * stays NEED_BUILD: linked source really is unbuilt source.
  *
  * Dispatch spawns: `windowsHide` + non-detached on Windows so the gated
  * build inherits this process's hidden console — a detached console-less
@@ -271,10 +285,12 @@ function ownBaselinePresent(): boolean {
 /**
  * Register the throttled auto-build dispatcher on the host context. It
  * observes fresh judgments; a moved source arms the stability window, a
- * persistent NEED_BUILD — or a missing OWN baseline (INIT, the bootstrap) —
- * dispatches one gated build when every gate is clear, an INIT that only a
- * linked repository's baseline can clear reports and dispatches nothing
- * (cause split, 2026-11-01), BUILD_FAILED arms
+ * persistent NEED_BUILD whose scope includes this tree's face — or a missing
+ * OWN baseline (INIT, the bootstrap) — dispatches one gated build when every
+ * gate is clear, an INIT that only a linked repository's baseline can clear
+ * reports and dispatches nothing (cause split, 2026-11-01), a NEED_BUILD that
+ * only a linked repository's drift can clear likewise reports and dispatches
+ * nothing (build trigger = 主仓面, linked-split 2026-11-01), BUILD_FAILED arms
  * the exponential backoff (and a retry past the backoff re-dispatches — the
  * new build's opening clears the failure marker), and any success-shaped
  * judgment resets the backoff. Disposal cancels timers and unsubscribes.
@@ -310,6 +326,7 @@ export function registerAutoBuild(ctx: Context, internals: AutoBuildInternals = 
   let failureRecorded = false
   let ownBuildPending = false
   let linkedBaselineWarned = false
+  let linkedDriftWarned = false
   let lockDeferralStartedAt: number | undefined
   let fireTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -489,6 +506,21 @@ export function registerAutoBuild(ctx: Context, internals: AutoBuildInternals = 
           arm()
           return
         }
+        if (fresh.facts?.ownFaceMoved === false) {
+          // Build trigger = 主仓面 (linked-split 2026-11-01): only a linked
+          // tree's source moved; this tree's build writes this tree's manifest
+          // and can never clear that gap — dispatching here was the second
+          // loop (one need-build dispatch per throttle cycle, forever). Report
+          // once per episode and keep observing: an own-face move dispatches
+          // normally, and a linked rebuild resolves the lamp on its own.
+          if (!linkedDriftWarned) {
+            linkedDriftWarned = true
+            warn('ui-settings-general: auto-build deferred: NEED_BUILD comes from a linked repository source drift; this tree agrees with its own baseline')
+            journal('defer linked-source-drift')
+          }
+          scheduleAt(now() + timings.intervalMs)
+          return
+        }
         dispatchBuild('need-build')
         return
       }
@@ -506,6 +538,9 @@ export function registerAutoBuild(ctx: Context, internals: AutoBuildInternals = 
     // A judgment that left INIT ends the linked-baseline episode: the next
     // INIT (should one arrive) gets its one journal line again.
     if (judgment.state !== 'INIT') linkedBaselineWarned = false
+    // Likewise a judgment that is no longer a linked-only drift (or lacks the
+    // own-face fact) ends the linked-drift episode for its one journal line.
+    if (judgment.state !== 'NEED_BUILD' || judgment.facts?.ownFaceMoved !== false) linkedDriftWarned = false
     switch (judgment.state) {
       case 'BUILDING':
         if (ownBuildPending) scheduleAt(now() + timings.intervalMs)

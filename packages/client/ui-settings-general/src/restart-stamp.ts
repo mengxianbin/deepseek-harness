@@ -6,10 +6,14 @@
  * repository's manifest (capability-gated: a linked repository participates
  * only when it ships the matching stamp script), combines their host-face
  * components into the host face hash this process loaded, and snapshots the
- * configured-source fingerprint (S_cfg) of the same moment. A missing manifest
- * — first start, cleaned tree, never built — reads as state `INIT`
- * ("未建基线"), which the state machine reports without acting; this module
- * defines and reads only, it renders no UI and triggers no rebuild or
+ * configured-source fingerprint (S_cfg) of the same moment. A missing OWN
+ * manifest — first start, cleaned tree, never built — reads as state `INIT`
+ * ("未建基线"), which the state machine reports without acting; a missing
+ * LINKED manifest never locks the lamp: it stays out of `reasons`, drops its
+ * component from the combination, and rides the separate `notices` field
+ * through judgment detail instead (linked-split, 2026-11-01 — INIT names only
+ * conditions this tree's own bootstrap build can clear). This module defines
+ * and reads only, it renders no UI and triggers no rebuild or
  * restart.
  *
  * S_cfg enumeration (design §二): the fixed set of setx environment variables
@@ -76,10 +80,14 @@ export interface RestartManifestComponent {
  * loaded and the configured-source snapshot of the capture moment.
  */
 export interface RestartStamp {
-  /** `BASELINE` when every in-scope manifest exists; `INIT` (未建基线) otherwise. */
+  /** `BASELINE` when this tree's own manifest exists; `INIT` (未建基线) when it is missing. */
   readonly state: 'INIT' | 'BASELINE'
-  /** Missing-manifest reasons; empty at `BASELINE`. */
+  /** Missing-OWN-manifest reasons; empty at `BASELINE`. Linked absences never enter here. */
   readonly reasons: readonly string[]
+  /** Linked-manifest notices: downgraded from `reasons` so a linked repository's
+   * missing bookkeeping records itself without locking the lamp; surfaced through
+   * the judgment's `detail`. Empty when every in-scope manifest is present. */
+  readonly notices: readonly string[]
   /** Combined host face hash of all in-scope components; absent at `INIT`. */
   readonly hostFaceHash: string | undefined
   /** S_cfg snapshot taken with this read. */
@@ -301,14 +309,19 @@ function profileDirectories(dshHome: string): string[] {
 /**
  * Read the runtime stamp (R) for this process: combine every in-scope
  * manifest's host-face component and snapshot S_cfg at the same moment.
+ * Linked-split (2026-11-01): only this tree's own manifest drives `INIT`
+ * (the bootstrap build can only ever write it); a linked repository without a
+ * manifest contributes a `notices` entry and no component instead of a
+ * `reasons` entry, so it records itself without locking the lamp.
  * @param options - Injection seams; production uses this tree and the resolved DSH home.
- * @returns The R stamp; `state: 'INIT'` when any in-scope manifest is missing.
+ * @returns The R stamp; `state: 'INIT'` when this tree's own manifest is missing.
  */
 export function readRestartStamp(options: RestartStampOptions = {}): RestartStamp {
   const repositoryRoot = options.repositoryRoot ?? defaultRepositoryRoot()
   const dshHome = options.dshHome ?? resolveDshHome()
   const query = (options.registryQuery ?? defaultRegistryQuery)()
   const reasons: string[] = []
+  const notices: string[] = []
   const components: RestartManifestComponent[] = []
 
   const own = readManifest(repositoryRoot)
@@ -318,19 +331,23 @@ export function readRestartStamp(options: RestartStampOptions = {}): RestartStam
   for (const repository of linkedStampRepositories(dshHome)) {
     if (repository === repositoryRoot) continue
     const component = readManifest(repository)
-    if (component === undefined) reasons.push(`linked manifest missing: ${repository}`)
+    // Downgraded to a notice: no build of this tree ever writes another
+    // repository's manifest, so a linked absence must not lock the lamp
+    // (linked-split 2026-11-01; the pre-split form pushed this into reasons
+    // and INIT'd the whole machine — the 2026-11-01 storm's first loop).
+    if (component === undefined) notices.push(`linked manifest missing: ${repository}`)
     else components.push(component)
   }
 
   const sCfg = computeConfigStamp(dshHome, query)
   const capturedAt = new Date().toISOString()
   if (reasons.length > 0) {
-    return { state: 'INIT', reasons, hostFaceHash: undefined, sCfg, capturedAt, components }
+    return { state: 'INIT', reasons, notices, hostFaceHash: undefined, sCfg, capturedAt, components }
   }
   const combined = components
     .map(component => `${component.repository.replace(/\\/g, '/')}=${component.hostFaceHash ?? 'ABSENT'}`)
     .join('\n')
-  return { state: 'BASELINE', reasons: [], hostFaceHash: sha256(combined), sCfg, capturedAt, components }
+  return { state: 'BASELINE', reasons: [], notices, hostFaceHash: sha256(combined), sCfg, capturedAt, components }
 }
 
 /**

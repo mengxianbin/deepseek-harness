@@ -17,6 +17,16 @@
  * conservatively to `NEED_BUILD` with the failure surfaced in `detail` and
  * one stderr line — never a silent `OK`.
  *
+ * Linked-split (口径拆分, 2026-11-01): `INIT` can only come from this tree's
+ * own manifest being missing (`readRestartStamp` keeps linked absences in
+ * `notices`); a `NEED_BUILD` lamp still fires when ANY in-scope face moved —
+ * linked drift really is unbuilt source, so the lamp stays honest — but the
+ * judgment carries `ownFaceMoved` so the build dispatcher's trigger scope
+ * (构建触发口径) can be this tree's face alone; and the R/B restart comparison
+ * keeps every component including linked ones, because the plugin `lib` this
+ * process loaded comes from those trees ("linked just rebuilt, process not
+ * reloaded" must keep raising NEED_RESTART `built`).
+ *
  * Gathering runs the stamp CLI (`scripts/restart-signal/signal-cli.ts`) in a
  * short-lived child process so a recompute never blocks the host event loop;
  * concurrent rechecks coalesce into one in-flight computation.
@@ -73,6 +83,12 @@ export interface RestartSignalInputs {
   readonly currentHostFace: string | undefined
   /** Current client-face source stamp of the harness tree; `undefined` when stamps were unavailable. */
   readonly currentClientFace: string | undefined
+  /** Whether THIS tree's own host face moved past its own manifest baseline — the
+   * build-trigger scope (构建触发口径 = 主仓面). `undefined` when the own component or
+   * its current stamp was unavailable (conservative: the dispatcher keeps its
+   * pre-split dispatch behaviour); `false` names linked-only drift, which no
+   * build of this tree can clear. */
+  readonly ownFaceMoved?: boolean | undefined
 }
 
 /** The machine facts a judgment was computed from (P3 observation seam: change-sensitive
@@ -83,6 +99,10 @@ export interface RestartSignalFacts {
   readonly currentHostFace: string | undefined
   /** Current configured-source stamp. */
   readonly configStamp: string
+  /** Whether this tree's own host face moved past its own baseline — the build
+   * dispatcher reads it off the fresh judgment to keep the dispatch trigger on
+   * the 主仓面; `undefined` when unavailable (conservative dispatch). */
+  readonly ownFaceMoved?: boolean | undefined
 }
 
 /** One judgment: the state machine's full output. */
@@ -94,6 +114,11 @@ export interface RestartSignalJudgment {
   readonly detail: string
   /** Machine facts this judgment consumed; attached by every production collect. */
   readonly facts?: RestartSignalFacts
+}
+
+/** Normalize a repository path for combination/lookup comparisons (separator-insensitive). */
+function normalizeRepository(repository: string): string {
+  return repository.replace(/\\/g, '/')
 }
 
 /**
@@ -110,11 +135,19 @@ export function combineHostFace(rows: readonly (readonly [string, string])[]): s
 
 /**
  * Judge the seven-state restart signal from its machine facts. Pure: no I/O,
- * no clock, deterministic for identical inputs.
+ * no clock, deterministic for identical inputs. Linked-manifest notices from
+ * the fresh read ride every judgment's `detail` — recorded, never
+ * lamp-locking (linked-split 2026-11-01).
  * @param inputs - R, fresh B, S_cfg, build markers, and current source stamps.
  * @returns The state, the restart branch when relevant, and the facts behind it.
  */
 export function judgeRestartSignal(inputs: RestartSignalInputs): RestartSignalJudgment {
+  const judgment = judgeCore(inputs)
+  const notices = inputs.fresh.notices
+  return notices.length === 0 ? judgment : { ...judgment, detail: `${judgment.detail} | ${notices.join('; ')}` }
+}
+
+function judgeCore(inputs: RestartSignalInputs): RestartSignalJudgment {
   if (inputs.fresh.state === 'INIT') {
     return { state: 'INIT', detail: `baseline manifest missing: ${inputs.fresh.reasons.join('; ')}` }
   }
@@ -131,6 +164,16 @@ export function judgeRestartSignal(inputs: RestartSignalInputs): RestartSignalJu
     }
   }
   if (inputs.currentHostFace !== inputs.fresh.hostFaceHash) {
+    // The lamp may name linked drift (unbuilt source is unbuilt source — honest),
+    // but ownFaceMoved=false pins the gap on a linked tree: the build trigger
+    // (构建触发口径) stays on this tree's face, and the dispatcher defers instead
+    // of rebuilding this tree forever (linked-split 2026-11-01, second loop).
+    if (inputs.ownFaceMoved === false) {
+      return {
+        state: 'NEED_BUILD',
+        detail: 'linked repository source moved past its build baseline while this tree agrees with its own; no build of this tree can clear it (build trigger scope: this tree only)',
+      }
+    }
     return { state: 'NEED_BUILD', detail: 'host-face source moved past the last build baseline' }
   }
   if (inputs.configStamp !== inputs.runtime.sCfg) {
@@ -254,6 +297,11 @@ async function computeRestartSignal(options: RestartSignalOptions): Promise<Rest
     )
   }
   const needsHostStamp = fresh.components.some(component => component.hostFaceHash !== null)
+  // 构建触发口径 = 主仓面: this tree's own component (always present at BASELINE —
+  // INIT owns the missing-own case) and its current stamp decide ownFaceMoved,
+  // the fact the dispatcher reads to keep harness builds off linked-only drift.
+  const own = fresh.components.find(component => normalizeRepository(component.repository) === normalizeRepository(repositoryRoot))
+  let ownFaceMoved: boolean | undefined = own !== undefined && own.hostFaceHash === null ? false : undefined
   let currentHostFace: string | undefined
   let currentClientFace: string | undefined
   if (needsHostStamp) {
@@ -269,19 +317,23 @@ async function computeRestartSignal(options: RestartSignalOptions): Promise<Rest
       )
       const harness = stamps.find(stamp => stamp.kind === 'harness')
       currentClientFace = harness?.client
+      if (own !== undefined && own.hostFaceHash !== null) {
+        ownFaceMoved = byRepository.get(normalizeRepository(own.repository))?.host !== own.hostFaceHash
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       process.stderr.write(`ui-settings-general: restart-signal stamp gathering failed: ${message}\n`)
       currentHostFace = undefined
       currentClientFace = undefined
+      ownFaceMoved = undefined
     }
   } else {
     currentHostFace = undefined
     currentClientFace = undefined
   }
   return publishJudgment(
-    judgeRestartSignal({ runtime, fresh, configStamp, building, failed, currentHostFace, currentClientFace }),
-    { currentHostFace, configStamp },
+    judgeRestartSignal({ runtime, fresh, configStamp, building, failed, currentHostFace, currentClientFace, ownFaceMoved }),
+    { currentHostFace, configStamp, ownFaceMoved },
   )
 }
 

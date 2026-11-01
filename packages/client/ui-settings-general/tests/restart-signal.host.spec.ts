@@ -29,7 +29,7 @@ const CLIENT_HASH = 'b'.repeat(64)
 /** One judgment's full input with sane baseline defaults; overrides name the case. */
 function inputs(overrides: Partial<RestartSignalInputs> = {}): RestartSignalInputs {
   const runtimeStamp = {
-    state: 'BASELINE' as const, reasons: [], hostFaceHash: HOST_HASH, sCfg: 'cfg-1',
+    state: 'BASELINE' as const, reasons: [], notices: [], hostFaceHash: HOST_HASH, sCfg: 'cfg-1',
     capturedAt: '2026-10-25T00:00:00.000Z',
     components: [{
       repository: 'C:\\repo', kind: 'harness' as const, time: 't', builtFaces: ['host', 'client'],
@@ -77,6 +77,23 @@ describe('judgeRestartSignal', () => {
     const judgment = judgeRestartSignal(inputs({ currentHostFace: 'c'.repeat(64) }))
     expect(judgment.state).toBe('NEED_BUILD')
     expect(judgment.reason).toBeUndefined()
+  })
+
+  it('keeps the NEED_BUILD lamp for linked-only drift but names the linked cause (build trigger scope: own face)', () => {
+    // The lamp stays NEED_BUILD — linked source really is unbuilt — while
+    // ownFaceMoved=false tells the dispatcher no build of this tree can clear it.
+    const judgment = judgeRestartSignal(inputs({ currentHostFace: 'c'.repeat(64), ownFaceMoved: false }))
+    expect(judgment.state).toBe('NEED_BUILD')
+    expect(judgment.detail).toContain('linked repository source moved')
+    expect(judgment.detail).toContain('build trigger scope: this tree only')
+  })
+
+  it('lets linked-manifest notices ride the judgment detail without changing the state', () => {
+    const judgment = judgeRestartSignal(inputs({
+      fresh: { ...inputs().fresh, notices: ['linked manifest missing: D:/linked-repo'] },
+    }))
+    expect(judgment.state).toBe('OK')
+    expect(judgment.detail).toContain('linked manifest missing: D:/linked-repo')
   })
 
   it('degrades conservatively to NEED_BUILD when current stamps are unavailable', () => {
@@ -168,6 +185,25 @@ function writeBaseline(repositoryRoot: string, faces: { host: string; client: st
     sStart: shared,
     sEnd: shared,
   })
+}
+
+/** A stamp-capable linked repository behind the fixture profile's link; no manifest yet. */
+function linkStampCapableRepository(dshHome: string, repository: string): void {
+  mkdirSync(join(repository, '.git'))
+  mkdirSync(join(repository, 'scripts', 'restart-signal'), { recursive: true })
+  writeFileSync(join(repository, 'scripts', 'restart-signal', 'build-stamp.ts'), '')
+  mkdirSync(join(dshHome, 'profiles', 'web'), { recursive: true })
+  writeFileSync(
+    join(dshHome, 'profiles', 'web', 'package.json'),
+    JSON.stringify({ name: 'fixture-profile', dependencies: { 'fixture-plugin': `link:${repository}` } }),
+  )
+}
+
+/** A throwaway linked repository directory, tracked for cleanup. */
+function linkedTree(): string {
+  const repository = mkdtempSync(join(tmpdir(), 'dsh-restart-signal-linked-'))
+  temporary.push(repository)
+  return repository
 }
 
 afterEach(() => {
@@ -272,5 +308,60 @@ describe('collectRestartSignal', () => {
     // harness tree against the fixture components: one true end-to-end path.
     const judgment = await collectRestartSignal({ repositoryRoot, dshHome, registryQuery: () => '' })
     expect(judgment.state).toBe('OK')
+  })
+
+  it('answers BASELINE with a notice while a linked manifest is missing, then NEED_RESTART built once it appears (acceptance ①③)', async () => {
+    const { repositoryRoot, dshHome } = fixtureTree()
+    const linked = linkedTree()
+    linkStampCapableRepository(dshHome, linked)
+    writeBaseline(repositoryRoot, { host: HOST_HASH, client: null })
+    // Capture #1 (R): own manifest present, linked has none — the read must
+    // NOT INIT (own-only) and must record the linked absence as a notice.
+    const first = await collectRestartSignal({
+      repositoryRoot,
+      dshHome,
+      registryQuery: () => '',
+      runStampCli: vi.fn(async (): Promise<readonly CurrentStamp[]> => [
+        { repository: repositoryRoot, kind: 'harness', host: HOST_HASH, client: CLIENT_HASH },
+      ]),
+    })
+    expect(first.state).toBe('OK')
+    expect(first.detail).toContain('linked manifest missing')
+    // The linked tree gets stamped after the capture: its component enters the
+    // combination, R (captured without it) no longer matches fresh B, and the
+    // R/B comparison — which keeps linked in full — raises NEED_RESTART built.
+    writeBaseline(linked, { host: 'b'.repeat(64), client: null })
+    const second = await collectRestartSignal({
+      repositoryRoot,
+      dshHome,
+      registryQuery: () => '',
+      runStampCli: vi.fn(async (): Promise<readonly CurrentStamp[]> => [
+        { repository: repositoryRoot, kind: 'harness', host: HOST_HASH, client: CLIENT_HASH },
+        { repository: linked, kind: 'harness', host: 'b'.repeat(64), client: CLIENT_HASH },
+      ]),
+    })
+    expect(second.state).toBe('NEED_RESTART')
+    expect(second.reason).toBe('built')
+  })
+
+  it('pins linked-only source drift on ownFaceMoved=false while the lamp stays NEED_BUILD (acceptance ② seam)', async () => {
+    const { repositoryRoot, dshHome } = fixtureTree()
+    const linked = linkedTree()
+    linkStampCapableRepository(dshHome, linked)
+    writeBaseline(repositoryRoot, { host: HOST_HASH, client: null })
+    writeBaseline(linked, { host: 'b'.repeat(64), client: null })
+    const judgment = await collectRestartSignal({
+      repositoryRoot,
+      dshHome,
+      registryQuery: () => '',
+      runStampCli: vi.fn(async (): Promise<readonly CurrentStamp[]> => [
+        // Own face matches its baseline; only the linked face drifted.
+        { repository: repositoryRoot, kind: 'harness', host: HOST_HASH, client: CLIENT_HASH },
+        { repository: linked, kind: 'harness', host: 'c'.repeat(64), client: CLIENT_HASH },
+      ]),
+    })
+    expect(judgment.state).toBe('NEED_BUILD')
+    expect(judgment.facts?.ownFaceMoved).toBe(false)
+    expect(judgment.detail).toContain('linked repository source moved')
   })
 })

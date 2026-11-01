@@ -1,8 +1,10 @@
 /**
  * Restart-signal runtime stamp (R): the process-start read over per-tree build
- * manifests — `INIT` while any in-scope manifest is missing, one combined
- * host face hash plus an S_cfg snapshot once every manifest exists, and the
- * capability gate that keeps stamp-less linked repositories out of scope.
+ * manifests — `INIT` while this tree's own manifest is missing, a linked
+ * repository's absence downgraded to a `notices` entry that never locks the
+ * lamp (linked-split 2026-11-01), one combined host face hash plus an S_cfg
+ * snapshot once every in-scope manifest exists, and the capability gate that
+ * keeps stamp-less linked repositories out of scope.
  */
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -88,7 +90,11 @@ describe('restart stamp read', () => {
     expect(second.hostFaceHash).toBe(first.hostFaceHash)
   })
 
-  it('reports INIT when a stamp-capable linked repository has no manifest yet', () => {
+  it('keeps BASELINE when a stamp-capable linked repository has no manifest yet, recording a notice instead', () => {
+    // linked-split 2026-11-01: only this tree's own missing manifest may INIT
+    // (the bootstrap build writes only this tree's manifest); a linked absence
+    // drops its component from the combination, rides `notices`, and once that
+    // tree is stamped moves the combined hash — the R/B restart trigger.
     const repositoryRoot = fixtureRoot('dsh-restart-stamp-')
     const dshHome = fixtureRoot('dsh-restart-stamp-home-')
     const linked = makeStampCapableRepository('dsh-restart-stamp-linked-')
@@ -97,13 +103,19 @@ describe('restart stamp read', () => {
 
     expect(linkedStampRepositories(dshHome)).toEqual([linked])
     const stamp = readRestartStamp({ repositoryRoot, dshHome, registryQuery: () => '' })
-    expect(stamp.state).toBe('INIT')
-    expect(stamp.reasons.some(reason => reason.startsWith('linked manifest missing'))).toBe(true)
+    expect(stamp.state).toBe('BASELINE')
+    expect(stamp.reasons).toEqual([])
+    expect(stamp.notices.some(notice => notice.startsWith('linked manifest missing'))).toBe(true)
+    expect(stamp.components).toHaveLength(1)
 
     writeManifest(linked, 'b'.repeat(64))
     const built = readRestartStamp({ repositoryRoot, dshHome, registryQuery: () => '' })
     expect(built.state).toBe('BASELINE')
+    expect(built.notices).toEqual([])
     expect(built.components).toHaveLength(2)
+    // The linked补账 moves the combined hash: against an own-present BASELINE
+    // capture the R/B comparison raises NEED_RESTART `built` (acceptance ③).
+    expect(built.hostFaceHash).not.toBe(stamp.hostFaceHash)
   })
 
   it('recognizes a linked repository as stamp-capable through scripts/build-stamp.mjs alone', () => {
@@ -119,7 +131,9 @@ describe('restart stamp read', () => {
     writeProfileLink(dshHome, 'web', linked)
 
     expect(linkedStampRepositories(dshHome)).toEqual([linked])
-    expect(readRestartStamp({ repositoryRoot, dshHome, registryQuery: () => '' }).state).toBe('INIT')
+    const unbuilt = readRestartStamp({ repositoryRoot, dshHome, registryQuery: () => '' })
+    expect(unbuilt.state).toBe('BASELINE')
+    expect(unbuilt.notices.some(notice => notice.startsWith('linked manifest missing'))).toBe(true)
 
     writeManifest(linked, 'b'.repeat(64))
     const built = readRestartStamp({ repositoryRoot, dshHome, registryQuery: () => '' })
