@@ -25,6 +25,7 @@
     "src/web/controller.ts",
     "src/list.ts",
     "src/media-references.ts",
+    "src/publication-gate.ts",
     "src/archived-session-gate.ts",
     "src/skill-catalog.ts"
   ],
