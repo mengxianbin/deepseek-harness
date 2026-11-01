@@ -167,6 +167,18 @@ const coveragePartitionMode = coveragePartitionRaw === '1'
 const laneTestBudget = coverageTestTimeoutOptions(process.env[COVERAGE_TEST_TIMEOUT_ENV])
 // Outside CI, forks follow the local worker budget; CI keeps Vitest's own default for its runner.
 const localWorkerBudget = process.env.CI === 'true' ? {} : { maxWorkers: defaultParallelism(process.env, undefined, LOCAL_TEST_PARALLELISM_CAP) }
+// SEMANTIC CHANGE (flake-timeout-govern-1101): outside CI, one failed test
+// attempt is retried once before turning red. Local runs share the workstation
+// with the production host, and scheduling latency inflates the 5000 ms
+// default into the loaded-host fake-red family ("Test timed out in 5000ms");
+// the single retry mechanizes the flake triage rule the repo already follows
+// by hand (rerun-green = flake). CI keeps upstream no-retry semantics, so a
+// genuine failure still turns red on the first attempt there. The cost is
+// local-only: a genuinely failing test runs twice. DSH_TEST_RETRY=0 restores
+// upstream no-retry semantics for a local run that needs them. Like
+// laneTestBudget it must land in each inline project below, because CLI flags
+// do not reach them.
+const localRetryBudget = process.env.CI === 'true' || process.env.DSH_TEST_RETRY === '0' ? {} : { retry: 1 }
 
 // These suites exercise process-global state, process APIs, or timing-sensitive process I/O
 // that worker threads cannot isolate reliably under aggregate gate contention.
@@ -226,6 +238,7 @@ export default defineConfig({
           // MaybeLocal in cjs_lexer::Parse) from worker threads on macOS,
           // Linux, and Windows. Forked workers avoid that shared thread path.
           pool: 'forks',
+          ...localRetryBudget,
           ...laneTestBudget,
           setupFiles: [
             './scripts/test-proxy-environment.ts', './scripts/test-dom-environment.ts', './scripts/test-official-listing-guard.ts',
@@ -246,6 +259,7 @@ export default defineConfig({
           execArgv: vitestExecArgv,
           env: { DSH_SUBPROCESS_LEDGER: subprocessLedgerScratch },
           pool: 'forks',
+          ...localRetryBudget,
           ...laneTestBudget,
           setupFiles: [
             './scripts/test-proxy-environment.ts', './scripts/test-dom-environment.ts', './scripts/test-official-listing-guard.ts',
