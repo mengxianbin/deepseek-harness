@@ -150,8 +150,18 @@ if (slowLaneRaw !== undefined && slowLaneRaw !== '' && slowLaneRaw !== '1') {
 }
 const slowLaneMode = slowLaneRaw === '1'
 const slowLaneExcludes = slowLaneMode ? [] : ['**/*.slowlane.spec.ts']
+// The lane face mirrors the default include prefixes: a bare `**` pattern would
+// walk the whole repository root — through node_modules/.pnpm's junction forest
+// and .git — and the overridden exclude arrays carry no node_modules backstop,
+// which ballooned collection to a 4 GB OOM on this host (2026-11-02 实测，
+// slowtop5-costdown-1101 批). Static prefixes keep every walk bounded.
 const testIncludes = slowLaneMode
-  ? ['**/*.slowlane.spec.ts']
+  ? [
+      'packages/*/*/tests/**/*.slowlane.spec.ts',
+      'apps/*/tests/**/*.slowlane.spec.ts',
+      'scripts/**/*.slowlane.spec.ts',
+      'website/tests/**/*.slowlane.spec.ts',
+    ]
   : [
       'packages/*/*/tests/**/*.spec.{ts,tsx}',
       'apps/*/tests/**/*.spec.{ts,tsx}',
