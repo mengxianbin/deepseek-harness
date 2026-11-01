@@ -71,6 +71,7 @@ async function harness(records: readonly SessionRecord[], projections: Record<st
       values: projections[meta.id] ?? { title: 'fixture' },
     }),
     cachedPredecessorTitle: () => undefined,
+    staleSnapshotKeys: () => [],
   } as never)
   const list = new ApiSessionList(ctx, 16)
   return { ctx, list, listSessions }

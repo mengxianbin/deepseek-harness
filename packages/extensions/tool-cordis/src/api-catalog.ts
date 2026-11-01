@@ -2848,6 +2848,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the viewed block, or `undefined` when no usable row exists for this lifecycle at the current Session format.',
       },
       {
+        signature: 'staleSnapshotKeys(meta: SessionHeader, keys?: ProjectionKeySelection): readonly string[]',
+        description: 'The stored rows this lifecycle holds but cachedSnapshot refuses to serve: keys whose rows exist at another unit\'s `stateVersion` (or fail the current schema). Zero I/O like every other read face — the header alone witnesses the lifecycle — and, like every other read face, it never seeds a fold. This is the listing\'s CUE for the consumer-owned cold refold: an absent key promises nothing, a stale row owes one, and the caller that needs the value answers with coldSnapshot.',
+        parameters: [{ name: 'meta', description: 'the listed session\'s header (identity witness; no log read).' }, { name: 'keys', description: 'optional projection keys required by the caller\'s audience.' }],
+        returns: 'stale keys among `keys`, or an empty list when none are owed.',
+      },
+      {
         signature: 'cachedPredecessorTitle(meta: SessionHeader): ProjectionSnapshot | undefined',
         description: 'Read only a predecessor checkpoint\'s title as a zero-I/O listing hint.\n\nThe authoritative Session header supplies the lifecycle identity. A cache checkpoint can lag that log but cannot lead it because writes flush the log first, so a matching predecessor title is a genuine (possibly stale) fact from this Session. The registry still requires the current title projection\'s row version and schema. No other predecessor projection is exposed: format normalization can change their current meaning, and the cachedSnapshot / hydration paths continue to reject them.',
         parameters: [{ name: 'meta', description: 'authoritative listed Session header.' }],
@@ -2931,6 +2937,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'View a checkpoint\'s rows without any log read: for every registered client-visible unit whose row\'s `ver` matches, serve the schema-validated `view` of the schema-validated stored state; mismatched, malformed, or absent rows leave their key absent (a cold or listing consumer treats it as not-yet-available and a fuller read path refolds it). The zero-I/O rung of the read ladder — values are as stale as their rows, never wrong.',
         parameters: [{ name: 'checkpoint', description: 'persisted rows for one session (possibly stale or empty).' }, { name: 'keys', description: 'optional wire keys to view.' }],
         returns: 'whole values per key with a usable row; empty when none.',
+      },
+      {
+        signature: 'staleCheckpointKeys( checkpoint: ProjectionCheckpoint, keys?: ProjectionKeySelection, ): string[]',
+        description: 'The checkpoint rows a viewCheckpoint read refuses although they exist: keys stored at another unit\'s `stateVersion`, or whose stored state no longer parses under the current `stateSchema`. An ABSENT key is deliberately not reported — nothing was ever promised for it, and only a present-but-unusable row owes its consumer a refold (the persisted-cache contract keeps the cache log-blind, so the consumer that needs the value owns the cold refold; this list is its cue).',
+        parameters: [{ name: 'checkpoint', description: 'persisted rows for one session (possibly stale or empty).' }, { name: 'keys', description: 'optional wire keys to inspect.' }],
+        returns: 'keys with a present-but-unusable row, in registration order.',
       },
       {
         signature: 'restore( checkpoint: ProjectionCheckpoint, events: readonly SessionEvent[], baseSeq: SessionLogOffset, header: SessionHeader, inheritedEventCount: SessionLogOffset, ): { snapshot: ProjectionSnapshot; checkpoint: ProjectionCheckpoint }',

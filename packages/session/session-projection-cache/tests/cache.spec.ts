@@ -646,6 +646,29 @@ describe('SessionProjectionCache listing read', () => {
       .toBeUndefined()
   })
 
+  it('staleSnapshotKeys names mismatched stored rows the view refuses, and never absent ones', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-projcache-'))
+    roots.push(root)
+    await seedRecord(root, 'stale-owed', {
+      'cache-test/marks': { ver: 99, seq: SessionSeq(4), val: { marks: ['old'] } },
+    })
+    await seedRecord(root, 'stale-clean', {
+      'cache-test/marks': { ver: 1, seq: SessionSeq(4), val: { marks: ['ok'] } },
+    })
+    const { cache } = await harness({ root })
+    // The cue the listing owes a refold for: a row exists and the zero-I/O
+    // view refuses it, so the consumer that needs the value must refold.
+    expect(cache.staleSnapshotKeys(headerOf(SessionId('stale-owed'))))
+      .toEqual(['cache-test/marks'])
+    expect(cache.staleSnapshotKeys(headerOf(SessionId('stale-clean')))).toEqual([])
+    // Absent keys promise nothing, and an unrelated lifecycle owes nothing.
+    expect(cache.staleSnapshotKeys(headerOf(SessionId('never-stored')))).toEqual([])
+    expect(cache.staleSnapshotKeys(headerOf(SessionId('stale-owed'), 777))).toEqual([])
+    // The key filter narrows the cue exactly like the listing's audience.
+    expect(cache.staleSnapshotKeys(headerOf(SessionId('stale-owed')), new Set(['title'])))
+      .toEqual([])
+  })
+
   it('binds identity on cwd too: a matching cwd serves, a moved session does not', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-projcache-'))
     roots.push(root)

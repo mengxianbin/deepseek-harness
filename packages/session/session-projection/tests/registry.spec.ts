@@ -678,6 +678,31 @@ describe('SessionProjectionRegistry drive', () => {
     expect(ctx.sessionProjections.viewCheckpoint({})).toEqual({})
   })
 
+  it('staleCheckpointKeys names only present-but-unusable wire rows and never absent ones', async () => {
+    const { ctx } = await harness()
+    await ctx.sessionProjections.register(marksUnit())
+    await ctx.sessionProjections.register(countUnit())
+    const mismatched = {
+      'test/marks': { ver: 99, seq: SessionSeq(4), val: { marks: ['old'] } },
+      // Host-only units carry no wire row to serve, so they never owe a refold.
+      'test/count': { ver: 99, seq: SessionSeq(4), val: 5 },
+    }
+    expect(ctx.sessionProjections.staleCheckpointKeys(mismatched)).toEqual(['test/marks'])
+    // Absent keys promise nothing: only a stored row that exists and cannot be
+    // served is a refold cue.
+    expect(ctx.sessionProjections.staleCheckpointKeys({})).toEqual([])
+    expect(ctx.sessionProjections.staleCheckpointKeys({
+      'test/marks': { ver: 1, seq: SessionSeq(4), val: { marks: ['stored'] } },
+    })).toEqual([])
+    // A version-matching row whose state fails the current schema is unusable
+    // for the same consumer, so it counts as stale.
+    expect(ctx.sessionProjections.staleCheckpointKeys({
+      'test/marks': { ver: 1, seq: SessionSeq(2), val: { marks: 'not-an-array' } },
+    })).toEqual(['test/marks'])
+    // The key filter mirrors viewCheckpoint's audience.
+    expect(ctx.sessionProjections.staleCheckpointKeys(mismatched, new Set(['test/stable-view']))).toEqual([])
+  })
+
   it('viewCheckpoint and restore exclude host-only state while retaining its checkpoint', async () => {
     const { ctx } = await harness()
     await ctx.sessionProjections.register(marksUnit())

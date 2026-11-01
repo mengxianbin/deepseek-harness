@@ -254,6 +254,20 @@ The persisted projection cache service. Opens the `session_projcache` domain at 
 cachedSnapshot( meta: SessionHeader, keys?: ProjectionKeySelection, ): ProjectionSnapshot | undefined
 
 /**
+ * The stored rows this lifecycle holds but {@link cachedSnapshot} refuses to
+ * serve: keys whose rows exist at another unit's `stateVersion` (or fail the
+ * current schema). Zero I/O like every other read face — the header alone
+ * witnesses the lifecycle — and, like every other read face, it never seeds
+ * a fold. This is the listing's CUE for the consumer-owned cold refold: an
+ * absent key promises nothing, a stale row owes one, and the caller that
+ * needs the value answers with {@link coldSnapshot}.
+ * @param meta - the listed session's header (identity witness; no log read).
+ * @param keys - optional projection keys required by the caller's audience.
+ * @returns stale keys among `keys`, or an empty list when none are owed.
+ */
+staleSnapshotKeys(meta: SessionHeader, keys?: ProjectionKeySelection): readonly string[]
+
+/**
  * Read only a predecessor checkpoint's title as a zero-I/O listing hint.
  *
  * The authoritative Session header supplies the lifecycle identity. A cache
@@ -424,6 +438,20 @@ restoreFloor(checkpoint: ProjectionCheckpoint): SessionLogOffset | undefined
  * @returns whole values per key with a usable row; empty when none.
  */
 viewCheckpoint( checkpoint: ProjectionCheckpoint, keys?: ProjectionKeySelection, ): Partial<SessionProjectionMap>
+
+/**
+ * The checkpoint rows a {@link viewCheckpoint} read refuses although they
+ * exist: keys stored at another unit's `stateVersion`, or whose stored state
+ * no longer parses under the current `stateSchema`. An ABSENT key is
+ * deliberately not reported — nothing was ever promised for it, and only a
+ * present-but-unusable row owes its consumer a refold (the persisted-cache
+ * contract keeps the cache log-blind, so the consumer that needs the value
+ * owns the cold refold; this list is its cue).
+ * @param checkpoint - persisted rows for one session (possibly stale or empty).
+ * @param keys - optional wire keys to inspect.
+ * @returns keys with a present-but-unusable row, in registration order.
+ */
+staleCheckpointKeys( checkpoint: ProjectionCheckpoint, keys?: ProjectionKeySelection, ): string[]
 
 /**
  * Cold read: fold every persisted unit over a stored log suffix, seeding

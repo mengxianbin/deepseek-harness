@@ -148,6 +148,7 @@ describe('sessions.list cold merge', () => {
       cachedPredecessorTitle: (meta: SessionHeader) => meta.id === sid('legacy-title')
         ? { asOfSeq: 2, values: { title: 'Cached predecessor title' } }
         : undefined,
+      staleSnapshotKeys: () => [],
     } as never)
     const remote = await createSessionTestRemote(ctx, {
       defaultModelSelection: () => ({ provider: 'p', model: 'm' }),
@@ -210,6 +211,7 @@ describe('sessions.list cold merge', () => {
         return undefined
       },
       cachedPredecessorTitle: () => undefined,
+      staleSnapshotKeys: () => [],
     } as never)
     const remote = await createSessionTestRemote(ctx, { defaultModelSelection: () => ({ provider: 'p', model: 'm' }), cwd: '/tmp' })
 

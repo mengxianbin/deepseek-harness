@@ -623,6 +623,43 @@ export class SessionProjectionRegistry extends Service {
   }
 
   /**
+   * The checkpoint rows a {@link viewCheckpoint} read refuses although they
+   * exist: keys stored at another unit's `stateVersion`, or whose stored state
+   * no longer parses under the current `stateSchema`. An ABSENT key is
+   * deliberately not reported — nothing was ever promised for it, and only a
+   * present-but-unusable row owes its consumer a refold (the persisted-cache
+   * contract keeps the cache log-blind, so the consumer that needs the value
+   * owns the cold refold; this list is its cue).
+   * @param checkpoint - persisted rows for one session (possibly stale or empty).
+   * @param keys - optional wire keys to inspect.
+   * @returns keys with a present-but-unusable row, in registration order.
+   */
+  staleCheckpointKeys(
+    checkpoint: ProjectionCheckpoint,
+    keys?: ProjectionKeySelection,
+  ): string[] {
+    const stale: string[] = []
+    const selected = selectedKeys(keys)
+    for (const registration of this.registrations.values()) {
+      const def = registration.def
+      if (def.wire === undefined) continue
+      if (selected !== undefined && !selected.has(def.key)) continue
+      const row = checkpoint[def.key]
+      if (row === undefined) continue
+      if (row.ver !== def.stateVersion) {
+        stale.push(def.key)
+        continue
+      }
+      try {
+        def.stateSchema.parse(row.val)
+      } catch {
+        stale.push(def.key)
+      }
+    }
+    return stale
+  }
+
+  /**
    * Cold read: fold every persisted unit over a stored log suffix, seeding
    * each from its checkpoint row when usable — the one read recipe (cached
    * state + forward tail replay + `view`) applied without a live `Session`.

@@ -170,6 +170,24 @@ export class SessionProjectionCache extends Service {
   }
 
   /**
+   * The stored rows this lifecycle holds but {@link cachedSnapshot} refuses to
+   * serve: keys whose rows exist at another unit's `stateVersion` (or fail the
+   * current schema). Zero I/O like every other read face — the header alone
+   * witnesses the lifecycle — and, like every other read face, it never seeds
+   * a fold. This is the listing's CUE for the consumer-owned cold refold: an
+   * absent key promises nothing, a stale row owes one, and the caller that
+   * needs the value answers with {@link coldSnapshot}.
+   * @param meta - the listed session's header (identity witness; no log read).
+   * @param keys - optional projection keys required by the caller's audience.
+   * @returns stale keys among `keys`, or an empty list when none are owed.
+   */
+  staleSnapshotKeys(meta: SessionHeader, keys?: ProjectionKeySelection): readonly string[] {
+    const record = this.requireTable().get(meta.id)
+    if (record === undefined || !currentLifecycleMatches(record.identity, lifecycleIdentityOf(meta))) return []
+    return this.ctx.sessionProjections.staleCheckpointKeys(record.rows, keys)
+  }
+
+  /**
    * Read only a predecessor checkpoint's title as a zero-I/O listing hint.
    *
    * The authoritative Session header supplies the lifecycle identity. A cache

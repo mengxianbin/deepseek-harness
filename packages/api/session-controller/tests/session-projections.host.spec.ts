@@ -552,6 +552,8 @@ describe('session.list projections column', () => {
           }
           : undefined
       },
+      // Nothing is owed a refold: this fixture proves the zero-I/O contract.
+      staleSnapshotKeys: () => [],
     } as never)
     const response = await (await remote(ctx)).list(request({}))
     if (!response.ok) throw new Error('unreachable')

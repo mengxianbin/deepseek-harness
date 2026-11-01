@@ -27,6 +27,17 @@ const SEARCH_PROVIDER_CALL_LIMIT = 100
 const SESSION_SEARCH_QUERY_MAX_CHARS = 500
 const MESSAGE_TYPES = new Set(['user/message', 'assistant/message'])
 
+/** One listed cold row owed a consumer-owned refold: its header witness plus the listed format classification. */
+type ColdRepairCue = Pick<SessionRecord, 'header' | 'formatStatus'>
+
+/**
+ * Cold refold attempts allowed per Session per process. A `stateVersion` move
+ * needs a code change (and a restart) to happen again, so a retry loop buys
+ * nothing beyond a bounded second and third try for a transient read failure.
+ */
+const COLD_REPAIR_ATTEMPT_LIMIT = 3
+
+
 /**
  * Projection keys a `trimHeavyProjections` list omits: every reader of these
  * keys opens its Session first (an exact `session/projections` baseline then
@@ -188,11 +199,31 @@ export class ApiSessionList {
    */
   constructor(private readonly ctx: Context, private readonly workSliceMs: number) {}
 
+  /** Session ids with a queued (not yet started) cold refold: one queue entry per id. */
+  private readonly repairQueued = new Set<SessionId>()
+
+  /** Cold refold attempts started this process, per Session id. */
+  private readonly repairAttempts = new Map<SessionId, number>()
+
+  /** Rows waiting for the serial repair pump, drained off any list request's path. */
+  private readonly repairQueue: ColdRepairCue[] = []
+
+  /** The running serial drain, `undefined` while idle. */
+  private repairPump: Promise<void> | undefined
+
+  /** Set at teardown: the pump stands down and publishes nothing further. */
+  private stopped = false
+
   /**
    * Acquire projection readers before exposing dependent operations.
    * @returns when all required registrations are ready.
    */
   async initialize(): Promise<void> {
+    this.ctx.effect(() => () => {
+      this.stopped = true
+      this.repairQueue.length = 0
+    }, 'apiSessionList.coldRepairStop')
+
     await this.ctx.sessionProjections.register<'sessionListMetadata', SessionListMetadata>({
       key: 'sessionListMetadata',
       stateSchema: sessionListMetadataSchema,
@@ -309,6 +340,10 @@ export class ApiSessionList {
     for (const record of cold) {
       signal?.throwIfAborted()
       items.push(this.summarizeCold(record, trimHeavyProjections))
+      // Cueing never blocks (and never throws into) the listing: the row is
+      // served above from whatever the cache still holds, while the owed
+      // refold runs on the serial pump below.
+      this.cueColdRepair(record)
       if (performance.now() >= yieldDeadline) {
         await scheduler.yield()
         signal?.throwIfAborted()
@@ -321,7 +356,7 @@ export class ApiSessionList {
   }
 
   private summarizeCold(
-    { header, formatStatus }: SessionRecord,
+    { header, formatStatus }: ColdRepairCue,
     trimHeavyProjections = false,
   ): SessionSummary {
     const projections = this.projectionsFor(header, undefined, trimHeavyProjections)
@@ -478,6 +513,116 @@ export class ApiSessionList {
       )
       return undefined
     }
+  }
+
+  /**
+   * Cue the consumer-owned cold refold for one listed row whose stored
+   * projection rows exist but can no longer be served — a unit's
+   * `stateVersion` moved since they were written (the bump itself says the
+   * rows "须重折一次"). Neither owner may do it inline: the cache is log-blind
+   * by contract and the listing is zero-I/O and never seeds a fold, so this
+   * is where the "fuller read path refolds it" promise is kept. The cue is
+   * synchronous, deduped, and bounded; the row keeps serving whatever the
+   * cache still holds until the pump reports back.
+   * @param record - the cold list record just served.
+   */
+  private cueColdRepair(record: ColdRepairCue): void {
+    const cache = this.ctx.get('sessionProjectionCache')
+    if (cache === undefined) return
+    const id = record.header.id
+    if (this.stopped || this.repairQueued.has(id)) return
+    if ((this.repairAttempts.get(id) ?? 0) >= COLD_REPAIR_ATTEMPT_LIMIT) return
+    try {
+      const stale = cache.staleSnapshotKeys(record.header, this.ctx.sessionProjections.summaryKeys())
+      if (stale.length === 0) return
+    } catch (error) {
+      this.ctx.logger.warn(
+        `api-session.list: stale-row probe for "${id}" failed; cold refold skipped: ${String(error)}`,
+      )
+      return
+    }
+    this.repairQueued.add(id)
+    this.repairQueue.push(record)
+    this.startRepairPump()
+  }
+
+  /**
+   * Drain the repair queue serially: one log read, full fold, checkpoint
+   * write-back, and row republish at a time, each between work yields and
+   * never inside a list request. A failing row is contained and logged — the
+   * attempt count stops a permanently failing Session from being retried on
+   * every list pull.
+   */
+  private startRepairPump(): void {
+    if (this.repairPump !== undefined) return
+    this.repairPump = (async () => {
+      while (!this.stopped) {
+        const cue = this.repairQueue.shift()
+        if (cue === undefined) return
+        this.repairQueued.delete(cue.header.id)
+        this.repairAttempts.set(cue.header.id, (this.repairAttempts.get(cue.header.id) ?? 0) + 1)
+        try {
+          await this.repairColdRow(cue)
+        } catch (error) {
+          this.ctx.logger.warn(
+            `api-session.list: cold projection refold for "${cue.header.id}" failed (the row keeps its stored columns): ${String(error)}`,
+          )
+        }
+        await scheduler.yield()
+      }
+    })().finally(() => {
+      this.repairPump = undefined
+      // A cue landing between the loop's last empty check and this clear
+      // would otherwise wait for a pump that no longer exists.
+      if (!this.stopped && this.repairQueue.length > 0) this.startRepairPump()
+    })
+  }
+
+  /**
+   * Refold one cold Session's projection rows from its stored log, refresh
+   * the durable checkpoint, and republish the repaired row. The stored log is
+   * the durability witness — `SessionHandle.read` only returns events the
+   * backend has accepted — so the cache write-back never runs ahead of the
+   * log, exactly the ordering `write()` buys with its flush. A Session that
+   * attaches meanwhile owns its own fold and frames, so the repair stands
+   * down before it writes and again before it publishes.
+   * @param cue - the cold list record queued for repair.
+   */
+  private async repairColdRow({ header, formatStatus }: ColdRepairCue): Promise<void> {
+    const cache = this.ctx.get('sessionProjectionCache')
+    const persistence = this.ctx.get('sessionPersistence')
+    if (cache === undefined || persistence === undefined) return
+    if (this.repairStandDown(header.id)) return
+    const handle = await persistence.open(header.id, 'read')
+    try {
+      const { events } = await handle.read()
+      if (this.repairStandDown(handle.header.id)) return
+      const repaired = hintsOf('cached', cache.coldSnapshot(handle.header, handle.inheritedEventCount, events), false)
+      if (this.repairStandDown(handle.header.id)) return
+      const summary = this.summarizeCold(
+        // `exactOptionalPropertyTypes`: an absent format status is omitted,
+        // never written as an explicit `undefined`.
+        formatStatus === undefined ? { header: handle.header } : { header: handle.header, formatStatus },
+        false,
+      )
+      // `api-session/added` is the list row's upsert on every consumer: the
+      // refreshed `cached` block fills the keys no sequenced row holds, which
+      // is exactly the state a version-bumped cold row is missing.
+      this.ctx.emit('api-session/added', repaired === undefined ? summary : { ...summary, projections: repaired })
+    } finally {
+      await handle.close()
+    }
+  }
+
+  /**
+   * Whether a repair must stand down for this Session: the list service is
+   * being disposed, or the Session attached while the repair ran and its own
+   * live fold now owns the checkpoint writes and the frames clients hear.
+   * @param sessionId - the Session the repair currently works on.
+   * @returns `true` when the repair must not write or publish.
+   */
+  private repairStandDown(sessionId: SessionId): boolean {
+    return this.stopped || this.ctx.sessions.get(sessionId) !== undefined
   }
 }
 

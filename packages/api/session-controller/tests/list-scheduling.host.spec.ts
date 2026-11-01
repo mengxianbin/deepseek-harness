@@ -94,6 +94,8 @@ async function harness(rows: readonly Row[], summaryMs = 8, workSliceMs = 8) {
       return { asOfSeq: -1, values: { sessionListMetadata: { blank: false, lastPromptAt: null } } }
     },
     cachedPredecessorTitle: () => undefined,
+    // The scheduling fixture owes no refold; the repair pump stays idle.
+    staleSnapshotKeys: () => [],
   } as never)
   const summaryFor = list.summaryFor.bind(list)
   vi.spyOn(list, 'summaryFor').mockImplementation((session) => {
