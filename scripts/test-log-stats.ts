@@ -51,12 +51,16 @@ export function parseTestLogStats(text: string): TestLogStats {
   for (const line of stripAnsi(text).split(/\r?\n/u)) {
     const match = FILE_LINE_PATTERN.exec(line.trimEnd())
     if (match === null) continue
-    const [, file, testsRaw, parenthetical, durationRaw] = match
+    const file = match[1]
+    const testsRaw = match[2]
+    const parenthetical = match[3]
+    const durationRaw = match[4]
+    if (file === undefined || testsRaw === undefined || parenthetical === undefined || durationRaw === undefined) continue
     const failed = FAILED_PATTERN.exec(parenthetical)
     entries.push({
       file,
       tests: Number(testsRaw),
-      failed: failed === null ? 0 : Number(failed[1]),
+      failed: failed === null || failed[1] === undefined ? 0 : Number(failed[1]),
       durationMs: Number(durationRaw),
     })
   }
@@ -92,6 +96,7 @@ function parseCliArgs(argv: readonly string[]): { path: string; top: number; fil
   let top = 20
   for (let index = 0; index < argv.length; index++) {
     const argument = argv[index]
+    if (argument === undefined) continue
     if (argument === '--top') {
       const value = Number(argv[++index])
       if (!Number.isSafeInteger(value) || value < 1) throw new Error('--top expects a positive integer')
