@@ -56,3 +56,13 @@ native/system/test/bin/
 /.wt-meta.yaml
 packages/api/workspace-files/src/client/watch-status.d.ts*
 packages/api/workspace-files/src/client/watch-status.js*
+
+# 本地临时与运行态（规则 = m-note content/tech/ai/dsh/temp-file-directory-rules.md，2026-11-01）
+/.tmp/
+/.build-*.log
+/profiles/
+/sessions/
+/storages/
+/.anonymous-user-id
+packages/util/home-paths/src/index.js*
+packages/util/home-paths/src/index.d.ts*
