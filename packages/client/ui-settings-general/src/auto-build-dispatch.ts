@@ -23,9 +23,26 @@
  * record and arms the same exponential backoff (INIT outranks the failure
  * marker in the judgment, so this module reads the marker directly).
  *
- * Dispatches are detached spawns: the build outlives this process and writes
- * its own start/failure markers (P0 build-stamp hooks), so the state machine
- * — not this dispatcher — remains the single truth for BUILDING/BUILD_FAILED.
+ * INIT cause split (2026-11-01 storm fix): INIT says "some in-scope baseline
+ * is missing", and the scan also covers linked plugin repositories
+ * (`restart-stamp.ts` `readRestartStamp`). This tree's build can only ever
+ * write THIS tree's manifest, so an INIT whose own manifest is present can
+ * only name a linked tree's missing manifest — dispatching would rebuild
+ * forever without ever clearing the condition (the observed init-bootstrap
+ * storm: one dispatched `pnpm run build` per throttle cycle, each a visible
+ * console window). With the own manifest present the dispatcher reports the
+ * linked condition once per episode in the journal and dispatches nothing;
+ * a missing own manifest keeps the bootstrap path above.
+ *
+ * Dispatch spawns: `windowsHide` + non-detached on Windows so the gated
+ * build inherits this process's hidden console — a detached console-less
+ * child instead lets its console grandchild allocate a NEW console, which
+ * the default terminal (Windows Terminal) renders as a visible,
+ * focus-stealing window (2026-11-01 popup finding). Elsewhere the spawn
+ * stays detached so the build outlives this process's session; either way
+ * the build writes its own start/failure markers (P0 build-stamp hooks), so
+ * the state machine — not this dispatcher — remains the single truth for
+ * BUILDING/BUILD_FAILED.
  * A post-dispatch outcome check re-collects after the minimum interval to
  * observe success (state moves on; backoff resets) or failure (backoff arms).
  *
@@ -74,6 +91,10 @@ const START_CAPTURE_FILE = 'restart-stamp.start.json'
 
 /** Build-failure record file name inside the stamp directory. */
 const FAILURE_FILE = 'restart-stamp.failed.json'
+
+/** Own baseline manifest file name inside the stamp directory (the INIT cause
+ * split reads it directly, mirroring the marker probes below). */
+const MANIFEST_FILE = 'restart-stamp.json'
 
 /** Journal file beside the manifest; rotated past this size (best-effort observability). */
 const JOURNAL_FILE = 'auto-build.log'
@@ -219,6 +240,11 @@ export interface AutoBuildInternals {
   /** Build-failure marker probe (INIT bootstrap: the judgment masks
    * BUILD_FAILED behind INIT); defaults to the harness tree's failure record. */
   readonly failedMarker?: () => boolean
+  /** Own-baseline probe (INIT cause split): true when THIS tree's manifest exists
+   * and parses, which means a still-INIT judgment names a linked repository's
+   * missing manifest — a condition no build of this tree can fix. Defaults to the
+   * harness tree's manifest file. */
+  readonly ownBaseline?: () => boolean
 }
 
 function sameFacts(left: RestartSignalFacts | undefined, right: RestartSignalFacts | undefined): boolean {
@@ -227,10 +253,28 @@ function sameFacts(left: RestartSignalFacts | undefined, right: RestartSignalFac
 }
 
 /**
+ * Whether this tree's own baseline manifest exists and parses as version 1.
+ * An unreadable or invalid manifest counts as missing so the INIT bootstrap
+ * can rewrite it; a valid own manifest under a still-INIT judgment pins the
+ * missing baseline on a linked repository instead.
+ * @returns true when the own manifest is present and readable.
+ */
+function ownBaselinePresent(): boolean {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(join(defaultRepositoryRoot(), STAMP_DIR, MANIFEST_FILE), 'utf8'))
+    return typeof parsed === 'object' && parsed !== null && Reflect.get(parsed, 'version') === 1
+  } catch {
+    return false
+  }
+}
+
+/**
  * Register the throttled auto-build dispatcher on the host context. It
  * observes fresh judgments; a moved source arms the stability window, a
- * persistent NEED_BUILD — or a missing baseline (INIT, the bootstrap) —
- * dispatches one detached build when every gate is clear, BUILD_FAILED arms
+ * persistent NEED_BUILD — or a missing OWN baseline (INIT, the bootstrap) —
+ * dispatches one gated build when every gate is clear, an INIT that only a
+ * linked repository's baseline can clear reports and dispatches nothing
+ * (cause split, 2026-11-01), BUILD_FAILED arms
  * the exponential backoff (and a retry past the backoff re-dispatches — the
  * new build's opening clears the failure marker), and any success-shaped
  * judgment resets the backoff. Disposal cancels timers and unsubscribes.
@@ -253,6 +297,7 @@ export function registerAutoBuild(ctx: Context, internals: AutoBuildInternals = 
     ?? ((): boolean => existsSync(join(defaultRepositoryRoot(), STAMP_DIR, START_CAPTURE_FILE)))
   const failedMarker = internals.failedMarker
     ?? ((): boolean => existsSync(join(defaultRepositoryRoot(), STAMP_DIR, FAILURE_FILE)))
+  const ownBaseline = internals.ownBaseline ?? ownBaselinePresent
   const subscribe = internals.subscribe
     ?? ((listener: (judgment: RestartSignalJudgment) => void): (() => void) => onRestartSignalJudgment(listener))
 
@@ -264,6 +309,7 @@ export function registerAutoBuild(ctx: Context, internals: AutoBuildInternals = 
   let failures = 0
   let failureRecorded = false
   let ownBuildPending = false
+  let linkedBaselineWarned = false
   let lockDeferralStartedAt: number | undefined
   let fireTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -316,7 +362,13 @@ export function registerAutoBuild(ctx: Context, internals: AutoBuildInternals = 
     lockDeferralStartedAt = undefined
     const options: SpawnOptions = {
       shell: true,
-      detached: true,
+      // Windows: NOT detached — a detached console-less cmd lets its console
+      // grandchild allocate a fresh console, which the default terminal
+      // (Windows Terminal) renders as a visible, focus-stealing window (the
+      // 2026-11-01 run-gates popups); staying attached lets windowsHide's
+      // hidden console cover the whole tree. Elsewhere detached keeps the
+      // build outliving this process's session.
+      detached: process.platform !== 'win32',
       stdio: 'ignore',
       windowsHide: true,
       env: process.env,
@@ -373,6 +425,23 @@ export function registerAutoBuild(ctx: Context, internals: AutoBuildInternals = 
           return
         }
         ownBuildPending = false
+        if (ownBaseline()) {
+          // INIT cause split (2026-11-01 storm fix): with this tree's manifest
+          // present, INIT can only name a linked repository's missing manifest
+          // (readRestartStamp scans the profile's link: repos) — no build of
+          // this tree ever writes that file, so dispatching here rebuilt the
+          // machine forever without clearing the condition (the observed
+          // init-bootstrap storm, one visible `pnpm run build` window per
+          // throttle cycle). Report once per episode and wait for that tree's
+          // own stamped build; a missing own manifest keeps the bootstrap below.
+          if (!linkedBaselineWarned) {
+            linkedBaselineWarned = true
+            warn('ui-settings-general: auto-build deferred: INIT comes from a linked repository missing its own build baseline; this tree cannot fix it')
+            journal('defer init-linked-baseline')
+          }
+          scheduleAt(now() + timings.intervalMs)
+          return
+        }
         if (failedMarker()) {
           recordFailure()
           if (now() < backoffUntil) {
@@ -434,6 +503,9 @@ export function registerAutoBuild(ctx: Context, internals: AutoBuildInternals = 
 
   const unsubscribe = subscribe((judgment) => {
     if (disposed) return
+    // A judgment that left INIT ends the linked-baseline episode: the next
+    // INIT (should one arrive) gets its one journal line again.
+    if (judgment.state !== 'INIT') linkedBaselineWarned = false
     switch (judgment.state) {
       case 'BUILDING':
         if (ownBuildPending) scheduleAt(now() + timings.intervalMs)

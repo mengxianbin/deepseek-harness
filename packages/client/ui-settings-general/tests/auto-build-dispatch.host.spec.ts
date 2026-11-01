@@ -1,14 +1,19 @@
 /**
  * Auto-build throttle (P3, design §四): continuous editing never storms the
  * build — a moved source re-arms the stability window, a persistent NEED_BUILD
- * dispatches one detached build per minimum interval, BUILD_FAILED backs off
+ * dispatches one gated build per minimum interval (hidden console on
+ * Windows, since 2026-11-01), BUILD_FAILED backs off
  * exponentially (and retries past the backoff), and the heavy-io lock defers
  * the dispatch so the save chain stays the single build dispatcher.
  *
  * Build-trigger hardening (2026-11-01): INIT no longer aborts into a
  * deadlock — a quiet marker-free INIT dispatches one bootstrap build, an
  * in-flight build marker defers to outcome checks, a failure marker arms the
- * same backoff, and every dispatch decision lands in the journal.
+ * same backoff, and every dispatch decision lands in the journal. The INIT
+ * cause split keeps that bootstrap honest: when this tree's own manifest is
+ * present, INIT can only name a linked repository's missing manifest, which
+ * no build here can fix — the dispatcher journals the condition once and
+ * dispatches nothing (the storm fix).
  */
 import { Context } from '@deepseek-ai/cordis'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -62,6 +67,7 @@ function harness(env: Record<string, string | undefined> = {}) {
   const heldFlag = vi.fn(() => false)
   const buildingMarker = vi.fn(() => false)
   const failedMarker = vi.fn(() => false)
+  const ownBaseline = vi.fn(() => false)
   registerAutoBuild(ctx, {
     subscribe: (l) => { listener = l; return () => { listener = undefined } },
     collect,
@@ -72,12 +78,13 @@ function harness(env: Record<string, string | undefined> = {}) {
     heldFlag,
     buildingMarker,
     failedMarker,
+    ownBaseline,
     command: 'build-cmd',
     env,
   })
   const emit = (judgment: RestartSignalJudgment): void => { listener?.(judgment) }
   const settle = async (ms: number): Promise<void> => { await vi.advanceTimersByTimeAsync(ms) }
-  return { emit, settle, collect, launch, warn, journal, lockHeld, heldFlag, buildingMarker, failedMarker }
+  return { emit, settle, collect, launch, warn, journal, lockHeld, heldFlag, buildingMarker, failedMarker, ownBaseline }
 }
 
 beforeEach(() => {
@@ -343,6 +350,34 @@ describe('auto-build dispatch throttle', () => {
     await h.settle(3_000)
     expect(h.launch).toHaveBeenCalledTimes(2)
     expect(h.journal).toHaveBeenCalledWith(expect.stringContaining('dispatch reason=init-retry'))
+  })
+
+  it('never dispatches when INIT comes from a linked repository missing its own baseline (storm fix)', async () => {
+    const h = harness()
+    h.collect.mockImplementation(async () => initJudgment())
+    // This tree's manifest is present, so INIT can only name a linked tree —
+    // a build here would rebuild forever without clearing the condition.
+    h.ownBaseline.mockReturnValue(true)
+    h.emit(initJudgment())
+    await h.settle(10 * 60_000)
+    expect(h.launch).not.toHaveBeenCalled()
+    const defers = h.journal.mock.calls.map(([line]) => line).filter((line): line is string => line === 'defer init-linked-baseline')
+    expect(defers).toHaveLength(1)
+    expect(h.warn).toHaveBeenCalledWith(expect.stringContaining('linked repository missing its own build baseline'))
+  })
+
+  it('bootstraps again once the own baseline goes missing (a linked defer never blocks a real bootstrap)', async () => {
+    const h = harness()
+    h.collect.mockImplementation(async () => initJudgment())
+    h.ownBaseline.mockReturnValue(true)
+    h.emit(initJudgment())
+    await h.settle(60_000)
+    expect(h.launch).not.toHaveBeenCalled()
+    // e.g. `pnpm run clean` wiped this tree's manifest: the bootstrap returns.
+    h.ownBaseline.mockReturnValue(false)
+    await h.settle(60_000)
+    expect(h.launch).toHaveBeenCalledOnce()
+    expect(h.journal).toHaveBeenCalledWith(expect.stringContaining('dispatch reason=init-bootstrap'))
   })
 
   it('journals every dispatch decision (need-build path included)', async () => {
