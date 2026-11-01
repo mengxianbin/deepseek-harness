@@ -54,6 +54,11 @@ describe('resolveRestartSignal', () => {
     expect(resolveRestartSignal({ state: 'NEED_RESTART', reason: 'built' })).toEqual({ state: 'NEED_RESTART', reason: 'built' })
   })
 
+  it('passes a readable BUILDING start time through to the timer tooltip (build-timer-tooltip-1101)', () => {
+    expect(resolveRestartSignal({ state: 'BUILDING', startedAt: '2026-11-01T13:36:21.476Z' }))
+      .toEqual({ state: 'BUILDING', startedAt: '2026-11-01T13:36:21.476Z' })
+  })
+
   it.each([
     ['absent', undefined],
     ['null', null],
@@ -62,6 +67,8 @@ describe('resolveRestartSignal', () => {
     ['an unknown state', { state: 'RESTART_SOON' }],
     ['a non-string state', { state: 7 }],
     ['an unknown branch', { state: 'NEED_RESTART', reason: 'someday' }],
+    ['a non-string build start', { state: 'BUILDING', startedAt: 7 }],
+    ['an unreadable build start', { state: 'BUILDING', startedAt: 'yesterday' }],
   ])('rejects %s', (_label, value) => {
     expect(resolveRestartSignal(value)).toBeUndefined()
   })

@@ -45,6 +45,10 @@ export interface RestartSignalView {
   readonly state: RestartSignalState
   /** Present only on `NEED_RESTART`: configuration vs built-artifact cause. */
   readonly reason?: RestartSignalReason
+  /** Present only on `BUILDING` when the Host's start capture carried a
+   * readable time: build start (ISO 8601), rendered locally as the restart
+   * button's timer tooltip — `HH:mm 起 · 已 <elapsed>` (build-timer-tooltip-1101). */
+  readonly startedAt?: string
 }
 
 /** Every legal signal state, for response validation. */
@@ -64,5 +68,13 @@ export function resolveRestartSignal(value: unknown): RestartSignalView | undefi
   if (typeof state !== 'string' || !RESTART_SIGNAL_STATES.includes(state as RestartSignalState)) return undefined
   const reason: unknown = Reflect.get(value, 'reason')
   if (reason !== undefined && reason !== 'config' && reason !== 'built') return undefined
-  return reason === undefined ? { state: state as RestartSignalState } : { state: state as RestartSignalState, reason }
+  // An unreadable build-start time fails the whole view (the badge keeps its
+  // previous state) rather than rendering a broken timer string.
+  const startedAt: unknown = Reflect.get(value, 'startedAt')
+  if (startedAt !== undefined && (typeof startedAt !== 'string' || !Number.isFinite(Date.parse(startedAt)))) return undefined
+  return {
+    state: state as RestartSignalState,
+    ...(reason === undefined ? {} : { reason }),
+    ...(startedAt === undefined ? {} : { startedAt }),
+  }
 }

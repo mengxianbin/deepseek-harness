@@ -47,9 +47,14 @@ export function registerRestartSignal(ctx: Context, internals: RestartSignalInte
       }, () => {})
       return collect().then(
         (judgment): Promise<Response> => Promise.resolve(Response.json(
-          judgment.reason === undefined
-            ? { state: judgment.state }
-            : { state: judgment.state, reason: judgment.reason },
+          // `startedAt` rides only on a BUILDING judgment whose start capture
+          // carried a readable time; the browser renders it as the timer
+          // tooltip's start stamp + elapsed age (build-timer-tooltip-1101).
+          {
+            state: judgment.state,
+            ...(judgment.reason === undefined ? {} : { reason: judgment.reason }),
+            ...(judgment.startedAt === undefined ? {} : { startedAt: judgment.startedAt }),
+          },
         )),
         (error: unknown): Promise<Response> => {
           process.stderr.write(`ui-settings-general: restart-signal recheck failed: ${error instanceof Error ? error.message : String(error)}\n`)

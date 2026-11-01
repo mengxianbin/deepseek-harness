@@ -46,6 +46,20 @@ describe('restart-signal recheck route', () => {
     expect(await (await post()).json()).toEqual({ state: 'OK' })
   })
 
+  it('carries the build-start time with a BUILDING judgment (build-timer-tooltip-1101)', async () => {
+    const { ctx, post } = fixture()
+    registerRestartSignal(ctx, {
+      collect: async () => ({ state: 'BUILDING', startedAt: '2026-11-01T13:36:21.476Z', detail: 'fixture' }),
+    })
+    expect(await (await post()).json()).toEqual({ state: 'BUILDING', startedAt: '2026-11-01T13:36:21.476Z' })
+  })
+
+  it('omits the start time on a BUILDING judgment without one', async () => {
+    const { ctx, post } = fixture()
+    registerRestartSignal(ctx, { collect: async () => ({ state: 'BUILDING', detail: 'fixture' }) })
+    expect(await (await post()).json()).toEqual({ state: 'BUILDING' })
+  })
+
   it('answers 500 with one stderr line when the gather rejects', async () => {
     const { ctx, post } = fixture()
     const write = vi.spyOn(process.stderr, 'write').mockReturnValue(true)

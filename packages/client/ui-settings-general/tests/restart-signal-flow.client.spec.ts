@@ -147,6 +147,23 @@ describe('restart-signal recheck attestation (P3)', () => {
     flow.dispose()
   })
 
+  it('keeps the BUILDING timer tooltip fresh on the same cadence, then stops (build-timer-tooltip-1101)', async () => {
+    let body: unknown = { state: 'BUILDING', startedAt: '2026-11-01T13:36:21.476Z' }
+    const fetchImpl = vi.fn(async () => ({ ok: true, status: 200, json: async () => body }))
+    const flow = startRestartSignalFlow(vi.fn(), { fetch: fetchImpl, warn: vi.fn(), refreshMs: 30_000 })
+    await flush()
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    // The build finishes: that tick stops the cadence like any other state.
+    body = { state: 'OK' }
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
+    flow.dispose()
+  })
+
   it('dispose cancels the refresh cadence', async () => {
     const fetchImpl = fetchStub({ state: 'NEED_RESTART', reason: 'built' })
     const flow = startRestartSignalFlow(vi.fn(), { fetch: fetchImpl, warn: vi.fn(), refreshMs: 30_000 })

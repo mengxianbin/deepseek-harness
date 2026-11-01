@@ -15,6 +15,7 @@ import {
   combineHostFace,
   collectRestartSignal,
   judgeRestartSignal,
+  readBuildStartCaptureTime,
   resetRestartSignalForTest,
   type CurrentStamp,
   type RestartSignalInputs,
@@ -61,6 +62,12 @@ describe('judgeRestartSignal', () => {
   it('reports BUILDING while the build-start capture exists, before any source judgment', () => {
     const judgment = judgeRestartSignal(inputs({ building: true, currentHostFace: 'other' }))
     expect(judgment.state).toBe('BUILDING')
+  })
+
+  it('carries the build-start time on a BUILDING judgment, and none without one (build-timer-tooltip-1101)', () => {
+    const startedAt = '2026-11-01T13:36:21.476Z'
+    expect(judgeRestartSignal(inputs({ building: true, buildingStartedAt: startedAt })).startedAt).toBe(startedAt)
+    expect(judgeRestartSignal(inputs({ building: true })).startedAt).toBeUndefined()
   })
 
   it('reports BUILD_FAILED while the failure record exists', () => {
@@ -363,5 +370,37 @@ describe('collectRestartSignal', () => {
     expect(judgment.state).toBe('NEED_BUILD')
     expect(judgment.facts?.ownFaceMoved).toBe(false)
     expect(judgment.detail).toContain('linked repository source moved')
+  })
+})
+
+describe('readBuildStartCaptureTime', () => {
+  const tree = mkdtempSync(join(tmpdir(), 'dsh-build-start-'))
+  const capturePath = join(tree, '.dsh-build', 'restart-stamp.start.json')
+  afterEach(() => { rmSync(tree, { recursive: true, force: true }) })
+  const writeCapture = (body: string): void => {
+    mkdirSync(join(tree, '.dsh-build'), { recursive: true })
+    writeFileSync(capturePath, body)
+  }
+
+  it('reads the capture time behind the BUILDING lamp', () => {
+    writeCapture(JSON.stringify({
+      version: 1,
+      kind: 'harness-start',
+      time: '2026-11-01T13:36:21.476Z',
+      faces: ['host'],
+      sStart: { repo: 'r', host: 'h', client: 'c' },
+    }))
+    expect(readBuildStartCaptureTime(tree)).toBe('2026-11-01T13:36:21.476Z')
+  })
+
+  it.each([
+    ['a missing capture', undefined],
+    ['malformed JSON', '{'],
+    ['a foreign kind', JSON.stringify({ version: 1, kind: 'other', time: '2026-11-01T00:00:00.000Z' })],
+    ['an unreadable time', JSON.stringify({ version: 1, kind: 'harness-start', time: 'yesterday' })],
+  ])('degrades to undefined on %s (build-timer-tooltip-1101)', (_label, body) => {
+    if (body === undefined) rmSync(capturePath, { force: true })
+    else writeCapture(body)
+    expect(readBuildStartCaptureTime(tree)).toBeUndefined()
   })
 })

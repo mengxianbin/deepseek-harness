@@ -35,7 +35,7 @@
 
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import {
@@ -77,6 +77,10 @@ export interface RestartSignalInputs {
   readonly configStamp: string
   /** True while a build-start capture sits in the harness tree: a build is running. */
   readonly building: boolean
+  /** Build-start capture time (ISO 8601) while a build is running; display data
+   * behind the BUILDING lamp's timer tooltip (build-timer-tooltip-1101), never
+   * a judgment input — the lamp itself still keys on the capture's existence. */
+  readonly buildingStartedAt?: string | undefined
   /** True while a build-failure record sits in the harness tree: the last build failed. */
   readonly failed: boolean
   /** Combined current host-face source stamp (S.host); `undefined` when stamps were unavailable. */
@@ -110,6 +114,10 @@ export interface RestartSignalJudgment {
   readonly state: RestartSignalState
   /** Present only on `NEED_RESTART`: which restart branch fired. */
   readonly reason?: RestartSignalReason
+  /** Present only on `BUILDING` when the start capture carried a readable
+   * time: the build-start instant (ISO 8601) the browser renders as the
+   * timer tooltip's start stamp and elapsed age (build-timer-tooltip-1101). */
+  readonly startedAt?: string
   /** Human-readable facts behind the judgment; log and test surface, never copy text. */
   readonly detail: string
   /** Machine facts this judgment consumed; attached by every production collect. */
@@ -152,7 +160,12 @@ function judgeCore(inputs: RestartSignalInputs): RestartSignalJudgment {
     return { state: 'INIT', detail: `baseline manifest missing: ${inputs.fresh.reasons.join('; ')}` }
   }
   if (inputs.building) {
-    return { state: 'BUILDING', detail: `build-start capture present at ${STAMP_DIR}/${START_CAPTURE_FILE}` }
+    const startedAt = inputs.buildingStartedAt
+    return {
+      state: 'BUILDING',
+      ...(startedAt === undefined ? {} : { startedAt }),
+      detail: `build-start capture present at ${STAMP_DIR}/${START_CAPTURE_FILE}`,
+    }
   }
   if (inputs.failed) {
     return { state: 'BUILD_FAILED', detail: `build-failure record present at ${STAMP_DIR}/${FAILURE_FILE}` }
@@ -198,6 +211,34 @@ function judgeCore(inputs: RestartSignalInputs): RestartSignalJudgment {
 
 /** Injection seam for the current-stamp gatherer; production spawns the stamp CLI. */
 export type StampCliRunner = (repositoryRoot: string, components: readonly RestartManifestComponent[]) => Promise<readonly CurrentStamp[]>
+
+/**
+ * Read the build-start capture time behind the BUILDING lamp, for the timer
+ * tooltip only (build-timer-tooltip-1101); the lamp itself keys on the
+ * capture's existence. A malformed or unreadable capture degrades to
+ * `undefined` — the plain Building copy — instead of failing the judgment.
+ * @param repositoryRoot - Harness repository tree holding `.dsh-build`.
+ * @returns The capture time (ISO 8601) or `undefined` when unreadable.
+ */
+export function readBuildStartCaptureTime(repositoryRoot: string): string | undefined {
+  let text: string
+  try {
+    text = readFileSync(join(repositoryRoot, STAMP_DIR, START_CAPTURE_FILE), 'utf8')
+  } catch {
+    return undefined
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return undefined
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined
+  const record = parsed as Record<string, unknown>
+  if (record.kind !== 'harness-start' || record.version !== 1) return undefined
+  const time = record.time
+  return typeof time === 'string' && Number.isFinite(Date.parse(time)) ? time : undefined
+}
 
 /** Injection seams for one collect; production defaults come from this process and the CLI. */
 export interface RestartSignalOptions extends RestartStampOptions {
@@ -288,11 +329,15 @@ async function computeRestartSignal(options: RestartSignalOptions): Promise<Rest
   const runtime = restartStamp(options)
   const fresh = readRestartStamp(options)
   const building = existsSync(join(repositoryRoot, STAMP_DIR, START_CAPTURE_FILE))
+  const buildingStartedAt = building ? readBuildStartCaptureTime(repositoryRoot) : undefined
   const failed = existsSync(join(repositoryRoot, STAMP_DIR, FAILURE_FILE))
   const configStamp = fresh.sCfg
   if (fresh.state === 'INIT') {
     return publishJudgment(
-      judgeRestartSignal({ runtime, fresh, configStamp, building, failed, currentHostFace: undefined, currentClientFace: undefined }),
+      judgeRestartSignal({
+        runtime, fresh, configStamp, building, buildingStartedAt, failed,
+        currentHostFace: undefined, currentClientFace: undefined,
+      }),
       { currentHostFace: undefined, configStamp },
     )
   }
@@ -332,7 +377,10 @@ async function computeRestartSignal(options: RestartSignalOptions): Promise<Rest
     currentClientFace = undefined
   }
   return publishJudgment(
-    judgeRestartSignal({ runtime, fresh, configStamp, building, failed, currentHostFace, currentClientFace, ownFaceMoved }),
+    judgeRestartSignal({
+      runtime, fresh, configStamp, building, buildingStartedAt, failed,
+      currentHostFace, currentClientFace, ownFaceMoved,
+    }),
     { currentHostFace, configStamp, ownFaceMoved },
   )
 }

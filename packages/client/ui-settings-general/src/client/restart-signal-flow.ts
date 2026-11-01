@@ -11,7 +11,9 @@
  * P3 additions, both dark until the host's flag is on: every recheck carries
  * the page's own running-Session count (`runningCount`, the host's automatic
  * fork compares it against its own reading), and a `NEED_RESTART` badge keeps
- * the attestation fresh with a quiet 30s refresh until the state moves on.
+ * the attestation fresh with a quiet 30s refresh until the state moves on;
+ * a `BUILDING` badge rides the same refresh so its timer tooltip's elapsed
+ * age stays current (build-timer-tooltip-1101).
  */
 import { RECHECK_PATH, resolveRestartSignal, type RestartSignalView } from '../restart.ts'
 
@@ -111,8 +113,10 @@ export function startRestartSignalFlow(
         if (view === undefined) throw new Error('recheck answered a malformed body')
         publish(view)
         // A NEED_RESTART badge keeps its attestation fresh (the host's fork
-        // window is 90s); any other state stops the refresh.
-        if (view.state === 'NEED_RESTART') startRefresh()
+        // window is 90s), and a BUILDING badge keeps its timer tooltip's
+        // elapsed age fresh on the same cadence (build-timer-tooltip-1101);
+        // any other state stops the refresh.
+        if (view.state === 'NEED_RESTART' || view.state === 'BUILDING') startRefresh()
         else stopRefresh()
       })
       .catch((error: unknown) => {

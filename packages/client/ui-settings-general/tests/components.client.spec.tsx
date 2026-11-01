@@ -27,7 +27,7 @@ import { CurrentVersionRow } from '../src/client/CurrentVersionRow.tsx'
 import { DesktopUpdateBadge } from '../src/client/DesktopUpdateIndicator.tsx'
 import { HostReleasePrompt, type HostReleasePromptProps } from '../src/client/HostReleasePrompt.tsx'
 import { AuthExpiredOverlay, type AuthExpiredOverlayProps } from '../src/client/AuthExpiredOverlay.tsx'
-import { RestartServerButton, type RestartServerButtonProps } from '../src/client/RestartServerButton.tsx'
+import { RestartServerButton, restartBuildElapsed, restartSignalCopy, type RestartServerButtonProps } from '../src/client/RestartServerButton.tsx'
 import { RESTART_PATH } from '../src/restart.ts'
 import type { DesktopUpdateView } from '../src/types.ts'
 
@@ -465,6 +465,40 @@ describe('Restart server button', () => {
       BUILD_FAILED: en['restart.signal.buildFailed'],
     }[state]
     expect(screen.getByRole('button', { name: copy }).getAttribute('data-restart-signal')).toBe(state)
+  })
+
+  it('appends the build start stamp and elapsed age to the BUILDING copy (build-timer-tooltip-1101)', () => {
+    // Local-clock anchored: 21:58 local renders as `21:58` in any test TZ.
+    const startedAt = new Date(2026, 10, 1, 21, 58, 0).toISOString()
+    const now = new Date(2026, 10, 1, 22, 35, 0).getTime() // 37 minutes later
+    // Function seat, pinned clock: the task's exact face in both key languages.
+    expect(restartSignalCopy(base.t, { state: 'BUILDING', startedAt }, now))
+      .toBe('Building · started at 21:58 · 37 min elapsed')
+    expect(restartSignalCopy(makeTranslate(zh), { state: 'BUILDING', startedAt }, now))
+      .toBe('构建中 · 21:58 起 · 已 37 分钟')
+    // Render seat: the assembled line lands on the button's accessible name.
+    render(<RestartServerButton {...base} signal={{ state: 'BUILDING', startedAt }} />)
+    expect(screen.getByRole('button').getAttribute('aria-label'))
+      .toMatch(/^Building · started at 21:58 · /)
+  })
+
+  it('keeps the plain BUILDING copy when the Host delivered no start time (build-timer-tooltip-1101)', () => {
+    expect(restartSignalCopy(base.t, { state: 'BUILDING' })).toBe(en['restart.signal.building'])
+  })
+
+  describe('restartBuildElapsed', () => {
+    it.each([
+      [0, '1s'],
+      [45_000, '45s'],
+      [37 * 60_000, '37 min'],
+      [59 * 60_000 + 5_000, '59 min 5s'],
+      [65 * 60_000, '1 h 5 min'],
+      [3 * 3_600_000, '3 h'],
+      [(26 * 3_600_000) + (3 * 60_000), '1 d 2 h'],
+      [48 * 3_600_000, '2 d'],
+    ])('renders %sms as %s (two levels at most)', (elapsedMs, expected) => {
+      expect(restartBuildElapsed(base.t, elapsedMs)).toBe(expected)
+    })
   })
 
   it('lights nothing for OK or the client-only state', () => {

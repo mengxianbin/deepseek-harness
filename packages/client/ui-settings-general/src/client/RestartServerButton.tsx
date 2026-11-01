@@ -18,17 +18,53 @@ export type RestartServerButtonProps = PropsLocale<'settings'> & {
   signal?: RestartSignalView | undefined
 }
 
+/** Pad a clock component to two digits for the tooltip's `HH:mm` start stamp. */
+function pad2(value: number): string {
+  return String(value).padStart(2, '0')
+}
+
+/**
+ * A running build's age as at most two localized levels — days+hours,
+ * hours+minutes, minutes+seconds, seconds alone — assembled from the
+ * elapsed-unit copy seats (build-timer-tooltip-1101).
+ * @param t - localized copy seat of the `settings` namespace.
+ * @param elapsedMs - non-negative milliseconds since the build started.
+ * @returns the localized elapsed phrase, e.g. `37 分钟` / `1 h 5 min`.
+ */
+export function restartBuildElapsed(t: PropsLocale<'settings'>['t'], elapsedMs: number): string {
+  const totalMinutes = Math.floor(elapsedMs / 60_000)
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  const seconds = Math.floor((elapsedMs % 60_000) / 1000)
+  const unit = (kind: 'sec' | 'min' | 'hour' | 'day', n: number): string =>
+    t(`restart.signal.building.elapsed.${kind}`, { n })
+  if (totalMinutes >= 24 * 60) {
+    const days = Math.floor(hours / 24)
+    const restHours = hours % 24
+    return restHours === 0 ? unit('day', days) : `${unit('day', days)} ${unit('hour', restHours)}`
+  }
+  if (hours > 0) {
+    return minutes === 0 ? unit('hour', hours) : `${unit('hour', hours)} ${unit('min', minutes)}`
+  }
+  if (totalMinutes > 0) {
+    return seconds === 0 ? unit('min', totalMinutes) : `${unit('min', totalMinutes)} ${unit('sec', seconds)}`
+  }
+  return unit('sec', Math.max(seconds, 1))
+}
+
 /**
  * The one next-step copy for a judgment; `OK` and the client-only
  * `CLIENT_UPDATED` state have no lamp and never reach this function.
  * @param t - localized copy seat of the `settings` namespace.
  * @param signal - latest judgment.
+ * @param now - current epoch milliseconds for the BUILDING elapsed age; the
+ *   default keeps production callers (render-time) honest while tests pin it.
  * @returns the single next-step line the tooltip, confirm dialog, and rail dot all carry.
  */
-export function restartSignalCopy(t: PropsLocale<'settings'>['t'], signal: RestartSignalView): string {
+export function restartSignalCopy(t: PropsLocale<'settings'>['t'], signal: RestartSignalView, now: number = Date.now()): string {
   switch (signal.state) {
     case 'INIT': return t('restart.signal.init')
-    case 'BUILDING': return t('restart.signal.building')
+    case 'BUILDING': return buildingSignalCopy(t, signal, now)
     case 'BUILD_FAILED': return t('restart.signal.buildFailed')
     case 'NEED_BUILD': return t('restart.signal.needBuild')
     case 'NEED_RESTART': return signal.reason === 'config'
@@ -37,6 +73,26 @@ export function restartSignalCopy(t: PropsLocale<'settings'>['t'], signal: Resta
     /* v8 ignore next -- OK and CLIENT_UPDATED are filtered before the copy seat; the switch needs its total form. */
     default: return ''
   }
+}
+
+/**
+ * The BUILDING line: the plain `Building…` copy while the Host delivered no
+ * readable start time, otherwise `Building · HH:mm · <elapsed>` from it —
+ * local clock, and the age clamped at zero so clock skew never prints a
+ * negative (build-timer-tooltip-1101).
+ * @param t - localized copy seat of the `settings` namespace.
+ * @param signal - the BUILDING judgment.
+ * @param now - current epoch milliseconds.
+ * @returns the timer-tooltip line.
+ */
+function buildingSignalCopy(t: PropsLocale<'settings'>['t'], signal: RestartSignalView, now: number): string {
+  if (signal.startedAt === undefined) return t('restart.signal.building')
+  const started = Date.parse(signal.startedAt)
+  if (!Number.isFinite(started)) return t('restart.signal.building')
+  const start = new Date(started)
+  const time = `${pad2(start.getHours())}:${pad2(start.getMinutes())}`
+  const elapsed = restartBuildElapsed(t, Math.max(now - started, 0))
+  return t('restart.signal.building.since', { time, elapsed })
 }
 
 /** Whether a judgment wears the restart lamp at all. */
