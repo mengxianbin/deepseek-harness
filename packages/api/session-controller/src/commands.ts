@@ -163,11 +163,13 @@ export class SessionCommandController {
       }
     }
     const cwd = workspace?.path ?? request.cwd ?? this.defaultCwd
-    // Attachment runs inside the pre-publication setup window (S2): the
-    // workspace record is written before the Session publishes, so the row's
-    // first visible frame already carries its group. A failed attach is
-    // remembered, not thrown — creation publishes anyway and the contract
-    // below reports it exactly as the old attach-after-create order did.
+    // Attachment runs inside the setup window (S2). The loop may publish the
+    // Session before it runs, so the publication gate withholds the row's
+    // first api-session/added frame until the attach settles: the row's
+    // first visible frame already carries its group, in either loop order.
+    // A failed attach is remembered, not thrown — creation publishes anyway
+    // (the gate releases an Ungrouped row with it) and the contract below
+    // reports it exactly as the old attach-after-create order did.
     let attachError: string | undefined
     let created: ApiSessionCreated
     try {
@@ -317,10 +319,13 @@ export class SessionCommandController {
     }
     const childId = brandString<SessionId>(`session-${randomUUID()}`)
     const composition = await this.agents.composeAgent(this.agents.presetForObservation(source))
-    // Same pre-publication attachment order as create (S2): the child's
-    // workspace membership is durable before it publishes; a failed attach
-    // is remembered and reported after creation under the same contract.
+    // Same attach-publication gate as create (S2): the child's first
+    // api-session/added frame is withheld until the attach settles, so the
+    // row's first visibility already carries its group; a failed attach is
+    // remembered, the gate still releases the row, and the contract below
+    // reports the failure after creation under the same terms.
     let attachError: string | undefined
+    if (workspace !== undefined) this.agents.publicationGate.hold(childId)
     try {
       const { provider, model } = this.ctx.agentDefaultModel.currentSelection()
       await this.ctx.agents.create({
@@ -344,10 +349,12 @@ export class SessionCommandController {
             } catch (error) {
               attachError = String(error)
             }
+            this.agents.publicationGate.attachSettled(agent.id)
             return commit
           },
       })
     } catch (error) {
+      this.agents.publicationGate.release(childId)
       throw new RemoteError(
         'gateway/internal',
         `failed to fork session "${request.sessionId}": ${String(error)}`,

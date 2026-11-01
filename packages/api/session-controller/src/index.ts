@@ -202,6 +202,12 @@ export class SessionController extends TypertRemoteService {
     ctx.typert.resources.register('session', { resolve: resolveSessionResource })
     this.agents = new ApiSessionAgentController(ctx)
     this.agents.initialize()
+    // The gate releases a withheld attach frame through this listener's own
+    // summary path, so a gated row's first frame is built exactly like any
+    // other added frame (listState is read at call time, after init).
+    this.agents.publicationGate.publish = (session) => {
+      ctx.emit('api-session/added', this.listState.summaryFor(session))
+    }
     this.commands = new SessionCommandController(ctx, this.agents, process.cwd())
     ctx.effect(() => ctx.fileUploads.registerAgentResolver(async (sessionId) => {
       const result = await this.agents.resolveAgent(sessionId)
@@ -230,9 +236,17 @@ export class SessionController extends TypertRemoteService {
     ctx.plugin(ArchivedSessionGate)
 
     ctx.on('session/created', (session) => {
+      // A Workspace-attached create/fork holds its first frame in the
+      // publication gate until the attach settles — the loop publishes a
+      // fresh Session before its setup window attaches, and an earlier
+      // frame would surface the row before the Workspace feed establishes
+      // its group (the S2 flash). The gate re-publishes the held frame at
+      // the attach settle, in either loop order.
+      if (!this.agents.publicationGate.sessionCreated(session)) return
       ctx.emit('api-session/added', this.listState.summaryFor(session))
     })
     ctx.on('session/disposed', (session) => {
+      this.agents.publicationGate.release(session.id)
       ctx.emit('api-session/removed', session.id)
     })
     const publishAgentAvailability = ({ agent }: { agent: Agent }): undefined => {
@@ -240,8 +254,16 @@ export class SessionController extends TypertRemoteService {
         ctx.emit('api-session/added', this.listState.summaryFor(agent.session))
       }
     }
-    ctx.on('agent/created', publishAgentAvailability)
-    ctx.on('agent/disposed', publishAgentAvailability)
+    ctx.on('agent/created', ({ agent }) => {
+      // A gated creation's first frame is the gate's own release at its
+      // attach settle; this re-emission would be its duplicate.
+      if (!this.agents.publicationGate.agentCreated(agent.id)) return
+      publishAgentAvailability({ agent })
+    })
+    ctx.on('agent/disposed', ({ agent }) => {
+      if (!this.agents.publicationGate.agentDisposed(agent.id)) return
+      publishAgentAvailability({ agent })
+    })
     const runningBySession = new Map<SessionId, boolean>()
     // The objective "blocked on the user" fold: today only the durable
     // userQuestions projection carries one. Read structurally so this host

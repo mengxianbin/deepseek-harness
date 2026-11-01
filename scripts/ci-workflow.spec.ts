@@ -1012,6 +1012,17 @@ describe('CI workflow', () => {
     expect(config).toContain('const laneTestBudget = coverageTestTimeoutOptions(process.env[COVERAGE_TEST_TIMEOUT_ENV])')
     expect(config.match(/^ {10}\.\.\.laneTestBudget,$/gm)).toHaveLength(2)
   })
+
+  it('applies the local retry budget inside every Vitest project', () => {
+    // SEMANTIC CHANGE lock (flake-timeout-govern-1101): the loaded-host
+    // fake-red fix is local-only — the budget is empty under CI, so upstream
+    // no-retry semantics stay pinned here, and it must land in each inline
+    // project because CLI flags do not reach them (same rule as laneTestBudget).
+    const config = readFileSync(resolve(root, 'vitest.config.ts'), 'utf8')
+
+    expect(config).toContain("const localRetryBudget = process.env.CI === 'true' || process.env.DSH_TEST_RETRY === '0' ? {} : { retry: 1 }")
+    expect(config.match(/^ {10}\.\.\.localRetryBudget,$/gm)).toHaveLength(2)
+  })
 })
 
 describe('Runtime and LLM e2e Blacksmith routing', () => {
