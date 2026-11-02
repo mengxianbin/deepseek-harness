@@ -207,4 +207,28 @@ export class TestWorkspaces implements IWorkspaces {
       draft.pinnedSessionIds = draft.pinnedSessionIds.filter(id => id !== sessionId)
     })
   }
+
+  /**
+   * Seat a session in its workspace locally (recorded). The default mirrors
+   * the production face's observable effect: the id joins the target
+   * workspace's `sessionIds`. Synchronous like the real local bridge — no
+   * Remote call, no round trip, so a feature test sees the seat in the same
+   * turn the create or fork promise resolves.
+   * @param workspaceId - workspace the session was attached to.
+   * @param sessionId - session to seat.
+   */
+  seatSession(workspaceId: WorkspaceId, sessionId: SessionId): void {
+    this.calls.push({ method: 'seatSession', args: [workspaceId, sessionId] })
+    const stub = this.stubs.get('seatSession')
+    if (stub !== undefined) {
+      stub(workspaceId, sessionId)
+      return
+    }
+    this.list.update((draft) => {
+      draft.items = draft.items.map(item => item.workspaceId === workspaceId
+        && !item.sessionIds.includes(sessionId)
+        ? { ...item, sessionIds: [...item.sessionIds, sessionId] }
+        : item)
+    })
+  }
 }
