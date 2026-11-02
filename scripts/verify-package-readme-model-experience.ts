@@ -260,6 +260,7 @@ const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/util/timeout': { kind: 'indirect', reason: 'Only timeout consumers render timeout outcomes.' },
   'packages/util/output-retention': { kind: 'indirect', reason: 'Only retention consumers render retained content and omission metadata.' },
   'packages/util/native-command': { kind: 'none', reason: 'The host-side subprocess runner registers nothing model-facing.' },
+  'packages/guard/unit-scheduler': { kind: 'none', reason: 'Scheduling policy only: it changes when slot-holding tool calls run and registers no prompt, schema, or result text.' },
   'packages/web/web': { kind: 'indirect', reason: 'The provider registry delegates model rendering to dsh-tool-web.' },
   'packages/web/web-fetch-http': { kind: 'indirect', reason: 'The provider backend delegates model rendering to dsh-tool-web.' },
   'packages/web/web-search-brave': { kind: 'indirect', reason: 'The provider backend delegates model rendering to dsh-tool-web.' },
