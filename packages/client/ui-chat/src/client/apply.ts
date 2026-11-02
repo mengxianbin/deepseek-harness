@@ -302,7 +302,17 @@ export function apply(ctx: Context): void {
             ctx.sessions.fork({ sessionId, atSeq: seq, increaseTitle: true, entry: 'footer', onCreated: (childId) => {
               ctx.get('productAnalytics')?.track('branch_session_click', { session_id: childId, parent_session_id: sessionId, ...messageId === undefined ? {} : { parent_message_id: messageId }, click_position: 'footer' })
             } })
-              .then((childId) => { ctx.uiWorkspace.openSession(childId) })
+              .then((childId) => {
+                // Seat the child in the source's Workspace before its row can
+                // paint ungrouped: the placeholder arrives on the fork result
+                // (HTTP) while the membership rides the workspace follow stream
+                // (WebSocket), and nothing orders those two at the browser.
+                const workspaces = ctx.get('workspaces')
+                const owner = workspaces?.list.getSnapshot().items
+                  .find(item => item.sessionIds.includes(sessionId))
+                if (owner !== undefined) workspaces?.seatSession(owner.workspaceId, childId)
+                ctx.uiWorkspace.openSession(childId)
+              })
               .catch(() => {
                 // Fork or child-title failure leaves the source view unchanged.
               })

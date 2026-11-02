@@ -271,6 +271,13 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     readonly agentPreset?: string
   }): Promise<SessionId> {
     const sessionId = await this.sessions.create(request)
+    // The Host has attached by now, but the row's placeholder arrives on the
+    // create result (HTTP) while the Workspace membership arrives on the
+    // workspace follow stream (WebSocket): two transports nothing orders at
+    // the browser, so the group is seated here — same turn as the placeholder,
+    // before any paint — and the authoritative upsert confirms it afterwards.
+    // A failed attach throws above, so only Host-attached Sessions are seated.
+    this.workspaces.seatSession(request.workspaceId, sessionId)
     const named = request.sessionId
     if (named !== undefined && named !== sessionId) {
       void this.sessions.refreshProjections(named).catch((reason: unknown) => {
@@ -337,13 +344,21 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     onCreated?: (childId: SessionId) => void,
     options?: Pick<Parameters<ISessions['fork']>[0], 'allowMigration' | 'entry'>,
   ): Promise<SessionId> {
-    return this.sessions.fork({
+    const childId = await this.sessions.fork({
       sessionId,
       increaseTitle: true,
       ...onCreated === undefined ? {} : { onCreated },
       ...options?.allowMigration === undefined ? {} : { allowMigration: options.allowMigration },
       ...options?.entry === undefined ? {} : { entry: options.entry },
     })
+    // The Host forks a child into the source's Workspace, so the source's
+    // owner is the child's group: seat it here for the same cross-transport
+    // reason createNamed does. A source outside every Workspace seats nothing
+    // and the child stays ungrouped, exactly as the Host reports it.
+    const owner = this.workspaces.list.getSnapshot().items
+      .find(item => item.sessionIds.includes(sessionId))
+    if (owner !== undefined) this.workspaces.seatSession(owner.workspaceId, childId)
+    return childId
   }
 
   startSession(workspaceId?: WorkspaceId, options?: StartSessionOptions): void {

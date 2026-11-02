@@ -236,6 +236,20 @@ class FakeWorkspaces implements IWorkspaces {
       pinnedSessionIds: state.pinnedSessionIds.filter(id => id !== sessionId),
     }))
   }
+
+  /** Every local seat observed, in order (create/fork bridging the transport gap). */
+  readonly seatCalls: { workspaceId: WorkspaceId; sessionId: SessionId }[] = []
+
+  seatSession(workspaceId: WorkspaceId, sessionId: SessionId): void {
+    this.seatCalls.push({ workspaceId, sessionId })
+    this.list.update(state => ({
+      ...state,
+      items: state.items.map(item => item.workspaceId === workspaceId
+        && !item.sessionIds.includes(sessionId)
+        ? { ...item, sessionIds: [...item.sessionIds, sessionId] }
+        : item),
+    }))
+  }
 }
 
 const listing: DirectoryListing = {

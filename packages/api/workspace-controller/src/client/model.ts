@@ -3,6 +3,7 @@
 import { notifySubscribers } from '@deepseek-ai/dsh-client-store'
 import type {} from '@deepseek-ai/dsh-api-workspace-controller/remote'
 import { isRemoteFailure } from '@deepseek-ai/dsh-api-gateway/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { RemoteFailure, RemoteResult, TypertClientRemote } from '@deepseek-ai/dsh-typert-protocol'
 import type {
   WorkspaceArchiveSessionRequest,
@@ -255,6 +256,38 @@ export class ClientWorkspaceModel implements WorkspaceFollowSink {
       this.installPinned(result.value.pinnedSessionIds)
     }
     return result
+  }
+
+  /**
+   * Seat a Session its Host has already attached into its Workspace, locally.
+   *
+   * Create and fork publish their row on the session channel while the
+   * membership rides the workspace follow stream, and those two channels are
+   * separate transports (the unary result is HTTP, the follow frames are
+   * WebSocket) whose browser-side arrival order nothing guarantees. A Client
+   * that only waited for the follow frame therefore painted the fresh row in
+   * the ungrouped bucket first whenever the follow frame was the larger side
+   * — with m-note's 966-session frame (45KB) versus a ~70ms unary round trip,
+   * always; the frame size decided the race, not the caller's entry point.
+   *
+   * By the time create or fork resolves, the Host attach has run, so seating
+   * here invents no fact: it only paints the group in the same frame as the
+   * local placeholder row, and the authoritative upsert then carries the
+   * identical membership over it. Local-only by construction — no Remote call
+   * is issued and `updatedAt` is left untouched, so every later Host increment
+   * still outranks this row.
+   * @param workspaceId - Workspace the Host attached the Session to.
+   * @param sessionId - Session the Host just created or forked into it.
+   */
+  seatSession(workspaceId: WorkspaceId, sessionId: SessionId): void {
+    if (this.removedIds.has(workspaceId)) return
+    const index = this.items.findIndex(item => item.workspaceId === workspaceId)
+    const installed = this.items[index]
+    if (installed === undefined || installed.sessionIds.includes(sessionId)) return
+    this.items = this.items.map((item, position) => position === index
+      ? { ...item, sessionIds: [...item.sessionIds, sessionId] }
+      : item)
+    this.invalidate()
   }
 
   /**

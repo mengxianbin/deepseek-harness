@@ -101,6 +101,20 @@ export interface IWorkspaces {
    */
   unpinSession(sessionId: SessionId): Promise<void>
   /**
+   * Seat a Session the Host has already attached into its Workspace, locally.
+   *
+   * Bridges create/fork's cross-transport gap: the row arrives on the session
+   * channel, the membership on the workspace follow stream, and the unary
+   * create/fork result is HTTP while the follow frames are WebSocket — the two
+   * transports are never coordinated at the browser, so without a seat the
+   * placeholder row paints in the ungrouped bucket until the size-dependent
+   * follow frame lands. Local only: no Remote call, no fact invented; the
+   * authoritative upsert carries the same membership over it.
+   * @param workspaceId - Workspace the Host attached the Session to.
+   * @param sessionId - Session the Host just created or forked into it.
+   */
+  seatSession(workspaceId: WorkspaceId, sessionId: SessionId): void
+  /**
    * Move a Session within one Workspace account.
    * @param workspaceId - owning Workspace.
    * @param sessionId - Session to move.
@@ -173,6 +187,10 @@ export class WorkspaceController extends Service implements IWorkspaces {
   async unpinSession(sessionId: SessionId): Promise<void> {
     const result = await this.model.unpinSession(sessionId)
     if (!result.ok) throw commandError('session unpin', result.error)
+  }
+
+  seatSession(workspaceId: WorkspaceId, sessionId: SessionId): void {
+    this.model.seatSession(workspaceId, sessionId)
   }
 
   async insertSessionBefore(
