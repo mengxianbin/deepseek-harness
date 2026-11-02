@@ -11,13 +11,18 @@
  * separation — the dot is a bare 6px core at the row's head, this lamp is a
  * ringed core at the row's end.
  *
- * Lamp table = design §四 (两绿对照, 刻意不同于归档门的 `isGreenSeal`):
- * 🟢 `DONE` / `N_A` (save 收口完成 = 归档触发灯) · 🔴 `UNSEALED` / `UNKNOWN`
- * (先处理) · dark = `NEUTRAL` / `LEGACY` / no verdict for the row — and the
- * whole channel fails dark when contract C1's endpoint is absent or fails
- * (单1 在途 = 当前预期常态), so an unlanded endpoint paints nothing and says
- * nothing. Registration rides the component's mount, so an archived or blank
- * row — which renders no lamp — never joins the check's id set either.
+ * Lamp table = design §四 (两绿对照, 刻意不同于归档门的 `isGreenSeal`),
+ * GREEN-ONLY since the 2026-11-02 丙-最简 revision (m-note
+ * content/tech/ai/dsh/archive-seal-light.md §〇修订注 / §四修订段,判据源 =
+ * decision-log `2026-11-02T16:55` 条): 🟢 `DONE` / `N_A` (save 收口完成 =
+ * 归档触发灯) · `UNSEALED` / `UNKNOWN` no longer paint red — 「未收口」是多轮
+ * 编辑的正常中间态,常亮红把状态当警报、违反警报经济学,红的职责整体移交归档门
+ * (单2,点归档那一刻的单条预检) · dark = `NEUTRAL` / `LEGACY` / no verdict for
+ * the row — and the whole channel fails dark when contract C1's endpoint is
+ * absent or fails (单1 在途 = 当前预期常态), so an unlanded endpoint paints
+ * nothing and says nothing. Registration rides the component's mount, so an
+ * archived or blank row — which renders no lamp — never joins the check's id
+ * set either.
  */
 import { useEffect } from 'react'
 import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -28,19 +33,19 @@ import css from './Rows.module.css'
 /** The locale seat, prop-passed from the browser root (Rows' own alias). */
 type SealLightTranslate = WorkspaceBrowserProps['t']
 
-/** The lamp's two lit tones; no tone is the dark row (no lamp rendered). */
-export type SealLightTone = 'ready' | 'blocked'
+/** The lamp's only lit tone (2026-11-02 丙-最简: red exited the row); no tone is the dark row (no lamp rendered). */
+export type SealLightTone = 'ready'
 
 /**
- * The design's lamp table (archive-seal-light.md §四 灯绿): save 收口完成
- * lights the archive-trigger green, an unsealed or unreadable row lights red,
- * and the two groups the machine cannot judge stay dark for the human.
+ * The design's lamp table (archive-seal-light.md §四 灯绿; 2026-11-02 丙-最简
+ * 修订 = 行内绿-only): save 收口完成 lights the archive-trigger green, and
+ * every other verdict — including `UNSEALED` / `UNKNOWN`, whose red left the
+ * row for the archive gate — stays dark for the human.
  * @param seal - the verdict C1 reported for this row.
  * @returns the tone to paint, or nothing for a dark row.
  */
 export function sealLightTone(seal: SealLightSeal): SealLightTone | undefined {
   if (seal.verdict === 'DONE' || seal.verdict === 'N_A') return 'ready'
-  if (seal.verdict === 'UNSEALED' || seal.verdict === 'UNKNOWN') return 'blocked'
   return undefined
 }
 
@@ -64,22 +69,16 @@ function sealDetailLine(seal: SealLightSeal, t: SealLightTranslate): string | un
 }
 
 /**
- * The tooltip and screen-reader text: the tone's head line carrying the raw
- * verdict token (traceable against a C1 report), plus the server-named detail
- * when there is one. Copy rides the dictionary; only the separator is
- * structural (verify-client-ui-i18n exempts it: no language character).
+ * The tooltip and screen-reader text: the head line carrying the raw verdict
+ * token (traceable against a C1 report), plus the server-named detail when
+ * there is one. Copy rides the dictionary; only the separator is structural
+ * (verify-client-ui-i18n exempts it: no language character).
  * @param seal - the verdict C1 reported for this row.
- * @param tone - the lit tone behind this tooltip.
  * @param t - the browser root's locale seat.
  * @returns the complete label.
  */
-function sealLightLabel(seal: SealLightSeal, tone: SealLightTone, t: SealLightTranslate): string {
-  const head = t(
-    tone === 'ready'
-      ? 'sealLight.ready'
-      : seal.verdict === 'UNKNOWN' ? 'sealLight.unreadable' : 'sealLight.blocked',
-    { v: seal.verdict },
-  )
+function sealLightLabel(seal: SealLightSeal, t: SealLightTranslate): string {
+  const head = t('sealLight.ready', { v: seal.verdict })
   const detail = sealDetailLine(seal, t)
   return detail === undefined ? head : `${head} · ${detail}`
 }
@@ -115,7 +114,7 @@ export function SealLight({ sessionId, running, seal, sealRows, t }: SealLightPr
   }, [sessionId, running, sealRows])
   const tone = seal === undefined ? undefined : sealLightTone(seal)
   if (seal === undefined || tone === undefined) return null
-  const label = sealLightLabel(seal, tone, t)
+  const label = sealLightLabel(seal, t)
   return (
     <Tooltip label={label} delayMs={500} side="left">
       <span className={css.sealLight} data-seal-tone={tone} role="img" aria-label={label} />

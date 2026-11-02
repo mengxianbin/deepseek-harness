@@ -67,9 +67,9 @@ describe('sealLightTone (design §四: the lamp green is not the gate green)', (
     expect(sealLightTone({ verdict: 'N_A' })).toBe('ready')
   })
 
-  it('lights red exactly on UNSEALED and UNKNOWN', () => {
-    expect(sealLightTone({ verdict: 'UNSEALED' })).toBe('blocked')
-    expect(sealLightTone({ verdict: 'UNKNOWN' })).toBe('blocked')
+  it('stays dark on UNSEALED and UNKNOWN (2026-11-02 丙-最简: red exits the row)', () => {
+    expect(sealLightTone({ verdict: 'UNSEALED' })).toBeUndefined()
+    expect(sealLightTone({ verdict: 'UNKNOWN' })).toBeUndefined()
   })
 
   it('keeps NEUTRAL and LEGACY dark even though the archive gate calls them green', () => {
@@ -261,9 +261,9 @@ describe('SealLight (the lamp on the row)', () => {
     expect(screen.getByRole('tooltip').textContent).toBe('归档就绪：save 已收口（DONE）')
   })
 
-  it('folds the detail vocabulary and the stale follow-up count into one label', () => {
+  it('renders nothing for an unsealed row even with its detail vocabulary (2026-11-02 丙-最简)', () => {
     const sealRows = observer()
-    render(
+    const view = render(
       <SealLight
         sessionId={sid('one')}
         running={false}
@@ -272,17 +272,20 @@ describe('SealLight (the lamp on the row)', () => {
         t={t}
       />,
     )
-    const lamp = screen.getByRole('img')
-    expect(lamp.getAttribute('data-seal-tone')).toBe('blocked')
-    expect(lamp.getAttribute('aria-label'))
-      .toBe('未收口：归档前先处理（UNSEALED） · 上次 save 已 DONE、其后续聊 3 条')
+    expect(view.container.querySelector('[data-seal-tone]')).toBeNull()
+    expect(view.container.textContent).toBe('')
+    // Dark or lit, a mounted lamp registers its row: the verdict arriving is
+    // what lights it, so the id set does not depend on the current tone.
+    expect(sealRows.watch).toHaveBeenCalledWith(sid('one'))
   })
 
-  it('names an unreadable verdict with its own line (UNKNOWN is not 未收口)', () => {
+  it('renders nothing for an unreadable verdict (UNKNOWN has no row seat)', () => {
     const sealRows = observer()
-    render(<SealLight sessionId={sid('one')} running={false} seal={{ verdict: 'UNKNOWN' }} sealRows={sealRows} t={t} />)
-    expect(screen.getByRole('img').getAttribute('aria-label'))
-      .toBe('收口状态不可读：归档前先处理（UNKNOWN）')
+    const view = render(
+      <SealLight sessionId={sid('one')} running={false} seal={{ verdict: 'UNKNOWN' }} sealRows={sealRows} t={t} />,
+    )
+    expect(view.container.querySelector('[data-seal-tone]')).toBeNull()
+    expect(view.container.textContent).toBe('')
   })
 
   it('takes its copy from the dictionary: the same verdict reads English in en', () => {
@@ -411,9 +414,9 @@ describe('the light copy ships with every published language', () => {
   // The literal keys are checked against `WorkspaceKey` at compile time (a
   // typo stops the build), and every dictionary already `satisfies` that key
   // set — the runtime check below covers the placeholder and the values.
-  const KEYS: readonly WorkspaceKey[] = ['sealLight.ready', 'sealLight.blocked', 'sealLight.unreadable']
+  const KEYS: readonly WorkspaceKey[] = ['sealLight.ready']
 
-  it('carries all three lamp lines, {v} intact, in all eight dictionaries', () => {
+  it('carries the lamp line, {v} intact, in all eight dictionaries', () => {
     for (const dictionary of [zh, en, ja, es, fr, de, ru, pt]) {
       for (const key of KEYS) {
         expect(dictionary[key], key).toBeTypeOf('string')
