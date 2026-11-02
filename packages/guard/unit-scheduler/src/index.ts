@@ -40,12 +40,24 @@
  * gated here; `job_output` stays pass-through so waiting for it can never
  * close a ring.
  *
+ * Observation layer (P0.5, plan §4.2 three channels): the gate COUNTS what it
+ * already does and never feeds those counts back into a scheduling decision.
+ * Channel a prints one conditional aggregate log line every five minutes,
+ * channel c serves `GET /api/unit-scheduler/state` behind a loopback fence,
+ * and both read the same internal {@link UnitSlotSemaphore.stats} counters —
+ * held slots, the queue and its oldest wait, granted-wait percentiles over a
+ * rolling window, and the fail-open tally split by cause (the M1 attribution
+ * field). Scheduling defaults, FIFO order, the pass-through list, the three
+ * iron laws and the fail-open semantics above are untouched by this layer.
+ *
  * @module @deepseek-ai/dsh-unit-scheduler
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks'
+import type { IncomingMessage } from 'node:http'
 import { availableParallelism } from 'node:os'
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-host-webserver'
 import z from '@deepseek-ai/schemastery'
 import type { ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 
@@ -164,6 +176,82 @@ export function compilePassThrough(extraPatterns: readonly string[] = []): (tool
 /** Session key used when a direct `ctx.tools.execute()` caller carries no agent: one shared anonymous bucket. */
 const NO_AGENT_SESSION_KEY = '#no-agent'
 
+/** The read-only state probe route (plan §4.2c channel c). */
+export const STATE_PATH = '/api/unit-scheduler/state'
+
+/**
+ * Channel a's cadence (plan §4.2a「每 5min」): one conditional aggregate log
+ * line per interval, printed only when the queue is non-empty or a fail-open
+ * happened since the previous tick.
+ */
+export const AGGREGATION_INTERVAL_MS = 5 * 60_000
+
+/**
+ * Rolling window behind {@link UnitSchedulerState.waitP50} and
+ * {@link UnitSchedulerState.waitP95} (plan §4.2c `waitP50/P95(win)`): exactly
+ * one {@link AGGREGATION_INTERVAL_MS}, so one percentile read covers the same
+ * span one aggregate line reports. Samples age out on every read and on every
+ * new sample; the five-minute tick reads continuously, so a quiet gate never
+ * accumulates stale waits.
+ */
+export const WAIT_WINDOW_MS = AGGREGATION_INTERVAL_MS
+
+/**
+ * Which grant gate kept a waiter queued until its bounded wait expired — the
+ * P0.5 split of `#canGrant`'s two short-circuited conditions (plan §4.2a
+ * 分因, the M1 attribution field):
+ * - `global-full` — 「全局满」: every slot is held (`held >= maxSlots`);
+ * - `session-cap` — 「本会话 cap=2 挤兑」: the pool has room, but this owner
+ *   session already holds `maxSlotsPerSession` slots.
+ */
+export type FailOpenCause = 'global-full' | 'session-cap'
+
+/** Cumulative fail-open tally carried by {@link UnitSchedulerState}. */
+export interface FailOpenStats {
+  /** Fail-open releases since the plugin loaded. */
+  total: number
+  /** Enqueue→expiry elapsed time of the most recent fail-open (ms); 0 when there has been none. */
+  lastMs: number
+  /** Wall clock of the most recent fail-open (ms since epoch); 0 when there has been none. */
+  lastAt: number
+  /** Cause of the most recent fail-open; `null` while the gate has never failed open. */
+  cause: FailOpenCause | null
+}
+
+/**
+ * The `GET /api/unit-scheduler/state` payload — plan §4.2c schema verbatim.
+ * A read-only projection of the live gate: nothing in here feeds back into a
+ * scheduling decision.
+ */
+export interface UnitSchedulerState {
+  /** Wall clock of this snapshot (ms since epoch). */
+  at: number
+  /** Configured host-global slot budget. */
+  maxSlots: number
+  /** Slots currently held across all sessions. */
+  held: number
+  /** Slots currently held, per owner session; a session holding none is absent. */
+  heldBySession: Readonly<Record<string, number>>
+  /** Waiters currently queued for a slot. */
+  queued: number
+  /** Age of the oldest queued waiter (ms); 0 when the queue is empty. */
+  queueOldestMs: number
+  /** p50 of granted enqueue→grant waits inside {@link WAIT_WINDOW_MS} (ms); 0 with no sample. */
+  waitP50: number
+  /** p95 of the same window (ms); 0 with no sample. */
+  waitP95: number
+  /** Fail-open tally (plan §4.2c). */
+  failOpen: FailOpenStats
+}
+
+/** What the semaphore's `stats()` returns: the probe payload plus the per-cause tallies its fixed schema omits. */
+export interface UnitSchedulerStats {
+  /** The plan §4.2c payload, exactly as the endpoint serves it. */
+  readonly state: UnitSchedulerState
+  /** Cumulative fail-open count per cause — the aggregate line's 分因 suffix. */
+  readonly failOpenByCause: Readonly<Record<FailOpenCause, number>>
+}
+
 /** Outcome of one bounded-wait acquisition: either a held slot with its release, or an ordered release without one. */
 type SlotAcquireOutcome =
   | { readonly acquired: true; readonly waitedMs: number; release(): void }
@@ -202,6 +290,14 @@ class UnitSlotSemaphore {
   #held = 0
   readonly #heldBySession = new Map<string, number>()
   readonly #queue: Waiter[] = []
+  /** Granted enqueue→grant waits inside {@link WAIT_WINDOW_MS}, oldest first. */
+  readonly #waitSamples: { at: number; ms: number }[] = []
+  /** Fail-open tally: total, the most recent event's wait/time/cause, and the per-cause split. */
+  #failOpenTotal = 0
+  #failOpenLastMs = 0
+  #failOpenLastAt = 0
+  #failOpenCause: FailOpenCause | null = null
+  readonly #failOpenByCause: Record<FailOpenCause, number> = { 'global-full': 0, 'session-cap': 0 }
 
   constructor(options: UnitSlotSemaphoreOptions) {
     this.#maxSlots = options.maxSlots
@@ -234,7 +330,11 @@ class UnitSlotSemaphore {
         signal.addEventListener('abort', onAbort, { once: true })
       }
       waiter.timer = setTimeout(() => {
-        this.#settle(waiter, { acquired: false, reason: 'fail-open', waitedMs: Date.now() - waiter.enqueuedAt })
+        const waitedMs = Date.now() - waiter.enqueuedAt
+        // Tally the expiry (with its cause) before resolving, so the caller's
+        // fail-open warn and any probe read see the same accounting.
+        this.#recordFailOpen(waiter.sessionKey, waitedMs)
+        this.#settle(waiter, { acquired: false, reason: 'fail-open', waitedMs })
       }, budgetMs)
       // Grant synchronously when the budget already allows it; otherwise the
       // waiter stays queued until a release (or the bounded wait expires).
@@ -242,10 +342,61 @@ class UnitSlotSemaphore {
     })
   }
 
+  /**
+   * Read the P0.5 observation counters (plan §4.4 `stats()`): one coherent
+   * snapshot of the live gate plus the cumulative fail-open tally. A read
+   * changes no scheduling state and disturbs no waiter.
+   * @returns the plan §4.2c payload and the per-cause tally it omits.
+   */
+  stats(): UnitSchedulerStats {
+    const now = Date.now()
+    this.#pruneWaits(now)
+    const heldBySession: Record<string, number> = {}
+    for (const [sessionKey, held] of this.#heldBySession) heldBySession[sessionKey] = held
+    // Settled waiters are dequeued as they settle; filtering keeps the probe
+    // honest even if a release path ever leaves one behind.
+    const queued = this.#queue.filter(waiter => !waiter.settled)
+    const oldest = queued[0]
+    const { p50, p95 } = this.#percentiles()
+    return {
+      state: {
+        at: now,
+        maxSlots: this.#maxSlots,
+        held: this.#held,
+        heldBySession,
+        queued: queued.length,
+        queueOldestMs: oldest === undefined ? 0 : Math.max(0, now - oldest.enqueuedAt),
+        waitP50: p50,
+        waitP95: p95,
+        failOpen: {
+          total: this.#failOpenTotal,
+          lastMs: this.#failOpenLastMs,
+          lastAt: this.#failOpenLastAt,
+          cause: this.#failOpenCause,
+        },
+      },
+      failOpenByCause: { ...this.#failOpenByCause },
+    }
+  }
+
+  /**
+   * Which grant gate denies `sessionKey` one more slot right now — the two
+   * conditions of the P0 `#canGrant`, split so a fail-open can record WHICH
+   * one blocked (plan §4.2a 分因). Evaluation order is unchanged: the global
+   * pool is checked first, then the per-session cap, so `#canGrant` keeps
+   * exactly its P0 meaning.
+   * @param sessionKey - owner-session accounting key.
+   * @returns `global-full`, `session-cap`, or `undefined` when the session may hold one more slot.
+   */
+  #denyCause(sessionKey: string): FailOpenCause | undefined {
+    if (this.#held >= this.#maxSlots) return 'global-full'
+    if ((this.#heldBySession.get(sessionKey) ?? 0) >= this.#maxPerSession) return 'session-cap'
+    return undefined
+  }
+
   /** Whether `sessionKey` may hold one more slot right now. */
   #canGrant(sessionKey: string): boolean {
-    if (this.#held >= this.#maxSlots) return false
-    return (this.#heldBySession.get(sessionKey) ?? 0) < this.#maxPerSession
+    return this.#denyCause(sessionKey) === undefined
   }
 
   /** Grant to the FIFO-first grantable waiter while global slots are free (skipping sessions at their cap). */
@@ -264,6 +415,9 @@ class UnitSlotSemaphore {
   #grant(waiter: Waiter): void {
     this.#held += 1
     this.#heldBySession.set(waiter.sessionKey, (this.#heldBySession.get(waiter.sessionKey) ?? 0) + 1)
+    // P0.5: this wait BECAME a grant, so it is the sample behind waitP50/P95
+    // (fail-open and aborted waits never became grants; they are tallied apart).
+    this.#recordWait(Date.now() - waiter.enqueuedAt)
     let released = false
     const release = (): void => {
       if (released) return
@@ -291,6 +445,170 @@ class UnitSlotSemaphore {
     if (index !== -1) this.#queue.splice(index, 1)
     waiter.resolve(outcome)
   }
+
+  /**
+   * Keep one granted enqueue→grant wait for the percentile window.
+   * @param waitedMs - the enqueue→grant elapsed time just observed.
+   */
+  #recordWait(waitedMs: number): void {
+    const now = Date.now()
+    this.#waitSamples.push({ at: now, ms: waitedMs })
+    this.#pruneWaits(now)
+  }
+
+  /** Drop window-expired wait samples; samples are appended in time order, so the first live one bounds the expired prefix. */
+  #pruneWaits(now: number): void {
+    const cutoff = now - WAIT_WINDOW_MS
+    const keepFrom = this.#waitSamples.findIndex(sample => sample.at >= cutoff)
+    if (keepFrom === -1) {
+      this.#waitSamples.length = 0
+      return
+    }
+    if (keepFrom > 0) this.#waitSamples.splice(0, keepFrom)
+  }
+
+  /**
+   * Nearest-rank percentiles over the windowed granted waits: rank
+   * `ceil(p · n)` of the ascending samples (the classic definition, so the
+   * p95 of ten samples is the largest of them rather than an interpolation
+   * between the ninth and tenth).
+   * @returns p50/p95 in milliseconds; 0 for both while the window is empty.
+   */
+  #percentiles(): { p50: number; p95: number } {
+    const sorted = this.#waitSamples.map(sample => sample.ms).sort((a, b) => a - b)
+    const at = (p: number): number => {
+      if (sorted.length === 0) return 0
+      const rank = Math.min(sorted.length, Math.max(1, Math.ceil(p * sorted.length)))
+      return sorted[rank - 1] ?? 0
+    }
+    return { p50: at(0.5), p95: at(0.95) }
+  }
+
+  /**
+   * Count one bounded-wait expiry together with the gate that kept its waiter
+   * queued (the plan §4.2a 分因 split performed by `#denyCause`).
+   * @param sessionKey - the owner session whose budget expired.
+   * @param waitedMs - the enqueue→expiry elapsed time.
+   */
+  #recordFailOpen(sessionKey: string, waitedMs: number): void {
+    // At expiry the waiter is queue-resident, and `#drain` never leaves a
+    // grantable waiter queued, so one of the two gates is always closed here;
+    // `session-cap` names that unreachable third state so the tally stays total.
+    const cause = this.#denyCause(sessionKey) ?? 'session-cap'
+    this.#failOpenTotal += 1
+    this.#failOpenLastMs = waitedMs
+    this.#failOpenLastAt = Date.now()
+    this.#failOpenCause = cause
+    this.#failOpenByCause[cause] += 1
+  }
+}
+
+/**
+ * The request facts the loopback fence reads; a Node `IncomingMessage`
+ * supplies both members structurally.
+ */
+export interface ProbeRequest {
+  readonly headers: IncomingMessage['headers']
+  readonly socket: { readonly remoteAddress: string | undefined }
+}
+
+/** Whether a decimal IPv4 literal lies in 127/8 (RFC 5735 loopback). */
+function isIPv4Loopback(value: string): boolean {
+  const octets = value.split('.')
+  return octets.length === 4
+    && octets[0] === '127'
+    && octets.every(octet => /^\d{1,3}$/.test(octet) && Number(octet) <= 255)
+}
+
+/** Whether a socket peer address names loopback: 127/8, `::1`, or the IPv4-mapped form of either. */
+function isLoopbackAddress(address: string | undefined): boolean {
+  if (address === undefined) return false
+  const normalized = address.toLowerCase()
+  if (normalized === '::1') return true
+  if (normalized.startsWith('::ffff:')) return isIPv4Loopback(normalized.slice('::ffff:'.length))
+  return isIPv4Loopback(normalized)
+}
+
+/** Whether a parsed URL hostname names loopback: `localhost`, `[::1]`, or a 127/8 literal. */
+function isLoopbackHostname(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '[::1]' || isIPv4Loopback(hostname)
+}
+
+/**
+ * The state probe's fence — plan §4.2c「自写 loopback 判定」: a request passes
+ * only when the SOCKET peer is loopback AND the Host header names a loopback
+ * authority AND any browser same-origin markers agree (`sec-fetch-site:
+ * cross-site` is refused outright; an attached Origin must be exactly the Host
+ * authority). The socket address is authoritative and `X-Forwarded-For` is
+ * never read, so a DNS-rebound or cross-site page is refused the same way the
+ * dsh-web sysmon route refuses it — loopback 恒过, everything else 403.
+ *
+ * The precedent's second door (a paired remote-web-ui device cookie) is
+ * deliberately NOT reimplemented: until the P1 chip batch (plan §4.4) the
+ * only consumer is a loopback `curl`, and the alternative fence offered by
+ * the plan — mounting the gateway's browserAuth — would answer 401 to exactly
+ * that caller. The trade is recorded in this change's fence reconciliation
+ * note; extending the probe to a paired remote browser belongs to P1.
+ *
+ * @param request - the incoming request (headers plus socket peer address).
+ * @returns true only for a loopback caller speaking for this loopback authority.
+ */
+export function isLoopbackProbeRequest(request: ProbeRequest): boolean {
+  if (!isLoopbackAddress(request.socket.remoteAddress)) return false
+  const host = request.headers.host
+  if (host === undefined) return false
+  let hostUrl: URL
+  try {
+    hostUrl = new URL(`http://${host}`)
+  } catch {
+    return false
+  }
+  if (!isLoopbackHostname(hostUrl.hostname)) return false
+  if (request.headers['sec-fetch-site'] === 'cross-site') return false
+  const origin = request.headers.origin
+  if (origin === undefined) return true
+  try {
+    return new URL(origin).host === hostUrl.host
+  } catch {
+    return false
+  }
+}
+
+/** Compact age for the `…/last …` field: seconds below a minute, hours past an hour. */
+function formatAge(ageMs: number): string {
+  const seconds = Math.floor(ageMs / 1000)
+  if (seconds < 60) return `${String(seconds)}s`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${String(minutes)}m`
+  return `${String(Math.floor(minutes / 60))}h`
+}
+
+/**
+ * The conditional aggregate log line (channel a, plan §4.2a): printed once per
+ * {@link AGGREGATION_INTERVAL_MS} and only when there is something to report —
+ * a non-empty queue, or at least one fail-open since the previous tick. The
+ * shape follows the plan verbatim (`unit-scheduler: held 8/12 queued 3
+ * wait-p95 420ms fail-open 1/last 12m`) with the per-cause tally appended, so
+ * a grep of the host log carries both the timeline and the M1 attribution.
+ *
+ * @param state - the snapshot describing this tick.
+ * @param failOpensSinceTick - fail-opens counted since the previous tick.
+ * @param failOpenByCause - cumulative per-cause tally (the 分因 suffix).
+ * @returns the line to log, or `undefined` when this tick must stay silent.
+ */
+export function formatAggregateLine(
+  state: UnitSchedulerState,
+  failOpensSinceTick: number,
+  failOpenByCause: Readonly<Record<FailOpenCause, number>>,
+): string | undefined {
+  if (state.queued === 0 && failOpensSinceTick === 0) return undefined
+  const { total, lastAt } = state.failOpen
+  const last = total === 0 ? 'never' : formatAge(Math.max(0, state.at - lastAt))
+  const causes = total === 0
+    ? ''
+    : ` (${Object.entries(failOpenByCause).map(([cause, count]) => `${cause} ${count}`).join(', ')})`
+  return `unit-scheduler: held ${state.held}/${state.maxSlots} queued ${state.queued} `
+    + `wait-p95 ${state.waitP95}ms fail-open ${total}/last ${last}${causes}`
 }
 
 /**
@@ -298,6 +616,12 @@ class UnitSlotSemaphore {
  * and reentrant dispatches delegate at once; every other call takes a slot
  * (bounded wait, fail-open on expiry) for the delegated lifetime and releases
  * it in a `finally`.
+ *
+ * The P0.5 observation layer registers alongside: the REST probe waits for a
+ * `webServer` carrier in its own child fiber, so the gate itself never waits
+ * for one (a composition without an HTTP layer keeps P0 behaviour unchanged
+ * and simply has no route), and the aggregate log tick is one unref'd timer
+ * disposed with this fiber.
  *
  * @param ctx - plugin context; the listener is scoped to it and disposed with it.
  * @param config - validated {@link Config}; range checks fail loud at load.
@@ -351,4 +675,48 @@ export function apply(ctx: Context, config: Config): void {
       outcome.release()
     }
   })
+
+  // Channel c (plan §4.2c): `GET /api/unit-scheduler/state`. The route waits
+  // for a carrier in a child fiber so the GATE never waits for one; the fence
+  // runs before the method check, so an untrusted caller learns nothing — not
+  // even the schema.
+  ctx.inject(['webServer'], (webCtx) => {
+    webCtx.effect(() => webCtx.webServer.register({
+      kind: 'exact',
+      path: STATE_PATH,
+      handler: (req, res) => {
+        if (!isLoopbackProbeRequest(req)) {
+          res.writeHead(403, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ ok: false, error: 'forbidden: loopback-only' }))
+          return
+        }
+        if (req.method !== 'GET') {
+          res.writeHead(405, { allow: 'GET', 'cache-control': 'no-store' })
+          res.end()
+          return
+        }
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(JSON.stringify(semaphore.stats().state))
+      },
+    }), 'unit-scheduler: GET /api/unit-scheduler/state')
+  })
+
+  // Channel a (plan §4.2a): one conditional aggregate line per interval. The
+  // cumulative fail-open total doubles as the window flag — its delta since
+  // the previous tick is exactly "a fail-open happened inside this window",
+  // while the line itself keeps reporting the lifetime total and its cause.
+  let failOpenTotalAtLastTick = 0
+  ctx.effect(() => {
+    const timer = setInterval(() => {
+      const { state, failOpenByCause } = semaphore.stats()
+      const failOpensSinceTick = state.failOpen.total - failOpenTotalAtLastTick
+      failOpenTotalAtLastTick = state.failOpen.total
+      const line = formatAggregateLine(state, failOpensSinceTick, failOpenByCause)
+      if (line !== undefined) ctx.logger.info(line)
+    }, AGGREGATION_INTERVAL_MS)
+    timer.unref()
+    return () => {
+      clearInterval(timer)
+    }
+  }, 'unit-scheduler: aggregate log tick')
 }

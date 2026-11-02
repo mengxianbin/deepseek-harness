@@ -292,7 +292,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-api-session-controller`
 
 - `inject`: `agentDefaultModel` · `agents` · `attachments` · `fileUploads` · `fs` · `llm` · `remoteAccess` · `sessions` · `sessionProjections` · `sessionQuery` · `typert` · `typertGateway` · `workspaceRegistry`
-- `source`: [`packages/api/session-controller/src/index.ts:111`](../packages/api/session-controller/src/index.ts)
+- `source`: [`packages/api/session-controller/src/index.ts:121`](../packages/api/session-controller/src/index.ts)
 
 ```ts config-catalog
 /** Session Controller deployment policy. */
@@ -1810,7 +1810,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-host-frontend-static`
 
 - `inject`: `webServer` · `connection`
-- `source`: [`packages/host/frontend-static/src/index.ts:34`](../packages/host/frontend-static/src/index.ts)
+- `source`: [`packages/host/frontend-static/src/index.ts:36`](../packages/host/frontend-static/src/index.ts)
 
 ```ts config-catalog
 /** Plugin config: the dist anchor. */
@@ -4216,7 +4216,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-tool-present`
 
 - `inject`: `tools` · `fs` · `agents` · `workingDirectory`
-- `source`: [`packages/deliverables/tool-present/src/index.ts:15`](../packages/deliverables/tool-present/src/index.ts)
+- `source`: [`packages/deliverables/tool-present/src/index.ts:14`](../packages/deliverables/tool-present/src/index.ts)
 
 ```ts config-catalog
 /** Per-call delivery limit. */
@@ -4562,7 +4562,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-unit-scheduler`
 
 - `inject`: `tools`
-- `source`: [`packages/guard/unit-scheduler/src/index.ts:64`](../packages/guard/unit-scheduler/src/index.ts)
+- `source`: [`packages/guard/unit-scheduler/src/index.ts:76`](../packages/guard/unit-scheduler/src/index.ts)
 
 ```ts config-catalog
 /**
