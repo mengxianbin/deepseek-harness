@@ -12,6 +12,7 @@ import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { SessionQueryError, type SessionObservation } from '@deepseek-ai/dsh-session-query'
 import { RemoteError, remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-typert-registry'
+import { SessionPublicationGate } from './publication-gate.ts'
 
 /** Cold Session identity absent from persistence. */
 export class ApiSessionNotFound extends Error {}
@@ -138,6 +139,12 @@ export class ApiSessionAgentController {
   private readonly resumes = new Map<SessionId, Promise<Agent>>()
   private readonly claims = new Map<SessionId, Promise<void>>()
   private readonly imageAdmissionChains = new WeakMap<Agent, Promise<void>>()
+  /**
+   * Gate withholding a Workspace-attached create/fork's first
+   * `api-session/added` frame until its attach hook settles, so the row's
+   * first visibility already carries its group in either loop order.
+   */
+  readonly publicationGate = new SessionPublicationGate()
 
   /** @param ctx - Host context carrying Agent, model, persistence, and Typert services. */
   constructor(private readonly ctx: Context) {}
@@ -479,24 +486,37 @@ export class ApiSessionAgentController {
     } catch (error: unknown) {
       throw new Error(`failed to ensure project directory "${cwd}": ${String(error)}`, { cause: error })
     }
-    return (await this.ctx.agents.create({
-      sessionId,
-      agentOptions: this.agentOptions(),
-      meta: {
-        cwd,
-        ...(composition.agentPreset === undefined ? {} : { agentPreset: composition.agentPreset }),
-      },
-      setup: attach === undefined
-        ? composition.setup
-        : async (agentCtx, agent) => {
-          // The pre-publication hook runs inside the setup window: the
-          // header is durable, nothing has published yet, and a hook
-          // failure rolls the unpublished Agent back.
-          const commit = await composition.setup(agentCtx, agent)
-          await attach(agent.session)
-          return commit
+    // An attaching creation holds its first api-session/added frame in the
+    // publication gate: the loop may publish the Session before setup runs
+    // the attach, and an earlier frame would surface the row before the
+    // Workspace feed establishes its group (the S2 flash).
+    if (attach !== undefined) this.publicationGate.hold(sessionId)
+    try {
+      return (await this.ctx.agents.create({
+        sessionId,
+        agentOptions: this.agentOptions(),
+        meta: {
+          cwd,
+          ...(composition.agentPreset === undefined ? {} : { agentPreset: composition.agentPreset }),
         },
-    })).agent
+        setup: attach === undefined
+          ? composition.setup
+          : async (agentCtx, agent) => {
+            // The attach hook runs inside the setup window. Its settle —
+            // success or a recorded failure — releases the held frame, so
+            // the row's first visible frame already carries its group; a
+            // hook rejection rolls the Agent back and the gate releases
+            // nothing (the Session never became a row).
+            const commit = await composition.setup(agentCtx, agent)
+            await attach(agent.session)
+            this.publicationGate.attachSettled(agent.id)
+            return commit
+          },
+      })).agent
+    } catch (error) {
+      this.publicationGate.release(sessionId)
+      throw error
+    }
   }
 
   private agentOptions(): AgentOptions {

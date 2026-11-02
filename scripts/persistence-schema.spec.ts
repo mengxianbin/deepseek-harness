@@ -1,11 +1,11 @@
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { collectLogEvents } from './gen-persistence-catalog.ts'
 import { extractPersistenceSchema } from './persistence-schema.ts'
 import { classifyPersistenceChange, parsePersistenceSnapshot } from './persistence-changes.ts'
-import { canonicalizeSchema, encodePersistenceSnapshot, isArbitraryJsonSchema, schemaDigest, type PersistenceSchemaInventory } from './persistence-schema-model.ts'
+import { encodePersistenceSnapshot, isArbitraryJsonSchema, type PersistenceSchemaInventory } from './persistence-schema-model.ts'
 
 const roots: string[] = []
 afterEach(() => {
@@ -314,23 +314,6 @@ interface SessionEventMap {
     ['invalid generic alias', 'type Bad = ReturnType<42>; export interface Payload {value: Bad}', 'TS2344'],
   ])('rejects %s rather than weakening the schema', (_name, source, error) => {
     expect(() => extractPersistenceSchema(fixture(source))).toThrow(error)
-  })
-
-  // Repository-wide TypeScript extraction and reachable-node hashing use the Windows coverage test budget.
-  it('includes every real repository event and fingerprints every reachable node', { timeout: 90_000 }, () => {
-    const root = resolve(import.meta.dirname, '..')
-    const model = extractPersistenceSchema(root)
-    expect(model.roots.filter(root => root.kind === 'event').map(root => root.event).sort())
-      .toEqual(collectLogEvents(root).map(event => event.name).sort())
-    expect(model.roots.some(root => root.kind === 'header')).toBe(true)
-    expect(model.roots.some(root => root.kind === 'envelope')).toBe(true)
-    const digests = new Set(model.types.map(type => type.digest))
-    for (const root of model.roots) {
-      expect(schemaDigest(root.schema)).toBe(root.digest)
-      for (let node = 0; node < root.schema.nodes.length; node++) {
-        expect(digests.has(schemaDigest(canonicalizeSchema(root.schema.nodes, node)))).toBe(true)
-      }
-    }
   })
 })
 

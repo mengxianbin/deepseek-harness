@@ -1042,6 +1042,30 @@ describe('deriveQueue (collab step3 §一, q1-placement)', () => {
     expect(queue.queued).toEqual(new Set([sid('ask')]))
   })
 
+  it('skips subagent-origin rows in every tier while ordinary rows still queue', () => {
+    const subagentAsk = {
+      ...summary('subagent-ask', 40), parentId: sid('parent'), origin: 'subagent' as const,
+    }
+    const subagentFailed = {
+      ...summary('subagent-failed', 35), parentId: sid('parent'), origin: 'subagent' as const,
+    }
+    const sessions = list(
+      subagentAsk, subagentFailed, summary('ask', 30), summary('failed', 20), summary('resting', 10),
+    )
+    const statuses: SessionStatusSnapshot = new Map([
+      [sid('subagent-ask'), status({ key: 'question:1', kind: 'question', sessionId: sid('subagent-ask') } as SessionPendingInteraction)],
+      [sid('subagent-failed'), status(undefined, { completionUnread: true, completionOutcome: 'failed' })],
+      [sid('ask'), status({ key: 'question:2', kind: 'question', sessionId: sid('ask') } as SessionPendingInteraction)],
+      [sid('failed'), status(undefined, { completionUnread: true, completionOutcome: 'failed' })],
+      [sid('resting'), status(undefined)],
+    ])
+    const queue = deriveQueue(sessions, statuses, [])
+    expect(queue.tiers.map(tier => tier.tier)).toEqual(['p0', 'p1'])
+    expect(queue.tiers[0]!.sessions.map(node => node.id)).toEqual([sid('ask')])
+    expect(queue.tiers[1]!.sessions.map(node => node.id)).toEqual([sid('failed')])
+    expect(queue.queued).toEqual(new Set([sid('ask'), sid('failed')]))
+  })
+
   it('keeps a re-running failed row out of P1 while P0 keeps its awaiting row (2026-10-31 在跑出队裁定)', () => {
     const sessions = list(
       summary('running-failed', 30), summary('stopped-failed', 20), summary('running-ask', 10),

@@ -1,4 +1,11 @@
-/** Differential regressions for Node lookup with peer mappings at each linked importer's ancestor position. */
+/** Shared fixture and probe machinery for the linked-resolution differential matrix families.
+ *
+ * Split from linked-resolution-matrix.spec.ts: each family spec runs its own
+ * cases in its own worker, so the differential keeps cross-file parallelism
+ * while every case still builds, probes, and disposes serially inside one
+ * process (the ESM loader interception and NODE_PATH reset are process-global,
+ * which is why suites never opt into per-file concurrency).
+ */
 
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
@@ -7,280 +14,22 @@ import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createRuntimeResolution, type Profile } from '../src/profile.ts'
-import { barePackageName, installRuntimeInterception } from '../src/profile-resolution/resolver.ts'
-
-type Layout = 'single-flat' | 'single-pnpm' | 'pnpm-monorepo'
-type Method = 'esm-resolve' | 'esm-meta-resolve' | 'esm-import' | 'cjs-resolve' | 'cjs-require' | 'cjs-paths' | 'metadata'
-type Importer = 'root' | 'source' | 'nested' | 'pnpm-helper'
-type Source = 'runtime' | 'local' | 'parent' | 'workspace' | 'profile' | 'private'
-type ManifestState = 'absent' | 'plain' | 'peer'
-type ModulesState = 'absent' | 'empty' | 'target'
-
-interface DirectoryState {
-  manifest: ManifestState
-  modules: ModulesState
-}
-
-interface PeerProjection {
-  directory: string
-  peerMatches: boolean
-  physicalModules: boolean
-  physicalTarget: boolean
-  projected: boolean
-}
-
-interface MatrixCase {
-  id: string
-  family: string
-  layout: Layout
-  name: string
-  inRuntime: boolean
-  declarations: number
-  copies: number
-  importer: Importer
-  workspaceDeclarations?: number
-  helperDeclarations?: number
-  variant?: string
-  rawPeers?: unknown
-  request?: string
-  explicitStart?: 'profile'
-  comparison?: { start: DirectoryState; parent: DirectoryState; grandparent?: DirectoryState }
-  legacy?: { missingSubpaths: readonly Source[] }
-}
-
-interface Observation {
-  selected: string
-  path?: string
-  code?: string
-  message?: string
-  sameRuntimeInstance?: boolean
-  exists?: boolean
-}
-
-interface MatrixRow {
-  scenario: MatrixCase
-  declarationText: string
-  copiesText: string
-  importerPath: string
-  linkedRoots: string[]
-  methods: Record<Method, Observation>
-  comparison?: {
-    native: Record<Method, Observation>
-    reference: Record<Method, Observation>
-    peerProjection: readonly PeerProjection[]
-  }
-}
-
-interface ProbeModule {
-  source: string
-  token: object
-}
-
-interface ResolveProbeModule {
-  locate(specifier: string): string
-}
-
-interface NativeLoader {
-  getOrCreateModuleJob?: unknown
-  import<T = ProbeModule>(specifier: string, parent: string, attributes: ImportAttributes): Promise<T>
-  resolveSync(
-    first: string,
-    second: string | { specifier: string; attributes: ImportAttributes },
-    attributes?: ImportAttributes,
-  ): { url: string }
-}
+import { createRuntimeResolution, type Profile } from '../../src/profile.ts'
+import { barePackageName, installRuntimeInterception } from '../../src/profile-resolution/resolver.ts'
+import {
+  declarationFields, declarations, copies, matrixCases, methods, type DirectoryState, type MatrixCase,
+  type MatrixFamily, type MatrixRow, type Method, type NativeLoader, type Observation, type PeerProjection,
+  type ProbeModule, type ResolveProbeModule, type Source,
+} from './cases.ts'
 
 const requireHere = createRequire(import.meta.url)
 const nativeModule = requireHere('node:module') as { _initPaths(): void }
-const originalNodePath = process.env.NODE_PATH
 const addon = requireHere('node-addon-require-builtin') as { requireBuiltin(id: string): unknown }
 const loaderModule = addon.requireBuiltin('internal/modules/esm/loader') as {
   getOrInitializeCascadedLoader(): NativeLoader
 }
 const loader = loaderModule.getOrInitializeCascadedLoader()
-const methods: readonly Method[] = ['esm-resolve', 'esm-meta-resolve', 'esm-import', 'cjs-resolve', 'cjs-require', 'cjs-paths', 'metadata']
-const layouts: readonly Layout[] = ['single-flat', 'single-pnpm', 'pnpm-monorepo']
-// These are real request spellings; each fixture supplies its own package implementations.
-const names = ['@deepseek-ai/dsh-tools', 'react'] as const
-const copyBits: readonly [Source, number][] = [
-  ['local', 1], ['parent', 2], ['profile', 4], ['private', 8], ['workspace', 16],
-]
-const rows: MatrixRow[] = []
 let fixtureSequence = 0
-
-// pnpm's launcher adds repository packages to NODE_PATH; fixtures must supply their own copies.
-beforeAll(() => {
-  delete process.env.NODE_PATH
-  nativeModule._initPaths()
-})
-afterAll(() => {
-  if (originalNodePath === undefined) delete process.env.NODE_PATH
-  else process.env.NODE_PATH = originalNodePath
-  nativeModule._initPaths()
-})
-
-function declarationFields(name: string, bits: number): Record<string, unknown> {
-  return {
-    ...(bits & 1 ? { dependencies: { [name]: '*' } } : {}),
-    ...(bits & 2 ? { devDependencies: { [name]: '*' } } : {}),
-    ...(bits & 4 ? { peerDependencies: { [name]: '*' } } : {}),
-  }
-}
-
-function declarations(bits: number): string {
-  return [[1, 'dependency'], [2, 'dev'], [4, 'peer']]
-    .filter(([bit]) => bits & Number(bit)).map(([, name]) => name).join('+') || 'none'
-}
-
-function copies(bits: number): string {
-  return copyBits.filter(([, bit]) => bits & bit).map(([name]) => name).join('+') || 'none'
-}
-
-function matrixCases(): MatrixCase[] {
-  const cases: MatrixCase[] = []
-  for (const layout of layouts) {
-    for (const name of names) {
-      for (const inRuntime of [false, true]) {
-        for (let declarations = 0; declarations < 8; declarations++) {
-          for (let copies = 0; copies < 8; copies++) {
-            cases.push({ id: '', family: 'root', layout, name, inRuntime, declarations, copies, importer: 'root' })
-          }
-        }
-      }
-    }
-  }
-  for (const layout of layouts) {
-    for (const name of names) {
-      for (const inRuntime of [false, true]) {
-        for (let declarations = 0; declarations < 8; declarations++) {
-          for (const importer of ['source', 'nested', 'pnpm-helper'] as const) {
-            for (const copies of [8, 9, 10, 11, 16, 17, 31]) {
-              cases.push({ id: '', family: 'placement', layout, name, inRuntime, declarations, copies, importer })
-            }
-          }
-        }
-      }
-    }
-  }
-  for (const name of names) {
-    for (const inRuntime of [false, true]) {
-      for (let declarations = 0; declarations < 8; declarations++) {
-        for (let workspaceDeclarations = 0; workspaceDeclarations < 8; workspaceDeclarations++) {
-          for (const copies of [1, 16, 17]) {
-            cases.push({ id: '', family: 'workspace-declaration', layout: 'pnpm-monorepo', name,
-              inRuntime, declarations, workspaceDeclarations, copies, importer: 'root' })
-          }
-        }
-      }
-    }
-  }
-  for (const layout of layouts) {
-    for (const name of names) {
-      for (const inRuntime of [false, true]) {
-        for (const [variant, rawPeers] of [
-          ['peer-null', null], ['peer-array', [name]], ['peer-string', name],
-          ['peer-empty', {}], ['wrong-field', {}], ['peer-range-mismatch', { [name]: '^999.0.0' }],
-        ] as const) {
-          for (const copies of [1, 19]) {
-            cases.push({ id: '', family: 'malformed-declaration', layout, name, inRuntime,
-              declarations: 2, copies, importer: 'root', variant, rawPeers })
-          }
-        }
-        for (const declarations of [2, 6]) {
-          for (const request of ['#target', `${name}/sub`, `${name}/private`, `${name}/missing`]) {
-            for (const copies of [1, 3]) {
-              cases.push({ id: '', family: 'request-form', layout, name, inRuntime,
-                declarations, copies, importer: 'root', request })
-            }
-          }
-        }
-        for (const importer of ['nested', 'pnpm-helper'] as const) {
-          for (const declarations of [2, 6]) {
-            for (const helperDeclarations of [2, 6]) {
-              for (const copies of [1, 9]) {
-                cases.push({ id: '', family: 'helper-declaration', layout, name, inRuntime,
-                  declarations, helperDeclarations, copies, importer })
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-  const parents: readonly DirectoryState[] = [
-    { manifest: 'absent', modules: 'absent' },
-    { manifest: 'absent', modules: 'target' },
-    { manifest: 'plain', modules: 'target' },
-    { manifest: 'peer', modules: 'absent' },
-    { manifest: 'peer', modules: 'target' },
-  ]
-  let comparisonId = 0
-  for (const layout of ['single-flat', 'pnpm-monorepo'] as const) {
-    for (const name of names) {
-      for (const inRuntime of [false, true]) {
-        for (const startManifest of ['absent', 'plain', 'peer'] as const) {
-          for (const startModules of ['absent', 'empty', 'target'] as const) {
-            for (const parent of parents) {
-              cases.push({ id: `N${String(++comparisonId).padStart(4, '0')}`, family: 'node-comparison', layout, name,
-                inRuntime, declarations: startManifest === 'peer' ? 4 : 0, copies: 0, importer: 'root',
-                comparison: { start: { manifest: startManifest, modules: startModules }, parent } })
-            }
-          }
-        }
-        for (const importer of ['root', 'source'] as const) {
-          for (const request of [name, `${name}/sub`, `${name}/missing`, `${name}/private`]) {
-            for (const startModules of ['absent', 'target'] as const) {
-              cases.push({ id: `N${String(++comparisonId).padStart(4, '0')}`, family: 'node-comparison-files', layout, name,
-                inRuntime, declarations: 0, copies: 0, importer, request,
-                comparison: { start: { manifest: 'absent', modules: startModules },
-                  parent: { manifest: 'plain', modules: 'absent' },
-                  grandparent: { manifest: 'peer', modules: 'target' } } })
-            }
-          }
-        }
-      }
-    }
-  }
-  for (const layout of ['single-flat', 'pnpm-monorepo'] as const) {
-    for (const name of names) {
-      for (const inRuntime of [false, true]) {
-        for (const copies of [0, 4]) {
-          cases.push({ id: `N${String(++comparisonId).padStart(4, '0')}`, family: 'node-comparison-explicit', layout,
-            name, inRuntime, declarations: 4, copies, importer: 'root', explicitStart: 'profile',
-            comparison: { start: { manifest: 'peer', modules: 'target' },
-              parent: { manifest: 'absent', modules: 'absent' } } })
-        }
-      }
-    }
-  }
-  const legacyCases: readonly { start: ManifestState; parent: ManifestState; missingSubpaths: readonly Source[] }[] = [
-    { start: 'peer', parent: 'peer', missingSubpaths: [] },
-    { start: 'peer', parent: 'plain', missingSubpaths: ['runtime'] },
-    { start: 'plain', parent: 'peer', missingSubpaths: ['runtime', 'local'] },
-    { start: 'peer', parent: 'peer', missingSubpaths: ['runtime'] },
-    { start: 'plain', parent: 'peer', missingSubpaths: ['local'] },
-    { start: 'peer', parent: 'peer', missingSubpaths: ['runtime', 'workspace'] },
-  ]
-  let legacyId = 0
-  for (const layout of layouts) {
-    for (const name of names) {
-      for (const inRuntime of [false, true]) {
-        for (const entry of legacyCases) {
-          for (const request of [name, `${name}/sub.cjs`, `${name}/missing.cjs`]) {
-            cases.push({ id: `L${String(++legacyId).padStart(4, '0')}`, family: 'node-legacy', layout, name,
-              inRuntime, declarations: 0, copies: 0, importer: 'root', request,
-              variant: `missing-sub:${entry.missingSubpaths.join('+') || 'none'}`, legacy: entry,
-              comparison: { start: { manifest: entry.start, modules: 'target' },
-                parent: { manifest: entry.parent, modules: 'target' },
-                grandparent: { manifest: 'plain', modules: 'target' } } })
-          }
-        }
-      }
-    }
-  }
-  return cases.map((value, index) => ({ ...value, id: value.id || `M${String(index + 1).padStart(4, '0')}` }))
-}
 
 function put(path: string, content: string): void {
   mkdirSync(dirname(path), { recursive: true })
@@ -531,11 +280,11 @@ class MatrixFixture {
   dispose(): void { rmSync(this.root, { recursive: true, force: true }) }
 }
 
-function outcome(value: Observation): string {
+export function outcome(value: Observation): string {
   return value.code ?? `${value.selected}${value.exists === false ? ':path-absent' : ''}`
 }
 
-function comparable(value: Observation): object {
+export function comparable(value: Observation): object {
   return { outcome: outcome(value), sameRuntimeInstance: value.sameRuntimeInstance,
     ...(value.exists ? { path: value.path } : {}) }
 }
@@ -576,69 +325,88 @@ function writeNodeComparison(output: string, selected: readonly MatrixRow[]): vo
   writeFileSync(join(output, 'node-comparison.md'), markdown.join('\n'), { flag: 'wx' })
 }
 
-afterAll(() => {
+function writeFamilyReport(family: MatrixFamily, planned: number, rows: readonly MatrixRow[]): void {
   const parent = process.env.DSH_RESOLUTION_MATRIX_REPORT_DIR
   if (parent === undefined) return
   mkdirSync(parent, { recursive: true })
-  const output = mkdtempSync(join(resolve(parent), 'run-'))
+  const output = mkdtempSync(join(resolve(parent), `${family}-`))
   const sorted = [...rows].sort((left, right) => left.scenario.id.localeCompare(right.scenario.id))
   const csv = [
     ['id', 'family', 'layout', 'package', 'inRuntime', 'declarations', 'workspaceDeclarations', 'helperDeclarations',
       'variant', 'request', 'copies', 'importer', ...methods],
     ...sorted.map(row => [row.scenario.id, row.scenario.family, row.scenario.layout, row.scenario.name,
-      row.scenario.inRuntime, row.declarationText, declarations(row.scenario.workspaceDeclarations ?? 0),
+      row.scenario.inRuntime, declarations(row.scenario.declarations), declarations(row.scenario.workspaceDeclarations ?? 0),
       declarations(row.scenario.helperDeclarations ?? 4), row.scenario.variant ?? '', row.scenario.request ?? row.scenario.name,
-      row.copiesText, row.importerPath,
+      copies(row.scenario.copies), row.importerPath,
       ...methods.map(method => outcome(row.methods[method]))]),
   ].map(line => line.map(value => JSON.stringify(String(value))).join(',')).join('\n') + '\n'
   const sourceHead = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
-  writeFileSync(join(output, 'matrix.json'), JSON.stringify({ node: process.versions.node, platform: process.platform,
-    sourceHead, plannedCases: matrixCases().length, observedCases: sorted.length, rule: 'native-node-with-peer-positions',
+  writeFileSync(join(output, `matrix-${family}.json`), JSON.stringify({ node: process.versions.node, platform: process.platform,
+    sourceHead, family, mode: process.env.DSH_RESOLUTION_MATRIX_FULL === '1' ? 'full' : 'sampled',
+    plannedCases: planned, observedCases: sorted.length, rule: 'native-node-with-peer-positions',
     rows: sorted }, null, 2) + '\n', { flag: 'wx' })
-  writeFileSync(join(output, 'matrix.csv'), csv, { flag: 'wx' })
+  writeFileSync(join(output, `matrix-${family}.csv`), csv, { flag: 'wx' })
   writeNodeComparison(output, sorted)
   const markdown = [
-    '# Linked resolution regression matrix', '',
+    `# Linked resolution regression matrix · ${family}`, '',
     'Every row is checked against native Node with only the matching peer positions replaced by the runtime package. The node-comparison report includes both baselines and the per-operation verdict.', '',
     '| ID | Family | Layout | Package | Runtime entry | Declaration | Workspace declaration | Helper declaration | Variant | Request | Copies | Importer | ESM resolve | import.meta.resolve | ESM import | CJS resolve | CJS require | CJS paths | Metadata |',
     '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
     ...sorted.map(row => `| ${[row.scenario.id, row.scenario.family, row.scenario.layout, row.scenario.name, row.scenario.inRuntime,
-      row.declarationText, declarations(row.scenario.workspaceDeclarations ?? 0), declarations(row.scenario.helperDeclarations ?? 4),
-      row.scenario.variant ?? '', row.scenario.request ?? row.scenario.name, row.copiesText, row.scenario.importer,
+      declarations(row.scenario.declarations), declarations(row.scenario.workspaceDeclarations ?? 0),
+      declarations(row.scenario.helperDeclarations ?? 4), row.scenario.variant ?? '',
+      row.scenario.request ?? row.scenario.name, copies(row.scenario.copies), row.scenario.importer,
       ...methods.map(method => outcome(row.methods[method]))].join(' | ')} |`),
     '',
   ].join('\n')
-  writeFileSync(join(output, 'matrix.md'), markdown, { flag: 'wx' })
-  console.info(`Resolution matrix: ${sorted.length} observations at ${output}`)
-})
+  writeFileSync(join(output, `matrix-${family}.md`), markdown, { flag: 'wx' })
+  console.info(`Resolution matrix: family=${family} mode=${process.env.DSH_RESOLUTION_MATRIX_FULL === '1' ? 'full' : 'sampled'} `
+    + `${sorted.length}/${planned} observations at ${output}`)
+}
 
-describe('linked resolution differential matrix', { concurrent: false }, () => {
-  it.each(matrixCases())('$id $family $layout $name runtime=$inRuntime declarations=$declarations copies=$copies importer=$importer', async (scenario) => {
-    const fixtures: MatrixFixture[] = []
-    try {
-      const baseline = new MatrixFixture(scenario)
-      fixtures.push(baseline)
-      baseline.setup()
-      const native = await baseline.observe('native')
-      const fixture = new MatrixFixture(scenario)
-      fixtures.push(fixture)
-      fixture.setup()
-      const row = await fixture.observe()
-      const reference = new MatrixFixture(scenario)
-      fixtures.push(reference)
-      reference.setup()
-      reference.projectPeerPositions()
-      const projected = await reference.observe('native')
-      // Explicit paths are exempt from the policy and use the pristine native filesystem.
-      projected.methods['cjs-paths'] = native.methods['cjs-paths']
-      row.comparison = { native: native.methods, reference: projected.methods, peerProjection: reference.peerProjection }
-      rows.push(row)
-      if (reference.peerProjection.every(layer => !layer.projected)) expect(projected.methods).toEqual(native.methods)
-      for (const method of methods) {
-        for (const observed of [native, row, projected]) expect(observed.methods[method].selected).not.toBe('external')
-        expect(comparable(row.methods[method]), `${scenario.id}: ${method}`).toEqual(comparable(projected.methods[method]))
-      }
-      expect(Object.keys(row.methods)).toEqual(methods)
-    } finally { for (const fixture of fixtures.reverse()) fixture.dispose() }
+/** Register one family's suite: NODE_PATH isolation, serial differential cases, and the env-gated report. */
+export function runFamilySuite(family: MatrixFamily, scenarios: readonly MatrixCase[]): void {
+  const originalNodePath = process.env.NODE_PATH
+  const rows: MatrixRow[] = []
+  // pnpm's launcher adds repository packages to NODE_PATH; fixtures must supply their own copies.
+  beforeAll(() => {
+    delete process.env.NODE_PATH
+    nativeModule._initPaths()
   })
-})
+  afterAll(() => {
+    if (originalNodePath === undefined) delete process.env.NODE_PATH
+    else process.env.NODE_PATH = originalNodePath
+    nativeModule._initPaths()
+  })
+  afterAll(() => { writeFamilyReport(family, matrixCases().filter(scenario => scenario.family === family).length, rows) })
+  describe(`linked resolution differential matrix · ${family}`, { concurrent: false }, () => {
+    it.each(scenarios)('$id $family $layout $name runtime=$inRuntime declarations=$declarations copies=$copies importer=$importer', async (scenario) => {
+      const fixtures: MatrixFixture[] = []
+      try {
+        const baseline = new MatrixFixture(scenario)
+        fixtures.push(baseline)
+        baseline.setup()
+        const native = await baseline.observe('native')
+        const fixture = new MatrixFixture(scenario)
+        fixtures.push(fixture)
+        fixture.setup()
+        const row = await fixture.observe()
+        const reference = new MatrixFixture(scenario)
+        fixtures.push(reference)
+        reference.setup()
+        reference.projectPeerPositions()
+        const projected = await reference.observe('native')
+        // Explicit paths are exempt from the policy and use the pristine native filesystem.
+        projected.methods['cjs-paths'] = native.methods['cjs-paths']
+        row.comparison = { native: native.methods, reference: projected.methods, peerProjection: reference.peerProjection }
+        rows.push(row)
+        if (reference.peerProjection.every(layer => !layer.projected)) expect(projected.methods).toEqual(native.methods)
+        for (const method of methods) {
+          for (const observed of [native, row, projected]) expect(observed.methods[method].selected).not.toBe('external')
+          expect(comparable(row.methods[method]), `${scenario.id}: ${method}`).toEqual(comparable(projected.methods[method]))
+        }
+        expect(Object.keys(row.methods)).toEqual(methods)
+      } finally { for (const fixture of fixtures.reverse()) fixture.dispose() }
+    })
+  })
+}

@@ -226,7 +226,7 @@ export function ciWorkerEnvironment(
   // reads the same variables (run-gates.spec.ts builds coverage gates from
   // DSH_COVERAGE_PARTITIONS; the oxlint contract spawns run-oxlint, which
   // reads DSH_OXLINT_THREADS), so the aggregate leaves the environment as
-  // `pnpm run test` finds it.
+  // `pnpm run test:all` (the full inventory this lane mirrors) finds it.
   if (!mode.startsWith('ci-') || mode === 'ci-unit') return {}
   const budget = defaultParallelism(env, cpus)
   const testBudget = defaultParallelism(env, cpus, LOCAL_TEST_PARALLELISM_CAP)
@@ -744,11 +744,12 @@ function coverageGates(platform: NodeJS.Platform = process.platform): Gate[] {
 }
 
 // The uninstrumented unit inventory for a whole-inventory reference lane
-// (the Sandbox workflow's darwin parity job). It is `pnpm run test`; the lane
-// sets DSH_COVERAGE_TEST_TIMEOUT_MS, which vitest.config.ts reads from the
-// inherited environment, because a shared hosted runner delays cases that
-// inherit Vitest's defaults past them. Output streams so the job log keeps
-// per-file timestamps for a 15–30 minute run.
+// (the Sandbox workflow's darwin parity job). It is `pnpm run test:all` (the
+// fastlane split left `test` skipping the static slow list; this CI lane keeps
+// every file); the lane sets DSH_COVERAGE_TEST_TIMEOUT_MS, which
+// vitest.config.ts reads from the inherited environment, because a shared
+// hosted runner delays cases that inherit Vitest's defaults past them. Output
+// streams so the job log keeps per-file timestamps for a 15–30 minute run.
 function ciUnitGates(): Gate[] {
   return [
     pnpmScript('native-system', 'build:native-system'),

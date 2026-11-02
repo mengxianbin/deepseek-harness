@@ -726,6 +726,8 @@ export interface QueueSegment {
  * §3.1 marks both 无现行), so they populate nothing rather than guess. Within a
  * tier rows order by recency — severity is a hover/color label and never a
  * queue key (step1 §2.3 终态收敛). Archived and blank rows never queue.
+ * Subagent rows never queue either — same rule as `sessionVisible`: they
+ * surface through their parent's catalog, never as standalone rows.
  * @param list - sessions list snapshot.
  * @param statuses - unified UI status by Session.
  * @param archivedIds - registry-global archive set.
@@ -742,7 +744,7 @@ export function deriveQueue(
   const p1: SessionNode[] = []
   for (const id of list.ids) {
     const s = list.byId[id]
-    if (s === undefined || s.blank || archived.has(id)) continue
+    if (s === undefined || s.blank || s.origin === 'subagent' || archived.has(id)) continue
     const node = sessionNode(s, list, statuses, pinned, archived)
     if (node.pendingInteraction !== undefined) p0.push(node)
     // 在跑不出队 (2026-10-31 裁定): a live re-run is being handled, not

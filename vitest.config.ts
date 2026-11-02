@@ -136,12 +136,38 @@ const pwshCoverageExclusions = spawnSync(resolvePwshPath(), ['-NoLogo', '-NoProf
       'packages/shell/pwsh-sandbox/src/**/*.ts',
     ]
 
-const testIncludes = [
-  'packages/*/*/tests/**/*.spec.{ts,tsx}',
-  'apps/*/tests/**/*.spec.{ts,tsx}',
-  'scripts/**/*.spec.ts',
-  'website/tests/**/*.spec.ts',
-]
+// Slow-lane suites (*.slowlane.spec.ts) hold the heavy real-process and
+// real-program contracts: type-aware Oxlint project discovery, repository-wide
+// persistence-schema extraction, the Cordis byte-for-byte catalog projection,
+// and the ACL diagnose-script ladder. The default run leaves them out;
+// `pnpm test:slowlane` (scripts/run-slow-lane.ts sets DSH_TEST_SLOWLANE=1)
+// collects exactly them, and the trigger roster lives in m-note
+// content/tech/ai/dsh/worktree-governance.md §5.7. A set-but-not-'1' value is
+// a misconfiguration, not a silent no-op.
+const slowLaneRaw = process.env.DSH_TEST_SLOWLANE
+if (slowLaneRaw !== undefined && slowLaneRaw !== '' && slowLaneRaw !== '1') {
+  throw new Error(`vitest config: DSH_TEST_SLOWLANE must be '1' or unset, got ${JSON.stringify(slowLaneRaw)}.`)
+}
+const slowLaneMode = slowLaneRaw === '1'
+const slowLaneExcludes = slowLaneMode ? [] : ['**/*.slowlane.spec.ts']
+// The lane face mirrors the default include prefixes: a bare `**` pattern would
+// walk the whole repository root — through node_modules/.pnpm's junction forest
+// and .git — and the overridden exclude arrays carry no node_modules backstop,
+// which ballooned collection to a 4 GB OOM on this host (2026-11-02 实测，
+// slowtop5-costdown-1101 批). Static prefixes keep every walk bounded.
+const testIncludes = slowLaneMode
+  ? [
+      'packages/*/*/tests/**/*.slowlane.spec.ts',
+      'apps/*/tests/**/*.slowlane.spec.ts',
+      'scripts/**/*.slowlane.spec.ts',
+      'website/tests/**/*.slowlane.spec.ts',
+    ]
+  : [
+      'packages/*/*/tests/**/*.spec.{ts,tsx}',
+      'apps/*/tests/**/*.spec.{ts,tsx}',
+      'scripts/**/*.spec.ts',
+      'website/tests/**/*.spec.ts',
+    ]
 
 // The instrumented coverage gate sets this env; the exempt heavy suites then
 // run beside it uninstrumented (membership contract in scripts/coverage-exempt.ts).
@@ -167,6 +193,18 @@ const coveragePartitionMode = coveragePartitionRaw === '1'
 const laneTestBudget = coverageTestTimeoutOptions(process.env[COVERAGE_TEST_TIMEOUT_ENV])
 // Outside CI, forks follow the local worker budget; CI keeps Vitest's own default for its runner.
 const localWorkerBudget = process.env.CI === 'true' ? {} : { maxWorkers: defaultParallelism(process.env, undefined, LOCAL_TEST_PARALLELISM_CAP) }
+// SEMANTIC CHANGE (flake-timeout-govern-1101): outside CI, one failed test
+// attempt is retried once before turning red. Local runs share the workstation
+// with the production host, and scheduling latency inflates the 5000 ms
+// default into the loaded-host fake-red family ("Test timed out in 5000ms");
+// the single retry mechanizes the flake triage rule the repo already follows
+// by hand (rerun-green = flake). CI keeps upstream no-retry semantics, so a
+// genuine failure still turns red on the first attempt there. The cost is
+// local-only: a genuinely failing test runs twice. DSH_TEST_RETRY=0 restores
+// upstream no-retry semantics for a local run that needs them. Like
+// laneTestBudget it must land in each inline project below, because CLI flags
+// do not reach them.
+const localRetryBudget = process.env.CI === 'true' || process.env.DSH_TEST_RETRY === '0' ? {} : { retry: 1 }
 
 // These suites exercise process-global state, process APIs, or timing-sensitive process I/O
 // that worker threads cannot isolate reliably under aggregate gate contention.
@@ -211,7 +249,7 @@ export default defineConfig({
     ],
     // .tsx: client component specs (jsdom via per-file @vitest-environment pragma).
     include: testIncludes,
-    exclude: platformUnsupportedTests,
+    exclude: [...platformUnsupportedTests, ...slowLaneExcludes],
     // One coverage invocation aggregates both projects. Every suite forks for
     // Node stability; process-bound suites stay separate for inventory control.
     projects: [
@@ -226,6 +264,7 @@ export default defineConfig({
           // MaybeLocal in cjs_lexer::Parse) from worker threads on macOS,
           // Linux, and Windows. Forked workers avoid that shared thread path.
           pool: 'forks',
+          ...localRetryBudget,
           ...laneTestBudget,
           setupFiles: [
             './scripts/test-proxy-environment.ts', './scripts/test-dom-environment.ts', './scripts/test-official-listing-guard.ts',
@@ -235,6 +274,7 @@ export default defineConfig({
             ...platformUnsupportedTests,
             ...processBoundTests,
             ...coverageExemptExcludes,
+            ...slowLaneExcludes,
           ],
         },
       },
@@ -246,6 +286,7 @@ export default defineConfig({
           execArgv: vitestExecArgv,
           env: { DSH_SUBPROCESS_LEDGER: subprocessLedgerScratch },
           pool: 'forks',
+          ...localRetryBudget,
           ...laneTestBudget,
           setupFiles: [
             './scripts/test-proxy-environment.ts', './scripts/test-dom-environment.ts', './scripts/test-official-listing-guard.ts',
@@ -254,6 +295,7 @@ export default defineConfig({
           exclude: [
             ...platformUnsupportedTests,
             ...coverageExemptExcludes,
+            ...slowLaneExcludes,
           ],
         },
       },

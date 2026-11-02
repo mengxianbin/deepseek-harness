@@ -83,7 +83,8 @@ Package groups: [packages/README.md](packages/README.md). [Experimental status](
 ```sh
 pnpm install            # pnpm workspaces, node >=24.9
 pnpm run clean           # remove build outputs and safe residue from deleted packages
-pnpm run test           # unit tests
+pnpm run test           # unit tests (fast lane: skips the static slow list in scripts/test-slow-manifest.txt)
+pnpm run test:all       # unit tests, every file (full suite; heavy:test wraps this)
 pnpm run test:coverage  # CI coverage gate: per-file 100% on packages/*/*/src
 pnpm run test:e2e       # real-API tests; self-skip without DEEPSEEK_API_KEY
 pnpm run test:expected  # owner-local process expectations

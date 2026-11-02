@@ -414,6 +414,16 @@ const BUILTIN_SOURCE = {
   readonly ['sessionId']
 >
 
+/** One row's roster watch registered before the jobs service resolved. */
+interface PendingRowWatch {
+  /** The Session whose roster the caller wants mirrored. */
+  readonly sessionId: SessionId
+  /** Whether the caller still holds the watch (released before the service arrived). */
+  active: boolean
+  /** The live release, once {@link UiSession.attachJobs} started the watch. */
+  release: (() => void) | undefined
+}
+
 /** Session-scoped source roster and renderer adapter. */
 export class UiSession extends Service {
   private readonly descriptors: RuntimeSessionSourceDescriptor[] = [
@@ -492,17 +502,25 @@ export class UiSession extends Service {
   }
   /** Renderer-facing adapter for `session` and `session-maybe` scopes. */
   readonly adapter: SlotScopeAdapter
+  /** The jobs service once resolved; an assembly may provide it after this plugin applies. */
+  private jobs?: IJobs
+  /** State subscription armed by {@link UiSession.attachJobs}; replaced on re-attach, torn down with the controller. */
+  private disposeJobsState?: () => void
+  /** Row watchers registered while the jobs service was still unresolved. */
+  private readonly pendingRowWatches = new Set<PendingRowWatch>()
 
   /**
    * @param ctx - Client root context.
    * @param sessions - Controller-owned Session object layer.
-   * @param jobs - Read-only background-job rosters; absent when the bundle carries no jobs service.
+   * @param jobs - Read-only background-job rosters, when they are already
+   *   resolvable; an assembly that provides them later adopts them through
+   *   {@link UiSession.attachJobs} instead of staying count-less forever.
    * @param connectionState - Connection recovery state; absent outside a connected assembly.
    */
   constructor(
     ctx: Context,
     private readonly sessions: ISessions,
-    private readonly jobs?: IJobs,
+    jobs?: IJobs,
     private readonly connectionState?: ConnectionStateSource,
   ) {
     super(ctx, 'uiSession')
@@ -530,8 +548,9 @@ export class UiSession extends Service {
         this.observeHealth(report)
       })
       // Optional read-only sources: their snapshot changes re-fold the status
-      // facts that read them (job counts, the stale flag).
-      const disposeJobs = this.jobs?.state.subscribe(() => { this.publishStatus() })
+      // facts that read them (job counts, the stale flag). The jobs side arms
+      // through `attachJobs` — in an assembled composition the service can
+      // resolve after this effect has already run.
       const disposeConnection = this.connectionState?.subscribe(() => { this.publishStatus() })
       // Heartbeat staleness is a function of elapsed time, so it needs a tick
       // of its own: without one a quiet Host would only surface on the next
@@ -550,7 +569,7 @@ export class UiSession extends Service {
         disposeRemoteStatus()
         disposeRemoteError()
         disposeRemoteHealth()
-        disposeJobs?.()
+        this.disposeJobsState?.()
         disposeConnection?.()
         this.disposeMainRetain()
         const records = [...this.bindings.values]
@@ -558,18 +577,57 @@ export class UiSession extends Service {
         for (const record of records) record.release()
       }
     }, 'ui-session: Session binding projection')
+
+    if (jobs !== undefined) this.attachJobs(jobs)
+  }
+
+  /**
+   * Adopt the jobs service the moment it exists, whenever that is. An
+   * assembled composition resolves `jobs` behind its own fiber, whose inject
+   * gate (`remote.job`) can trail this plugin's — so the one-shot read at
+   * apply time legitimately sees nothing, and without this late adoption the
+   * roster fold and every row's ⚙ⁿ stay dark for the page's lifetime
+   * (green-dot-jobs-bug-1101: the green ③ mark outranked a ② signal that
+   * never arrived).
+   * @param jobs - the client jobs service to fold counts and stream rosters through.
+   */
+  attachJobs(jobs: IJobs): void {
+    if (this.jobs === jobs) return
+    this.jobs = jobs
+    this.disposeJobsState?.()
+    this.disposeJobsState = jobs.state.subscribe(() => { this.publishStatus() })
+    for (const pending of [...this.pendingRowWatches]) {
+      this.pendingRowWatches.delete(pending)
+      if (pending.active) pending.release = jobs.watchRows(pending.sessionId)
+    }
+    this.publishStatus()
   }
 
   /**
    * Keep one Session's background-job roster current for as long as the caller
    * (a rendered Session row) holds the release. Reference-counted by the
    * client jobs service, so a row and the open session's header panel share
-   * one stream; without a jobs service this is a no-op and no count appears.
+   * one stream; a row mounting before the jobs service resolves keeps its
+   * watch pending and starts it on {@link UiSession.attachJobs}, and a
+   * caller whose assembly never carries jobs still gets a working release.
    * @param sessionId - Session whose owned live jobs feed `activeJobCount`.
    * @returns the release for this watcher.
    */
   watchSessionJobs(sessionId: SessionId): () => void {
-    return this.jobs?.watchRows(sessionId) ?? (() => {})
+    const jobs = this.jobs
+    if (jobs !== undefined) return jobs.watchRows(sessionId)
+    const pending: PendingRowWatch = { sessionId, active: true, release: undefined }
+    this.pendingRowWatches.add(pending)
+    return () => {
+      const release = pending.release
+      if (release !== undefined) {
+        pending.release = undefined
+        release()
+        return
+      }
+      pending.active = false
+      this.pendingRowWatches.delete(pending)
+    }
   }
 
   /**
@@ -1120,9 +1178,19 @@ export function apply(ctx: Context): void {
   // (no job count, no stale flag) instead of breaking every row's status.
   // The connection cast mirrors ui-settings-general's `ctx.get('connection')`
   // precedent: that key resolves through the untyped `get` overload.
+  //
+  // Absence-at-this-instant is not absence-for-the-assembly, though: the jobs
+  // service's own fiber waits on `remote.job`, whose sequential mount can
+  // trail this plugin's inject gates, so this read may legitimately lose the
+  // race (green-dot-jobs-bug-1101). The waiter below adopts the service the
+  // moment it appears — a bundle that never carries one simply never wakes it.
   const jobs = ctx.get('jobs')
   const connection = ctx.get('connection') as ConnectionHandle | undefined
   const service = new UiSession(ctx, ctx.sessions, jobs, connection?.state)
+  ctx.inject(['jobs'], (scope) => {
+    const jobs = scope.get('jobs')
+    if (jobs !== undefined) service.attachJobs(jobs)
+  })
   ctx.slots.provideRoot({
     hooks: {
       sessions: ctx.sessions.list,

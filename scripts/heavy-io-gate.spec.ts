@@ -145,15 +145,22 @@ describe('heavy-io gate wiring', () => {
       ['heavy:build:lib', 'pnpm run build:lib'],
       ['heavy:build:lib:host', 'pnpm run build:lib:host'],
       ['heavy:build:lib:client', 'pnpm run build:lib:client'],
-      ['heavy:test', 'pnpm run test'],
+      // FORK dsh-local (fastlane-2s-1101): `test` split into a fast default
+      // (static slow-list exclusion) and `test:all` (the former full run).
+      // `heavy:test` keeps the full-suite semantics §5.7's 全量跑法 cites.
+      ['heavy:test', 'pnpm run test:all'],
       ['heavy:test:coverage', 'pnpm run test:coverage'],
       ['heavy:test:coverage:partitioned', 'pnpm run test:coverage:partitioned'],
       ['heavy:test:gui', 'vitest run packages/client packages/host'],
       ['heavy:install', 'pnpm install'],
       // B-case bare-path closure: `test` and `test:coverage` previously sat
       // ungated behind these twins, so a direct `pnpm run test` raced queued
-      // jobs. Now wrapped in place — inner command text unchanged.
-      ['test', 'pnpm run build:native-system && vitest run'],
+      // jobs. Now wrapped in place. FORK dsh-local (fastlane-2s-1101): `test`
+      // is the fast lane since the 2s slow-list split — its inner command
+      // carries the fast config; `test:all` inherits the former full-run text
+      // unchanged (still gated, still the true full suite).
+      ['test', 'pnpm run build:native-system && vitest run --config vitest.fast.config.ts'],
+      ['test:all', 'pnpm run build:native-system && vitest run'],
       ['test:coverage', 'pnpm run build:native-system && vitest run --coverage'],
     ] as const) {
       expect(packageScripts[entry], entry).toBe(`tsx scripts/heavy-io-gate.ts "${inner}"`)
@@ -165,7 +172,10 @@ describe('heavy-io gate wiring', () => {
     expect(packageScripts['test:coverage:partitioned']).toBe('tsx scripts/run-coverage-partitions.ts')
     expect(packageScripts['test:gui']).toBe('vitest run packages/client packages/host')
     expect(packageScripts['build:lib']).toBe('pnpm run build:lib:host && pnpm run build:lib:client')
-    expect(packageScripts['build:lib:host']).toContain('tsc -b tsconfig.host.json')
+    // a61a221001 wrapped build:lib:host in the build-stamp runner and moved it
+    // to `tsc -p` (the host face compiles under node's size cap, not tsc -b);
+    // the lock follows the current load-bearing original.
+    expect(packageScripts['build:lib:host']).toContain('tsc -p tsconfig.host.json')
     expect(packageScripts['build:lib:client']).toContain('tsc -b tsconfig.client.json')
   })
 

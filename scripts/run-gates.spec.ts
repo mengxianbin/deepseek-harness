@@ -684,14 +684,18 @@ describe('gate graph validation', () => {
     }
     expect(scripts['check:ci:unit']).toBe('tsx scripts/run-gates.ts ci-unit')
 
-    // The aggregate is the `test` package script's two segments, in order,
+    // The aggregate is the full-suite package script's two segments, in order,
     // so a step added to one cannot silently leave the other. The lane sets
     // DSH_COVERAGE_TEST_TIMEOUT_MS; vitest.config.ts reads it per inline
     // project (coverageTestTimeoutOptions), so the gate passes no budget flag.
     // FORK dsh-local (heavy-gate-b-1030): the bare `test` path is gated now, so
     // unwrap the gate prefix before splitting — segment identity is unchanged,
     // only the delivery wrapper grew a prefix.
-    const ungatedTest = (scripts.test ?? '').replace(/^tsx scripts\/heavy-io-gate\.ts "(.+)"$/, '$1')
+    // FORK dsh-local (fastlane-2s-1101): `test` became the fast lane (static
+    // 2s slow-list exclusion), so this whole-inventory CI lane locks `test:all`
+    // instead — it inherits the former full-run text, darwin parity keeps
+    // running every file, and the fast default never reaches CI via this graph.
+    const ungatedTest = (scripts['test:all'] ?? '').replace(/^tsx scripts\/heavy-io-gate\.ts "(.+)"$/, '$1')
     const [nativeBuild, unitRun, ...rest] = ungatedTest.split(' && ')
     expect(rest).toEqual([])
     for (const budget of ['15000', undefined]) {
