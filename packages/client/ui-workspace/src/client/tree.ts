@@ -9,6 +9,7 @@ import {
 import type { WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type {
   SessionCompletionOutcome,
+  SessionStatus,
   SessionStatusSnapshot,
 } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
@@ -768,12 +769,69 @@ export function deriveQueue(
 }
 
 /**
- * Weighted placement of the non-queue rows (collab step3 §6.2, q6-attr): pin
- * leads, then task priority, then recency — 置顶 > 优先级 > 活跃度. Pure: the
- * caller feeds attributes and holds no second state. The priority plane has no
- * carrier yet, so every row defaults to P2 and the comparator degenerates to
- * 置顶 > 活跃度 — which the pinned-leading group order already realizes; the
- * named function pins the contract the future attribute supply plugs into.
+ * 回合归属状态序档位 (拍板账⑧, 2026-11-01 修订): the three tiers the ②段
+ * sorts by — 已完成 > 静默 > 运行中.
+ */
+export type RestingState = 'completed' | 'silent' | 'running'
+
+/** Rank of each {@link RestingState}; lower sorts earlier. */
+const RESTING_STATE_RANK: Readonly<Record<RestingState, number>> = {
+  completed: 0,
+  silent: 1,
+  running: 2,
+}
+
+/**
+ * Map one row onto its 回合归属 tier (状态序 mapping 口径, step3 §一 ⑧):
+ * - `running` — the ball is under the bot's feet, so the row sinks (防打扰).
+ *   Checked first: a durable green dot from a previous turn stays lit while the
+ *   next turn runs, and that row is not awaiting my acceptance yet.
+ * - otherwise `completionUnread` — the 待收讫 dot is the "waiting on me" state.
+ * - otherwise `silent` — stopped with nothing owed to either side.
+ * `running` reads the live status when it carries one and falls back to the
+ * Host list row, the same precedence `sessionNode` uses for the rendered dot.
+ * @param summary - list row carrying the Host running baseline.
+ * @param status - live UI status for that row, when one has been published.
+ * @returns the row's tier.
+ */
+export function restingStateOf(
+  summary: Pick<SessionSummary, 'running'>,
+  status: SessionStatus | undefined,
+): RestingState {
+  const running = status?.running ?? summary.running
+  if (running) return 'running'
+  if (status?.completionUnread === true) return 'completed'
+  return 'silent'
+}
+
+/**
+ * Ordering of the non-queue rows (collab step3 §6.2 q6-attr, revised by
+ * 拍板账⑧): `f(置顶过渡优先, 状态序[已完成 > 静默 > 运行中], 最后活跃时间)`.
+ * Pure: the caller feeds the row facts and holds no second state. The
+ * attribute plane is out of the sort key as of 拍板账⑧ — 优先级 no longer
+ * ranks anything here; the 属性缺省 hover hint in `rows/Rows.tsx` keeps naming
+ * the default placement to the user, which is display only.
+ *
+ * 排序只在加载/刷新时计算 (取舍记录): the sort is a pure function of the
+ * snapshot the caller hands over, so the order changes only when a list or
+ * status snapshot lands — never per render tick and never off a relative clock,
+ * which is what keeps rows from jittering. A status snapshot *is* a load, so a
+ * state transition does move its row once (完成时状态翻转自然上浮 = 状态迁移即
+ * 通知); the secondary key is the absolute `updatedAt`, so a moved row never
+ * re-shuffles inside its new tier and one transition never moves a row twice.
+ * The render phase cannot postpone that single move without holding a stale
+ * snapshot, so "只在加载/刷新时计算" is realized as "computed from the
+ * snapshot, not from the clock" — recorded here because the tradeoff is a
+ * deliberate one rather than an oversight.
+ *
+ * Reserved slots (四留口子, 槽位已留不接线 — comments only, zero behaviour):
+ * ① 红点例外拉起 — a provably hung red-dot row lifts above its own tier;
+ * ② 假运行中降级 — a stuck "running" row drops to its true tier;
+ * ③ 完成者二级键 — owner-aware tie-break inside 已完成 (needs the bot/human
+ * ownership ruling first, so the slot stays empty until then);
+ * ④ bot 泳道 — owner lanes that keep bot churn out of human work in-tray.
+ * None of the four feeds this comparator yet; adding one is a follow-up task.
+ *
  * Manual drag order stays the caller's business (this comparator ranks rows
  * handed to it unsorted).
  * @param left - left row facts.
@@ -781,9 +839,50 @@ export function deriveQueue(
  * @returns the sort rank: negative when left leads.
  */
 export function compareRestingRows(
-  left: { readonly pinned: boolean; readonly updatedAt: number },
-  right: { readonly pinned: boolean; readonly updatedAt: number },
+  left: { readonly pinned: boolean; readonly state: RestingState; readonly updatedAt: number },
+  right: { readonly pinned: boolean; readonly state: RestingState; readonly updatedAt: number },
 ): number {
   if (left.pinned !== right.pinned) return left.pinned ? -1 : 1
+  const rank = RESTING_STATE_RANK[left.state] - RESTING_STATE_RANK[right.state]
+  if (rank !== 0) return rank
   return right.updatedAt - left.updatedAt
+}
+
+/**
+ * Project known account members by 回合归属状态序 then last activity — the
+ * real-chain counterpart of {@link orderByRecency} for the default
+ * (最近更新) view. Rows without a summary are omitted until it arrives; the
+ * id tie-break keeps equal facts deterministic.
+ * @param sessionIds - authoritative account membership.
+ * @param summaries - current Session summaries.
+ * @param statuses - unified UI status by Session, for the 状态序 tier.
+ * @param rowState - global pin and archive membership (置顶过渡优先).
+ * @returns known members ordered by pin, tier, then newest first.
+ */
+export function orderByResting(
+  sessionIds: readonly SessionId[],
+  summaries: SessionListState['byId'],
+  statuses: SessionStatusSnapshot,
+  rowState?: Pick<SessionRowState, 'pinnedSessionIds' | 'archivedSessionIds'>,
+): SessionId[] {
+  const pinned = new Set(rowState?.pinnedSessionIds)
+  const archived = new Set(rowState?.archivedSessionIds)
+  return sessionIds.flatMap((id) => {
+    const summary = summaries[id]
+    if (summary === undefined) return []
+    return [{
+      id,
+      facts: {
+        pinned: pinned.has(id) && !archived.has(id),
+        state: restingStateOf(summary, statuses.get(id)),
+        updatedAt: summary.updatedAt,
+      },
+    }]
+  })
+    .sort((a, b) => {
+      const rank = compareRestingRows(a.facts, b.facts)
+      if (rank !== 0) return rank
+      return a.id < b.id ? -1 : 1
+    })
+    .map(member => member.id)
 }

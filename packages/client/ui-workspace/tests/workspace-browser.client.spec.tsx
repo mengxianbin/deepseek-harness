@@ -265,6 +265,37 @@ describe('WorkspaceBrowser', () => {
     expect(b.store.getSnapshot().orderBy).toBe('updated')
   })
 
+  it('状态序：最近更新视图把完成态聚顶、运行中垫底（拍板账⑧ 真实排序链接线）', () => {
+    localStorage.clear()
+    const preferences = createWorkspaceViewStore().create()
+    preferences.actions.setGroupExpanded('alpha', true)
+    localStorage.setItem('dsh.workspace.view.v5', JSON.stringify(preferences.getSnapshot()))
+    const statuses = hook<SessionStatusSnapshot>(new Map([
+      [sid('running-s'), { running: true, pendingInteraction: undefined, completionUnread: false }],
+      [sid('completed-s'), { running: false, pendingInteraction: undefined, completionUnread: true }],
+      [sid('silent-s'), { running: false, pendingInteraction: undefined, completionUnread: false }],
+    ]))
+    const b = mount({
+      useSessions: hook(sessionState([
+        summary('running-s', 30, { running: true }),
+        summary('completed-s', 10),
+        summary('silent-s', 20),
+      ])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['running-s', 'completed-s', 'silent-s'])])),
+      useSessionStatus: statuses,
+    })
+    expect(b.store.getSnapshot().orderBy).toBe('updated')
+    // The freshest row is running, the stalest is the unread completion: pure
+    // activity order would reverse this list, so the assertion proves the
+    // 状态序 primary key is what the rendered order actually reads.
+    const rows = () => screen.getAllByRole('treeitem').filter(row => row.getAttribute('aria-expanded') === null)
+    expect(rows().map(row => row.textContent)).toEqual([
+      expect.stringContaining('completed-s'),
+      expect.stringContaining('silent-s'),
+      expect.stringContaining('running-s'),
+    ])
+  })
+
   it('moves focus into Workspace controls without selecting a Session while a main panel is active', () => {
     const panelInfo = { activePanelId: 'panel-a' as MainPanelId }
     const b = mount({

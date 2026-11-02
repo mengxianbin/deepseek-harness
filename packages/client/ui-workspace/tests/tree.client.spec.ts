@@ -10,10 +10,10 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { SessionProjectionSnapshot } from '@deepseek-ai/dsh-api-session-controller/client'
 import {
-  type ArchivedFilter,
+  type ArchivedFilter, type RestingState,
   compareRestingRows, deriveFlat, deriveGroups, deriveQueue, deriveSearchResults, orderByRecency,
-  owningGroupKey, owningParentFolder,
-  pinCurrentBlank, reconcileManualOrder, sessionMemberIds, visibleSessionIds, workspaceLabel,
+  orderByResting, owningGroupKey, owningParentFolder,
+  pinCurrentBlank, reconcileManualOrder, restingStateOf, sessionMemberIds, visibleSessionIds, workspaceLabel,
   UNGROUPED_KEY,
 } from '../src/client/tree.ts'
 import { createWorkspaceViewStore } from '../src/client/stores.ts'
@@ -44,6 +44,39 @@ const withMain = (state: SessionListState, id: SessionId): SessionListState => (
     [id]: { ...state.byId[id]!, retainedBy: { ...state.byId[id]!.retainedBy, mainView: 1 } },
   },
 })
+/**
+ * Row facts handed to `compareRestingRows`: 置顶 / 状态序档位 / 最后活跃时间.
+ * @param pinned - global pin membership.
+ * @param state - 回合归属 tier.
+ * @param updatedAt - last activity timestamp.
+ * @returns the fact record the comparator ranks.
+ */
+const restingFacts = (pinned: boolean, state: RestingState, updatedAt: number) => ({ pinned, state, updatedAt })
+/**
+ * One published UI status carrying only the facts the 状态序 mapping reads.
+ * @param overrides - facts to lift off the defaults.
+ * @returns the status record.
+ */
+const statusRow = (overrides: Partial<SessionStatus>): SessionStatus => ({
+  running: false, pendingInteraction: undefined, completionUnread: false, ...overrides,
+})
+/** One list row plus the status published for it. */
+type StateOrderFixture = { summary: SessionSummary; status: SessionStatus }
+/**
+ * Build a `SessionListState` and the matching status snapshot for 状态序 cases.
+ * @param rows - one entry per row, newest activity last unless pinned says otherwise.
+ * @returns both halves `orderByResting` needs.
+ */
+function stateOrderFixture(rows: readonly StateOrderFixture[]): {
+  summaries: SessionListState['byId']
+  statuses: SessionStatusSnapshot
+} {
+  return {
+    summaries: Object.fromEntries(rows.map(row => [row.summary.id, row.summary])),
+    statuses: new Map(rows.map(row => [row.summary.id, row.status])),
+  }
+}
+
 /**
  * Projection values one shipped Host publishes for a Session. The `forkLineage` key belongs to the
  * Liveshare package, which this program does not name, so the values are built through the open key
@@ -1103,10 +1136,89 @@ describe('deriveQueue (collab step3 §一, q1-placement)', () => {
 
 describe('compareRestingRows (collab step3 §6.2, q6-attr)', () => {
   it('leads pinned rows, then the more recently active', () => {
-    const pinnedOld = { pinned: true, updatedAt: 1 }
-    const plainNew = { pinned: false, updatedAt: 10 }
+    const pinnedOld = restingFacts(true, 'silent', 1)
+    const plainNew = restingFacts(false, 'silent', 10)
     expect(compareRestingRows(pinnedOld, plainNew)).toBeLessThan(0)
     expect(compareRestingRows(plainNew, pinnedOld)).toBeGreaterThan(0)
-    expect(compareRestingRows({ pinned: false, updatedAt: 10 }, { pinned: false, updatedAt: 2 })).toBeLessThan(0)
+    expect(compareRestingRows(restingFacts(false, 'silent', 10), restingFacts(false, 'silent', 2))).toBeLessThan(0)
+  })
+})
+
+describe('状态序 compareRestingRows（拍板账⑧：已完成 > 静默 > 运行中）', () => {
+  it('状态序：已完成行排在运行中行之前', () => {
+    expect(compareRestingRows(restingFacts(false, 'completed', 1), restingFacts(false, 'running', 100)))
+      .toBeLessThan(0)
+    expect(compareRestingRows(restingFacts(false, 'running', 100), restingFacts(false, 'completed', 1)))
+      .toBeGreaterThan(0)
+  })
+
+  it('状态序：静默档夹在已完成与运行中之间', () => {
+    expect(compareRestingRows(restingFacts(false, 'silent', 1), restingFacts(false, 'running', 100)))
+      .toBeLessThan(0)
+    expect(compareRestingRows(restingFacts(false, 'completed', 1), restingFacts(false, 'silent', 100)))
+      .toBeLessThan(0)
+  })
+
+  it('状态序：置顶仍领先状态序（置顶过渡优先）', () => {
+    expect(compareRestingRows(restingFacts(true, 'running', 1), restingFacts(false, 'completed', 100)))
+      .toBeLessThan(0)
+    expect(compareRestingRows(restingFacts(false, 'completed', 100), restingFacts(true, 'running', 1)))
+      .toBeGreaterThan(0)
+  })
+
+  it('状态序：同档按最后活跃时间 tiebreak', () => {
+    expect(compareRestingRows(restingFacts(false, 'completed', 10), restingFacts(false, 'completed', 5)))
+      .toBeLessThan(0)
+    expect(compareRestingRows(restingFacts(false, 'running', 10), restingFacts(false, 'running', 5)))
+      .toBeLessThan(0)
+    expect(compareRestingRows(restingFacts(false, 'silent', 5), restingFacts(false, 'silent', 10)))
+      .toBeGreaterThan(0)
+  })
+})
+
+describe('状态序 restingStateOf（绿点完成态=已完成 / running=运行中 / 其余静默）', () => {
+  it('状态序：在跑优先，即使耐久绿点还亮着', () => {
+    expect(restingStateOf({ running: true }, statusRow({ running: true, completionUnread: true })))
+      .toBe('running')
+    expect(restingStateOf({ running: true }, undefined)).toBe('running')
+  })
+
+  it('状态序：耐久绿点读已完成，非运行中行读静默', () => {
+    expect(restingStateOf({ running: false }, statusRow({ completionUnread: true }))).toBe('completed')
+    expect(restingStateOf({ running: false }, undefined)).toBe('silent')
+    expect(restingStateOf({ running: false }, statusRow({}))).toBe('silent')
+  })
+
+  it('状态序：状态缺省时回落 Host 列表行的 running 基线', () => {
+    expect(restingStateOf({ running: true }, statusRow({ running: undefined }))).toBe('running')
+  })
+})
+
+describe('状态序 orderByResting（真实排序链：置顶 > 状态序 > 活跃时间）', () => {
+  it('状态序：已完成聚顶、运行中垫底，置顶仍领先且活跃时间只在同档内起作用', () => {
+    const fixture = stateOrderFixture([
+      { summary: summary('completed', 1), status: statusRow({ completionUnread: true }) },
+      { summary: summary('silent', 50), status: statusRow({}) },
+      { summary: summary('running', 100), status: statusRow({ running: true }) },
+      { summary: summary('pinned-running', 200), status: statusRow({ running: true }) },
+    ])
+    expect(orderByResting(
+      [sid('running'), sid('completed'), sid('silent'), sid('pinned-running')],
+      fixture.summaries,
+      fixture.statuses,
+      { pinnedSessionIds: [sid('pinned-running')], archivedSessionIds: [] },
+    )).toEqual([sid('pinned-running'), sid('completed'), sid('silent'), sid('running')])
+  })
+
+  it('状态序：无状态快照时退化为纯活跃度序，未知成员等待其摘要', () => {
+    const fixture = stateOrderFixture([
+      { summary: summary('older', 20), status: statusRow({}) },
+      { summary: summary('newer', 100), status: statusRow({}) },
+    ])
+    expect(orderByResting(
+      [sid('older'), sid('newer'), sid('missing')],
+      fixture.summaries,
+      fixture.statuses,
+    )).toEqual([sid('newer'), sid('older')])
   })
 })
