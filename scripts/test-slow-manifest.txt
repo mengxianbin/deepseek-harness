@@ -453,7 +453,7 @@ packages/ptc-runtime/ptc-runtime-node/tests/persistent-sandbox.spec.ts
 packages/ptc-runtime/ptc-runtime-node/tests/persistent.spec.ts
 packages/ptc-runtime/ptc-runtime-node/tests/runtime.spec.ts
 packages/sandbox/sandbox-windows-acl/tests/control.spec.ts
-packages/sandbox/sandbox-windows-acl/tests/diagnose-script.spec.ts
+packages/sandbox/sandbox-windows-acl/tests/diagnose-script.slowlane.spec.ts
 packages/sandbox/sandbox-windows-acl/tests/probe.spec.ts
 packages/sandbox/sandbox-windows-acl/tests/runner.spec.ts
 packages/schedule/schedule/tests/cron.spec.ts
@@ -548,7 +548,7 @@ packages/test-support/loader-smoke/tests/loader-smoke.spec.ts
 packages/test-support/remote-mock/tests/proxy-types.client.spec.ts
 packages/test-support/session-snapshot/tests/harness.spec.ts
 packages/test-support/session-snapshot/tests/suite.spec.ts
-packages/typert/generator/tests/cordis-catalog.spec.ts
+packages/typert/generator/tests/cordis-catalog.slowlane.spec.ts
 packages/typert/generator/tests/remote-metadata.spec.ts
 packages/typert/generator/tests/remote-model.spec.ts
 packages/typert/generator/tests/schema-emitter.spec.ts
