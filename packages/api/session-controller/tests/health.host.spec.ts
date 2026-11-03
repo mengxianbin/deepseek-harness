@@ -15,6 +15,25 @@ import { reconcileSessionHealth } from '../src/health.ts'
 import type { SessionHealthRow } from '../src/types.ts'
 import { createSessionTestController } from './test-remote.ts'
 
+// 批2 duty-shield-b2-1103: the sweep folds the 值守总账 into the SAME frame —
+// the reader is mocked so this integration assertion stays machine-independent
+// while still proving the CALL SITE (a sweep that stopped reading the ledger
+// would drop the `duty` key and fail the toEqual below). The reader's own
+// behavior — freshness, three states, fail-closed — lives in duty.spec.ts.
+const { dutyFixture } = vi.hoisted(() => ({
+  dutyFixture: {
+    ok: true,
+    fresh: true,
+    ageSec: 42,
+    counts: { total: 2, healthy: 1, disabled: 1, failed: 0 },
+    items: [
+      { id: 'DSH-Build-Watchdog', status: 'healthy' as const, intentional: false, reasons: [] },
+      { id: 'taskbot-guard-check', status: 'disabled' as const, intentional: true, reasons: [] },
+    ],
+  },
+}))
+vi.mock('../src/duty.ts', () => ({ readDutyInventory: () => dutyFixture }))
+
 const defaults = {
   defaultModelSelection: () => ({ provider: 'fixture', model: 'fixture-model' }),
   cwd: '/tmp',
@@ -125,6 +144,8 @@ describe('sweep publishes api-session/health (step2 §4.3 同一数据源同一�
       total: 1,
       counts: { running: 1, awaiting: 0, failed: 0, rest: 0 },
       issues: [],
+      // 批2: the duty fold rides every sweep frame (同一 tick, 同一 frame).
+      duty: dutyFixture,
     })
 
     await vi.advanceTimersByTimeAsync(SESSION_STATUS_SWEEP_MS)

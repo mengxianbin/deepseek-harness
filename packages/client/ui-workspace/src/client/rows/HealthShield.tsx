@@ -18,24 +18,23 @@
  * while the tooltip counts the interruption up. The 安康位 alarm additionally
  * cuts into the 「要我拿主意」 queue segment at P0/P1 level (the queue health
  * alert below); this badge is the always-on global seat.
+ *
+ * 批2 duty-shield-b2-1103 (ruling `shield-entry-ruling` A案 淡绿常驻可点,
+ * 2026-11-03): the faint-green平态 is now CLICKABLE — one badge, one detail
+ * surface, TWO sections (会话对账 + 值守清单, rendered by the shared
+ * HealthDetail) — so the duty inventory stays reachable even when everything
+ * is green, without a second badge (一个入口两段内容). `broken` widens to the
+ * duty fold: a failed or untrusted 值守总账 paints the shield red exactly like
+ * a broken Session reconciliation (三态纪律: healthy quiet / 有意停用 grey /
+ * failed red + 逐项明细 + 插队 P0/P1).
  */
 import { useState } from 'react'
 import clsx from 'clsx'
 import { IconShieldOutlineMedium, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { SessionHealthState, UseSessionHealth } from '@deepseek-ai/dsh-client-ui-session/client'
-import type { WorkspaceKey } from '../locales.ts'
+import type { UseSessionHealth } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { WorkspaceBrowserProps } from '../contract/slots.ts'
+import { HealthDetail } from './HealthDetail.tsx'
 import css from './HealthShield.module.css'
-
-/** One broken invariant as this seat names it (derived from the wire report). */
-type HealthInvariant = NonNullable<SessionHealthState['report']>['issues'][number]['invariant']
-
-/** The invariant labels this seat's language table carries. */
-const INVARIANT_KEYS = {
-  'total-partition': 'health.invariant.totalPartition',
-  unclassified: 'health.invariant.unclassified',
-  unreadable: 'health.invariant.unreadable',
-} as const satisfies Record<HealthInvariant, WorkspaceKey>
 
 type HealthShieldProps = {
   /**
@@ -49,7 +48,7 @@ type HealthShieldProps = {
 }
 
 /**
- * Render the shield with its optional detail popover.
+ * Render the shield with its two-section detail popover.
  * @param props - the health hook plus the sidebar locale seat.
  * @returns the shield element tree, or null without a health source.
  */
@@ -58,7 +57,8 @@ export function HealthShield({ useSessionHealth, t }: HealthShieldProps) {
   const [detailAnchor, setDetailAnchor] = useState<{ left: number; top: number } | undefined>(undefined)
   if (health === undefined) return null
   const report = health.report
-  const broken = report?.ok === false
+  // Either plane breaks the shield: Session invariants OR the duty fold (批2).
+  const broken = report?.ok === false || report?.duty?.ok === false
   const stale = health.stale === true
   const label = stale
     ? t('health.stale.label')
@@ -77,9 +77,11 @@ export function HealthShield({ useSessionHealth, t }: HealthShieldProps) {
           type="button"
           className={css.button}
           aria-label={label}
-          {...(broken ? { 'aria-expanded': detailAnchor !== undefined } : {})}
+          aria-expanded={detailAnchor !== undefined}
           onClick={(event) => {
-            if (!broken) return
+            // 批2 ruling A案: the faint-green平态 is clickable too — the detail
+            // opens for both verdicts (one entrance, two sections); only the
+            // self-stale ring changes the tooltip, never the disclosure.
             if (detailAnchor !== undefined) {
               setDetailAnchor(undefined)
               return
@@ -93,22 +95,13 @@ export function HealthShield({ useSessionHealth, t }: HealthShieldProps) {
           <IconShieldOutlineMedium size={16} />
         </button>
       </Tooltip>
-      {/* `broken` (aliased from `report?.ok === false`) already narrows
-          `report` to present — the detail only exists with a verdict. */}
-      {broken && detailAnchor !== undefined && (
+      {detailAnchor !== undefined && (
         <div
           className={css.detail}
           data-health-detail=""
           style={{ left: detailAnchor.left, top: detailAnchor.top }}
         >
-          {report.issues.map(issue => (
-            <div key={issue.invariant} className={css.issue} data-health-invariant={issue.invariant}>
-              <span className={css.issueLabel}>{t(INVARIANT_KEYS[issue.invariant])}</span>
-              <span className={css.issueSessions}>
-                {issue.sessionIds.length === 0 ? '—' : issue.sessionIds.join(', ')}
-              </span>
-            </div>
-          ))}
+          <HealthDetail report={report} t={t} />
         </div>
       )}
     </span>

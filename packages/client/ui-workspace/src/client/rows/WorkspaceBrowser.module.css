@@ -733,20 +733,6 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-.queueHealthIssue {
-  display: flex;
-  gap: 6px;
-  align-items: baseline;
-  padding: 1px 0;
-}
-
-.queueHealthInvariant {
-  flex: none;
-  font-weight: 600;
-  color: var(--dsw-alias-state-error-primary);
-}
-
-.queueHealthSessions {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
+/* 批2 duty-shield: the expansion body is the shared HealthDetail (会话对账 +
+   值守清单) — its row vocabulary lives in HealthDetail.module.css, one body
+   for both entrances; no per-entrance row classes remain here. */

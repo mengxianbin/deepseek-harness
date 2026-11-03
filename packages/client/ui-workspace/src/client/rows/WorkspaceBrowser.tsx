@@ -34,7 +34,6 @@ import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
   SealLightSnapshot, SealRowObserver, WorkspaceBrowserProps,
 } from '../contract/slots.ts'
-import type { WorkspaceKey } from '../locales.ts'
 import type { ArchivedFilter, GroupNode, QueueSegment, SessionNode, SessionOrderBy, SessionRowState } from '../tree.ts'
 import {
   deriveFlat, deriveGroups, deriveQueue, deriveSearchResults, orderByResting, owningGroupKey, owningParentFolder,
@@ -42,6 +41,7 @@ import {
 } from '../tree.ts'
 import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
 import { HealthShield } from './HealthShield.tsx'
+import { HealthDetail } from './HealthDetail.tsx'
 import { FLAT_SESSION_ORDER_KEY, type SessionGroupBy } from '../stores.ts'
 import { WorkspacePickFlow } from '../WorkspacePicker.tsx'
 import css from './WorkspaceBrowser.module.css'
@@ -358,22 +358,21 @@ type SessionTreeProps = Pick<
  * cuts into this segment at P0/P1 level (step3 §5.2 插队, step2 §4.3 机制自动
  * 巡检) — a red row when the Host sweep's books stop balancing, an amber dashed
  * row when the health chain itself goes silent; the click expands the same
- * difference detail the shield shows.
+ * detail the shield shows. 批2 duty-shield-b2-1103 (step2 §4.3 duty
+ * extension): the duty fold rides the SAME row — a failed or untrusted 值守总账
+ * cuts in exactly like a broken Session reconciliation (三态纪律: 有意停用
+ * never sets the verdict, so it never queues — 灰不亮不插队), and the
+ * expansion renders the shared two-section HealthDetail (会话对账 + 值守清单).
  */
-/** One broken invariant as this segment names it (derived from the wire report). */
-type HealthInvariant = NonNullable<SessionHealthState['report']>['issues'][number]['invariant']
-
-/** The invariant labels this namespace's language table carries. */
-const QUEUE_INVARIANT_KEYS = {
-  'total-partition': 'health.invariant.totalPartition',
-  unclassified: 'health.invariant.unclassified',
-  unreadable: 'health.invariant.unreadable',
-} as const satisfies Record<HealthInvariant, WorkspaceKey>
-
 /** The 安康位 alarm's row in the hard top segment (collab step3 §5.2 插队 P0/P1). */
 function HealthQueueAlert({ health, t }: { health: SessionHealthState; t: SessionTreeProps['t'] }) {
   const [expanded, setExpanded] = useState(false)
-  const broken = health.report?.ok === false
+  const report = health.report
+  const sessionBroken = report?.ok === false
+  // 批2: the duty verdict plugs into the same alarm — red + 插队 for a failed
+  // or untrusted ledger; a healthy/disabled-only ledger sets nothing here.
+  const dutyBroken = report?.duty?.ok === false
+  const broken = sessionBroken || dutyBroken
   return (
     <div className={css.queueHealth} data-row-key="queue-health" data-health-alert={broken ? 'broken' : 'stale'}>
       <button
@@ -382,23 +381,18 @@ function HealthQueueAlert({ health, t }: { health: SessionHealthState; t: Sessio
         aria-expanded={expanded}
         onClick={() => { setExpanded(value => !value) }}
       >
-        {broken
+        {sessionBroken
           ? t('queue.health.broken')
-          : t('queue.health.stale', { s: health.staleSeconds ?? 0 })}
+          : dutyBroken
+            ? t('queue.health.duty')
+            : t('queue.health.stale', { s: health.staleSeconds ?? 0 })}
       </button>
       {expanded && (
         <div className={css.queueHealthDetail} data-health-alert-detail="">
-          {/* `broken` (aliased from `health.report?.ok === false`) already
-              narrows the report to present. */}
+          {/* `broken` already narrows at least one plane present; the shared
+              body shows every section the report carries (批2 两段). */}
           {broken
-            ? health.report.issues.map(issue => (
-              <div key={issue.invariant} className={css.queueHealthIssue} data-health-invariant={issue.invariant}>
-                <span className={css.queueHealthInvariant}>{t(QUEUE_INVARIANT_KEYS[issue.invariant])}</span>
-                <span className={css.queueHealthSessions}>
-                  {issue.sessionIds.length === 0 ? '—' : issue.sessionIds.join(', ')}
-                </span>
-              </div>
-            ))
+            ? <HealthDetail report={report} t={t} />
             : t('queue.health.staleHint')}
         </div>
       )}
@@ -436,7 +430,8 @@ function QueueSection({ queue, currentId, onOpen, onSessionRenameRequest, render
   const health = useSessionHealth?.(state => state)
   return (
     <div className={css.queueSection} data-row-key="queue" role="tree" aria-label={t('queue.title')}>
-      {health !== undefined && (health.stale === true || health.report?.ok === false) && (
+      {health !== undefined
+        && (health.stale === true || health.report?.ok === false || health.report?.duty?.ok === false) && (
         <HealthQueueAlert health={health} t={t} />
       )}
       {queue.tiers.length === 0

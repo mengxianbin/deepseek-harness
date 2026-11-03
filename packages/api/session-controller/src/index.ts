@@ -32,6 +32,7 @@ import { SessionSkillCatalog } from './skill-catalog.ts'
 import { SessionMediaReferences } from './media-references.ts'
 import { ArchivedSessionGate } from './archived-session-gate.ts'
 import { reconcileSessionHealth } from './health.ts'
+import { readDutyInventory } from './duty.ts'
 import type {
   ModelCatalog,
   SessionWorkspacePathApplication,
@@ -379,7 +380,12 @@ export class SessionController extends TypertRemoteService {
           })
           emitStatus(sessionId, running)
         }
-        ctx.emit('api-session/health', reconcileSessionHealth(rows))
+        // 批2 duty-shield-b2-1103 (step2 §4.3 duty extension): the SAME tick
+        // also reads the 值守总账 `~/.dsh/duty-inventory-state.json` (collector
+        // cadence 10min) + its freshness judgment — one small file, never a
+        // per-tick scheduler query (清单档 §三 约束①) — and folds it into the
+        // SAME frame: one data source, one period, one emission per tick.
+        ctx.emit('api-session/health', { ...reconcileSessionHealth(rows), duty: readDutyInventory() })
       }, SESSION_STATUS_SWEEP_MS)
       timer.unref()
       return () => {
