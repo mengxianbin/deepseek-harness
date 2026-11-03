@@ -3001,6 +3001,63 @@ describe('Workspace tree grouping', () => {
     expect(screen.getByText('安康位自身读不到：盾已亮虚线圈，读数恢复即自动清除')).toBeTruthy()
   })
 
+  it('cuts the duty alarm into the queue head on a failed 值守总账, quiet on disabled-only (批2 插队)', () => {
+    const ledgerBase = {
+      ok: true,
+      fresh: true,
+      ageSec: 120,
+      counts: { total: 3, healthy: 1, disabled: 2, failed: 0 },
+      items: [
+        { id: 'DSH-Build-Watchdog', status: 'healthy' as const, intentional: false, reasons: [] },
+        { id: 'taskbot-guard-check', status: 'disabled' as const, intentional: true, reasons: [] },
+        { id: 'taskbot-archive-janitor', status: 'disabled' as const, intentional: true, reasons: [] },
+      ],
+    }
+    const sessionsBalanced: SessionHealthReport = {
+      ok: true, total: 1, counts: { running: 1, awaiting: 0, failed: 0, rest: 0 }, issues: [],
+    }
+    // 有意停用 = 灰不亮不插队: a healthy/disabled-only ledger queues nothing.
+    const quiet = mount({ useSessionHealth: hook({ report: { ...sessionsBalanced, duty: ledgerBase } }) })
+    expect(document.querySelector('[data-row-key="queue-health"]')).toBeNull()
+    quiet.view.unmount()
+
+    // A failed item flips the verdict → the alarm row cuts in at the segment head.
+    mount({
+      useSessionHealth: hook({
+        report: {
+          ...sessionsBalanced,
+          duty: {
+            ...ledgerBase,
+            ok: false,
+            counts: { total: 3, healthy: 1, disabled: 1, failed: 1 },
+            items: [
+              ...ledgerBase.items.slice(0, 2),
+              {
+                id: 'DSH-Host-Revive',
+                status: 'failed' as const,
+                intentional: false,
+                cadenceLabel: '每 5 分钟',
+                reasons: ['该跑没跑：LastRunTime 距今 900s > 阈 900s'],
+              },
+            ],
+          },
+        },
+      }),
+    })
+    const alert = screen.getByText('值守告警：值守总账有失效，点开看明细')
+      .closest('[data-row-key="queue-health"]') as HTMLElement
+    expect(alert.getAttribute('data-health-alert')).toBe('broken')
+    fireEvent.click(alert.querySelector('button') as HTMLElement)
+    // The expansion is the shared two-section body: failed row with reasons, disabled row grey.
+    const detail = alert.querySelector('[data-health-alert-detail=""]') as HTMLElement
+    expect(detail.textContent).toContain('值守清单')
+    expect(detail.textContent).toContain('DSH-Host-Revive')
+    expect(detail.textContent).toContain('该跑没跑')
+    expect(detail.textContent).toContain('taskbot-guard-check')
+    expect(detail.textContent).toContain('有意停用')
+    expect(detail.textContent).not.toContain('DSH-Build-Watchdog')
+  })
+
   it('seats the shield outside the actions cluster clip window (件C5 裁切复修1101)', () => {
     const balanced: SessionHealthReport = {
       ok: true, total: 1, counts: { running: 1, awaiting: 0, failed: 0, rest: 0 }, issues: [],

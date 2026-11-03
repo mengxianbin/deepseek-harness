@@ -16,6 +16,7 @@
     "src/control.ts",
     "src/file-references.ts",
     "src/health.ts",
+    "src/duty.ts",
     "src/history.ts",
     "src/history/controller.ts",
     "src/history/listener.ts",
