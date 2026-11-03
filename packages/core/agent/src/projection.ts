@@ -17,11 +17,17 @@ const turnBoundaryProjectionSchema: zod.ZodType<TurnBoundaryProjection> = zod.ob
   lastTurn: zod.number().int().nonnegative(),
 })
 
-/** Host projection of agent turn and step boundaries. */
+/**
+ * Projection of agent turn and step boundaries. Client-visible: a Session
+ * whose final `turn/start` never met a `turn/end` carries the open turn's seq
+ * on every summary row, which is how a row reads "interrupted mid-turn"
+ * without the Session being opened first.
+ */
 export const turnBoundaryProjectionDefinition = {
   key: 'turnBoundary',
   stateVersion: 2,
   stateSchema: turnBoundaryProjectionSchema,
+  wire: { viewSchema: turnBoundaryProjectionSchema, view: state => state },
   init: () => ({
     openTurnStartSeq: null,
     lastStepStartSeq: null,

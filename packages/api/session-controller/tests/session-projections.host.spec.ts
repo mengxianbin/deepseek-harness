@@ -740,16 +740,17 @@ describe('session.list projections column', () => {
 })
 
 describe('Session control projection frames', () => {
-  /** Drain frames until `count` projection replacements arrive. */
+  /** Drain frames until `count` frames matching `counts` arrive. */
   async function collect(
     iterable: AsyncIterable<SessionControlFrame>,
     count: number,
     abort: AbortController,
+    counts: (frame: SessionControlFrame) => boolean = candidate => candidate.type === 'projection',
   ): Promise<SessionControlFrame[]> {
     const frames: SessionControlFrame[] = []
     for await (const frame of iterable) {
       frames.push(frame)
-      if (frames.filter(candidate => candidate.type === 'projection').length >= count) abort.abort()
+      if (frames.filter(counts).length >= count) abort.abort()
     }
     return frames
   }
@@ -763,7 +764,11 @@ describe('Session control projection frames', () => {
     await new Promise(resolve => setTimeout(resolve, 0))
     const abort = new AbortController()
     const stream = proxy.control(abort.signal)
-    const collected = collect(stream, 5, abort)
+    // Count only the keys this test asserts: every summary unit broadcasts its
+    // own frames now, and an unrelated key's frame must not starve these.
+    const collected = collect(stream, 5, abort, candidate =>
+      candidate.type === 'projection'
+      && (candidate.key === 'test/last-user' || candidate.key === 'sessionListMetadata'))
 
     const now = vi.spyOn(Date, 'now').mockReturnValue(100)
     seedMessages(session, 1)

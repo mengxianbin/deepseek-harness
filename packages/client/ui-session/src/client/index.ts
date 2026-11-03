@@ -975,7 +975,18 @@ export class UiSession extends Service {
       // `interrupted` — the crash closer for a turn the DSH process left open
       // — reads red with `error`: the chat face already shows its task-stopped
       // row, and a row that stayed silent through the restart hid that残局.
-      const durableFailed = durableKind === 'error' || durableKind === 'interrupted'
+      // That closer is written only when the Session is opened, so a row that
+      // has never been reopened still folds to its pre-crash value (or null
+      // when no turn ever ended) and would hide the same残局. The open turn's
+      // own `turn/start` seq closes that gap from the transcript: an unclosed
+      // turn on a Session that is not running died before anything could close
+      // it, and reads red exactly as the reopened row does. `running === false`
+      // is the whole guard, matching `pendingWakeup` below: the Host appends
+      // `turn/start` only after it publishes the running transition, so a live
+      // Agent always reports running for as long as its own turn stays open.
+      const openTurn = list.byId[id]?.projectionValues?.turnBoundary?.openTurnStartSeq != null
+      const diedMidTurn = openTurn && this.running.get(id) === false
+      const durableFailed = durableKind === 'error' || durableKind === 'interrupted' || diedMidTurn
         ? 'failed' as const
         : undefined
       const durableClean = durableKind === undefined

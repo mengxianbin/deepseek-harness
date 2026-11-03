@@ -47,7 +47,10 @@ describe('title projection unit', () => {
     const firstSeq = appendTitle(session, 'First title')
     const secondSeq = appendTitle(session, 'Second title')
     session.append('turn/start', { turn: 1 })
-    expect(changes).toEqual([
+    // turnBoundary carries a wire since the unclosed-turn-dot fix, so its
+    // turn/start fold reaches the feed as well; count only this unit's key
+    // (same rule as the session-projections collect predicate).
+    expect(changes.filter(change => change.key === 'title')).toEqual([
       { key: 'title', value: 'First title', seq: firstSeq },
       { key: 'title', value: 'Second title', seq: secondSeq },
     ])

@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-11-02-unclosed-turn-row-reads-red.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-11-02-unclosed-turn-row-reads-red.md
+/agent-note-unclosed-turn-reads-red-without-reopening-the-session:
+  en: edce3f6494e1462e
+  zh: 59afd4a8969820ee
+/agent-note-unclosed-turn-reads-red-without-reopening-the-session/problem:
+  en: 6c384a3f44c1fc80
+  zh: ed42ae7c33ed45cf
+/agent-note-unclosed-turn-reads-red-without-reopening-the-session/decision:
+  en: 51e9dd4650b2adf2
+  zh: a9626ec216685fc1
+/agent-note-unclosed-turn-reads-red-without-reopening-the-session/alternatives-considered:
+  en: 967a2339f5d8aa6d
+  zh: e5c485ebab84a949
+/agent-note-unclosed-turn-reads-red-without-reopening-the-session/consequences:
+  en: 40a543d637a278cc
+  zh: 70bfe591187736a4

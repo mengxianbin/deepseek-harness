@@ -77,7 +77,9 @@ describe('permissions projection unit', () => {
     expect(permissionChanges).toHaveLength(3)
     expect(permissionChanges.at(-1)).toMatchObject({ key: 'permissions', value: { currentValue: 'danger-full-access' } })
     session.append('turn/start', { turn: 1 })
-    expect(changes).toHaveLength(3)
+    // turnBoundary carries a wire since the unclosed-turn-dot fix, so
+    // turn/start folds it into the feed too; this unit only owns permissions.
+    expect(changes.filter(change => change.key === 'permissions')).toHaveLength(3)
   })
 
   it('projects custom as a current value when the knobs match no preset', async () => {

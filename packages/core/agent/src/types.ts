@@ -81,6 +81,13 @@ export interface TurnBoundaryProjection {
   readonly lastTurn: number
 }
 
+declare module '@deepseek-ai/dsh-session-projection/types' {
+  interface SessionProjectionMap {
+    /** Turn and step positions recorded in a Session. */
+    turnBoundary: TurnBoundaryProjection
+  }
+}
+
 /** Complete provider, model, and optional reasoning effort chosen for one Session's model steps. */
 export interface ModelSelection {
   /** Registered provider route. */

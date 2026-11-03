@@ -16,6 +16,7 @@ import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { StaticRemoteAccess } from '@deepseek-ai/dsh-client-test-runtime'
 import type { HostObservable, RootStandardSourceContribution } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import { SessionSeq } from '@deepseek-ai/dsh-session/types'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SessionHealthReport } from '@deepseek-ai/dsh-api-session-controller/types'
 import {
@@ -805,6 +806,63 @@ describe('UiSession status', () => {
     bench.emitStatus(id, true)
     expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(true)
     expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('failed')
+  })
+
+  it('lights the durable red mark for a turn nothing closed (被打断未重开红点, ruling 2026-11-02)', () => {
+    const ctx = new Context()
+    const bench = createSessionsBench(ctx)
+    const id = sessionId('died-mid-turn')
+    bench.binding(id)
+    const service = createUiSession(ctx, bench)
+
+    const openTurn = {
+      turnBoundary: {
+        openTurnStartSeq: SessionSeq(42),
+        lastStepStartSeq: SessionSeq(43),
+        lastStepBoundary: { kind: 'start' as const, seq: SessionSeq(43) },
+        lastTurn: 1,
+      },
+    }
+    const closedTurn = {
+      turnBoundary: {
+        openTurnStartSeq: null,
+        lastStepStartSeq: SessionSeq(43),
+        lastStepBoundary: { kind: 'end' as const, seq: SessionSeq(44) },
+        lastTurn: 1,
+      },
+    }
+    const status = () => service.sessionStatus.getSnapshot().get(id)
+
+    // The Host never reopened this Session, so the `interrupted` closer is
+    // absent from its log and `lastTurnOutcome` still reads its pre-crash
+    // value (or null when no turn ever ended): the row used to stay silent or
+    // green until someone opened it. The turn it left open is the fact that
+    // survives in the transcript.
+    bench.list.update((draft) => { draft.byId[id]!.projectionValues = openTurn })
+    expect(status()?.completionUnread).toBe(true)
+    expect(status()?.completionOutcome).toBe('failed')
+
+    // A pre-crash clean value must not paint the crashed row green either.
+    bench.list.update((draft) => {
+      draft.byId[id]!.projectionValues = { ...openTurn, lastTurnOutcome: { kind: 'completed', at: 3 } }
+    })
+    expect(status()?.completionOutcome).toBe('failed')
+
+    // Closing the turn restores the ordinary clean mark.
+    bench.list.update((draft) => {
+      draft.byId[id]!.projectionValues = { ...closedTurn, lastTurnOutcome: { kind: 'completed', at: 3 } }
+    })
+    expect(status()?.completionUnread).toBe(true)
+    expect(status()?.completionOutcome).toBe('completed')
+
+    // The mark follows the open turn itself, not a stale outcome.
+    bench.list.update((draft) => { draft.byId[id]!.projectionValues = openTurn })
+    expect(status()?.completionOutcome).toBe('failed')
+
+    // A live Agent publishes running before it appends `turn/start`, so an
+    // open turn on a running Session is ordinary work, never a crash.
+    bench.list.update((draft) => { draft.byId[id]!.running = true })
+    expect(status()?.completionUnread).toBe(false)
   })
 
   it('arms the 已阅 check on a pending question and drops it when the question settles (新事件自动清)', () => {
