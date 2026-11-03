@@ -93,6 +93,24 @@ function TerminalScreen({ state, model, visible, label, theme }: {
       minimumContrastRatio: 4.5, cursorBlink: true, fontSize: current.current.fontSize, fontFamily: current.current.fontFamily,
       scrollback: current.current.state.environment?.scrollback ?? 0,
     })
+    // Windows/Linux browsers own Ctrl+V/Ctrl+C: xterm would map them to ^V/^C bytes and cancel
+    // the event, which kills the native paste/copy default. Returning false skips xterm without
+    // canceling, so the browser fires the paste/copy event that xterm's own clipboard listeners
+    // serve. Ctrl+C only yields to copy while a selection exists — otherwise it still reaches the
+    // shell as SIGINT. Every other chord (including Ctrl+Shift+V) keeps xterm's status quo.
+    xterm.attachCustomKeyEventHandler((event) => {
+      if (event.type === 'keyup') return true
+      if (!event.ctrlKey || event.shiftKey || event.altKey || event.metaKey) return true
+      if (event.code === 'KeyV') return false
+      if (event.code === 'KeyC' && xterm.hasSelection()) {
+        // Stage the selection in the helper textarea (xterm's right-click copy does the same) so
+        // the browser's native copy has the terminal selection to put on the clipboard.
+        const textarea = xterm.textarea
+        if (textarea !== undefined) { textarea.value = xterm.getSelection(); textarea.select() }
+        return false
+      }
+      return true
+    })
     const addon = new FitAddon()
     xterm.loadAddon(addon)
     xterm.open(node)

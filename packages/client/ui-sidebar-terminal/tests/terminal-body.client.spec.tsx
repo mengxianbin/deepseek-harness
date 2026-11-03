@@ -20,6 +20,8 @@ class FakeTerminal {
   options: { disableStdin?: boolean; theme?: ITheme; fontFamily?: string; fontSize?: number }
   textarea: HTMLTextAreaElement | undefined = document.createElement('textarea')
   input: ((data: string) => void) | undefined
+  selection = ''
+  keyHandler: ((event: KeyboardEvent) => boolean) | undefined
   readonly disposeInput = vi.fn()
   readonly parser = { registerOscHandler: vi.fn(() => ({ dispose: vi.fn() })) }
   renderFrame: (() => void) | undefined
@@ -37,6 +39,9 @@ class FakeTerminal {
   constructor(options: object) { this.options = options; fake.terminals.push(this) }
   open(node: HTMLElement) { node.appendChild(this.textarea!) }
   onData(input: (data: string) => void) { this.input = input; return { dispose: this.disposeInput } }
+  attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean) { this.keyHandler = handler }
+  hasSelection() { return this.selection !== '' }
+  getSelection() { return this.selection }
 }
 vi.mock('@xterm/xterm', () => ({ Terminal: vi.fn(function (options: object) { return new FakeTerminal(options) }) }))
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { proposeDimensions() { return fake.dimensions } } }))
@@ -397,6 +402,26 @@ it.each(titleSurfaces)('removes the native $name listener when its title unmount
 it('starts a recovered screen with no local history when environment discovery is unavailable', () => {
   mount({ ...idle, info, environment: undefined })
   expect(fake.terminals[0]!.options).toHaveProperty('scrollback', 0)
+})
+
+it('hands Ctrl+V and Ctrl+C-with-selection to the browser while keeping every other chord on xterm', () => {
+  mount({ ...idle, info, phase: 'connected', writable: true })
+  const terminal = fake.terminals[0]!
+  const handle = (init: KeyboardEventInit) => terminal.keyHandler!(new KeyboardEvent('keydown', init))
+  // Ctrl+V skips xterm so the browser's native paste reaches xterm's paste listener.
+  expect(handle({ code: 'KeyV', ctrlKey: true })).toBe(false)
+  // Ctrl+C only becomes copy while text is selected; without one it stays SIGINT.
+  expect(handle({ code: 'KeyC', ctrlKey: true })).toBe(true)
+  terminal.selection = 'selected output'
+  expect(handle({ code: 'KeyC', ctrlKey: true })).toBe(false)
+  expect(terminal.textarea!.value).toBe('selected output')
+  expect(terminal.textarea!.selectionEnd).toBe('selected output'.length)
+  // Plain keys, keyup, and chorded variants keep xterm's behavior unchanged.
+  expect(handle({ code: 'KeyV' })).toBe(true)
+  expect(handle({ code: 'KeyV', ctrlKey: true, shiftKey: true })).toBe(true)
+  expect(handle({ code: 'KeyC', ctrlKey: true, shiftKey: true })).toBe(true)
+  expect(handle({ code: 'KeyZ', ctrlKey: true })).toBe(true)
+  expect(terminal.keyHandler!(new KeyboardEvent('keyup', { code: 'KeyV', ctrlKey: true }))).toBe(true)
 })
 
 
