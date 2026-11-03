@@ -7,11 +7,23 @@
  * `git diff HEAD`, the porcelain status, and each untracked file's path with
  * its content hash, runtime data excluded) plus the S_cfg configuration
  * snapshot (`computeConfigStamp`: the fixed HKCU setx inventory and each
- * profile's configuration files) — and fires a state-machine recheck only
- * when the fingerprint moved. The capture runs in a short-lived child
+ * profile's configuration files) — and fires a state-machine recheck when
+ * the fingerprint, or the build-marker signature below, moved from the last
+ * captured baseline. The capture runs in a short-lived child
  * process (the same non-blocking pattern the recheck gatherer uses), so the
  * host event loop never waits on git or `reg`; each poll needs zero
  * credentials and installs no hooks (design §三).
+ *
+ * The same tick also compares the build-marker signature of every in-scope
+ * tree (`.dsh-build/restart-stamp.start.json`, `restart-stamp.failed.json`,
+ * `restart-stamp.json`: existence plus content hash). A build only writes
+ * those gitignored files, so the fingerprint never sees a build start or
+ * finish — without this leg the judgment flips (NEED_BUILD → BUILDING → …)
+ * while no push fires and the page badge freezes (restart-badge-blindspot-1103,
+ * design C.5 revision 2026-11-03). The marker read is a handful of tiny
+ * synchronous file reads in this process — no child, no git — so it rides
+ * the existing tick without a second timer; a failed read degrades to
+ * `absent` (fail-soft, the poll keeps running).
  *
  * The repository set is the state machine's own scope: this tree plus every
  * linked, stamp-capable plugin repository (`linkedStampRepositories`), so the
@@ -22,13 +34,15 @@
  * 30–60s band, and defaults to 30s.
  *
  * Push leg (design C.5, closes R3「页面开着不操作角标自现」): after a moved
- * fingerprint's recheck lands, the poll emits the allowlisted
- * `restart-signal/changed` Host event, which the Remote carrier forwards to
- * every connected page; the browser half subscribes and answers with its
- * existing `recheck()` — the judgment itself keeps riding the recheck route,
- * so the push event carries no payload and cannot drift from the state
- * machine. A failed recheck emits nothing (there is no fresh judgment to
- * deliver) and keeps the pre-P2 warn line.
+ * fingerprint's or build-marker signature's recheck lands, the poll emits the
+ * allowlisted `restart-signal/changed` Host event, which the Remote carrier
+ * forwards to every connected page; the browser half subscribes and answers
+ * with its existing `recheck()` — the judgment itself keeps riding the
+ * recheck route, so the push event carries no payload and cannot drift from
+ * the state machine. Both triggers share one recheck and one emit per tick
+ * (at most one push per interval, regardless of how many inputs moved), and
+ * a failed recheck emits nothing (there is no fresh judgment to deliver) and
+ * keeps the pre-P2 warn line.
  * @module @deepseek-ai/dsh-client-ui-settings-general/stamp-poll-host
  */
 
@@ -36,6 +50,8 @@ import { execFile } from 'node:child_process'
 import type { Context } from '@deepseek-ai/cordis'
 // Type-only: pulls the `restart-signal/changed` Events declaration the push emit names.
 import type {} from '@deepseek-ai/dsh-api-remotes/types'
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
@@ -86,7 +102,15 @@ export interface StampPollInternals {
   readonly dshHome?: string
   /** Failure sink; defaults to one stderr line. */
   readonly warn?: (message: string) => void
+  /** Tree whose `.dsh-build` markers are compared each tick; defaults to this module's own tree. */
+  readonly repositoryRoot?: string
 }
+
+/** Gitignored directory holding the per-tree build markers (mirrors the state-machine-side constants). */
+const STAMP_DIR = '.dsh-build'
+
+/** Build-marker file names compared each tick (mirrors restart-signal.ts / restart-stamp.ts). */
+const MARKER_FILES: readonly string[] = ['restart-stamp.start.json', 'restart-stamp.failed.json', 'restart-stamp.json']
 
 /** Inputs the generated probe module is parameterized with. */
 export interface FingerprintProbeCodeOptions {
@@ -211,6 +235,36 @@ function fingerprintMoved(baseline: FingerprintProbe, probe: FingerprintProbe): 
 }
 
 /**
+ * Read the build-marker signature over the in-scope trees: for every tree and
+ * marker file, presence plus a content hash (`absent` when missing or
+ * unreadable — a failed read degrades to `absent`, fail-soft, so one locked
+ * file never stops the poll). Gitignored `.dsh-build` files never enter the
+ * fingerprint, so this signature is what lets a build start/finish move the
+ * push trigger (restart-badge-blindspot-1103, design C.5 revision 2026-11-03).
+ * The journal (`auto-build.log`) and cache (`face-paths.json`) are
+ * deliberately excluded: they churn on a cadence that carries no judgment
+ * change and would turn every tick into a push.
+ * @param roots - Absolute repository paths, the fingerprint's own scope.
+ * @returns One comparable string; equal output means no marker moved.
+ */
+export function buildMarkerSignature(roots: readonly string[]): string {
+  const parts: string[] = []
+  for (const root of roots) {
+    for (const name of MARKER_FILES) {
+      let token: string
+      try {
+        token = createHash('sha256').update(readFileSync(join(root, STAMP_DIR, name), 'utf8')).digest('hex')
+      } catch {
+        // Missing or unreadable: both read as absent (fail-soft, see doc).
+        token = 'absent'
+      }
+      parts.push(`${root}|${name}|${token}`)
+    }
+  }
+  return parts.join('\n')
+}
+
+/**
  * Render one failure for the single-line log (③, 2026-10-26: the old form
  * dumped the probe child's full `-e` script — hundreds of lines — and buried
  * the exit code; a JSON body failure surfaced as a bare
@@ -246,22 +300,24 @@ function errorLine(error: unknown): string {
 
 /**
  * Start the design's polling triggers ① and ②: one fingerprint capture per
- * interval, a state-machine recheck whenever the fingerprint moves from the
- * last captured baseline, and one failure line per distinct failure state.
- * Disposal clears the timer; an in-flight capture that lands after disposal
- * is dropped.
+ * interval, a state-machine recheck whenever the fingerprint or the
+ * build-marker signature moves from the last captured baseline, and one
+ * failure line per distinct failure state. Both deltas share one recheck and
+ * one emit per tick. Disposal clears the timer; an in-flight capture that
+ * lands after disposal is dropped.
  * @param ctx - Host context carrying the effect lifetime.
  * @param internals - Injectable seams; production uses this tree, the resolved DSH home, and the probe child.
  */
 export function registerStampPoll(ctx: Context, internals: StampPollInternals = {}): void {
   const intervalMs = internals.intervalMs ?? resolvePollIntervalMs(process.env[STAMP_POLL_INTERVAL_ENV])
-  const repositoryRoot = defaultRepositoryRoot()
+  const repositoryRoot = internals.repositoryRoot ?? defaultRepositoryRoot()
   const dshHome = internals.dshHome ?? resolveDshHome()
   const recheck = internals.recheck ?? ((): Promise<unknown> => collectRestartSignal())
   const runProbe = internals.runProbe ?? runFingerprintProbe
   const warn = internals.warn ?? ((message: string): void => { process.stderr.write(`${message}\n`) })
 
   let baseline: FingerprintProbe | undefined
+  let markerBaseline: string | undefined
   let probing = false
   let disposed = false
   let lastFailure: string | undefined
@@ -274,16 +330,26 @@ export function registerStampPoll(ctx: Context, internals: StampPollInternals = 
   const tick = (): void => {
     if (probing || disposed) return
     probing = true
-    void runProbe(probeRoots(), dshHome).then((probe) => {
+    const roots = probeRoots()
+    void runProbe(roots, dshHome).then((probe) => {
       probing = false
       if (disposed) return
       lastFailure = undefined
-      if (baseline === undefined) {
+      // Marker signature rides the same healthy tick: read here (not at tick
+      // start) so a probe failure keeps the last good marker baseline too —
+      // a change that lands during an outage is picked up by the next
+      // successful tick instead of firing a recheck the broken probe would
+      // only fail again.
+      const markers = buildMarkerSignature(roots)
+      if (baseline === undefined || markerBaseline === undefined) {
         baseline = probe
+        markerBaseline = markers
         return
       }
-      if (!fingerprintMoved(baseline, probe)) return
+      const moved = fingerprintMoved(baseline, probe) || markers !== markerBaseline
+      if (!moved) return
       baseline = probe
+      markerBaseline = markers
       void recheck().then(() => {
         if (disposed) return
         // Design C.5 push leg: the judgment was just recomputed, so poke

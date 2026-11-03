@@ -164,6 +164,30 @@ describe('restart-signal recheck attestation (P3)', () => {
     flow.dispose()
   })
 
+  it('polls NEED_BUILD on the same cadence so a starting build shows up within one tick (restart-badge-blindspot-1103)', async () => {
+    let body: unknown = { state: 'NEED_BUILD' }
+    const fetchImpl = vi.fn(async () => ({ ok: true, status: 200, json: async () => body }))
+    const flow = startRestartSignalFlow(vi.fn(), { fetch: fetchImpl, warn: vi.fn(), refreshMs: 30_000 })
+    await flush()
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    // Without this leg the badge froze for the whole build window: NEED_BUILD
+    // started no timer, so BUILDING never surfaced until a visibilitychange.
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    // The build starts between polls: the next tick delivers BUILDING.
+    body = { state: 'BUILDING', startedAt: '2026-11-03T04:00:00.000Z' }
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
+    // BUILDING keeps the cadence (it is in the condition too), so the run
+    // drains only when the state moves somewhere quiet.
+    body = { state: 'OK' }
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(fetchImpl).toHaveBeenCalledTimes(4)
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(fetchImpl).toHaveBeenCalledTimes(4)
+    flow.dispose()
+  })
+
   it('dispose cancels the refresh cadence', async () => {
     const fetchImpl = fetchStub({ state: 'NEED_RESTART', reason: 'built' })
     const flow = startRestartSignalFlow(vi.fn(), { fetch: fetchImpl, warn: vi.fn(), refreshMs: 30_000 })

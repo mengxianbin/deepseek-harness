@@ -1,13 +1,13 @@
 /**
  * Restart-signal polling (design triggers ① and ②): the interval capture over
- * repo-level source states plus S_cfg, the recheck fired only when the
- * fingerprint moves from the last captured baseline, one failure line per
- * failure state, the clamped 30–60s interval band with its `0` off-switch,
- * and the child probe running the tree's real stamp modules against a real
- * repository.
+ * repo-level source states plus S_cfg, the recheck fired when the
+ * fingerprint or the build-marker signature moves from the last captured
+ * baseline, one failure line per failure state, the clamped 30–60s interval
+ * band with its `0` off-switch, and the child probe running the tree's real
+ * stamp modules against a real repository.
  */
 import { execFileSync } from 'node:child_process'
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -36,13 +36,25 @@ function probe(repos: Record<string, string>, sCfg = 'cfg'): FingerprintProbe {
   return { repos, sCfg }
 }
 
+/** An isolated marker tree: `.dsh-build` inside a temp root, removed on finish. */
+function tempRoot(): string {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-stamp-poll-root-'))
+  onTestFinished(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+  return root
+}
+
 function pollFixture(runProbe: FingerprintRunner, extra: Partial<StampPollInternals> = {}) {
   const ctx = new Context()
   onTestFinished(() => ctx.fiber.dispose())
   const recheck = vi.fn(() => Promise.resolve({ state: 'OK' }))
   const warn = vi.fn()
-  registerStampPoll(ctx, { intervalMs: 30_000, runProbe, recheck, warn, dshHome: TEST_HOME, ...extra })
-  return { recheck, warn, ctx }
+  // A temp root keeps the marker signature hermetic: real `.dsh-build` churn
+  // in this tree (a build running elsewhere) must never move a test baseline.
+  const repositoryRoot = tempRoot()
+  registerStampPoll(ctx, { intervalMs: 30_000, runProbe, recheck, warn, dshHome: TEST_HOME, repositoryRoot, ...extra })
+  return { recheck, warn, ctx, repositoryRoot }
 }
 
 describe('poll interval', () => {
@@ -284,6 +296,122 @@ describe('restart-signal push leg (design C.5)', () => {
     release?.(undefined)
     await vi.advanceTimersByTimeAsync(0)
     expect(pushed).not.toHaveBeenCalled()
+  })
+})
+
+describe('build-marker push leg (restart-badge-blindspot-1103, design C.5 revision)', () => {
+  /** Write one `.dsh-build` marker under the fixture's temp root. */
+  function writeMarker(root: string, name: string, body: string): void {
+    mkdirSync(join(root, '.dsh-build'), { recursive: true })
+    writeFileSync(join(root, '.dsh-build', name), body)
+  }
+
+  it('rechecks and pushes when a marker appears, even though the fingerprint never moves', async () => {
+    vi.useFakeTimers()
+    // The fingerprint answers the same value every tick: only the marker can move.
+    const runProbe = vi.fn(() => Promise.resolve(probe({ '/r': 'a' })))
+    const { recheck, ctx, repositoryRoot } = pollFixture(runProbe)
+    const pushed = vi.fn()
+    ctx.on('restart-signal/changed', pushed)
+
+    // Prime pins both baselines: no markers yet, no recheck, no push.
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(recheck).not.toHaveBeenCalled()
+    expect(pushed).not.toHaveBeenCalled()
+
+    // Build starts: the start capture appears (gitignored — the fingerprint stays put).
+    writeMarker(repositoryRoot, 'restart-stamp.start.json', '{"kind":"harness-start"}')
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(recheck).toHaveBeenCalledTimes(1)
+    expect(pushed).toHaveBeenCalledTimes(1)
+
+    // Unchanged markers recheck nothing and push nothing (idempotent).
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(recheck).toHaveBeenCalledTimes(1)
+    expect(pushed).toHaveBeenCalledTimes(1)
+  })
+
+  it('rechecks and pushes when the build finishes: start marker gone, manifest rewritten', async () => {
+    vi.useFakeTimers()
+    const runProbe = vi.fn(() => Promise.resolve(probe({ '/r': 'a' })))
+    const { recheck, ctx, repositoryRoot } = pollFixture(runProbe)
+    const pushed = vi.fn()
+    ctx.on('restart-signal/changed', pushed)
+
+    // The build is running at prime time: start marker present, baseline pins it.
+    writeMarker(repositoryRoot, 'restart-stamp.start.json', '{"kind":"harness-start"}')
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(recheck).not.toHaveBeenCalled()
+
+    // Build end: the start marker disappears and the manifest is rewritten
+    // (same existence, new content — the hash leg catches it).
+    rmSync(join(repositoryRoot, '.dsh-build', 'restart-stamp.start.json'))
+    writeMarker(repositoryRoot, 'restart-stamp.json', '{"kind":"harness","time":"2026-11-03T04:00:00.000Z"}')
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(recheck).toHaveBeenCalledTimes(1)
+    expect(pushed).toHaveBeenCalledTimes(1)
+  })
+
+  it('pushes nothing while neither the fingerprint nor the markers change', async () => {
+    vi.useFakeTimers()
+    const runProbe = vi.fn(() => Promise.resolve(probe({ '/r': 'a' })))
+    const { recheck, ctx, repositoryRoot } = pollFixture(runProbe)
+    const pushed = vi.fn()
+    ctx.on('restart-signal/changed', pushed)
+
+    writeMarker(repositoryRoot, 'restart-stamp.json', '{"kind":"harness"}')
+    await vi.advanceTimersByTimeAsync(2_000)
+    await vi.advanceTimersByTimeAsync(30_000)
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(runProbe).toHaveBeenCalledTimes(3)
+    expect(recheck).not.toHaveBeenCalled()
+    expect(pushed).not.toHaveBeenCalled()
+  })
+
+  it('merges a fingerprint move and a marker move into one recheck, one push per tick', async () => {
+    vi.useFakeTimers()
+    const answers = [probe({ '/r': 'a' }), probe({ '/r': 'b' }), probe({ '/r': 'b' })]
+    const runProbe = vi.fn(() => Promise.resolve(answers.shift() ?? probe({ '/r': 'b' })))
+    const { recheck, ctx, repositoryRoot } = pollFixture(runProbe)
+    const pushed = vi.fn()
+    ctx.on('restart-signal/changed', pushed)
+
+    await vi.advanceTimersByTimeAsync(2_000)
+    // Both inputs move inside one tick window: still exactly one of each.
+    writeMarker(repositoryRoot, 'restart-stamp.start.json', '{"kind":"harness-start"}')
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(recheck).toHaveBeenCalledTimes(1)
+    expect(pushed).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the last marker baseline across a probe outage, then pushes the missed change once', async () => {
+    vi.useFakeTimers()
+    const answers: Array<FingerprintProbe | Error> = [probe({ '/r': 'a' }), new Error('git exploded'), probe({ '/r': 'a' }), probe({ '/r': 'a' })]
+    const runProbe = vi.fn(() => {
+      const next = answers.shift()
+      return next instanceof Error ? Promise.reject(next) : Promise.resolve(next ?? probe({ '/r': 'a' }))
+    })
+    const { recheck, warn, ctx, repositoryRoot } = pollFixture(runProbe)
+    const pushed = vi.fn()
+    ctx.on('restart-signal/changed', pushed)
+
+    await vi.advanceTimersByTimeAsync(2_000)
+    // The marker lands while the probe is down: no push from the failed tick.
+    writeMarker(repositoryRoot, 'restart-stamp.start.json', '{"kind":"harness-start"}')
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('probe failed'))
+    expect(recheck).not.toHaveBeenCalled()
+    expect(pushed).not.toHaveBeenCalled()
+
+    // Probe recovers: the missed change is picked up by the next healthy tick.
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(recheck).toHaveBeenCalledTimes(1)
+    expect(pushed).toHaveBeenCalledTimes(1)
+
+    // Baseline absorbed it: the following tick is quiet again.
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(recheck).toHaveBeenCalledTimes(1)
+    expect(pushed).toHaveBeenCalledTimes(1)
   })
 })
 

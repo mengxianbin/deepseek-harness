@@ -13,7 +13,10 @@
  * fork compares it against its own reading), and a `NEED_RESTART` badge keeps
  * the attestation fresh with a quiet 30s refresh until the state moves on;
  * a `BUILDING` badge rides the same refresh so its timer tooltip's elapsed
- * age stays current (build-timer-tooltip-1101).
+ * age stays current (build-timer-tooltip-1101); a `NEED_BUILD` badge rides
+ * it too, so a build that starts while the page idles shows up within one
+ * cadence even when the host push leg never fires
+ * (restart-badge-blindspot-1103).
  */
 import { RECHECK_PATH, resolveRestartSignal, type RestartSignalView } from '../restart.ts'
 
@@ -113,10 +116,12 @@ export function startRestartSignalFlow(
         if (view === undefined) throw new Error('recheck answered a malformed body')
         publish(view)
         // A NEED_RESTART badge keeps its attestation fresh (the host's fork
-        // window is 90s), and a BUILDING badge keeps its timer tooltip's
-        // elapsed age fresh on the same cadence (build-timer-tooltip-1101);
-        // any other state stops the refresh.
-        if (view.state === 'NEED_RESTART' || view.state === 'BUILDING') startRefresh()
+        // window is 90s), a BUILDING badge keeps its timer tooltip's
+        // elapsed age fresh on the same cadence (build-timer-tooltip-1101),
+        // and a NEED_BUILD badge polls so the next state (BUILDING or OK)
+        // lands within one cadence even when the host push leg is missed
+        // (restart-badge-blindspot-1103); any other state stops the refresh.
+        if (view.state === 'NEED_RESTART' || view.state === 'BUILDING' || view.state === 'NEED_BUILD') startRefresh()
         else stopRefresh()
       })
       .catch((error: unknown) => {
