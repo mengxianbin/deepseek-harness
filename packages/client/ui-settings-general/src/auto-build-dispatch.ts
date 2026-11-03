@@ -62,13 +62,26 @@
  *
  * Every dispatch decision (dispatch / defer / backoff / error / episode
  * reset) is journalled to `.dsh-build/auto-build.log` beside the manifest —
- * stderr dies with the console, the journal is the durable "did the machine
- * even try?" record (build-trigger hardening 2026-11-01, 洞③).
+ * the journal is the durable "did the machine even try?" record (build-trigger
+ * hardening 2026-11-01, 洞③).
+ *
+ * Failure output capture (auto-build failout 2026-11-03, 洞⑦): the spawn no
+ * longer discards stdio — stdout/stderr are redirected to
+ * `.dsh-build/auto-build.{stdout,stderr}.tmp` (file descriptors, NOT pipes:
+ * a pipe's read end dies with this host on restart and the still-running
+ * build would crash writing into it, mis-reporting BUILD_FAILED), and the
+ * child's `close` event folds a non-zero exit into one journalled line
+ * `build-failed exit=<code> cmd=<command> stdout-tail=… stderr-tail=…`
+ * (each tail capped at 4KB, whitespace folded — same family as the
+ * watchdog's line). A zero exit removes the capture files and writes
+ * nothing: successful builds add no journal noise. BUILD_FAILED judgment
+ * itself still comes only from the P0 failure marker — this line is
+ * observability, never a state-machine input.
  */
 import { spawn } from 'node:child_process'
 import type { SpawnOptions } from 'node:child_process'
 import type { Context } from '@deepseek-ai/cordis'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync } from 'node:fs'
+import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { defaultRepositoryRoot } from './restart-stamp.ts'
@@ -115,6 +128,16 @@ const JOURNAL_FILE = 'auto-build.log'
 
 /** Journal rotation threshold: keep the last ~512KB of dispatch decisions. */
 const JOURNAL_CAP_BYTES = 512 * 1024
+
+/** Build stdout capture file inside the stamp directory (failout 2026-11-03);
+ * truncated on every dispatch, removed once the outcome is journalled. */
+export const STDOUT_CAPTURE_FILE = 'auto-build.stdout.tmp'
+
+/** Build stderr capture file inside the stamp directory (failout 2026-11-03). */
+export const STDERR_CAPTURE_FILE = 'auto-build.stderr.tmp'
+
+/** Bytes of each captured stream kept in a `build-failed` journal line. */
+const FAILURE_TAIL_BYTES = 4 * 1024
 
 /** Delay before re-probing a held heavy-io lock. */
 const LOCK_RETRY_MS = 30_000
@@ -193,11 +216,20 @@ export function heavyIoLockHeld(directory: string): boolean {
   }
 }
 
-/** Detached launcher seam typed like the restart dispatch's launcher. */
-export type BuildLauncher = (commandLine: string, options: SpawnOptions) => {
+/** The child-process surface the dispatcher needs from the launcher seam:
+ * spawn failure, terminal close (the exit code behind the failout line), and
+ * idle-semantic unref. */
+export interface AutoBuildChild {
+  /** Keep the child out of this process's exit wait (host idle semantics). */
   readonly unref: () => void
-  readonly on: (event: 'error', listener: (error: Error) => void) => void
+  /** Observe an asynchronous spawn failure (the process never started). */
+  on(event: 'error', listener: (error: Error) => void): void
+  /** Observe the child's terminal close: exit code, or null when killed by signal. */
+  on(event: 'close', listener: (code: number | null) => void): void
 }
+
+/** Detached launcher seam typed like the restart dispatch's launcher. */
+export type BuildLauncher = (commandLine: string, options: SpawnOptions) => AutoBuildChild
 
 /**
  * The durable decision journal: one line per dispatch / defer / backoff /
@@ -248,6 +280,9 @@ export interface AutoBuildInternals {
   readonly warn?: (message: string) => void
   /** Decision journal sink; defaults to the rotating file beside the manifest. */
   readonly journal?: (line: string) => void
+  /** Stamp directory holding the journal and the failout capture files;
+   * defaults to this tree's `.dsh-build` beside the manifest. */
+  readonly stampDirectory?: string
   /** Build-start marker probe (INIT bootstrap: the judgment masks BUILDING
    * behind INIT); defaults to the harness tree's start capture file. */
   readonly buildingMarker?: () => boolean
@@ -264,6 +299,86 @@ export interface AutoBuildInternals {
 function sameFacts(left: RestartSignalFacts | undefined, right: RestartSignalFacts | undefined): boolean {
   if (left === undefined || right === undefined) return false
   return left.currentHostFace === right.currentHostFace && left.configStamp === right.configStamp
+}
+
+/** One dispatch's opened failout capture files (failout 2026-11-03): the
+ * parent closes its fd copies right after the spawn — only the child keeps
+ * writing through its inherited handles. */
+interface CaptureFiles {
+  readonly stdoutFd: number
+  readonly stderrFd: number
+  readonly stdoutPath: string
+  readonly stderrPath: string
+}
+
+/**
+ * Open this dispatch's stdout/stderr capture files under the stamp directory
+ * (each `open('w')` truncates any orphan a dead host left behind). Pure
+ * observability: an unwritable stamp directory degrades to the legacy
+ * `stdio: 'ignore'` spawn instead of ever blocking the build.
+ * @param directory - Stamp directory holding the journal.
+ * @returns The open fds and paths, or undefined when capture is unavailable.
+ */
+function openCaptureFiles(directory: string): CaptureFiles | undefined {
+  const stdoutPath = join(directory, STDOUT_CAPTURE_FILE)
+  const stderrPath = join(directory, STDERR_CAPTURE_FILE)
+  let stdoutFd: number | undefined
+  let stderrFd: number | undefined
+  try {
+    mkdirSync(directory, { recursive: true })
+    stdoutFd = openSync(stdoutPath, 'w')
+    stderrFd = openSync(stderrPath, 'w')
+    return { stdoutFd, stderrFd, stdoutPath, stderrPath }
+  } catch {
+    if (stdoutFd !== undefined) {
+      try { closeSync(stdoutFd) } catch { /* best-effort cleanup */ }
+      removeCapture(stdoutPath)
+    }
+    return undefined
+  }
+}
+
+/**
+ * Fold a captured stream tail into one journal-safe segment: the last
+ * {@link FAILURE_TAIL_BYTES} bytes with whitespace collapsed to single
+ * spaces, so a multi-line build log lands on ONE journal line (the
+ * watchdog's `output-tail` folding, same口径). A torn multibyte char at the
+ * cut decodes to a replacement glyph — truncation is accepted by design.
+ * @param path - Capture file written by the dispatched build.
+ * @returns The folded tail; an absent or unreadable file yields ''.
+ */
+function foldTail(path: string): string {
+  let fd: number | undefined
+  try {
+    fd = openSync(path, 'r')
+    const { size } = fstatSync(fd)
+    const length = Math.min(size, FAILURE_TAIL_BYTES)
+    const buffer = Buffer.allocUnsafe(length)
+    const read = readSync(fd, buffer, 0, length, size - length)
+    return buffer.subarray(0, read).toString('utf8').replace(/\s+/g, ' ').trim()
+  } catch {
+    return ''
+  } finally {
+    if (fd !== undefined) {
+      try { closeSync(fd) } catch { /* best-effort close */ }
+    }
+  }
+}
+
+/**
+ * Remove a dispatch's capture files after the outcome is folded into the
+ * journal (or dropped on spawn failure); best-effort like every journal
+ * write — a stuck file simply gets truncated by the next dispatch.
+ * @param paths - Capture file paths to delete.
+ */
+function removeCapture(...paths: string[]): void {
+  for (const path of paths) {
+    try {
+      rmSync(path, { force: true })
+    } catch {
+      // Observability only: never propagate into the dispatch path.
+    }
+  }
 }
 
 /**
@@ -302,13 +417,14 @@ export function registerAutoBuild(ctx: Context, internals: AutoBuildInternals = 
   const env = internals.env ?? process.env
   const timings = resolveAutoBuildTimings(env)
   const warn = internals.warn ?? ((message: string): void => { process.stderr.write(`${message}\n`) })
-  const launch = internals.launch ?? ((commandLine: string, options: SpawnOptions) => spawn(commandLine, options))
+  const launch: BuildLauncher = internals.launch ?? ((commandLine: string, options: SpawnOptions) => spawn(commandLine, options))
   const collect = internals.collect ?? ((): Promise<RestartSignalJudgment> => collectRestartSignal())
   const lockHeld = internals.lockHeld ?? ((): boolean => heavyIoLockHeld(defaultHeavyIoLockDirectory(env)))
   const heldFlag = internals.heldFlag ?? ((): boolean => env.DSH_HEAVY_IO_HELD === '1')
   const command = internals.command ?? DEFAULT_BUILD_COMMAND
   const cwd = internals.cwd
   const journal = internals.journal ?? defaultAutoBuildJournalLine()
+  const stampDirectory = internals.stampDirectory ?? join(defaultRepositoryRoot(), STAMP_DIR)
   const buildingMarker = internals.buildingMarker
     ?? ((): boolean => existsSync(join(defaultRepositoryRoot(), STAMP_DIR, START_CAPTURE_FILE)))
   const failedMarker = internals.failedMarker
@@ -377,6 +493,7 @@ export function registerAutoBuild(ctx: Context, internals: AutoBuildInternals = 
     failureRecorded = false
     ownBuildPending = true
     lockDeferralStartedAt = undefined
+    const capture = openCaptureFiles(stampDirectory)
     const options: SpawnOptions = {
       shell: true,
       // Windows: NOT detached — a detached console-less cmd lets its console
@@ -386,18 +503,49 @@ export function registerAutoBuild(ctx: Context, internals: AutoBuildInternals = 
       // hidden console cover the whole tree. Elsewhere detached keeps the
       // build outliving this process's session.
       detached: process.platform !== 'win32',
-      stdio: 'ignore',
+      // Failout (2026-11-03): file redirection, NOT pipes — a pipe's read end
+      // dies with this host on restart and the still-running build would
+      // crash writing into it (false BUILD_FAILED); files are immune. Falls
+      // back to 'ignore' when the stamp dir is unwritable (observability
+      // never blocks a build).
+      stdio: capture === undefined ? 'ignore' : ['ignore', capture.stdoutFd, capture.stderrFd],
       windowsHide: true,
       env: process.env,
       ...(cwd === undefined ? {} : { cwd }),
     }
     const child = launch(command, options)
+    // The parent keeps no fd copies: the child inherited its own handles, and
+    // holding ours would pin the capture files open on Windows (rmSync would
+    // fail and the next dispatch could not truncate).
+    if (capture !== undefined) {
+      try { closeSync(capture.stdoutFd) } catch { /* already closed */ }
+      try { closeSync(capture.stderrFd) } catch { /* already closed */ }
+    }
+    let spawnFailed = false
     child.on('error', (error: Error) => {
+      spawnFailed = true
+      if (capture !== undefined) removeCapture(capture.stdoutPath, capture.stderrPath)
       if (isDisposed()) return
       warn(`ui-settings-general: auto-build dispatch failed: ${error.message}`)
       journal(`dispatch-error ${error.message}`)
       recordFailure()
       scheduleAt(backoffUntil)
+    })
+    // The failout line: non-zero exit folds both stream tails (4KB each,
+    // whitespace-collapsed to ONE line) plus cmd and exit code into the
+    // journal — the watchdog's build-failed family, same file. Exit 0 just
+    // drops the captures: success adds no journal noise (failout 判据 4).
+    // `close` after `error` carries no new truth; spawnFailed skips it and
+    // the error path already dropped the captures.
+    child.on('close', (code: number | null) => {
+      if (spawnFailed || code === 0) {
+        if (capture !== undefined) removeCapture(capture.stdoutPath, capture.stderrPath)
+        return
+      }
+      const stdoutTail = capture === undefined ? '' : foldTail(capture.stdoutPath)
+      const stderrTail = capture === undefined ? '' : foldTail(capture.stderrPath)
+      if (capture !== undefined) removeCapture(capture.stdoutPath, capture.stderrPath)
+      journal(`build-failed exit=${code ?? 'null'} cmd=${command} stdout-tail=${stdoutTail} stderr-tail=${stderrTail}`)
     })
     child.unref()
     warn(`ui-settings-general: auto-build dispatched (${command})`)

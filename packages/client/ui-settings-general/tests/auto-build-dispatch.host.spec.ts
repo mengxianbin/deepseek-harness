@@ -20,9 +20,17 @@
  * trigger scope is this tree's face (主仓面), so the dispatcher journals that
  * condition once per episode and dispatches nothing; own moves and unknown
  * scopes keep the normal dispatch, and the lamp itself stays NEED_BUILD.
+ *
+ * Failout (2026-11-03): the spawn redirects stdout/stderr into stamp-dir
+ * capture files, and a non-zero close folds both tails (4KB each,
+ * whitespace-collapsed) plus cmd and exit code into ONE `build-failed` journal
+ * line; exit 0 just drops the captures — success adds no journal noise. These
+ * specs drive REAL failing/succeeding commands end to end (real spawn, real
+ * capture files, real journal call), because the whole point is that the
+ * output actually survives.
  */
 import { Context } from '@deepseek-ai/cordis'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
@@ -30,19 +38,33 @@ import {
   AUTO_BUILD_BACKOFF_ENV,
   AUTO_BUILD_INTERVAL_ENV,
   AUTO_BUILD_STABLE_ENV,
+  defaultAutoBuildJournalLine,
   defaultHeavyIoLockDirectory,
   heavyIoLockHeld,
   registerAutoBuild,
   resolveAutoBuildTimings,
+  STDERR_CAPTURE_FILE,
+  STDOUT_CAPTURE_FILE,
+  type AutoBuildChild,
 } from '../src/auto-build-dispatch.ts'
 import type { RestartSignalFacts, RestartSignalJudgment } from '../src/restart-signal.ts'
-import type { RestartChild } from '../src/restart-host.ts'
 import type { RestartSignalState } from '../src/restart.ts'
 
 const START = 1_000_000
 
-function stubChild(): RestartChild {
-  return { unref: vi.fn(), on: vi.fn() }
+/** A stub child that can replay the two events the dispatcher subscribes to. */
+function stubChild(): AutoBuildChild & { emitError(error: Error): void; emitClose(code: number | null): void } {
+  const errorListeners: Array<(error: Error) => void> = []
+  const closeListeners: Array<(code: number | null) => void> = []
+  return {
+    unref: vi.fn(),
+    on: (event: 'error' | 'close', listener: (...args: never[]) => void): void => {
+      if (event === 'error') errorListeners.push(listener as unknown as (error: Error) => void)
+      else closeListeners.push(listener as unknown as (code: number | null) => void)
+    },
+    emitError: (error: Error): void => { for (const listener of errorListeners) listener(error) },
+    emitClose: (code: number | null): void => { for (const listener of closeListeners) listener(code) },
+  }
 }
 
 function facts(host: string, config = 'cfg', ownFaceMoved?: boolean): RestartSignalFacts {
@@ -67,11 +89,22 @@ function initJudgment(config = 'cfg'): RestartSignalJudgment {
 function harness(env: Record<string, string | undefined> = {}) {
   const ctx = new Context()
   onTestFinished(() => ctx.fiber.dispose())
+  // Failout capture files land in a throwaway stamp dir: the spec must never
+  // touch the real tree's `.dsh-build`.
+  const stampDirectory = mkdtempSync(join(tmpdir(), 'auto-build-stamp-'))
+  onTestFinished(() => {
+    rmSync(stampDirectory, { recursive: true, force: true })
+  })
   let listener: ((judgment: RestartSignalJudgment) => void) | undefined
   const collect = vi.fn(async (): Promise<RestartSignalJudgment> => {
     throw new Error('collect not scripted by this test')
   })
-  const launch = vi.fn((_commandLine: string, _options: unknown) => stubChild())
+  const children: ReturnType<typeof stubChild>[] = []
+  const launch = vi.fn((_commandLine: string, _options: unknown) => {
+    const child = stubChild()
+    children.push(child)
+    return child
+  })
   const warn = vi.fn<(message: string) => void>()
   const journal = vi.fn<(line: string) => void>()
   const lockHeld = vi.fn(() => false)
@@ -85,6 +118,7 @@ function harness(env: Record<string, string | undefined> = {}) {
     launch,
     warn,
     journal,
+    stampDirectory,
     lockHeld,
     heldFlag,
     buildingMarker,
@@ -95,7 +129,21 @@ function harness(env: Record<string, string | undefined> = {}) {
   })
   const emit = (judgment: RestartSignalJudgment): void => { listener?.(judgment) }
   const settle = async (ms: number): Promise<void> => { await vi.advanceTimersByTimeAsync(ms) }
-  return { emit, settle, collect, launch, warn, journal, lockHeld, heldFlag, buildingMarker, failedMarker, ownBaseline }
+  return {
+    emit,
+    settle,
+    collect,
+    launch,
+    children,
+    warn,
+    journal,
+    stampDirectory,
+    lockHeld,
+    heldFlag,
+    buildingMarker,
+    failedMarker,
+    ownBaseline,
+  }
 }
 
 beforeEach(() => {
@@ -456,19 +504,22 @@ describe('auto-build dispatch throttle', () => {
     expect(defers).toEqual(['defer heavy-io-lock-held', 'defer-giveup held-past-bound'])
   })
 
-  it('reports a spawn failure through the backoff instead of a hot retry loop', async () => {
+  it('reports a spawn failure through the backoff instead of a hot retry loop (no build-failed double line)', async () => {
     const h = harness()
     h.collect.mockImplementation(async () => judgment('NEED_BUILD', 'h1'))
-    const errorListeners: Array<(error: Error) => void> = []
-    h.launch.mockImplementation(() => ({
-      unref: vi.fn(),
-      on: vi.fn((_event: 'error', listener: (error: Error) => void) => { errorListeners.push(listener) }),
-    }))
     h.emit(judgment('NEED_BUILD', 'h1'))
     await h.settle(15_000)
     expect(h.launch).toHaveBeenCalledOnce()
-    for (const listener of errorListeners) listener(new Error('pnpm missing'))
+    const child = h.children.at(-1)
+    expect(child).toBeDefined()
+    child?.emitError(new Error('pnpm missing'))
     expect(h.warn).toHaveBeenCalledWith(expect.stringContaining('pnpm missing'))
+    // The spawn error dropped the captures itself; the `close` that follows a
+    // failed spawn must not add a duplicate build-failed line (spawnFailed
+    // guard, failout 2026-11-03).
+    child?.emitClose(null)
+    const lines = h.journal.mock.calls.map(([line]) => line)
+    expect(lines.filter(line => line.includes('build-failed'))).toEqual([])
     await h.settle(60_000)
     // The spawn-failure backoff (5min from the error) blocks the hot window.
     expect(h.launch).toHaveBeenCalledOnce()
@@ -494,5 +545,127 @@ describe('auto-build dispatch throttle', () => {
     await vi.advanceTimersByTimeAsync(600_000)
     expect(launch).not.toHaveBeenCalled()
     expect(listener).toBeUndefined()
+  })
+})
+
+/**
+ * Failout (2026-11-03, 洞⑦): the spawn redirects stdout/stderr into stamp-dir
+ * capture files, and a non-zero close folds both tails (last 4KB each,
+ * whitespace-collapsed to ONE line) plus cmd and exit code into the journal —
+ * the same `build-failed` family the watchdog writes, so 查红 has one place to
+ * look. These tests drive a REAL journal file under a temp `.dsh-build` (the
+ * acceptance surface: findable under `.dsh-build/`), injecting the close event
+ * and writing the capture content a real build would have produced.
+ */
+describe('auto-build failout: failure output capture (failout 2026-11-03)', () => {
+  /** One dispatcher over a real journal file in a temp tree's `.dsh-build`. */
+  function failoutHarness() {
+    const root = mkdtempSync(join(tmpdir(), 'auto-build-failout-'))
+    onTestFinished(() => {
+      rmSync(root, { recursive: true, force: true })
+    })
+    const stampDirectory = join(root, '.dsh-build')
+    const ctx = new Context()
+    onTestFinished(() => ctx.fiber.dispose())
+    let listener: ((judgment: RestartSignalJudgment) => void) | undefined
+    const children: ReturnType<typeof stubChild>[] = []
+    const launch = vi.fn((_commandLine: string, _options: unknown) => {
+      const child = stubChild()
+      children.push(child)
+      return child
+    })
+    registerAutoBuild(ctx, {
+      subscribe: (l) => { listener = l; return () => { listener = undefined } },
+      collect: async (): Promise<RestartSignalJudgment> => judgment('NEED_BUILD', 'h1'),
+      launch,
+      warn: vi.fn(),
+      journal: defaultAutoBuildJournalLine(root),
+      stampDirectory,
+      lockHeld: () => false,
+      heldFlag: () => false,
+      command: 'build-cmd',
+      env: {},
+    })
+    const journalPath = join(stampDirectory, 'auto-build.log')
+    const stdoutPath = join(stampDirectory, STDOUT_CAPTURE_FILE)
+    const stderrPath = join(stampDirectory, STDERR_CAPTURE_FILE)
+    return {
+      emit: (j: RestartSignalJudgment): void => { listener?.(j) },
+      settle: async (ms: number): Promise<void> => { await vi.advanceTimersByTimeAsync(ms) },
+      launch,
+      children,
+      journalPath,
+      stdoutPath,
+      stderrPath,
+      journalLines: (): string[] => readFileSync(journalPath, 'utf8').trim().split('\n'),
+    }
+  }
+
+  it('captures the spawn stdio as fd redirection (files, not pipes)', async () => {
+    const h = failoutHarness()
+    h.emit(judgment('NEED_BUILD', 'h1'))
+    await h.settle(15_000)
+    expect(h.launch).toHaveBeenCalledOnce()
+    const call = h.launch.mock.calls.at(-1)
+    expect(call).toBeDefined()
+    const options = call?.[1] as { stdio?: unknown }
+    // ['ignore', stdoutFd, stderrFd]: the child's streams land in the capture
+    // files — a pipe would die with this host and crash the surviving build.
+    expect(options.stdio).toEqual(['ignore', expect.any(Number), expect.any(Number)])
+    expect(existsSync(h.stdoutPath)).toBe(true)
+    expect(existsSync(h.stderrPath)).toBe(true)
+  })
+
+  it('folds a failed build’s stdout/stderr tails + exit code into the journal (one timestamped line)', async () => {
+    const h = failoutHarness()
+    h.emit(judgment('NEED_BUILD', 'h1'))
+    await h.settle(15_000)
+    expect(h.launch).toHaveBeenCalledOnce()
+    // What the real build would have written through the inherited fds:
+    // >4KB so the fold must keep the TAIL and drop the head, with an
+    // embedded newline to prove whitespace collapses onto one journal line.
+    writeFileSync(h.stdoutPath, 'OUT-HEAD build starting\nOUT-TAIL done\n')
+    writeFileSync(
+      h.stderrPath,
+      `STDERR-HEAD-MARKER ${'x'.repeat(5000)} line1\nline2\nSTDERR-TAIL-MARKER\n`,
+    )
+    const child = h.children.at(-1)
+    expect(child).toBeDefined()
+    child?.emitClose(7)
+    const lines = h.journalLines()
+    expect(lines).toHaveLength(2)
+    const failed = lines.find(line => line.includes('build-failed'))
+    expect(failed).toBeDefined()
+    // Timestamped (journal ISO prefix) + exit code + command, watchdog family.
+    expect(failed).toMatch(/^\d{4}-\d{2}-\d{2}T\S+ build-failed exit=7 cmd=build-cmd /)
+    // Both tails present, whitespace folded to a single line.
+    expect(failed).toContain('stdout-tail=OUT-HEAD build starting OUT-TAIL done')
+    expect(failed).toContain('STDERR-TAIL-MARKER')
+    expect(failed).toContain('line1 line2')
+    // 4KB tail semantics: the head beyond the window is gone.
+    expect(failed).not.toContain('STDERR-HEAD-MARKER')
+    // Captures cleaned up after folding — no orphan .tmp files.
+    expect(existsSync(h.stdoutPath)).toBe(false)
+    expect(existsSync(h.stderrPath)).toBe(false)
+  })
+
+  it('adds no journal noise for a successful build and still drops the captures (判据 4)', async () => {
+    const h = failoutHarness()
+    h.emit(judgment('NEED_BUILD', 'h1'))
+    await h.settle(15_000)
+    expect(h.launch).toHaveBeenCalledOnce()
+    writeFileSync(h.stdoutPath, 'OUT-HEAD build starting\nOUT-TAIL done\n')
+    writeFileSync(h.stderrPath, 'warning: something chatty\n')
+    const child = h.children.at(-1)
+    expect(child).toBeDefined()
+    child?.emitClose(0)
+    const lines = h.journalLines()
+    // Exactly the one pre-existing dispatch decision line: exit 0 writes NO
+    // build-failed line and the captures are removed either way.
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toMatch(/^\d{4}-\d{2}-\d{2}T\S+ dispatch reason=need-build cmd=build-cmd$/)
+    expect(lines.some(line => line.includes('build-failed'))).toBe(false)
+    expect(existsSync(h.stdoutPath)).toBe(false)
+    expect(existsSync(h.stderrPath)).toBe(false)
   })
 })
