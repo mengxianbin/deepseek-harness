@@ -68,9 +68,11 @@
 import { spawn } from 'node:child_process'
 import type { SpawnOptions } from 'node:child_process'
 import type { Context } from '@deepseek-ai/cordis'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { defaultAutoBuildJournalLine } from './auto-build-journal.ts'
+import { readBuildingCapture } from './build-start-liveness.ts'
 import { defaultRepositoryRoot } from './restart-stamp.ts'
 import { collectRestartSignal, onRestartSignalJudgment, type RestartSignalFacts, type RestartSignalJudgment } from './restart-signal.ts'
 
@@ -100,21 +102,12 @@ const BACKOFF_CAP_MS = 60 * 60_000
  * so the bootstrap path reads them directly). */
 const STAMP_DIR = '.dsh-build'
 
-/** Build-start capture file name inside the stamp directory. */
-const START_CAPTURE_FILE = 'restart-stamp.start.json'
-
 /** Build-failure record file name inside the stamp directory. */
 const FAILURE_FILE = 'restart-stamp.failed.json'
 
 /** Own baseline manifest file name inside the stamp directory (the INIT cause
  * split reads it directly, mirroring the marker probes below). */
 const MANIFEST_FILE = 'restart-stamp.json'
-
-/** Journal file beside the manifest; rotated past this size (best-effort observability). */
-const JOURNAL_FILE = 'auto-build.log'
-
-/** Journal rotation threshold: keep the last ~512KB of dispatch decisions. */
-const JOURNAL_CAP_BYTES = 512 * 1024
 
 /** Delay before re-probing a held heavy-io lock. */
 const LOCK_RETRY_MS = 30_000
@@ -199,31 +192,6 @@ export type BuildLauncher = (commandLine: string, options: SpawnOptions) => {
   readonly on: (event: 'error', listener: (error: Error) => void) => void
 }
 
-/**
- * The durable decision journal: one line per dispatch / defer / backoff /
- * error / episode-reset beside the manifest (`.dsh-build/auto-build.log`),
- * rotated past {@link JOURNAL_CAP_BYTES}. Best-effort by design — a journal
- * failure must never take the dispatcher down, so writes swallow their own
- * errors after the rotation attempt.
- * @param repositoryRoot - Harness tree whose stamp directory holds the journal.
- * @returns A line sink safe to call from any dispatcher path.
- */
-export function defaultAutoBuildJournalLine(repositoryRoot: string = defaultRepositoryRoot()): (line: string) => void {
-  const directory = join(repositoryRoot, STAMP_DIR)
-  const path = join(directory, JOURNAL_FILE)
-  return (line: string): void => {
-    try {
-      mkdirSync(directory, { recursive: true })
-      if (existsSync(path) && statSync(path).size > JOURNAL_CAP_BYTES) {
-        renameSync(path, `${path}.old`)
-      }
-      appendFileSync(path, `${new Date().toISOString()} ${line}\n`)
-    } catch {
-      // Observability only: never propagate into the dispatch path.
-    }
-  }
-}
-
 /** Injection seams for one registration; production defaults come from this process. */
 export interface AutoBuildInternals {
   /** Judgment subscription; defaults to the state machine's observer seam. */
@@ -249,7 +217,10 @@ export interface AutoBuildInternals {
   /** Decision journal sink; defaults to the rotating file beside the manifest. */
   readonly journal?: (line: string) => void
   /** Build-start marker probe (INIT bootstrap: the judgment masks BUILDING
-   * behind INIT); defaults to the harness tree's start capture file. */
+   * behind INIT); defaults to the harness tree's start capture file read
+   * through the O-1103 liveness probe, so a marker whose build process died
+   * clears (plus its journal line) instead of deferring this dispatcher
+   * forever. */
   readonly buildingMarker?: () => boolean
   /** Build-failure marker probe (INIT bootstrap: the judgment masks
    * BUILD_FAILED behind INIT); defaults to the harness tree's failure record. */
@@ -310,7 +281,7 @@ export function registerAutoBuild(ctx: Context, internals: AutoBuildInternals = 
   const cwd = internals.cwd
   const journal = internals.journal ?? defaultAutoBuildJournalLine()
   const buildingMarker = internals.buildingMarker
-    ?? ((): boolean => existsSync(join(defaultRepositoryRoot(), STAMP_DIR, START_CAPTURE_FILE)))
+    ?? ((): boolean => readBuildingCapture(defaultRepositoryRoot()))
   const failedMarker = internals.failedMarker
     ?? ((): boolean => existsSync(join(defaultRepositoryRoot(), STAMP_DIR, FAILURE_FILE)))
   const ownBaseline = internals.ownBaseline ?? ownBaselinePresent

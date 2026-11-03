@@ -16,6 +16,8 @@
     "src/restart-disposition.ts",
     "src/restart-disposition-host.ts",
     "src/auto-build-dispatch.ts",
+    "src/auto-build-journal.ts",
+    "src/build-start-liveness.ts",
     "src/stamp-poll-host.ts"
   ],
   "references": [

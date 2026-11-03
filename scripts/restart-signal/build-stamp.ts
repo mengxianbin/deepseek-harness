@@ -92,7 +92,9 @@ function capture(root: string): { repo: string; host: string; client: string } {
 
 /**
  * Opening build step: capture S_start for the faces this invocation rebuilds
- * and persist it as the build-start temporary record.
+ * and persist it as the build-start temporary record, tagged with this
+ * process's pid so readers can probe the build's liveness (O-1103 orphan
+ * start-marker recovery).
  * @param root - Repository tree being built.
  * @param faces - Faces this build invocation will rebuild.
  */
@@ -102,6 +104,7 @@ export function beginBuild(root: string, faces: readonly BuildFace[]): void {
     version: 1,
     kind: 'harness-start',
     time: new Date().toISOString(),
+    pid: process.pid,
     faces: [...faces],
     sStart,
   })

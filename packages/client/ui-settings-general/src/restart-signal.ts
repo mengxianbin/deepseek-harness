@@ -38,6 +38,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
+import { readBuildingCapture } from './build-start-liveness.ts'
 import {
   defaultRepositoryRoot,
   readRestartStamp,
@@ -328,7 +329,11 @@ async function computeRestartSignal(options: RestartSignalOptions): Promise<Rest
   const repositoryRoot = options.repositoryRoot ?? defaultRepositoryRoot()
   const runtime = restartStamp(options)
   const fresh = readRestartStamp(options)
-  const building = existsSync(join(repositoryRoot, STAMP_DIR, START_CAPTURE_FILE))
+  // O-1103: this read doubles as the liveness probe — a marker whose build
+  // process died is cleared here (one `orphan-start-marker-cleared` journal
+  // line), so the judgment below recovers from a permanent BUILDING in the
+  // same pass instead of waiting for a rerun's beginBuild to overwrite it.
+  const building = readBuildingCapture(repositoryRoot)
   const buildingStartedAt = building ? readBuildStartCaptureTime(repositoryRoot) : undefined
   const failed = existsSync(join(repositoryRoot, STAMP_DIR, FAILURE_FILE))
   const configStamp = fresh.sCfg

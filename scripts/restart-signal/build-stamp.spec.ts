@@ -7,7 +7,7 @@
  * its previous baseline forward.
  */
 import { execFileSync, spawnSync } from 'node:child_process'
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -46,6 +46,9 @@ describe('build stamp closing step', () => {
     const root = fixtureRepository()
     beginBuild(root, ['host'])
     expect(readStartStamp(root)?.faces).toEqual(['host'])
+    // O-1103: the opening step tags the capture with this process's pid, the
+    // field every reader's liveness probe keys on.
+    expect(readStartStamp(root)?.pid).toBe(process.pid)
     appendFileSync(join(root, 'src', 'host', 'a.ts'), '// edited during the build\n')
     endBuild(root)
 
@@ -56,6 +59,16 @@ describe('build stamp closing step', () => {
     expect(manifest?.hostFaceHash).toBe(manifest?.sStart.host)
     expect(manifest?.hostFaceHash).not.toBe(manifest?.sEnd.host)
     expect(manifest?.clientFaceHash).toBeNull()
+    expect(readStartStamp(root)).toBeUndefined()
+  })
+
+  it('refuses a start capture that carries no pid (O-1103 marker schema, loud on drift)', () => {
+    const root = fixtureRepository()
+    beginBuild(root, ['host'])
+    const path = join(root, '.dsh-build', 'restart-stamp.start.json')
+    const record = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
+    delete record.pid
+    writeFileSync(path, JSON.stringify(record))
     expect(readStartStamp(root)).toBeUndefined()
   })
 
