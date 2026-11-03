@@ -162,6 +162,26 @@ describe('heavy-io gate wiring', () => {
       ['test', 'pnpm run build:native-system && vitest run --config vitest.fast.config.ts'],
       ['test:all', 'pnpm run build:native-system && vitest run'],
       ['test:coverage', 'pnpm run build:native-system && vitest run --coverage'],
+      // FORK dsh-local (heavy-gate-expand1-1103): build-family bare keys closed
+      // behind the gate (错峰裁决 C · 缺口 G1 扩闸第一批). Each `inner` below is
+      // the pre-wrap original byte-for-byte — the `toBe` above therefore doubles
+      // as the reverse assertion that the inner command never drifted. Two-checks
+      // (spec `toBe` on the key + run-gates/ci-workflow structured reads) passed
+      // for all five; `ci-workflow.ts` has no such reader (only the .spec does).
+      ['build:artifacts', 'tsx scripts/build.ts --scope artifacts'],
+      ['build:check', 'tsx scripts/build.ts --scope check'],
+      ['build:official', 'tsx scripts/build.ts --profile official'],
+      ['build:web', 'pnpm --filter @deepseek-ai/dsh-web-frontend run build'],
+      ['build:desktop', 'pnpm --filter @deepseek-ai/dsh-desktop run build'],
+      // FORK dsh-local (heavy-gate-expand1-1103): these four were already gated
+      // (build/lint/lint:fix from the original three-layer landing, test:slowlane
+      // from fastlane-2s-1101) but never listed here, so the wiring count trailed
+      // the package.json gated-key count. Listing them closes that gap with
+      // assertions only — no script value changes.
+      ['build', 'tsx scripts/build.ts'],
+      ['lint', 'tsx scripts/compile-referenced-projects.ts host-contracts && npm run lint:contracts-ready'],
+      ['lint:fix', 'tsx scripts/compile-referenced-projects.ts host-contracts && npm run lint:fix:contracts-ready'],
+      ['test:slowlane', 'tsx scripts/run-slow-lane.ts'],
     ] as const) {
       expect(packageScripts[entry], entry).toBe(`tsx scripts/heavy-io-gate.ts "${inner}"`)
     }
