@@ -65,8 +65,8 @@ interface BenchOptions {
   planEntry?: React.ReactNode
   /** The `plan` projection value the standard-kit useProjection serves. */
   plan?: { active: boolean; pending: boolean }
-  /** The `goal` projection value used only to prove attachment intake remains ordinary. */
-  goal?: { phase: 'active'; objective: string }
+  /** The `goal` projection value (wire shape — `phase` lives on `.goal`). */
+  goal?: { goal: { phase: 'active' | 'paused' | 'blocked' | 'complete'; objective: string } }
   modelEntry?: React.ReactNode
   permissionEntry?: React.ReactNode
   /** Hot text-ref lexicon (injects a minimal slash stub exposing only lexicon()). */
@@ -1382,7 +1382,7 @@ describe('running and lock semantics', () => {
 
   it.each([
     ['active plan', { plan: { active: true, pending: false } }],
-    ['active goal', { goal: { phase: 'active' as const, objective: 'inspect files' } }],
+    ['active goal', { goal: { goal: { phase: 'active' as const, objective: 'inspect files' } } }],
   ])('%s keeps ordinary generic-file intake enabled', (_name, projection) => {
     const added = vi.fn(() => null)
     const { view, slotCalls, shell } = bench({ ...projection, addFiles: added })
@@ -1792,6 +1792,27 @@ describe('decorations', () => {
       )
     })
     expect(textarea.style.getPropertyValue('--dsh-composer-hint')).toBe(JSON.stringify('输入目标，智能体将持续执行'))
+  })
+
+  it('an on-book goal phases the /goal hint: active keeps the active entry, complete falls back', () => {
+    const claim = { name: 'goal', token: '/goal ', hint: '[<objective>|clear|edit <objective>|pause|resume]', submit: () => Promise.resolve({ kind: 'success' as const }) }
+    const hintFor = (goal: NonNullable<BenchOptions['goal']>): string => {
+      const { shell, textarea } = bench({ goal })
+      act(() => {
+        shell.setDraft('/goal ')
+        shell.beginCommand(claim, { start: 0, end: 6, draftRev: shell.snapshot.draftRev })
+      })
+      return textarea.style.getPropertyValue('--dsh-composer-hint')
+    }
+    // A goal still owed reads as active; a completed one is off the books, so
+    // the hint offers a fresh objective instead of resume/pause (host parity:
+    // command-goal's complete branch only offers `/goal <objective>` + clear).
+    expect(hintFor({ goal: { phase: 'active', objective: 'inspect files' } })).toBe(
+      JSON.stringify('当前目标进行中。可输入 edit 修改 / pause 暂停 / resume 继续 / clear 清除'),
+    )
+    expect(hintFor({ goal: { phase: 'complete', objective: 'inspect files' } })).toBe(
+      JSON.stringify('输入目标，智能体将持续执行'),
+    )
   })
 
   it('the hint lookup keys on the claim name, so a localized claim token keeps the locale entry', () => {

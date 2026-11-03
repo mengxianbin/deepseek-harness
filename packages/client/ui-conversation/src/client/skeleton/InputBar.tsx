@@ -76,8 +76,10 @@ export const InputBar = memo(function InputBar({
   // Plan mode swaps the composer placeholder (the projection is the folded
   // host value; owner-prop placeholders — hero, session-unavailable — win).
   const planActive = useProjection('plan', plan => plan !== undefined && (plan.pending ? !plan.active : plan.active))
-  // Absent (undefined: no frame yet) and cleared (null) both mean no goal.
-  const hasGoal = useProjection('goal', goal => goal != null)
+  // Absent (undefined: no frame yet) and cleared (null) both mean no goal; a
+  // completed goal is off the books the same way the GoalBar draws it, so the
+  // `/goal` hint falls back to a fresh objective instead of "active".
+  const hasGoal = useProjection('goal', goal => goal != null && goal.goal.phase !== 'complete')
   // Session-maybe: the machine faces are absent together while no session is
   // current; the bar renders the same DOM inert instead of a parallel tree.
   const live = input !== undefined && keyboard !== undefined && inputActions !== undefined

@@ -270,14 +270,14 @@ function createConnectionBench() {
   return { source, set }
 }
 
-/** A durable active-goal projection as a list row carries it. */
-function goalProjection(): GoalProjection {
+/** A durable goal projection as a list row carries it; phase defaults to active. */
+function goalProjection(phase: GoalProjection['goal']['phase'] = 'active'): GoalProjection {
   return {
     goal: {
       id: 'goal-1' as GoalProjection['goal']['id'],
       revision: 1,
       objective: 'ship the status dots',
-      phase: 'active',
+      phase,
       maxGoalRounds: 5,
     },
     roundsStarted: 0,
@@ -1141,6 +1141,37 @@ describe('UiSession wake-up, job-count, and stale status sources', () => {
       Reflect.deleteProperty(draft.byId, id)
     })
     expect(service.sessionStatus.getSnapshot().has(id)).toBe(false)
+  })
+
+  it('never lights pendingWakeup for a completed goal, while active/paused/blocked stopped phases do', () => {
+    const ctx = new Context()
+    const bench = createSessionsBench(ctx)
+    const id = sessionId('wake-phase')
+    bench.binding(id)
+    const service = createUiSession(ctx, bench)
+
+    const setPhase = (phase: GoalProjection['goal']['phase']): void => {
+      bench.list.update((draft) => { draft.byId[id]!.projectionValues = { goal: goalProjection(phase) } })
+    }
+
+    // A completed goal owes nothing: stopped, it still never lights the mark.
+    setPhase('complete')
+    expect(service.sessionStatus.getSnapshot().get(id)?.pendingWakeup).toBeUndefined()
+
+    // Every phase still owed keeps the mark while the Session is stopped.
+    for (const phase of ['active', 'paused', 'blocked'] as const) {
+      setPhase(phase)
+      expect(service.sessionStatus.getSnapshot().get(id)?.pendingWakeup).toBe(true)
+    }
+
+    // Running wins over every phase…
+    bench.emitStatus(id, true)
+    expect(service.sessionStatus.getSnapshot().get(id)?.pendingWakeup).toBeUndefined()
+    // …and a stop hands the mark back to whatever phase is on the books.
+    bench.emitStatus(id, false)
+    expect(service.sessionStatus.getSnapshot().get(id)?.pendingWakeup).toBe(true)
+    setPhase('complete')
+    expect(service.sessionStatus.getSnapshot().get(id)?.pendingWakeup).toBeUndefined()
   })
 
   it('reports status stale only while the connection withholds confirmation', () => {
