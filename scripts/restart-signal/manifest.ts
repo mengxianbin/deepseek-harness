@@ -70,6 +70,10 @@ export interface StartStamp {
   readonly kind: 'harness-start'
   /** Capture time (ISO 8601). */
   readonly time: string
+  /** Process id of the build invocation that opened this capture (O-1103:
+   * readers probe it — plus the start-time age bound — to tell a live build
+   * from an orphaned marker left by a killed process). */
+  readonly pid: number
   /** Faces this invocation is rebuilding. */
   readonly faces: readonly BuildFace[]
   /** Source stamps captured at build start. */
@@ -172,12 +176,17 @@ export function readStartStamp(root: string): StartStamp | undefined {
   const parsed = readJsonRecord(startPath(root))
   if (parsed === undefined || parsed.kind !== 'harness-start' || parsed.version !== 1) return undefined
   if (typeof parsed.time !== 'string') return undefined
+  // Strict on pid (schema drift is loud, same as the manifest reads): every
+  // opening step since O-1103 writes it, and the closing step reads back the
+  // record its own opening step wrote in the same process.
+  if (typeof parsed.pid !== 'number') return undefined
   if (!Array.isArray(parsed.faces) || !parsed.faces.every(isBuildFace)) return undefined
   if (!isFaceHashes(parsed.sStart)) return undefined
   return {
     version: 1,
     kind: 'harness-start',
     time: parsed.time,
+    pid: parsed.pid,
     faces: parsed.faces.filter(isBuildFace),
     sStart: parsed.sStart,
   }

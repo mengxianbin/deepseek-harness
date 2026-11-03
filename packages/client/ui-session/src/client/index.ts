@@ -102,10 +102,11 @@ export interface SessionStatus {
    */
   readonly activeJobCount?: number
   /**
-   * A durable goal is on the books while the Session is stopped — the wake-up
-   * weak mark. Present exactly while a list row carries a `goal` projection
-   * value and `running` is observed false; clears when the Session runs, the
-   * goal leaves the books, or the Session is removed.
+   * A durable, still-owed goal is on the books while the Session is stopped —
+   * the wake-up weak mark. Present exactly while a list row carries a `goal`
+   * projection value whose phase is not `complete` and `running` is observed
+   * false; clears when the Session runs, the goal leaves the books or
+   * completes, or the Session is removed.
    */
   readonly pendingWakeup?: true
   /**
@@ -999,7 +1000,12 @@ export class UiSession extends Service {
       const activeJobCount = roster === undefined
         ? 0
         : roster.filter(job => countsAsActiveOwnJob(job, id)).length
-      const pendingWakeup: true | undefined = list.byId[id]?.projectionValues?.goal != null
+      // A completed goal owes nothing: it stays on the books but must not keep
+      // the wake-up mark lit (same phase line the GoalBar, the input runMode,
+      // and the host `/goal` hint draw — see GoalBar's complete gate).
+      const goal = list.byId[id]?.projectionValues?.goal
+      const pendingWakeup: true | undefined = goal != null
+        && goal.goal.phase !== 'complete'
         && this.running.get(id) === false
         ? true
         : undefined

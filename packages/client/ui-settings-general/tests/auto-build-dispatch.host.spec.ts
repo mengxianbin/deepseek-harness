@@ -38,7 +38,6 @@ import {
   AUTO_BUILD_BACKOFF_ENV,
   AUTO_BUILD_INTERVAL_ENV,
   AUTO_BUILD_STABLE_ENV,
-  defaultAutoBuildJournalLine,
   defaultHeavyIoLockDirectory,
   heavyIoLockHeld,
   registerAutoBuild,
@@ -47,6 +46,7 @@ import {
   STDOUT_CAPTURE_FILE,
   type AutoBuildChild,
 } from '../src/auto-build-dispatch.ts'
+import { defaultAutoBuildJournalLine } from '../src/auto-build-journal.ts'
 import type { RestartSignalFacts, RestartSignalJudgment } from '../src/restart-signal.ts'
 import type { RestartSignalState } from '../src/restart.ts'
 

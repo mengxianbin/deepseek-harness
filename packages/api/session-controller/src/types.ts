@@ -788,6 +788,54 @@ export interface SessionHealthReport {
   readonly total: number
   readonly counts: SessionHealthCounts
   readonly issues: readonly SessionHealthIssue[]
+  /**
+   * The 值守总账 fold (批2 duty-shield-b2-1103, duty-inventory-shield-1103.md
+   * §三约束①): the SAME 15s tick read `~/.dsh/duty-inventory-state.json`
+   * (collector cadence 10min) plus a freshness judgment, so the shield audits
+   * the watch items under the same single-frame, same-period discipline as the
+   * Session invariants (step2 §4.3 duty extension). Absent only on a Host
+   * predating the wiring — the client then treats the duty plane as not
+   * attached, never as broken.
+   */
+  readonly duty?: DutyInventoryReport
+}
+
+/** One 值守总账 item exactly as the collector wrote it (清单档 §6.3 三态语义). */
+export interface DutyInventoryItem {
+  readonly id: string
+  /**
+   * The collector's three-state verdict: `healthy` / `disabled` (有意停用 —
+   * grey, never lights, never queues) / `failed` (该跑没跑 · LastResult≠0 ·
+   * 戳过期 · 日志超龄 — red, per-item detail, 插队 P0/P1).
+   */
+  readonly status: 'healthy' | 'disabled' | 'failed'
+  /** On the collector's intentional-stop list (`DISABLED_INTENTIONAL_IDS`). */
+  readonly intentional: boolean
+  /** Why the collector judged it failed (collector language, untranslated by policy). */
+  readonly reasons: readonly string[]
+  /** Collector cadence label as written (e.g. 每 10 分钟); absent for the guard process item. */
+  readonly cadenceLabel?: string
+}
+
+/** The 值守总账 verdict the sweep published with the audit (one file, fail-closed). */
+export interface DutyInventoryReport {
+  /**
+   * Fail-closed verdict: the ledger is fresh AND holds zero failed items.
+   * An unreadable or stale ledger reads `false` — a watch plane the sweep
+   * cannot trust is failed, never quiet (step3 §5.2 执法者纪律 同源).
+   */
+  readonly ok: boolean
+  /** The ledger parsed and is within the freshness bound (2× the collector cadence). */
+  readonly fresh: boolean
+  /** Seconds since the collector stamped the ledger; absent when the file could not be read. */
+  readonly ageSec?: number
+  readonly counts: {
+    readonly total: number
+    readonly healthy: number
+    readonly disabled: number
+    readonly failed: number
+  }
+  readonly items: readonly DutyInventoryItem[]
 }
 
 /** One swept Session's facts exactly as that sweep traversal read them. */

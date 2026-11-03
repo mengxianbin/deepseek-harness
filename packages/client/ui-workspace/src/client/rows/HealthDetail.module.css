@@ -1,0 +1,95 @@
+/* 批2 duty-shield-b2-1103 (ruling shield-entry-ruling A案): the shared
+   two-section detail body — 会话对账 above, 值守清单 below — used by BOTH the
+   header shield popover (fixed viewport panel) and the queue alarm row's
+   expansion, so the two entrances show the same two segments. 三态纪律
+   (清单档 §6.3): healthy items are hidden behind the summary counts, 有意停用
+   renders grey (never lit), failed renders red with the collector's reasons. */
+.section + .section {
+  margin-top: 6px;
+  padding-top: 5px;
+  border-top: 1px solid var(--dsw-alias-border-l);
+}
+
+.sectionTitle {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.quiet {
+  padding: 2px 0;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.issue {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 2px 0;
+}
+
+.issueLabel {
+  flex: none;
+  color: var(--dsw-alias-state-error-primary);
+  font-weight: 600;
+}
+
+.issueSessions {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.dutySummary {
+  padding: 2px 0;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* Untrusted ledger (unreadable or past the freshness bound): fail-closed
+   notice — the shield is already red, this names why. */
+.dutyUntrusted {
+  padding: 2px 0;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.dutyFailed {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 6px;
+  align-items: baseline;
+  padding: 2px 0;
+}
+
+.dutyFailed .dutyItemName {
+  color: var(--dsw-alias-state-error-primary);
+  font-weight: 600;
+}
+
+.dutyItemCadence {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+}
+
+.dutyItemReasons {
+  min-width: 0;
+  flex-basis: 100%;
+  overflow-wrap: anywhere;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.dutyDisabled {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 6px;
+  align-items: baseline;
+  padding: 1px 0;
+  /* 灰不亮: the intentional stop reads as neutral information, never a lamp. */
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.dutyItemTag {
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary);
+  opacity: 0.8;
+}

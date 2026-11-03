@@ -6,8 +6,8 @@
  * combination mirror that must stay equal to the runtime stamp's own hash,
  * and one real stamp-CLI spawn end to end.
  */
-import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync, spawn } from 'node:child_process'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -370,6 +370,51 @@ describe('collectRestartSignal', () => {
     expect(judgment.state).toBe('NEED_BUILD')
     expect(judgment.facts?.ownFaceMoved).toBe(false)
     expect(judgment.detail).toContain('linked repository source moved')
+  })
+
+  it('recovers from a killed build process in the very next collect — no permanent BUILDING (acceptance ①, O-1103)', async () => {
+    const { repositoryRoot, dshHome } = fixtureTree()
+    writeBaseline(repositoryRoot, { host: HOST_HASH, client: CLIENT_HASH })
+    const runStampCli = vi.fn(async (): Promise<readonly CurrentStamp[]> => [
+      { repository: repositoryRoot, kind: 'harness', host: HOST_HASH, client: CLIENT_HASH },
+    ])
+    const options = { repositoryRoot, dshHome, registryQuery: () => '', runStampCli }
+    // A stand-in build process under real control: the marker records its pid
+    // (what beginBuild writes), then it is really killed — the observed 300s
+    // foreground-timeout death, reproduced deterministically.
+    const buildProcess = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { windowsHide: true })
+    await new Promise<void>((resolve, reject) => {
+      buildProcess.once('spawn', () => { resolve() })
+      buildProcess.once('error', reject)
+    })
+    const pid = buildProcess.pid
+    if (pid === undefined) throw new Error('stand-in build process exposed no pid')
+    const capturePath = join(repositoryRoot, '.dsh-build', 'restart-stamp.start.json')
+    mkdirSync(join(repositoryRoot, '.dsh-build'), { recursive: true })
+    writeFileSync(capturePath, JSON.stringify({
+      version: 1,
+      kind: 'harness-start',
+      time: new Date().toISOString(),
+      pid,
+      faces: ['host', 'client'],
+      sStart: { repo: 'r', host: HOST_HASH, client: CLIENT_HASH },
+    }))
+
+    // While the named process lives, the judgment is BUILDING: a live build is
+    // never misjudged by the probe (the anti-blind-clearing half).
+    expect((await collectRestartSignal(options)).state).toBe('BUILDING')
+
+    buildProcess.kill('SIGKILL')
+    await new Promise<void>((resolve) => { buildProcess.once('exit', () => { resolve() }) })
+
+    // One collect (one poll) after the kill: the orphan marker is gone, its
+    // recovery line is in the journal, and the judgment has recovered.
+    const after = await collectRestartSignal(options)
+    expect(after.state).toBe('OK')
+    expect(existsSync(capturePath)).toBe(false)
+    const journal = readFileSync(join(repositoryRoot, '.dsh-build', 'auto-build.log'), 'utf8')
+    expect(journal).toContain('orphan-start-marker-cleared')
+    expect(journal).toContain(`pid=${String(pid)}`)
   })
 })
 
