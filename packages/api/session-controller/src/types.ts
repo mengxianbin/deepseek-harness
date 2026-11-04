@@ -798,6 +798,18 @@ export interface SessionHealthReport {
    * attached, never as broken.
    */
   readonly duty?: DutyInventoryReport
+  /**
+   * The auto-route controller poll fold (2026-11-04 ruling: sustained meter-
+   * poll failure is an availability fact for the shield). The dsh-auto-route
+   * plugin writes one ledger per tick to `<dsh-home>/auto-route-poll-state.json`
+   * (writer cadence ≤60 s, sibling of the duty ledger); the sweep reads it
+   * beside the 值守总账 and turns streak age into the `sustained` verdict
+   * (≥5 min ≈ N=7 consecutive misses). Optional plane — absent only when the
+   * plugin is not installed, disabled, or its writer stopped; the client then
+   * treats it as not attached, never as broken (the inverse of duty's
+   * fail-closed, because that collector is mandatory and this one is not).
+   */
+  readonly autoRoute?: AutoRoutePollReport
 }
 
 /** One 值守总账 item exactly as the collector wrote it (清单档 §6.3 三态语义). */
@@ -836,6 +848,39 @@ export interface DutyInventoryReport {
     readonly failed: number
   }
   readonly items: readonly DutyInventoryItem[]
+}
+
+/**
+ * The auto-route controller poll verdict the sweep published with the audit
+ * (2026-11-04 ruling; one ledger, one file, optional plane). The dsh-auto-route
+ * plugin writes facts only (`ok`, `failingSince`, bounded error); this side
+ * owns the alarm policy — `sustained` flips once the current failure streak
+ * reaches the threshold, which is what the 安康盾 and the queue alert key on.
+ * Transient failures stay non-sustained: visible in the glance tooltip and
+ * the detail section, never ambient (狼来了 discipline).
+ */
+export interface AutoRoutePollReport {
+  /**
+   * Fail-open on absence, fail-closed on presence: the latest tick's meter
+   * poll verdict. `false` means the controller cannot read its meters right
+   * now — whether that is alarming is `sustained`'s job, not this flag's.
+   */
+  readonly ok: boolean
+  /** Epoch ms of the FIRST failure of the current consecutive streak; absent while ok. */
+  readonly failingSince?: number
+  /** Seconds the current failure streak has run at fold time; absent while ok. */
+  readonly failingForSec?: number
+  /**
+   * The alarm verdict (2026-11-04 ruling): the streak has run ≥ the
+   * sustained threshold (~5 min ≈ N=7 consecutive misses at the 45 s
+   * cadence). Only `sustained: true` may redden the 安康盾 or insert the
+   * queue alarm row.
+   */
+  readonly sustained: boolean
+  /** The controller's bounded error text (untranslated, collector language). */
+  readonly error?: string
+  /** Seconds since the writer stamped the ledger; the sweep's freshness judgment. */
+  readonly ageSec: number
 }
 
 /** One swept Session's facts exactly as that sweep traversal read them. */

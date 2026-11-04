@@ -34,6 +34,25 @@ const { dutyFixture } = vi.hoisted(() => ({
 }))
 vi.mock('../src/duty.ts', () => ({ readDutyInventory: () => dutyFixture }))
 
+// 2026-11-04 ruling: the auto-route poll ledger rides the SAME fold. The
+// reader is mocked like duty's — machine-independent while still proving the
+// CALL SITE (a sweep that stopped reading the ledger would drop the key).
+// Setting `holder.autoRoute = undefined` = plugin absent → the key must vanish
+// from the frame entirely; the reader's own threshold/freshness behavior
+// lives in auto-route.spec.ts.
+// The holder's type is declared on the callback return (a value-side `as`
+// cast here reads as an unnecessary assertion to oxlint's type-aware rule);
+// the property is a required key whose value may be `undefined` so both the
+// fixture and the detach assignment stay legal under exactOptionalPropertyTypes.
+const { autoRouteHolder } = vi.hoisted(
+  (): { autoRouteHolder: { autoRoute: Record<string, unknown> | undefined } } => ({
+    autoRouteHolder: {
+      autoRoute: { ok: false, failingSince: 1, failingForSec: 300, sustained: true, error: 'boom', ageSec: 5 },
+    },
+  }),
+)
+vi.mock('../src/auto-route.ts', () => ({ readAutoRoutePoll: () => autoRouteHolder.autoRoute }))
+
 const defaults = {
   defaultModelSelection: () => ({ provider: 'fixture', model: 'fixture-model' }),
   cwd: '/tmp',
@@ -146,10 +165,21 @@ describe('sweep publishes api-session/health (step2 §4.3 同一数据源同一�
       issues: [],
       // 批2: the duty fold rides every sweep frame (同一 tick, 同一 frame).
       duty: dutyFixture,
+      // 2026-11-04: so does the auto-route poll verdict (同一 fold, 同一 frame).
+      autoRoute: autoRouteHolder.autoRoute,
     })
 
     await vi.advanceTimersByTimeAsync(SESSION_STATUS_SWEEP_MS)
     expect(health).toHaveBeenCalledTimes(2)
     expect(health.mock.calls[1]?.[0]).toEqual(health.mock.calls[0]?.[0])
+
+    // Optional plane detaches cleanly: plugin absent → the key is gone from
+    // the frame entirely, the rest of the audit is untouched (never broken).
+    autoRouteHolder.autoRoute = undefined
+    await vi.advanceTimersByTimeAsync(SESSION_STATUS_SWEEP_MS)
+    expect(health).toHaveBeenCalledTimes(3)
+    expect('autoRoute' in (health.mock.calls[2]?.[0] ?? {})).toBe(false)
+    expect(health.mock.calls[2]?.[0]).toMatchObject({ ok: true, duty: dutyFixture })
+    autoRouteHolder.autoRoute = { ok: false, failingSince: 1, failingForSec: 300, sustained: true, error: 'boom', ageSec: 5 }
   })
 })

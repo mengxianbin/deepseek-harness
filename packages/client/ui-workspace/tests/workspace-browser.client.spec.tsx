@@ -3058,6 +3058,48 @@ describe('Workspace tree grouping', () => {
     expect(detail.textContent).not.toContain('DSH-Build-Watchdog')
   })
 
+  // 2026-11-04 ruling: a SUSTAINED controller poll failure queues with its own
+  // text (never borrowed from 对账), while a transient miss queues nothing.
+  it('cuts the auto-route alarm into the queue head only when the failure is sustained (2026-11-04)', () => {
+    const sessionsBalanced: SessionHealthReport = {
+      ok: true, total: 1, counts: { running: 1, awaiting: 0, failed: 0, rest: 0 }, issues: [],
+    }
+    // Transient miss (< threshold): the queue stays quiet — the glance tooltip owns it.
+    const transient = mount({
+      useSessionHealth: hook({
+        report: { ...sessionsBalanced, autoRoute: { ok: false, failingForSec: 47, sustained: false, error: 'fetch failed', ageSec: 3 } },
+      }),
+    })
+    expect(document.querySelector('[data-row-key="queue-health"]')).toBeNull()
+    transient.view.unmount()
+
+    // Sustained (≥ threshold): the row cuts in with its own text, red-flagged.
+    mount({
+      useSessionHealth: hook({
+        report: {
+          ...sessionsBalanced,
+          autoRoute: {
+            ok: false,
+            failingSince: 1,
+            failingForSec: 312,
+            sustained: true,
+            error: 'meter source unreachable: fetch failed (cause: connect ECONNREFUSED 127.0.0.1:7897)',
+            ageSec: 4,
+          },
+        },
+      }),
+    })
+    const alert = screen.getByText('自动路由告警：控制器读数持续中断，点开看明细')
+      .closest('[data-row-key="queue-health"]') as HTMLElement
+    expect(alert.getAttribute('data-health-alert')).toBe('broken')
+    // The books balance — this alarm must not borrow the reconciliation text.
+    expect(alert.textContent).not.toContain('对账对不上')
+    fireEvent.click(alert.querySelector('button') as HTMLElement)
+    const detail = alert.querySelector('[data-health-alert-detail=""]') as HTMLElement
+    expect(detail.querySelector('[data-health-section="autoRoute"]')?.textContent).toContain('控制器读数中断 312s')
+    expect(detail.textContent).toContain('connect ECONNREFUSED')
+  })
+
   it('seats the shield outside the actions cluster clip window (件C5 裁切复修1101)', () => {
     const balanced: SessionHealthReport = {
       ok: true, total: 1, counts: { running: 1, awaiting: 0, failed: 0, rest: 0 }, issues: [],

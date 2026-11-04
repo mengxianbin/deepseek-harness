@@ -27,6 +27,13 @@
  * duty fold: a failed or untrusted 值守总账 paints the shield red exactly like
  * a broken Session reconciliation (三态纪律: healthy quiet / 有意停用 grey /
  * failed red + 逐项明细 + 插队 P0/P1).
+ *
+ * 2026-11-04 ruling (controller-poll availability): `broken` widens once more
+ * to the auto-route plane's SUSTAINED verdict — a meter-poll failure streak
+ * ≥ ~5 min burns the shield red with its own label (never "对账对不上": the
+ * books balance, the controller is blind). Transient misses set nothing here;
+ * they live in the glance button tooltip and the detail's third section
+ * (三态纪律 + 警报经济学: one fact, one alarm surface, no double meanings).
  */
 import { useState } from 'react'
 import clsx from 'clsx'
@@ -57,12 +64,22 @@ export function HealthShield({ useSessionHealth, t }: HealthShieldProps) {
   const [detailAnchor, setDetailAnchor] = useState<{ left: number; top: number } | undefined>(undefined)
   if (health === undefined) return null
   const report = health.report
-  // Either plane breaks the shield: Session invariants OR the duty fold (批2).
-  const broken = report?.ok === false || report?.duty?.ok === false
+  // Three planes can break the shield: Session invariants, the duty fold (批2),
+  // and — 2026-11-04 ruling — a SUSTAINED auto-route meter-poll failure.
+  // Transient misses never set it (狼来了: the glance tooltip owns those).
+  const sessionDutyBroken = report?.ok === false || report?.duty?.ok === false
+  const sustained = report?.autoRoute?.sustained === true
+  const broken = sessionDutyBroken || sustained
   const stale = health.stale === true
   const label = stale
     ? t('health.stale.label')
-    : broken ? t('health.broken.label') : t('health.ok.label')
+    // An autoRoute-only break must not claim "对账对不上" — the books balance;
+    // it's the controller that can't read its meters (three distinct alarms).
+    : sessionDutyBroken
+      ? t('health.broken.label')
+      : sustained
+        ? t('health.autoRoute.label')
+        : t('health.ok.label')
   const tooltip = stale && health.staleSeconds !== undefined
     ? t('health.stale.tooltip').replace('{s}', String(health.staleSeconds))
     : label

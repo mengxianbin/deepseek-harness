@@ -362,7 +362,9 @@ type SessionTreeProps = Pick<
  * extension): the duty fold rides the SAME row — a failed or untrusted 值守总账
  * cuts in exactly like a broken Session reconciliation (三态纪律: 有意停用
  * never sets the verdict, so it never queues — 灰不亮不插队), and the
- * expansion renders the shared two-section HealthDetail (会话对账 + 值守清单).
+ * expansion renders the shared HealthDetail (会话对账 + 值守清单). 2026-11-04
+ * ruling: a SUSTAINED auto-route poll failure joins the row with its own
+ * text (never borrowed from 对账), and the detail gains the 自动路由 section.
  */
 /** The 安康位 alarm's row in the hard top segment (collab step3 §5.2 插队 P0/P1). */
 function HealthQueueAlert({ health, t }: { health: SessionHealthState; t: SessionTreeProps['t'] }) {
@@ -372,7 +374,10 @@ function HealthQueueAlert({ health, t }: { health: SessionHealthState; t: Sessio
   // 批2: the duty verdict plugs into the same alarm — red + 插队 for a failed
   // or untrusted ledger; a healthy/disabled-only ledger sets nothing here.
   const dutyBroken = report?.duty?.ok === false
-  const broken = sessionBroken || dutyBroken
+  // 2026-11-04 ruling: a SUSTAINED auto-route meter-poll failure joins the
+  // alarm (transient misses set nothing — the glance tooltip owns those).
+  const autoRouteSustained = report?.autoRoute?.sustained === true
+  const broken = sessionBroken || dutyBroken || autoRouteSustained
   return (
     <div className={css.queueHealth} data-row-key="queue-health" data-health-alert={broken ? 'broken' : 'stale'}>
       <button
@@ -385,7 +390,11 @@ function HealthQueueAlert({ health, t }: { health: SessionHealthState; t: Sessio
           ? t('queue.health.broken')
           : dutyBroken
             ? t('queue.health.duty')
-            : t('queue.health.stale', { s: health.staleSeconds ?? 0 })}
+            : autoRouteSustained
+              // Its own text: the books balance, the controller is blind —
+              // never borrow "对账对不上" for a different fact.
+              ? t('queue.health.autoRoute')
+              : t('queue.health.stale', { s: health.staleSeconds ?? 0 })}
       </button>
       {expanded && (
         <div className={css.queueHealthDetail} data-health-alert-detail="">
@@ -431,7 +440,8 @@ function QueueSection({ queue, currentId, onOpen, onSessionRenameRequest, render
   return (
     <div className={css.queueSection} data-row-key="queue" role="tree" aria-label={t('queue.title')}>
       {health !== undefined
-        && (health.stale === true || health.report?.ok === false || health.report?.duty?.ok === false) && (
+        && (health.stale === true || health.report?.ok === false || health.report?.duty?.ok === false
+          || health.report?.autoRoute?.sustained === true) && (
         <HealthQueueAlert health={health} t={t} />
       )}
       {queue.tiers.length === 0

@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-11-04-auto-route-poll-alarm.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-11-04-auto-route-poll-alarm.md
+/agent-note-one-fact-one-alarm-surface-for-the-auto-route-controller:
+  en: 233b35e219892eb3
+  zh: 84664ac915a3589b
+/agent-note-one-fact-one-alarm-surface-for-the-auto-route-controller/problem:
+  en: 351cca501f34ff57
+  zh: 436bfcf20f851fe2
+/agent-note-one-fact-one-alarm-surface-for-the-auto-route-controller/decision:
+  en: aca5fef3ae03d26b
+  zh: 54d72e677293ad68
+/agent-note-one-fact-one-alarm-surface-for-the-auto-route-controller/alternatives-considered:
+  en: 101dc7a6cb313a6e
+  zh: 74ab88e503ae3e66
+/agent-note-one-fact-one-alarm-surface-for-the-auto-route-controller/consequences:
+  en: 78dec96eba852a6c
+  zh: 8080b32726b76e41

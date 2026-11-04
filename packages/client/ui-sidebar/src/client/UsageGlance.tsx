@@ -93,22 +93,22 @@
  * replaying the user's own path — the shell owns the panel state and exposes
  * no service for it, so every step degrades silently.
  *
- * v3.5 source indication, exception-only v2 (FORK source-badge-redo-1030,
- * 2026-10-30 — redo of `66b78fb3aa` against the post-CTA-restructure master,
- * then redesigned on the user's same-day design call: a permanently-on dot is
- * redundant while auto-routing is healthy and it steals width from the
- * calibrated read-out columns). The control reads the auto-routing
- * controller's own policy state at `GET /api/auto-route/status` (same origin,
- * same 60s cadence; a 404 — controller not installed — reads as nothing at
- * all), never the overview's `current{provider,model,source}` — that is
+ * v3 source indication, dots fully retired (2026-11-04 用户裁定, superseding
+ * the exception-only v2 badge from `ea1b98f237`/2026-10-30): both source dots
+ * are gone. Usage warnings speak through the bar colors alone; the source
+ * state speaks through the dimmed Go window rows (triggered = the rows stop
+ * describing dsh's live spend) plus one button-title line spelling the
+ * switch; the 95–99 dead-zone fork needs no indicator at all (the bar colors
+ * already carry it). The control still reads the auto-routing controller's
+ * own policy state at `GET /api/auto-route/status` (same origin, same 60s
+ * cadence; a 404 — controller not installed — reads as nothing at all),
+ * never the overview's `current{provider,model,source}` — that is
  * last-request-routing semantics and would flap while both sources run.
- * Three states, zero chrome at rest: **failing poll** → a small error-red
- * dot (the policy reads are stale — traffic may be stuck on the last
- * switched side); **95–99 dead zone** (`defaultsSource` diverges from
- * `effectiveSource`) → a warn dot whose tooltip adds the new-session-default
- * line; **triggered** → no dot at all, the Go window rows simply dim (they
- * stopped describing dsh's live spend) and the button tooltip spells the
- * switch. Baseline + healthy renders the pre-badge layout untouched.
+ * ONE exception line survives on the button title: a failing controller
+ * poll (控制器轮询异常), transient by design — ambient surfaces stay silent
+ * for blips (狼来了), while a SUSTAINED failure (≥ ~5 min) reddens the
+ * 安康盾 on the harness side, which folds the same controller's poll ledger
+ * into the health frame (2026-11-04 ruling: each fact has ONE alarm surface).
  *
  * Remount cache (FORK usage-glance-swr-1031, 2026-10-31 用户要求「先读缓存
  * 再更新」): the sidebar's wide content unmounts when a collapse settles and
@@ -317,36 +317,23 @@ export interface GlanceState {
   mimoBalanceStale?: boolean
 }
 
-/** One current-source badge reading, from the auto-route controller's policy layer. */
+/**
+ * One auto-route status reading, reduced to what the button still renders
+ * after the badge-dot retirement (2026-11-04 用户裁定: dots fully retired —
+ * usage warnings speak through bar colors, source state through the frozen
+ * rows, and the poll failure through one button-title line).
+ */
 export interface SourceBadgeView {
-  /** Provider id the policy considers in force (rendered via the locale map; raw id as fallback). */
-  source: string
-  /** True while the policy sits in its triggered (switched) phase. */
+  /** True while the policy sits in its triggered (switched) phase — the rows freeze. */
   triggered: boolean
-  /** Epoch ms of the last policy decision, when the host reported one. */
-  decidedAt?: number
-  /** Default-model provider id, present only while it differs from the in-flight source (the 95–99 dead zone). */
-  defaultsSource?: string
   /** True while the controller's latest meter poll failed — the policy reads are stale. */
   pollFailing?: boolean
 }
 
-/** The source name for the dot's tooltip (the raw id when the locale map lacks it). */
-export function sourceBadgeName(t: (key: SidebarKey) => string, source: string): string {
-  const key: SidebarKey | undefined = source === 'opencode-go'
-    ? 'glance.source.go'
-    : source === 'mimo'
-      ? 'glance.source.mimo'
-      : undefined
-  return key === undefined ? source : t(key)
-}
-
 /**
- * Reduce the auto-route status document to the badge facts. Foreign or
+ * Reduce the auto-route status document to the button facts. Foreign or
  * partial payloads (a host without the controller, an older one) read as
- * "no badge" — the dot is absent, never wrong. The default source rides along
- * only while it differs from the in-flight one, so the render side stays a
- * plain presence check (the two-leg-fork line, 2026-10-27 board row).
+ * "no badge facts" — the title line is absent, never wrong.
  * @param document_ - the parsed `/api/auto-route/status` body.
  * @returns the badge facts, or undefined when the policy layer is absent.
  */
@@ -354,21 +341,14 @@ export function readSourceBadge(document_: unknown): SourceBadgeView | undefined
   if (typeof document_ !== 'object' || document_ === null) return undefined
   const policy = (document_ as { policy?: unknown }).policy
   if (typeof policy !== 'object' || policy === null) return undefined
-  const { effectiveSource, phase, lastDecisionAt, defaultsSource, lastPoll } = policy as {
+  const { effectiveSource, phase, lastPoll } = policy as {
     effectiveSource?: unknown
     phase?: unknown
-    lastDecisionAt?: unknown
-    defaultsSource?: unknown
     lastPoll?: unknown
   }
   if (typeof effectiveSource !== 'string' || effectiveSource === '') return undefined
   return {
-    source: effectiveSource,
     triggered: phase === 'triggered',
-    ...(typeof lastDecisionAt === 'number' && Number.isFinite(lastDecisionAt) ? { decidedAt: lastDecisionAt } : {}),
-    ...(typeof defaultsSource === 'string' && defaultsSource !== '' && defaultsSource !== effectiveSource
-      ? { defaultsSource }
-      : {}),
     ...(typeof lastPoll === 'object' && lastPoll !== null && (lastPoll as { ok?: unknown }).ok === false
       ? { pollFailing: true }
       : {}),
@@ -837,19 +817,17 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
     : `${formatBalanceFigure(mimoBalance)}${mimoStale ? '*' : ''}`
   // The re-login CTA moved to the footer ⋯ menu (2026-10-30 用户指示, see the
   // module header); the stats column is readings-only again.
-  // Exception-only source indication (v2, 2026-10-30 用户设计裁定): a
-  // permanently-on dot is redundant while auto-routing is healthy and it
-  // steals width from the calibrated read-out columns. The dot renders ONLY
-  // while it carries information the layout cannot — a failing controller
-  // poll (error red: the policy reads are stale, traffic may be stuck on the
-  // last switched side) or the 95–99 dead zone (warn dot + the
-  // new-session-default tooltip line). The triggered state speaks through
-  // the dimmed Go rows instead — they stopped describing dsh's live spend —
-  // and the button tooltip spells the switch. Baseline + healthy renders
-  // nothing: the pre-badge layout, byte for byte.
+  // Exception-only source indication, v3 (2026-11-04 用户裁定 双点完全下岗):
+  // the red/warn source dots are GONE. Usage warnings already speak through
+  // the bar colors; the source state speaks through the frozen Go rows plus
+  // one button-title line ("dsh 已自动切至 MiMo 官方"); the 95–99 dead-zone
+  // fork needs no badge at all (bar colors suffice). The ONLY remaining
+  // exception line is a failing controller poll (title: 控制器轮询异常) —
+  // transient by design: ambient surfaces stay silent for blips (狼来了),
+  // while a SUSTAINED failure belongs to the 安康盾, which reads the same
+  // controller's health frame on the harness side (2026-11-04 ruling).
   const pollFailing = sourceBadge?.pollFailing === true
   const frozen = sourceBadge?.triggered === true && !pollFailing
-  const badgeDot = sourceBadge !== undefined && (pollFailing || sourceBadge.defaultsSource !== undefined)
   // One tooltip for the whole column: every reading plus the refresh stamp
   // (the stamp stays off-screen; v2.2 spent a third line on it).
   const columnTitle = [
@@ -866,36 +844,16 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
         type="button"
         className={css.glanceButton}
         aria-label={t('glance.open')}
-        title={frozen
-          ? `${t('glance.source.frozen')} · ${t('glance.open')}`
-          : t('glance.open')}
+        title={[
+          ...(frozen ? [t('glance.source.frozen')] : []),
+          // The one surviving exception line (transient poll failure);
+          // a sustained one is the 安康盾's job, not this button's.
+          ...(pollFailing ? [t('glance.source.pollError')] : []),
+          t('glance.open'),
+        ].join(' · ')}
         onClick={() => { openUsageSection() }}
       >
         <span className={css.glanceBody}>
-          {badgeDot
-            ? (
-              <span
-                className={pollFailing
-                  ? `${css.glanceSourceDot} ${css.glanceSourceDotError}`
-                  : `${css.glanceSourceDot} ${css.glanceSourceDotActive}`}
-                title={pollFailing
-                  ? [
-                    `${t('glance.source.label')}: ${sourceBadgeName(t, sourceBadge.source)}`,
-                    t('glance.source.pollError'),
-                  ].join(' · ')
-                  : [
-                    `${t('glance.source.label')}: ${sourceBadgeName(t, sourceBadge.source)}`,
-                    t(sourceBadge.triggered ? 'glance.source.triggered' : 'glance.source.baseline'),
-                    ...(sourceBadge.decidedAt === undefined
-                      ? []
-                      : [`${t('glance.source.decided')} ${formatRefreshStamp(sourceBadge.decidedAt)}`]),
-                    ...(sourceBadge.defaultsSource === undefined
-                      ? []
-                      : [`${t('glance.source.defaults')}: ${sourceBadgeName(t, sourceBadge.defaultsSource)}`]),
-                  ].join(' · ')}
-              />
-            )
-            : null}
           <span className={frozen ? `${css.glanceRows} ${css.glanceRowsFrozen}` : css.glanceRows}>
             {windows.map((row) => {
               // The tick sits at the continuous elapsed share of the window;

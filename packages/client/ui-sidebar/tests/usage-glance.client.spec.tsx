@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
-import { deriveGlance, formatBalanceFigure, formatCompactTokens, formatRefreshStamp, openUsageSection, readSourceBadge, resetGlanceCache, sourceBadgeName, UsageGlance, type GlanceWindowRow, type UsageOverviewView } from '../src/client/UsageGlance.tsx'
+import { deriveGlance, formatBalanceFigure, formatCompactTokens, formatRefreshStamp, openUsageSection, readSourceBadge, resetGlanceCache, UsageGlance, type GlanceWindowRow, type UsageOverviewView } from '../src/client/UsageGlance.tsx'
 import { en } from '../src/client/locales.ts'
 
 const t = makeTranslate({ ...commonEn, ...en })
@@ -702,8 +702,8 @@ describe('UsageGlance balance row after the re-login CTA moved (FORK mimo-login-
   })
 })
 
-describe('readSourceBadge — the policy-layer read (auto-route badge, v3.5)', () => {
-  it('drops foreign and partial payloads — the dot is absent, never wrong', () => {
+describe('readSourceBadge — the policy-layer read (dots retired, v3 2026-11-04)', () => {
+  it('drops foreign and partial payloads — the title line is absent, never wrong', () => {
     expect(readSourceBadge(undefined)).toBeUndefined()
     expect(readSourceBadge(null)).toBeUndefined()
     expect(readSourceBadge('status')).toBeUndefined()
@@ -714,38 +714,27 @@ describe('readSourceBadge — the policy-layer read (auto-route badge, v3.5)', (
     expect(readSourceBadge(OVERVIEW)).toBeUndefined()
   })
 
-  it('parses phase, source, a finite decision stamp, and the poll health only', () => {
+  it('parses only the phase and the poll health — source/stamp/fork facts are retired', () => {
     expect(readSourceBadge({ policy: { effectiveSource: 'mimo', phase: 'triggered', lastDecisionAt: 123, lastPoll: { ok: true } } }))
-      .toEqual({ source: 'mimo', triggered: true, decidedAt: 123 })
+      .toEqual({ triggered: true })
     expect(readSourceBadge({ policy: { effectiveSource: 'opencode-go', phase: 'baseline' } }))
-      .toEqual({ source: 'opencode-go', triggered: false })
-    // A non-finite stamp is dropped rather than rendered as Invalid Date.
-    expect(readSourceBadge({ policy: { effectiveSource: 'x', phase: 'baseline', lastDecisionAt: Number.NaN } }))
-      .toEqual({ source: 'x', triggered: false })
+      .toEqual({ triggered: false })
+    // The 95–99 dead-zone fork no longer reaches the button (bar colors carry it).
+    expect(readSourceBadge({ policy: { effectiveSource: 'opencode-go', phase: 'baseline', defaultsSource: 'mimo' } }))
+      .toEqual({ triggered: false })
     expect(readSourceBadge({ policy: { effectiveSource: 'deepseek-official', phase: 'other' } }))
-      .toEqual({ source: 'deepseek-official', triggered: false })
+      .toEqual({ triggered: false })
     // Poll health: only an explicit ok:false surfaces (missing/ok reads healthy-absent).
     expect(readSourceBadge({ policy: { effectiveSource: 'mimo', phase: 'baseline', lastPoll: { ok: false, error: 'x' } } }))
-      .toEqual({ source: 'mimo', triggered: false, pollFailing: true })
+      .toEqual({ triggered: false, pollFailing: true })
     expect(readSourceBadge({ policy: { effectiveSource: 'mimo', phase: 'triggered', lastPoll: { ok: true } } }))
-      .toEqual({ source: 'mimo', triggered: true })
+      .toEqual({ triggered: true })
     expect(readSourceBadge({ policy: { effectiveSource: 'mimo', phase: 'triggered', lastPoll: {} } }))
-      .toEqual({ source: 'mimo', triggered: true })
-  })
-
-  it('keeps the default source only while it differs from the in-flight one (two-leg fork)', () => {
-    // The 95–99 dead zone: in-flight rides Go while new sessions are born on mimo.
-    expect(readSourceBadge({ policy: { effectiveSource: 'opencode-go', phase: 'baseline', defaultsSource: 'mimo' } }))
-      .toEqual({ source: 'opencode-go', triggered: false, defaultsSource: 'mimo' })
-    // Aligned legs (the common case) carry no fork line.
-    expect(readSourceBadge({ policy: { effectiveSource: 'mimo', phase: 'triggered', defaultsSource: 'mimo' } }))
-      .toEqual({ source: 'mimo', triggered: true })
-    expect(readSourceBadge({ policy: { effectiveSource: 'mimo', phase: 'triggered', defaultsSource: '' } }))
-      .toEqual({ source: 'mimo', triggered: true })
+      .toEqual({ triggered: true })
   })
 })
 
-describe('current-source badge (auto-route, exception-only v2)', () => {
+describe('current-source button (auto-route, dots fully retired 2026-11-04)', () => {
   /** The status route contract (host-only endpoint; loopback in production). */
   const STATUS_ROUTE = '/api/auto-route/status'
 
@@ -756,7 +745,12 @@ describe('current-source badge (auto-route, exception-only v2)', () => {
     policy,
   })
 
-  it('renders nothing at baseline — the badge stays silent when nothing carries information', async () => {
+  /** No dot chrome exists post-retirement; the assertions below pin that. */
+  const expectNoDot = (container: HTMLElement): void => {
+    expect(container.querySelectorAll('[class*="glanceSourceDot"]')).toHaveLength(0)
+  }
+
+  it('renders nothing extra at baseline — the pre-badge layout byte for byte', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
     vi.stubGlobal('fetch', vi.fn(async (url: string) => ({
@@ -768,9 +762,9 @@ describe('current-source badge (auto-route, exception-only v2)', () => {
     })))
     const { container } = render(<UsageGlance t={t} />)
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
-    // No dot, no dim — the pre-badge layout byte for byte.
-    expect(container.querySelectorAll('[class*="glanceSourceDot"]')).toHaveLength(0)
+    expectNoDot(container)
     expect(container.querySelector('[class*="glanceRowsFrozen"]')).toBeNull()
+    expect(container.querySelector('button')?.getAttribute('title')).toBe(t('glance.open'))
     expect(screen.getByText('85%')).toBeTruthy()
   })
 
@@ -786,7 +780,7 @@ describe('current-source badge (auto-route, exception-only v2)', () => {
     const { container } = render(<UsageGlance t={t} />)
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
     // The triggered state speaks through the dimmed rows, never a dot.
-    expect(container.querySelectorAll('[class*="glanceSourceDot"]')).toHaveLength(0)
+    expectNoDot(container)
     expect(container.querySelector('[class*="glanceRowsFrozen"]')).toBeTruthy()
     const button = container.querySelector('button')
     expect(button?.getAttribute('title')).toContain(t('glance.source.frozen'))
@@ -797,7 +791,7 @@ describe('current-source badge (auto-route, exception-only v2)', () => {
     expect(button?.getAttribute('title')).not.toContain(t('glance.source.frozen'))
   })
 
-  it('surfaces a red dot only while the controller poll fails', async () => {
+  it('shows one title line while the controller poll fails (no dot, no dim)', async () => {
     // Real timers: waitFor's polling needs them (the cadence test above owns
     // the fake-timer surface).
     vi.stubGlobal('fetch', vi.fn(async (url: string) => (url === STATUS_ROUTE
@@ -805,16 +799,17 @@ describe('current-source badge (auto-route, exception-only v2)', () => {
       : { status: 200, ok: true, json: async () => OVERVIEW })))
     const { container } = render(<UsageGlance t={t} />)
     expect(await screen.findByText('85%')).toBeTruthy()
-    const dot = container.querySelector('[class*="glanceSourceDot"]')
-    expect(dot?.className).toContain('glanceSourceDotError')
-    expect(dot?.getAttribute('title')).toBe(
-      `${t('glance.source.label')}: ${t('glance.source.go')} · ${t('glance.source.pollError')}`,
-    )
+    expectNoDot(container)
+    // The surviving exception line rides the BUTTON title (hover-revealed,
+    // transient by design — a sustained failure is the 安康盾's alarm).
+    const title = container.querySelector('button')?.getAttribute('title') ?? ''
+    expect(title).toContain(t('glance.source.pollError'))
+    expect(title).toContain(t('glance.open'))
     // A failing poll never dims the rows — the numbers are still the live Go truth.
     expect(container.querySelector('[class*="glanceRowsFrozen"]')).toBeNull()
   })
 
-  it('appends the new-session default line only while the default source differs (two-leg fork)', async () => {
+  it('renders the two-leg fork as baseline — bar colors carry it, no chrome', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
     vi.stubGlobal('fetch', vi.fn(async (url: string) => ({
@@ -826,9 +821,9 @@ describe('current-source badge (auto-route, exception-only v2)', () => {
     })))
     const { container } = render(<UsageGlance t={t} />)
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
-    const title = container.querySelector('[class*="glanceSourceDot"]')?.getAttribute('title') ?? ''
-    expect(title).toContain(`${t('glance.source.defaults')}: ${sourceBadgeName(t, 'mimo')}`)
-    expect(title).toContain(t('glance.source.go'))
+    expectNoDot(container)
+    expect(container.querySelector('[class*="glanceRowsFrozen"]')).toBeNull()
+    expect(container.querySelector('button')?.getAttribute('title')).toBe(t('glance.open'))
   })
 
   it('keeps the overview snapshot alive when the status fetch fails', async () => {
@@ -838,18 +833,18 @@ describe('current-source badge (auto-route, exception-only v2)', () => {
       ? { status: 503, ok: false, json: async () => ({}) }
       : { status: 200, ok: true, json: async () => OVERVIEW })))
     const { container } = render(<UsageGlance t={t} />)
-    // The rows still render; the dot is simply absent.
+    // The rows still render; the poll-error line simply never appears.
     expect(await screen.findByText('85%')).toBeTruthy()
-    expect(container.querySelectorAll('[class*="glanceSourceDot"]')).toHaveLength(0)
+    expect(container.querySelector('button')?.getAttribute('title')).not.toContain(t('glance.source.pollError'))
   })
 
-  it('hides the dot when the controller is absent (404)', async () => {
+  it('shows no poll-error line when the controller is absent (404)', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => (url === STATUS_ROUTE
       ? { status: 404, ok: false, json: async () => ({}) }
       : { status: 200, ok: true, json: async () => OVERVIEW })))
     const { container } = render(<UsageGlance t={t} />)
     expect(await screen.findByText('85%')).toBeTruthy()
-    expect(container.querySelectorAll('[class*="glanceSourceDot"]')).toHaveLength(0)
+    expect(container.querySelector('button')?.getAttribute('title')).toBe(t('glance.open'))
   })
 })
 
@@ -907,28 +902,28 @@ describe('remount cache — stale-while-revalidate (FORK usage-glance-swr-1031)'
     expect(await screen.findByText('42%')).toBeTruthy()
   })
 
-  it('re-seeds the glance rows and the badge dot from the cache while revalidation hangs', async () => {
+  it('re-seeds the glance rows and the poll-fail title from the cache while revalidation hangs', async () => {
     const STATUS_ROUTE = '/api/auto-route/status'
     vi.stubGlobal('fetch', vi.fn(async (url: string) => (url === STATUS_ROUTE
       ? { status: 200, ok: true, json: async () => ({ ok: true, policy: { phase: 'baseline', effectiveSource: 'opencode-go', lastPoll: { at: NOW, ok: false, error: 'meter source unreachable' } } }) }
       : { status: 200, ok: true, json: async () => OVERVIEW })))
     const first = render(<UsageGlance t={t} />)
     await screen.findByText('85%')
-    expect(first.container.querySelector('[class*="glanceSourceDotError"]')).toBeTruthy()
+    expect(first.container.querySelector('button')?.getAttribute('title')).toContain(t('glance.source.pollError'))
     first.unmount()
     // One hanging promise per load cycle: the overview leg is released below,
     // the badge leg (created only after it settles) never is — the cached
-    // dot must therefore survive the whole cycle.
+    // poll-fail line must therefore survive the whole cycle.
     let release: ((value: unknown) => void) | undefined
     vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { release = resolve })))
     render(<UsageGlance t={t} />)
     expect(screen.getByText('85%')).toBeTruthy()
-    expect(document.querySelector('[class*="glanceSourceDotError"]')).toBeTruthy()
+    expect(document.querySelector('button')?.getAttribute('title')).toContain(t('glance.source.pollError'))
     await act(async () => {
       release?.({ status: 500, ok: false, json: async () => ({}) })
       await Promise.resolve()
     })
     expect(screen.getByText('85%')).toBeTruthy()
-    expect(document.querySelector('[class*="glanceSourceDotError"]')).toBeTruthy()
+    expect(document.querySelector('button')?.getAttribute('title')).toContain(t('glance.source.pollError'))
   })
 })

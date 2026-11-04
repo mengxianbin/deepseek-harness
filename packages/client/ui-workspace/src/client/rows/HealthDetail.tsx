@@ -1,15 +1,20 @@
 /**
- * The 安康位 detail body — TWO sections in ONE surface (批2
+ * The 安康位 detail body — THREE sections in ONE surface (批2
  * duty-shield-b2-1103, ruling `shield-entry-ruling` A案 淡绿常驻可点:
- * 一个入口两段内容): 会话对账 (the three-invariant difference detail) above
- * 值守清单 (the duty ledger's rows) below. Shared verbatim by the header
+ * 一个入口多段内容): 会话对账 (the three-invariant difference detail) above
+ * 值守清单 (the duty ledger's rows) above 自动路由 (the controller's meter-
+ * poll verdict, 2026-11-04 ruling). Shared verbatim by the header
  * shield popover and the queue alarm row, so both entrances expand the same
- * two segments (step3 §3.3/§5.2 duty extension).
+ * segments (step3 §3.3/§5.2 duty extension).
  *
  * 三态纪律 (清单档 §6.3, 警报经济学 archive-seal-light 2026-11-02): healthy
  * items are HIDDEN behind the summary counts (健康隐藏 — nothing to act on),
  * 有意停用 renders grey with its tag and never lights, failed renders red
- * with the collector's per-item reasons (逐项明细).
+ * with the collector's per-item reasons (逐项明细). The autoRoute plane is
+ * optional (absent = plugin not wired → quiet line, never broken); a failing
+ * poll renders red WITH its raw error and streak age — the detail is the
+ * on-demand investigation surface, so even a transient miss shows here even
+ * though it never sets any ambient alarm.
  */
 import type { SessionHealthState } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { WorkspaceBrowserProps } from '../contract/slots.ts'
@@ -30,13 +35,14 @@ const INVARIANT_KEYS = {
 } as const satisfies Record<HealthInvariant, WorkspaceKey>
 
 /**
- * Render the two-section detail over one wire report.
- * @param report - the sweep's audit (with its duty fold); `undefined` until the first frame lands.
+ * Render the three-section detail over one wire report.
+ * @param report - the sweep's audit (with its duty and autoRoute folds); `undefined` until the first frame lands.
  * @param t - the workspace namespace translator.
- * @returns the sessions + duty sections as one fragment.
+ * @returns the sessions + duty + autoRoute sections as one fragment.
  */
 export function HealthDetail({ report, t }: { report: HealthReport; t: DetailTranslate }) {
   const duty = report?.duty
+  const autoRoute = report?.autoRoute
   const failed = duty?.items.filter(item => item.status === 'failed') ?? []
   const disabled = duty?.items.filter(item => item.status === 'disabled') ?? []
   return (
@@ -100,6 +106,29 @@ export function HealthDetail({ report, t }: { report: HealthReport; t: DetailTra
               {/* healthy items stay HIDDEN behind the summary counts (健康隐藏). */}
             </>
           )}
+      </section>
+      {/* 2026-11-04 ruling: the controller's meter-poll verdict. Optional
+          plane — absent reads "not wired" (quiet, never broken); a miss
+          renders red with its raw error and streak age, sustained or not,
+          because THIS surface is the on-demand investigation, not an alarm. */}
+      <section className={css.section} data-health-section="autoRoute">
+        <div className={css.sectionTitle}>{t('health.section.autoRoute')}</div>
+        {autoRoute === undefined
+          ? <div className={css.quiet}>{t('health.autoRoute.unwired')}</div>
+          : autoRoute.ok
+            ? <div className={css.quiet}>{t('health.autoRoute.ok')}</div>
+            : (
+              <div className={css.dutyFailed} data-auto-route="failing">
+                <span className={css.dutyItemName}>
+                  {t('health.autoRoute.failing', { s: autoRoute.failingForSec ?? 0 })}
+                </span>
+                {autoRoute.sustained && (
+                  <span className={css.dutyItemTag}>{t('health.autoRoute.sustainedTag')}</span>
+                )}
+                {/* Controller error text, untranslated by policy (collector language, like duty reasons). */}
+                <span className={css.dutyItemReasons}>{autoRoute.error ?? '—'}</span>
+              </div>
+            )}
       </section>
     </>
   )

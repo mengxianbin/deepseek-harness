@@ -33,6 +33,7 @@ import { SessionMediaReferences } from './media-references.ts'
 import { ArchivedSessionGate } from './archived-session-gate.ts'
 import { reconcileSessionHealth } from './health.ts'
 import { readDutyInventory } from './duty.ts'
+import { readAutoRoutePoll } from './auto-route.ts'
 import type {
   ModelCatalog,
   SessionWorkspacePathApplication,
@@ -385,7 +386,14 @@ export class SessionController extends TypertRemoteService {
         // cadence 10min) + its freshness judgment — one small file, never a
         // per-tick scheduler query (清单档 §三 约束①) — and folds it into the
         // SAME frame: one data source, one period, one emission per tick.
-        ctx.emit('api-session/health', { ...reconcileSessionHealth(rows), duty: readDutyInventory() })
+        // 2026-11-04 ruling: the auto-route poll ledger rides the same fold
+        // (optional plane — absent when the plugin is, see auto-route.ts).
+        const autoRoute = readAutoRoutePoll()
+        ctx.emit('api-session/health', {
+          ...reconcileSessionHealth(rows),
+          duty: readDutyInventory(),
+          ...(autoRoute === undefined ? {} : { autoRoute }),
+        })
       }, SESSION_STATUS_SWEEP_MS)
       timer.unref()
       return () => {

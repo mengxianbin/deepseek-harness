@@ -64,6 +64,40 @@ const dutyBroken: SessionHealthState = {
   },
 }
 
+/** A balanced Session plane with NO autoRoute plane attached (plugin absent) — quiet by design. */
+const noAutoRoute: SessionHealthState = {
+  report: { ok: true, total: 1, counts: { running: 1, awaiting: 0, failed: 0, rest: 0 }, issues: [] },
+}
+
+/** Balanced books + a SUSTAINED controller poll failure (2026-11-04 ruling: the shield's third alarm). */
+const autoRouteSustained: SessionHealthState = {
+  report: {
+    ok: true,
+    total: 1,
+    counts: { running: 1, awaiting: 0, failed: 0, rest: 0 },
+    issues: [],
+    autoRoute: {
+      ok: false,
+      failingSince: 1_700_000_000_000,
+      failingForSec: 312,
+      sustained: true,
+      error: 'meter source unreachable: fetch failed (cause: connect ECONNREFUSED 127.0.0.1:7897)',
+      ageSec: 4,
+    },
+  },
+}
+
+/** Balanced books + a TRANSIENT poll miss — nothing ambient may light (狼来了). */
+const autoRouteTransient: SessionHealthState = {
+  report: {
+    ok: true,
+    total: 1,
+    counts: { running: 1, awaiting: 0, failed: 0, rest: 0 },
+    issues: [],
+    autoRoute: { ok: false, failingForSec: 47, sustained: false, error: 'fetch failed', ageSec: 3 },
+  },
+}
+
 afterEach(cleanup)
 
 describe('HealthShield', () => {
@@ -135,5 +169,46 @@ describe('HealthShield', () => {
   it('renders nothing without a health source (minimal assemblies)', () => {
     const view = render(<HealthShield useSessionHealth={undefined} t={t} />)
     expect(view.container.textContent).toBe('')
+  })
+
+  // 2026-11-04 ruling: sustained controller poll failure = the shield's third alarm.
+  it('burns red on a SUSTAINED auto-route poll failure — with its own label, never 对账对不上', () => {
+    render(<HealthShield useSessionHealth={selector => selector(autoRouteSustained)} t={t} />)
+    const label = '安康位：控制器读数持续中断，点击展开明细'
+    const shield = screen.getByLabelText(label).closest('[data-health-state]') as HTMLElement
+    expect(shield.getAttribute('data-health-state')).toBe('broken')
+    // The books balance — the label must not claim a reconciliation break.
+    expect(shield.textContent).not.toContain('对账对不上')
+
+    // The third detail section explains the red: raw error + streak age + sustained tag.
+    fireEvent.click(screen.getByLabelText(label))
+    const detail = document.querySelector('[data-health-detail=""]') as HTMLElement
+    expect(detail.querySelector('[data-health-section="autoRoute"]')?.textContent).toContain('控制器读数中断 312s')
+    expect(detail.textContent).toContain('持续 ≥5 分钟')
+    expect(detail.textContent).toContain('connect ECONNREFUSED')
+    // The other two sections keep their own verdicts (books balance).
+    expect(detail.querySelector('[data-health-section="sessions"]')?.textContent).toContain('对账平')
+  })
+
+  it('stays faint green on a TRANSIENT poll miss — only the detail carries the fact', () => {
+    render(<HealthShield useSessionHealth={selector => selector(autoRouteTransient)} t={t} />)
+    const shield = screen.getByLabelText('安康位：对账平，点击展开明细').closest('[data-health-state]') as HTMLElement
+    expect(shield.getAttribute('data-health-state')).toBe('ok')
+    expect(shield.hasAttribute('data-health-stale')).toBe(false)
+    // Drill-down still shows the raw miss (on-demand investigation, not an alarm).
+    fireEvent.click(screen.getByLabelText('安康位：对账平，点击展开明细'))
+    const detail = document.querySelector('[data-health-detail=""]') as HTMLElement
+    expect(detail.querySelector('[data-health-section="autoRoute"]')?.textContent).toContain('控制器读数中断 47s')
+    expect(detail.textContent).not.toContain('持续 ≥5 分钟')
+  })
+
+  it('shows a quiet not-wired line when the autoRoute plane is absent (optional plugin)', () => {
+    render(<HealthShield useSessionHealth={selector => selector(noAutoRoute)} t={t} />)
+    fireEvent.click(screen.getByLabelText('安康位：对账平，点击展开明细'))
+    const detail = document.querySelector('[data-health-detail=""]') as HTMLElement
+    expect(detail.querySelector('[data-health-section="autoRoute"]')?.textContent).toContain('控制器轮询未接入')
+    // Absent = not attached, NEVER broken.
+    const shield = screen.getByLabelText('安康位：对账平，点击展开明细').closest('[data-health-state]') as HTMLElement
+    expect(shield.getAttribute('data-health-state')).toBe('ok')
   })
 })

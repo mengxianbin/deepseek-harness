@@ -886,33 +886,11 @@
   background: var(--dsw-alias-state-error-primary);
 }
 
-/* FORK (source-badge-redo-1030 v2 "exception-only", 2026-10-30, on the user's
-   design call: a permanently-on dot is redundant while auto-routing is
-   healthy and steals width from the calibrated read-out columns): the dot
-   renders ONLY while it carries information the layout cannot — a failing
-   controller poll (error red) or the 95–99 dead zone (warn + the
-   new-session-default tooltip line). The triggered state speaks through the
-   dimmed rows instead (.glanceRowsFrozen); baseline renders nothing, byte
-   for byte the pre-badge layout. */
-.glanceSourceDot {
-  flex: none;
-  align-self: center;
-  width: 6px;
-  height: 6px;
-  border-radius: 3px;
-  background: var(--dsw-alias-label-secondary);
-  opacity: 0.55;
-}
-
-.glanceSourceDotActive {
-  background: var(--dsw-alias-state-warn-primary);
-  opacity: 1;
-}
-
-.glanceSourceDotError {
-  background: var(--dsw-alias-state-error-primary);
-  opacity: 1;
-}
+/* Source-badge dots fully retired (2026-11-04 用户裁定 双点完全下岗): the
+   error/warn dot classes are gone — usage warnings speak through the bar
+   colors (.glancePercentTrigger/.glanceFillTrigger), the source state
+   through .glanceRowsFrozen, and a failing controller poll through one
+   button-title line. No dot chrome remains in this column. */
 
 /* Triggered phase: the Go window rows stop describing dsh's live spend (the
    active set moved to MiMo official) — dim them rather than adding chrome;
