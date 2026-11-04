@@ -18,6 +18,7 @@ import { resolve } from 'node:path'
 import type { Duplex } from 'node:stream'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import { auditLine } from '@deepseek-ai/dsh-audit-line'
 import type { PeerScope } from '@deepseek-ai/dsh-typert-protocol'
 import compressionMiddleware from 'compression'
 import ipaddr from 'ipaddr.js'
@@ -545,6 +546,32 @@ export class WebServer extends Service {
     // client dropping mid-body). Per-request failures log and answer 400 —
     // never a process exit.
     const listener = (req: IncomingMessage, res: ServerResponse): void => {
+      /* One journal line per inbound HTTP exchange, taken at the single point
+      every named route, fence exit (401/405), resource, and fallback passes —
+      the launcher captures stdout, so this is the access trail forensic
+      timelines read. Mutations and every non-2xx record; successful GET/HEAD
+      stay out (probe volume). An exchange closed before `finish` records `-`
+      as its status: it never completed a response. Direct `auditLine` to
+      stdout, not `ctx.logger`: the shipped profile has no console exporter. */
+      const started = Date.now()
+      let audited = false
+      const audit = (): void => {
+        if (audited) return
+        audited = true
+        const method = req.method ?? '-'
+        const completed = res.writableFinished
+        if (completed && (method === 'GET' || method === 'HEAD')
+          && res.statusCode >= 200 && res.statusCode < 300) return
+        /* v8 ignore next -- `?? '/'` arm: node:http always sets url on server requests. */
+        const path = (req.url ?? '/').replace(/\s+/gu, '_')
+        // `socket` can be absent: a test harness may emit a synthesized request
+        // object that carries only method, url, and headers.
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- synthesized test requests carry no socket.
+        const remote = req.socket?.remoteAddress ?? '-'
+        auditLine(`access ${method} ${path} ${completed ? res.statusCode : '-'} ${remote} ${Date.now() - started}`)
+      }
+      res.once('finish', audit)
+      res.once('close', audit)
       const next = (): void => {
         void handle(req, res).catch((err: unknown) => {
           this.ctx.logger.warn(err instanceof Error ? err : new Error(String(err)))

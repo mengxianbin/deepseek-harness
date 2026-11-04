@@ -24,6 +24,9 @@
       "path": "../../util/atomic-write"
     },
     {
+      "path": "../../util/audit-line"
+    },
+    {
       "path": "../../../vendor/include"
     }
   ]

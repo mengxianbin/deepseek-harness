@@ -83,6 +83,9 @@
       "path": "../../llm/llm"
     },
     {
+      "path": "../../util/audit-line"
+    },
+    {
       "path": "../../util/deque"
     },
     {

@@ -139,6 +139,38 @@ describe('ApiSession Agent lookup and recovery', () => {
     })
   })
 
+  it('writes a resumed session journal line with reason=attach after a successful resume', async () => {
+    const { ctx, agents } = await harness()
+    const meta = header('resumed-line')
+    const resumed = unpublishedAgent(ctx, meta)
+    vi.spyOn(ctx.agents, 'resume').mockResolvedValue({
+      agent: resumed,
+      dispose: () => Promise.resolve(),
+    })
+    const observed = {
+      source: 'prepared',
+      header: meta,
+      events: [],
+      cursor: -1,
+      projections: { asOfSeq: -1, values: {} },
+      retain: vi.fn(),
+      [Symbol.dispose]: vi.fn(),
+    } as unknown as SessionObservation
+    const written: string[] = []
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: string | Uint8Array) => {
+      written.push(String(chunk))
+      return true
+    })
+    try {
+      await expect(agents.resolveObservedAgent(observed)).resolves.toEqual({ agent: resumed })
+    } finally {
+      spy.mockRestore()
+    }
+    // One timestamped journal line on stdout, the stream the launcher captures.
+    expect(written).toHaveLength(1)
+    expect(written[0]).toMatch(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] resumed session resumed-line reason=attach\n$/u)
+  })
+
   it('projects live Agent contexts and maps missing cold identities through Typert lookup failures', async () => {
     const { ctx } = await harness()
     const live = agent(ctx, header('live'))

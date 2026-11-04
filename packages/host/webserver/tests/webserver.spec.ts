@@ -576,6 +576,42 @@ describe('real Loader composition', () => {
     await expect(request(port, '/probe')).rejects.toThrow()
   })
 
+  it('writes a timestamped access line for a rejected request while skipping successful GETs', { timeout: 60_000 }, async () => {
+    const loaded = await loadComposition()
+    const server = loaded.webServer
+    const port = server.port
+    // The 401 fence models the production auth exit: a request arriving
+    // without a token must still leave one `[ts] access …` journal line on
+    // stdout, the stream the launcher captures as the host log.
+    server.register({ kind: 'exact', path: '/fence', handler: (_req, res) => { res.writeHead(401); res.end('no token\n') } })
+    server.register({ kind: 'exact', path: '/ok', handler: (_req, res) => { res.writeHead(200); res.end('OK') } })
+    const written: string[] = []
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: string | Uint8Array) => {
+      written.push(String(chunk))
+      return true
+    })
+    try {
+      expect(await request(port, '/fence')).toMatchObject({ status: 401 })
+      expect(await request(port, '/ok')).toMatchObject({ status: 200 })
+      expect(await request(port, '/ok', { method: 'POST' })).toMatchObject({ status: 200 })
+      expect(await request(port, '/no/such/route')).toMatchObject({ status: 404 })
+      // `finish` can trail the client's body read by a tick; bound the wait.
+      for (let attempt = 0; attempt < 50 && written.filter(line => line.includes('] access ')).length < 3; attempt++) {
+        await new Promise((resolve) => { setTimeout(resolve, 10) })
+      }
+    } finally {
+      spy.mockRestore()
+    }
+    const lines = written.filter(line => line.includes('] access '))
+    expect(lines).toHaveLength(3)
+    const rejected = lines.find(line => line.includes('GET /fence 401 '))
+    expect(rejected).toMatch(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] access GET \/fence 401 127\.0\.0\.1 \d+\n$/u)
+    expect(lines.some(line => line.includes('POST /ok 200 '))).toBe(true)
+    expect(lines.some(line => line.includes('GET /no/such/route 404 '))).toBe(true)
+    expect(lines.some(line => line.includes('GET /ok 200'))).toBe(false)
+    await loaded.fiber.dispose()
+  })
+
   it('answers resource routes over HTTP with the Fetch response, streamed and cancelled with the client', { timeout: 60_000 }, async () => {
     const loaded = await loadComposition()
     const server = loaded.webServer

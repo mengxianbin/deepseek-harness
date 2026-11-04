@@ -32,6 +32,7 @@
     "@deepseek-ai/cordis": "workspace:~"
   },
   "dependencies": {
+    "@deepseek-ai/dsh-audit-line": "workspace:*",
     "@deepseek-ai/schemastery": "workspace:~",
     "compression": "^1.8.1",
     "ipaddr.js": "^2.5.0",

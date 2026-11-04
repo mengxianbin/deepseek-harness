@@ -27,6 +27,9 @@
       "path": "../../boot/config-editor"
     },
     {
+      "path": "../../typert/protocol"
+    },
+    {
       "path": "../../../vendor/loader"
     }
   ]

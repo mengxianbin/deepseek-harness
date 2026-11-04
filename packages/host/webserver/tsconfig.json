@@ -16,6 +16,9 @@
     },
     {
       "path": "../../typert/protocol"
+    },
+    {
+      "path": "../../util/audit-line"
     }
   ]
 }

@@ -19,6 +19,62 @@ it('persists a model edit, updates the real consumer without remounting, and res
   expect(restored.agentDefaultModel.currentSelection()).toEqual({ provider: 'test', model: 'changed' })
 })
 
+/** Capture every `process.stdout.write` while `body` runs, as chunks. */
+async function captureStdout(body: () => Promise<void>): Promise<string[]> {
+  const written: string[] = []
+  const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: string | Uint8Array) => {
+    written.push(String(chunk))
+    return true
+  })
+  try {
+    await body()
+  } finally {
+    spy.mockRestore()
+  }
+  return written
+}
+
+it('writes a patch written journal line naming the changed keys', async () => {
+  const { ctx } = await fixture()
+  // A direct in-process settings write is the shape that saved the 04:12
+  // profile patch without leaving an author: the journal line now records the
+  // changed leaf keys, and no caller identity exists, so the author is unknown.
+  const written = await captureStdout(async () => {
+    await ctx.settings.mutate('default-model', [{ op: 'set', path: ['model'], value: 'line-probe' }])
+  })
+  const line = written.find(text => text.includes('] patch written '))
+  expect(line).toMatch(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] patch written keys=\[default-model\.model\] by=unknown\n$/u)
+  expect(ctx.settings.describe({ redactSecrets: true }).find(row => row.ns === 'default-model')!.value)
+    .toMatchObject({ model: 'line-probe' })
+})
+
+it('records the calling peer as the author when a gateway context drives the write', async () => {
+  const { ctx } = await fixture()
+  // Mirrors how the Typert Gateway derives the receiver: the service view is
+  // read from a Context carrying the call, so `ctx.invocation` names the Peer
+  // the write speaks for — the identity the journal line must record.
+  const invocation = {
+    request: { namespace: 'settings', method: 'mutate', args: {} },
+    service: 'settings',
+    peer: {
+      id: 'peer-audit-1',
+      ctx,
+      principal: { kind: 'owner' },
+      signal: new AbortController().signal,
+      interactions: 'answer',
+      dispose: () => Promise.resolve(),
+    },
+    signal: new AbortController().signal,
+    uplink: function () { return (async function* () {})() },
+  }
+  const remoteSettings = ctx.extend({ invocation }).get('settings') as typeof ctx.settings
+  const written = await captureStdout(async () => {
+    await remoteSettings.mutate('default-model', [{ op: 'set', path: ['model'], value: 'peer-probe' }])
+  })
+  const line = written.find(text => text.includes('] patch written '))
+  expect(line).toMatch(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] patch written keys=\[default-model\.model\] by=peer:peer-audit-1\n$/u)
+})
+
 it('isolates instances, hides ordinary fields, rejects invalid edits, and redacts secrets', async () => {
   const { ctx, profile } = await fixture()
   const before = readFileSync(profile.patchPath, 'utf8')

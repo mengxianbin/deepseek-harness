@@ -8,6 +8,7 @@ import type z from '@deepseek-ai/schemastery'
 import { interpolate, type Entry } from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-config-editor'
 import type {} from '@deepseek-ai/dsh-app-boot'
+import type {} from '@deepseek-ai/dsh-typert-protocol'
 import { redactSecrets, type RedactedSecret } from './redact.ts'
 import { isVolatilePath, plainConfig, projectForm, volatileForm } from './schema.ts'
 import type { SettingsNamespace } from './types.ts'
@@ -388,6 +389,24 @@ export class SettingsForms extends Service {
     for (const path of paths) {
       if (path.length && !isVolatilePath(schema, path)) throw new Error(`Config field "${path.join('.')}" is not volatile`)
     }
+    // A gateway write carries this call's Peer, and that peer id is the
+    // connection identity the `patch written` journal line records; a caller
+    // reaching Settings in-process (host defaults, agent saves) reads no
+    // invocation and leaves the author `unknown`. Whitespace folds so the
+    // author stays one space-free field.
+    // The Remote call's Peer is the connection identity behind a gateway
+    // write. Outside a Remote call the accessor answers `undefined`, and a
+    // composition that registered no Remote service refuses the read with
+    // `cannot get property` — both mean no caller identity, so the journal
+    // line records `unknown`. Whitespace folds so the author stays one
+    // space-free field.
+    let by: string | undefined
+    try {
+      const invocation = this.ctx.invocation
+      by = invocation === undefined ? undefined : `peer:${invocation.peer.id}`.replace(/\s+/gu, '_')
+    } catch {
+      by = undefined
+    }
     await this.ownerContext.configEditor.edit(entry, (raw, inherited) => {
       const descriptor = this.describe().find(row => row.ns === ns)
       if (descriptor === undefined) throw new Error(`Plugin entry "${ns}" is no longer configurable`)
@@ -419,7 +438,7 @@ export class SettingsForms extends Service {
         return result
       }
       return mergeLayers(strip(raw, form), next) as Record<string, unknown>
-    })
+    }, by)
     this.describe()
   }
 

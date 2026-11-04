@@ -1603,6 +1603,9 @@ importers:
 
   packages/api/session-controller:
     dependencies:
+      '@deepseek-ai/dsh-audit-line':
+        specifier: workspace:*
+        version: link:../../util/audit-line
       '@deepseek-ai/dsh-brand':
         specifier: workspace:*
         version: link:../../util/brand
@@ -2093,6 +2096,9 @@ importers:
       '@deepseek-ai/dsh-atomic-write':
         specifier: workspace:*
         version: link:../../util/atomic-write
+      '@deepseek-ai/dsh-audit-line':
+        specifier: workspace:*
+        version: link:../../util/audit-line
       js-yaml:
         specifier: ^4.3.2
         version: 4.3.2
@@ -12582,6 +12588,9 @@ importers:
 
   packages/host/webserver:
     dependencies:
+      '@deepseek-ai/dsh-audit-line':
+        specifier: workspace:*
+        version: link:../../util/audit-line
       '@deepseek-ai/schemastery':
         specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery
@@ -14982,6 +14991,9 @@ importers:
       '@deepseek-ai/dsh-session':
         specifier: workspace:*
         version: link:../../core/session
+      '@deepseek-ai/dsh-typert-protocol':
+        specifier: workspace:*
+        version: link:../../typert/protocol
 
   packages/shell/bash-local:
     dependencies:
@@ -17184,6 +17196,12 @@ importers:
         version: link:../protocol
 
   packages/util/atomic-write:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+
+  packages/util/audit-line:
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:~

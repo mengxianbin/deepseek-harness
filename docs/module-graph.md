@@ -9,6 +9,7 @@ Peer dependencies among the `@deepseek-ai/dsh-*` harness packages. A peer means 
 flowchart TD
   subgraph group_util["packages/util"]
     pkg_atomic_write["atomic-write"]
+    pkg_audit_line["audit-line"]
     pkg_brand["brand"]
     pkg_chunked_list["chunked-list"]
     pkg_deque["deque"]
@@ -1506,6 +1507,7 @@ flowchart TD
 | `package` | `group` | `peerDependencies` |
 | --- | --- | --- |
 | [`atomic-write`](../packages/util/atomic-write) | `util` | — |
+| [`audit-line`](../packages/util/audit-line) | `util` | — |
 | [`brand`](../packages/util/brand) | `util` | — |
 | [`chunked-list`](../packages/util/chunked-list) | `util` | — |
 | [`deque`](../packages/util/deque) | `util` | — |

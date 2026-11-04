@@ -9,6 +9,7 @@ import type { Entry, EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-hmr'
 import { composeEntries, loadProfileDirectory, readProfilePatches, reconcileProfilePatches } from '@deepseek-ai/dsh-app-boot'
 import { resolveLinkedPath, withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
+import { auditLine } from '@deepseek-ai/dsh-audit-line'
 import { isMap, isSeq, parseDocument, Scalar, visit } from 'yaml'
 
 declare module '@deepseek-ai/cordis' {
@@ -20,6 +21,28 @@ declare module '@deepseek-ai/cordis' {
 
 function flatten(rows: EntryOptions[]): EntryOptions[] {
   return rows.flatMap(row => [row, ...row.group && Array.isArray(row.config) ? flatten(row.config as EntryOptions[]) : []])
+}
+
+/** Cap on changed-key paths printed in one `patch written` journal line. */
+const MAX_AUDIT_KEYS = 24
+
+/** Collect the dotted leaf paths whose value differs between two raw configs. */
+function changedKeyPaths(current: Record<string, unknown>, next: Record<string, unknown>): string[] {
+  const paths: string[] = []
+  const walk = (before: unknown, after: unknown, path: readonly string[]): void => {
+    if (isDeepStrictEqual(before, after)) return
+    const beforeObject = typeof before === 'object' && before !== null && !Array.isArray(before)
+    const afterObject = typeof after === 'object' && after !== null && !Array.isArray(after)
+    if (beforeObject && afterObject) {
+      const keys = new Set([...Object.keys(before), ...Object.keys(after)])
+      for (const key of keys) walk((before as Record<string, unknown>)[key], (after as Record<string, unknown>)[key], [...path, key])
+      return
+    }
+    if (path.length === 0) return
+    paths.push(path.join('.'))
+  }
+  walk(current, next, [])
+  return paths
 }
 
 /** Persist complete raw configs and apply them through the normal Loader path. */
@@ -82,11 +105,15 @@ export class ConfigEditor extends Service {
   /** Validate, persist, and reconcile a plugin's next config; ordinary fields keep normal lifecycle rules.
    * @param entry Current Loader entry, also used to detect replacement during the write.
    * @param change Derive a raw config from the current entry and its inherited layer.
+   * @param by Author of the write — the Remote caller's `peer:<id>` when the change
+   *   arrived over the gateway, `unknown` for in-process callers; recorded on the
+   *   `patch written` journal line once the write commits.
    * @returns Fulfillment after Loader reconciliation completes.
    */
   async edit(
     entry: Entry,
     change: (current: Record<string, unknown>, inherited: Record<string, unknown>) => Record<string, unknown>,
+    by: string = 'unknown',
   ): Promise<void> {
     const run = async (): Promise<void> => {
       const path = this.documentPath
@@ -146,6 +173,17 @@ export class ConfigEditor extends Service {
           await reconcileProfilePatches(this.ownerContext.root, beforePatches, 'dsh')
           throw error
         }
+        // A committed patch write is the configuration-change audit point: the
+        // profile patch is the first cause of every reload chain, yet nothing
+        // recorded who wrote it or which keys changed. Emitted only after
+        // reconciliation succeeds — a rolled-back write leaves no line; direct
+        // stdout so the launcher captures it into the host journal (a logger
+        // console exporter is not mounted in the shipped profile).
+        const changed = changedKeyPaths(current, next).map(path => `${entry.options.id}.${path}`)
+        const keys = changed.length > MAX_AUDIT_KEYS
+          ? `${changed.slice(0, MAX_AUDIT_KEYS).join(',')},…+${changed.length - MAX_AUDIT_KEYS}`
+          : changed.join(',')
+        auditLine(`patch written keys=[${keys}] by=${by}`)
       })
     }
     const hmr = this.ownerContext.get('hmr')

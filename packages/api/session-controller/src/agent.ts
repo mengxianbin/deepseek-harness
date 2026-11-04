@@ -7,6 +7,7 @@ import type { Agent, AgentOptions, AgentSetup } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
+import { auditLine } from '@deepseek-ai/dsh-audit-line'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { SessionQueryError, type SessionObservation } from '@deepseek-ai/dsh-session-query'
@@ -345,11 +346,16 @@ export class ApiSessionAgentController {
     if (published !== undefined && hasApiSessionSubagentOwner(this.ctx, published, live)) {
       throw new ApiSessionSubagentOwnership(sessionId)
     }
-    return (await this.ctx.agents.resume({
+    // One journal line after a successful resume: the attach path is how a Web
+    // client pulls an existing Session back to life, and the Host log kept no
+    // record of which session rose when. stdout lands in dsh-web.log.
+    const resumed = await this.ctx.agents.resume({
       resumeSessionId: sessionId,
       agentOptions: this.agentOptions(),
       setup: composition.setup,
-    })).agent
+    })
+    auditLine(`resumed session ${sessionId} reason=attach`)
+    return resumed.agent
   }
 
   private async inOrder<Value>(sessionId: SessionId, operation: () => Promise<Value>): Promise<Value> {
@@ -400,11 +406,13 @@ export class ApiSessionAgentController {
     if (!reusable) return this.createMinted(request.cwd, composition, request.attach)
     this.assertPresetApplicable(sessionId, request.agentPreset)
     try {
-      return (await this.ctx.agents.resume({
+      const resumed = await this.ctx.agents.resume({
         resumeSessionId: sessionId,
         agentOptions: this.agentOptions(),
         setup: this.reuseSetup(composition),
-      })).agent
+      })
+      auditLine(`resumed session ${sessionId} reason=claim`)
+      return resumed.agent
     } catch (error: unknown) {
       if (error instanceof ApiSessionStartedSinceObserved) {
         return this.createMinted(request.cwd, composition, request.attach)
