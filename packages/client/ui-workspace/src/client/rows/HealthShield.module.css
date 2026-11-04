@@ -67,15 +67,24 @@
    header row may clip its overflow (and its icon cluster is narrow), so the
    detail must not live inside the row's box. Row vocabulary lives in
    HealthDetail.module.css (one body, two entrances). */
+/* Opaque surface (2026-11-04 user report: 值守告警 detail read as 半透明 — the
+   page's own rows showed through it and the two texts collided). The panel
+   used `--dsw-alias-surface-overlay` and `--dsw-alias-border-l`, NEITHER of
+   which is defined anywhere in the token set, so both declarations were
+   invalid at computed-value time and the panel fell back to a transparent
+   background with no border. Corrected to the real tokens: `--dsw-alias-bg-overlay`
+   (ui-theme: "Overlay and popover background", opaque in both themes) and the
+   `border-l2` hairline. A floating detail must cover what it overlaps —
+   readability outranks seeing the page through it. */
 .detail {
   position: fixed;
   z-index: 1000;
   min-width: 220px;
   max-width: 360px;
   padding: 6px 8px;
-  border: 1px solid var(--dsw-alias-border-l);
+  border: 1px solid var(--dsw-alias-border-l2);
   border-radius: var(--dsw-radius-md);
-  background: var(--dsw-alias-surface-overlay);
+  background: var(--dsw-alias-bg-overlay);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
   font-size: 11px;
   color: var(--dsw-alias-label-secondary);

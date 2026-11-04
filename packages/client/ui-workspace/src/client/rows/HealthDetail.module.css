@@ -4,10 +4,13 @@
    expansion, so the two entrances show the same two segments. 三态纪律
    (清单档 §6.3): healthy items are hidden behind the summary counts, 有意停用
    renders grey (never lit), failed renders red with the collector's reasons. */
+/* `border-l` (no digit) is not a defined token — the declaration silently
+   dropped the divider. `border-l2` is the real hairline (2026-11-04 fix,
+   same ghost-token pair as HealthShield's .detail surface). */
 .section + .section {
   margin-top: 6px;
   padding-top: 5px;
-  border-top: 1px solid var(--dsw-alias-border-l);
+  border-top: 1px solid var(--dsw-alias-border-l2);
 }
 
 .sectionTitle {
