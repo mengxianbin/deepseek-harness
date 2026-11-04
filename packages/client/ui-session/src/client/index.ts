@@ -945,9 +945,17 @@ export class UiSession extends Service {
       const remembered = this.unreadStops.get(id)
       // The Host folds the last turn's end reason into a durable projection
       // (collab step2 §7.2; 绿点耐久裁定 2026-11-01): every end reason rides
-      // it now — a failure or a crash interruption reads red and any clean
-      // end (completed / aborted / blocked) reads green — so both marks
+      // it now — a failure, a crash interruption, or an abort reads red and a
+      // genuinely clean end (completed / blocked) reads green — so both marks
       // survive a refresh and a restart until a later turn supersedes them.
+      // The abort flip (统一红裁定 2026-11-04): `aborted` used to ride the
+      // green side, so a turn an outside force cut short (a profile hot-reload
+      // tearing the agent-loop fiber down, a host dispose) lit「有新完成」on a
+      // row holding nothing completed — the icon promised work that was not
+      // there. A user-stopped turn carries the same reason and turns red with
+      // it; the sub-reason never reaches this projection (the row folds only
+      // `{kind, at}`), and splitting it would need the projection shape change
+      // the 2026-11-03 甲案 ruling rejected for its 1191-row mass mismatch.
       // The in-memory unread map still wins while it holds, being the live
       // observation.
       const durableKind = list.byId[id]?.projectionValues?.lastTurnOutcome?.kind
@@ -987,12 +995,13 @@ export class UiSession extends Service {
       // Agent always reports running for as long as its own turn stays open.
       const openTurn = list.byId[id]?.projectionValues?.turnBoundary?.openTurnStartSeq != null
       const diedMidTurn = openTurn && this.running.get(id) === false
-      const durableFailed = durableKind === 'error' || durableKind === 'interrupted' || diedMidTurn
+      const durableFailed = durableKind === 'error' || durableKind === 'interrupted' || durableKind === 'aborted' || diedMidTurn
         ? 'failed' as const
         : undefined
       const durableClean = durableKind === undefined
         || durableKind === 'error'
         || durableKind === 'interrupted'
+        || durableKind === 'aborted'
         ? undefined
         : 'completed' as const
       const outcome = remembered ?? durableFailed ?? receiptOutcome ?? durableClean

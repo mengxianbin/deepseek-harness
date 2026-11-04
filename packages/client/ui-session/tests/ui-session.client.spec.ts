@@ -752,14 +752,28 @@ describe('UiSession status', () => {
     expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(true)
     expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('completed')
 
-    // Aborted and blocked ends read green too — every non-error end reason.
+    // A blocked end still reads green — only `aborted` joined the red side
+    // (统一红裁定 2026-11-04), so the clean side keeps a non-completed case.
     bench.list.update((draft) => {
-      draft.byId[id]!.projectionValues = { lastTurnOutcome: { kind: 'aborted', at: 6 } }
+      draft.byId[id]!.projectionValues = { lastTurnOutcome: { kind: 'blocked', at: 6 } }
     })
     expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('completed')
 
+    // An aborted end reads red: a turn an outside force cut short (a profile
+    // hot-reload tearing the agent-loop fiber down) used to light「有新完成」
+    // on a row holding nothing completed — the icon promised work that was
+    // not there.
+    bench.list.update((draft) => {
+      draft.byId[id]!.projectionValues = { lastTurnOutcome: { kind: 'aborted', at: 6 } }
+    })
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('failed')
+
     // A live in-memory failure outranks the stale clean projection — the
-    // observation is the fresher fact.
+    // observation is the fresher fact. The projection is restored to a clean
+    // end first so the rank order is what this asserts, not the abort flip.
+    bench.list.update((draft) => {
+      draft.byId[id]!.projectionValues = { lastTurnOutcome: { kind: 'completed', at: 6 } }
+    })
     bench.emitStatus(id, true)
     bench.emitError(id, 'Connection error')
     bench.emitStatus(id, false)
@@ -806,6 +820,30 @@ describe('UiSession status', () => {
     bench.emitStatus(id, true)
     expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(true)
     expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('failed')
+  })
+
+  it('lights the durable red mark for an aborted turn (中止统一红, ruling 2026-11-04)', () => {
+    const ctx = new Context()
+    const bench = createSessionsBench(ctx)
+    const id = sessionId('durable-aborted')
+    bench.binding(id)
+    const service = createUiSession(ctx, bench)
+
+    // The Host folds the abort's end reason into the projection; the row
+    // lights red with no in-memory stop at all — the profile hot-reload /
+    // host-dispose scenario where the map is empty and nothing completed.
+    bench.list.update((draft) => {
+      draft.byId[id]!.projectionValues = { lastTurnOutcome: { kind: 'aborted', at: 5 } }
+    })
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(true)
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('failed')
+
+    // A later clean end supersedes the abort — the durable red is not sticky
+    // past a turn that did complete.
+    bench.list.update((draft) => {
+      draft.byId[id]!.projectionValues = { lastTurnOutcome: { kind: 'completed', at: 9 } }
+    })
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('completed')
   })
 
   it('lights the durable red mark for a turn nothing closed (被打断未重开红点, ruling 2026-11-02)', () => {
