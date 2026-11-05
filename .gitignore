@@ -66,3 +66,17 @@ packages/api/workspace-files/src/client/watch-status.js*
 /.anonymous-user-id
 packages/util/home-paths/src/index.js*
 packages/util/home-paths/src/index.d.ts*
+
+# src 原地发射产物（规则同上，2026-11-05 批；发射源未定位挂账，见 m-note temp-file-directory-rules §3.2 批注）
+packages/llm/deepseek-llm-api-extensions/src/*.js
+packages/llm/deepseek-llm-api-extensions/src/*.js.map
+packages/llm/deepseek-llm-api-extensions/src/*.d.ts*
+packages/test-support/llm-replay/src/*.js
+packages/test-support/llm-replay/src/*.js.map
+packages/test-support/llm-replay/src/*.d.ts*
+packages/test-support/loader-smoke/src/*.js
+packages/test-support/loader-smoke/src/*.js.map
+packages/test-support/loader-smoke/src/*.d.ts*
+packages/test-support/session-snapshot/src/*.js
+packages/test-support/session-snapshot/src/*.js.map
+packages/test-support/session-snapshot/src/*.d.ts*
