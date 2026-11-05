@@ -1,17 +1,18 @@
 // Shared IconActions chrome for user and assistant messages: copy
-// live, optional branch wiring, and an optional date-aware clock.
+// live (time-stamped for pasted excerpts), optional branch wiring, and an
+// optional date-aware clock.
 
 import { useId, type ReactNode } from 'react'
 import {
   IconBranchOutlineRegular, IconCheckOutlineRegular, IconCopyOutlineRegular, Tooltip, useClipboardCopy,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatViewSlotProps } from '../contract/slots.ts'
-import { formatMessageClock } from './message-chrome.ts'
+import { formatMessageClock, formatMessageStamp } from './message-chrome.ts'
 import { useCalendarDay } from './use-calendar-day.ts'
 import css from './MessageIconActions.module.css'
 
 export interface MessageIconActionsProps {
-  /** Plain text the copy action writes. */
+  /** Plain text the copy action writes; with a `time` it leads with `[YYYY-MM-DD HH:mm] `. */
   text: string
   /** Unix epoch ms for the clock label; omitted for transient messages. */
   time?: number | undefined
@@ -48,7 +49,10 @@ export function MessageIconActions({
 }: MessageIconActionsProps) {
   const day = useCalendarDay()
   const reasonId = useId()
-  const { copied, onCopy } = useClipboardCopy(text)
+  // E1: text leaving the UI carries the absolute message stamp, so a pasted
+  // excerpt keeps its date; transient messages without a time copy verbatim.
+  const stamped = time === undefined ? text : `[${formatMessageStamp(time)}] ${text}`
+  const { copied, onCopy } = useClipboardCopy(stamped)
   const clockEl = time === undefined ? null : (
     <span className={clock === 'start' ? css.timeStart : css.timeEnd}>
       {formatMessageClock(time, t, day)}

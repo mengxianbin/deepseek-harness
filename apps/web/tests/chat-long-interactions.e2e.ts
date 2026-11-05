@@ -67,6 +67,13 @@ function textContent(content: readonly unknown[]): string {
   }).join('')
 }
 
+/** Test-local absolute stamp, written independently of the production formatter. */
+function stampAt(ms: number): string {
+  const d = new Date(ms)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 async function nextPaint(page: Page): Promise<void> {
   await page.evaluate(async () => {
     await document.fonts.ready
@@ -195,6 +202,8 @@ describe('web e2e: long Chat interaction contract', () => {
     ))
     if (boundary === undefined) throw new Error(`turn ${String(BRANCH_TURN)} has no turn/end event`)
     const expectedUserText = textContent(branchUserEvent.data.content)
+    // E1: message copy leads with the event's absolute [YYYY-MM-DD HH:mm] stamp.
+    const expectedUserCopy = `[${stampAt(branchUserEvent.time)}] ${expectedUserText}`
 
     const turnNavigation = page.getByRole('navigation', { name: 'Turn navigation' })
     await turnNavigation.waitFor({ state: 'visible', timeout: 15_000 })
@@ -305,7 +314,7 @@ describe('web e2e: long Chat interaction contract', () => {
     await userRow.hover()
     await userRow.getByRole('button', { name: 'Copy', exact: true }).click()
     await expect.poll(() => page.evaluate(() => navigator.clipboard.readText()), { timeout: 5_000 })
-      .toBe(expectedUserText)
+      .toBe(expectedUserCopy)
 
     const existing = new Set(scaffold.ctx.agents.list().map(agent => agent.id))
     await turnTailRow.hover()

@@ -98,3 +98,17 @@ export function formatMessageClock(time: number, t: ClockTranslate, now: number 
   const md = d.getFullYear() === n.getFullYear() ? t('clock.md', params) : t('clock.ymd', params)
   return `${md} ${clock}`
 }
+
+/**
+ * Absolute local stamp for copied message text: `YYYY-MM-DD HH:mm`. The
+ * on-screen clock above stays compact and date-aware, but text leaving the UI
+ * must carry its full date so a pasted excerpt reads unambiguous out of
+ * context (E1 copy header). Pure: the instant is fixed, so it consumes no
+ * locale seat and needs no calendar-day refresh.
+ * @param time - Unix epoch ms from the source session event.
+ * @returns Zero-padded local date and 24-hour clock.
+ */
+export function formatMessageStamp(time: number): string {
+  const d = new Date(time)
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+}

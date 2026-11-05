@@ -43,6 +43,13 @@ let renderUserContent: ReturnType<typeof createUserContentFixture>
 beforeEach(() => { renderUserContent = createUserContentFixture() })
 const RETRY_ID = 'retry-fixture' as Extract<ConversationNode, { kind: 'model-retry' }>['retryId']
 
+/** Test-local absolute stamp, written independently of the production formatter. */
+function stampAt(ms: number): string {
+  const d = new Date(ms)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 // Recency scans the whole transcript; a detached fixture is its own latest row.
 const useDetachedChat: ChatNodeViewProps['useChat'] = bindSnapshotSelector({
   subscribe: () => () => {},
@@ -175,7 +182,7 @@ describe('MessageItem arms', () => {
     expect(resolved.container.textContent).toContain('/123 then ')
   })
 
-  it('user bubbles expose clock / copy and neither branch nor edit; copy writes the text', () => {
+  it('user bubbles expose clock / copy and neither branch nor edit; copy writes the stamped text', () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -202,7 +209,32 @@ describe('MessageItem arms', () => {
     expect(screen.queryByRole('button', { name: '在新对话中分支' })).toBeNull()
     expect(screen.queryByRole('button', { name: '编辑' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '复制' }))
-    expect(writeText).toHaveBeenCalledWith('hello bubble')
+    expect(writeText).toHaveBeenCalledWith(`[${stampAt(time)}] hello bubble`)
+  })
+
+  it('E1 copy leads with the absolute [YYYY-MM-DD HH:mm] stamp of the message time', () => {
+    let copied = ''
+    const writeText = vi.fn((value: string) => {
+      copied = value
+      return Promise.resolve()
+    })
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+    // Fixed local instant = the brief's literal example, independent of the host clock.
+    const time = new Date(2026, 10, 5, 2, 10).getTime()
+    render(
+      <MessageItem t={t} node={{
+        kind: 'user', seq: 1, time,
+        content: [{ type: 'text', text: 'hello bubble' }],
+        source: null,
+      }}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: '复制' }))
+    expect(copied).toBe('[2026-11-05 02:10] hello bubble')
+    expect(copied).toMatch(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\] hello bubble$/)
   })
 
   it('user copy falls back to execCommand when clipboard.writeText is unavailable', () => {
@@ -345,7 +377,7 @@ describe('MessageItem arms', () => {
     expect(view.getByText('steer!')).toBeTruthy()
     expect(view.getByText(/附加内容块/)).toBeTruthy()
     fireEvent.click(view.getByRole('button', { name: '复制' }))
-    expect(writeText).toHaveBeenCalledWith('steer!')
+    expect(writeText).toHaveBeenCalledWith(`[${stampAt(1_000)}] steer!`)
     expect(view.queryByRole('button', { name: '在新对话中分支' })).toBeNull()
   })
 
