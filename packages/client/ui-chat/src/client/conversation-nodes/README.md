@@ -14,6 +14,7 @@ A Turn shows an answer and lets the reader inspect the work behind it. Start wit
 - [How one Turn becomes a transcript](#reading-model)
 - [Whole-Turn folding](#whole-turn-folding)
 - [Row clocks](#row-clocks)
+- [Day separators](#day-separators)
 - [Display modes](#display-modes)
 - [Collapse timing](#collapse-timing)
 - [Replies after collapse](#folded-replies)
@@ -116,6 +117,15 @@ Automatic collapse keeps the process open if hiding it would hide keyboard focus
 Three row classes carry an always-visible clock at the row head as an independent `<time>` element, outside the hover-gated message actions, so a screenshot of tool work or a failure carries its instant. Tool rows stamp their own recorded event time — the stage that began: dispatch while the call runs, the result once it settles. Turn error and max-token notices stamp their recorded event time. Every other timed row stamps the instant that opens a loaded gap of at least ten minutes over the previous timed row in presentation order; rows without a durable time neither clock nor break the chain, and ordinary rows inside the gap keep the hover-only message clock.
 
 The Chat snapshot builder stamps these instants as the node-level `clock` field — key rows unconditionally, gap rows only when the threshold opens them — and the Chat node seat renders the field as the flow item's first child with the shared message-clock formatting and date rules. A row whose only difference is the derived field keeps its stored reference, so ordinary publishes do not re-create rows.
+
+-----
+
+<a id="day-separators"></a>
+## Day separators
+
+When the loaded transcript crosses a local calendar day, the first timed row of the new day opens with a day separator line — `Today`, `Yesterday`, or the date — so consecutive days in a long session read as distinct blocks instead of one run. The loaded window's opening timed row never carries one, because there is no earlier loaded day to cross; rows without a durable time pass through without breaking the chain; a split Assistant row opens the day only on its first part, so the reply row never repeats the line.
+
+The Chat snapshot builder stamps the separator as the node-level `dayBreak` field — local midnight of the day the row opens — in the same presentation-order walk that stamps the row clock, and the Chat node seat renders it above the row clock through the shared `clock.*` templates plus the `clock.today` / `clock.yesterday` keys. The label is a wall-clock fact, so it is computed at render time and the calendar-day hook refreshes it across midnight. Like the clock, a row whose only difference is the derived field keeps its stored reference.
 
 -----
 

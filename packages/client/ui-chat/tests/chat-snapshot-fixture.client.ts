@@ -524,8 +524,8 @@ export function chatSnapshotFixture(input: {
     })
   }
   nodes.sort((left, right) => left.anchorSeq - right.anchorSeq || left.key.localeCompare(right.key))
-  // Mirror production: the builder stamps the always-visible row clock before
-  // ordering, so fixture rows carry the same key-row/gap clocks.
+  // Mirror production: the builder stamps the row chrome (clock + day
+  // separator) before ordering, so fixture rows carry the same stamps.
   const stamped = new RowClockProjector().replace(nodes)
   const ordered = orderedVisibleChatNodes(stamped)
   const store = previous?.nodes instanceof FixtureNodeStore ? previous.nodes : new FixtureNodeStore()

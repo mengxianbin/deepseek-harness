@@ -3632,6 +3632,30 @@ describe('ChatView', () => {
     expect(late.querySelector('[class*="rowClock"]')?.textContent).toBe(formatMessageClock(603_000, h.props.t))
   })
 
+  it('opens a day separator above the first row of each new local day', withClock(new Date(2026, 10, 6, 12, 0).getTime(), () => {
+    const h = makeHarness({ chat: chatSnapshotFixture({
+      nodes: [
+        { ...user(1, 'older day'), time: new Date(2026, 10, 4, 9, 0).getTime() },
+        { ...user(2, 'same older day'), time: new Date(2026, 10, 4, 22, 0).getTime() },
+        { ...user(3, 'yesterday'), time: new Date(2026, 10, 5, 8, 0).getTime() },
+        { ...user(4, 'today'), time: new Date(2026, 10, 6, 8, 0).getTime() },
+      ],
+    }) })
+    const view = render(<h.ChatView {...h.props} />)
+    const rows = view.container.querySelectorAll<HTMLElement>('[data-chat-flow-kind="user"]')
+    expect(rows).toHaveLength(4)
+    const row = (index: number): HTMLElement => rows[index]!
+    // The window's opening row and the same-day follower stay unseparated.
+    expect(row(0).querySelector('[class*="daySeparator"]')).toBeNull()
+    expect(row(1).querySelector('[class*="daySeparator"]')).toBeNull()
+    const yesterday = row(2).querySelector<HTMLElement>('[class*="daySeparator"]')!
+    expect(yesterday.textContent).toBe('昨天')
+    expect(yesterday).toBe(row(2).firstElementChild)
+    expect(row(3).querySelector('[class*="daySeparator"]')?.textContent).toBe('今天')
+    // The row clock keeps its own slot under the separator.
+    expect(row(2).querySelector('[class*="rowClock"]')).not.toBeNull()
+  }))
+
   it('withholds the usage-details trigger when turn usage is outside the window', () => {
     const settled: AssistantMessageNode = {
       kind: 'assistant', seq: 2, time: 2_000, turn: 1, step: 1, blocks: [{ kind: 'text', text: 'answer' }],

@@ -98,6 +98,25 @@
   min-width: 0;
 }
 
+/* Day separator: the first timed row of a new local calendar day opens with
+   its label and a hairline, above the row clock. */
+.daySeparator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: var(--dsw-font-xxs-12);
+  color: var(--dsw-alias-label-tertiary);
+  margin-top: 6px;
+  margin-bottom: 2px;
+}
+
+.daySeparator::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--dsw-alias-border-l2);
+}
+
 /* Row-head clock: key rows (Tool, Turn error, max-token) stamp their own
    event time, and any timed row stamps the instant that opens a loaded gap
    of at least ten minutes. Independent of the hover-gated message actions. */

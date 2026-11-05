@@ -10,7 +10,7 @@ import { isAtOrOutside } from '../contract/group-tree.ts'
 import { isQuestionCallNode, turnProcessAlwaysOpen } from '../contract/turn-process.ts'
 import { turnProcessOpen } from '../stores.ts'
 import { hiddenOrCollapsing } from './flow-motion.ts'
-import { formatMessageClock } from './message-chrome.ts'
+import { formatDaySeparator, formatMessageClock } from './message-chrome.ts'
 import { useCalendarDay } from './use-calendar-day.ts'
 import css from './ChatView.module.css'
 
@@ -151,6 +151,14 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
     loadImage, fileMentions, turnProcess,
   ])
   if (routedNode === undefined || owner === null) return null
+  // One Node, two rows: the reasoning part precedes its reply row, so only the
+  // first part opens the day and a folded reasoning body hides its separator
+  // with the process instead of repeating it on the reply.
+  const reasoningRow = routedNode.kind === 'assistant-step'
+    && routedNode.data.blocks.some(block => block.kind === 'reasoning' && block.text.trim() !== '')
+  const dayBreak = routedNode.dayBreak !== undefined && !(groupPart === 'response' && reasoningRow)
+    ? routedNode.dayBreak
+    : undefined
   // Runtime dispatch owns the correlation: every Node's discriminant is the
   // keyed-slot entry passed alongside that same Node. TypeScript does not
   // distribute an object containing a union into a union of objects itself.
@@ -170,6 +178,9 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
       data-turn-process-member={processMember || undefined}
       data-turn-process-hidden={processHidden || undefined}
     >
+      {dayBreak !== undefined && (
+        <div className={css.daySeparator}>{formatDaySeparator(dayBreak, t, day)}</div>
+      )}
       {routedNode.clock !== undefined && (
         <time className={css.rowClock} dateTime={new Date(routedNode.clock).toISOString()}>
           {formatMessageClock(routedNode.clock, t, day)}

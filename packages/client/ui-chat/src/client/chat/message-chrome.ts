@@ -5,6 +5,9 @@ import type { Translate } from '@deepseek-ai/dsh-client-ui-slots'
 /** The date-template share of the conversation dictionary the clock consumes. */
 export type ClockTranslate = Translate<'clock.md' | 'clock.ymd'>
 
+/** The date-template share of the conversation dictionary a day separator consumes. */
+export type DayBreakTranslate = Translate<'clock.md' | 'clock.ymd' | 'clock.today' | 'clock.yesterday'>
+
 /** The elapsed-duration share of the conversation dictionary. */
 export type RunDurationTranslate =
   Translate<'duration.secondUnit' | 'duration.minuteUnit' | 'duration.hourUnit'>
@@ -111,4 +114,28 @@ export function formatMessageClock(time: number, t: ClockTranslate, now: number 
 export function formatMessageStamp(time: number): string {
   const d = new Date(time)
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+}
+
+/**
+ * Day-separator label for a local calendar day: `clock.today` on the current
+ * day, `clock.yesterday` on the previous one, otherwise the same date
+ * templates the message clock uses (`clock.md` this year, `clock.ymd`
+ * otherwise). Pure: the caller's locale seat and calendar-day reference
+ * supply both cuts, so a midnight rollover only needs a re-render.
+ * @param dayMs - Local midnight (ms) the separator opens.
+ * @param t - translate seat supplying the `clock.*` templates.
+ * @param now - Reference instant for the today/yesterday cut (defaults to wall clock).
+ * @returns Localized day label.
+ */
+export function formatDaySeparator(dayMs: number, t: DayBreakTranslate, now: number = Date.now()): string {
+  const d = new Date(dayMs)
+  const n = new Date(now)
+  const days = Math.round(
+    (Date.UTC(n.getFullYear(), n.getMonth(), n.getDate()) - Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
+      / 86_400_000,
+  )
+  if (days === 0) return t('clock.today')
+  if (days === 1) return t('clock.yesterday')
+  const params = { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate() }
+  return d.getFullYear() === n.getFullYear() ? t('clock.md', params) : t('clock.ymd', params)
 }

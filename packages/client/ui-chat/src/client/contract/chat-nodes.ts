@@ -26,6 +26,13 @@ export interface ChatConversationViewNode extends ConversationViewNode {
    * previous timed row. Absence keeps the row on hover-only clocks.
    */
   readonly clock?: number | undefined
+  /**
+   * Local midnight (ms) of the calendar day this row opens, stamped on the
+   * first timed row after a loaded row of an earlier day. The seat renders it
+   * as a day separator line above the row clock; absence keeps the row
+   * unseparated (including the loaded window's opening row).
+   */
+  readonly dayBreak?: number | undefined
 }
 
 /** Merge-extensible payload registry keyed by final Chat renderer kind. */

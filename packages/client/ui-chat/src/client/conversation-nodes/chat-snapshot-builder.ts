@@ -12,6 +12,7 @@ import type {
   ChatTurnNavigationIndex, ChatTurnProcessPresentation, LegacyConversationSlice, TurnNavigationItem,
 } from '../contract/snapshot.ts'
 import { isAtOrOutside } from '../contract/group-tree.ts'
+import { startOfLocalDay } from '../chat/message-chrome.ts'
 import { locationCoordinates } from './common.ts'
 import { sessionRecallLabels, skillInvocationName } from './event-projection.ts'
 import { GroupTreeSegments } from './group-tree-segments.ts'
@@ -574,13 +575,22 @@ function rowTimeOf(node: ChatConversationViewNode): number | undefined {
   }
 }
 
-function withRowClock(node: ChatConversationViewNode, clock: number | undefined): ChatConversationViewNode {
-  if (node.clock === clock) return node
-  return clock === undefined ? { ...node, clock: undefined } : { ...node, clock }
+/** One row's derived chrome: the always-visible clock and the day separator it opens. */
+interface RowChrome {
+  readonly clock: number | undefined
+  readonly dayBreak: number | undefined
 }
 
-/** Whether two rows are one row apart only by the derived clock field. */
-function sameRowExceptClock(
+/** A row carrying neither derived field. */
+const NO_CHROME: RowChrome = { clock: undefined, dayBreak: undefined }
+
+function withRowChrome(node: ChatConversationViewNode, chrome: RowChrome): ChatConversationViewNode {
+  if (node.clock === chrome.clock && node.dayBreak === chrome.dayBreak) return node
+  return { ...node, clock: chrome.clock, dayBreak: chrome.dayBreak }
+}
+
+/** Whether two rows are one row apart only by the derived clock/day fields. */
+function sameRowExceptChrome(
   previous: ChatConversationViewNode,
   node: ChatConversationViewNode,
 ): boolean {
@@ -598,34 +608,37 @@ function sameRowExceptClock(
 }
 
 /**
- * Align one row's clock while preserving identity: business upserts arrive
- * without the derived field on every publish, so a row that differs from the
- * stored one only by its clock keeps the stored reference instead of being
- * re-stamped into a fresh object each time.
+ * Align a row's derived chrome while preserving identity: business upserts
+ * arrive without the derived fields on every publish, so a row that differs
+ * from the stored one only by its chrome keeps the stored reference instead
+ * of being re-stamped into a fresh object each time.
  */
-function alignRowClock(
+function alignRowChrome(
   node: ChatConversationViewNode,
   previous: ChatConversationViewNode | undefined,
-  clock: number | undefined,
+  chrome: RowChrome,
 ): ChatConversationViewNode {
-  if (previous !== undefined && sameRowExceptClock(previous, node)) {
-    if (previous.clock === clock) return previous
-    return clock === undefined ? node : { ...node, clock }
+  if (previous !== undefined
+    && previous.clock === chrome.clock && previous.dayBreak === chrome.dayBreak
+    && sameRowExceptChrome(previous, node)
+  ) {
+    return previous
   }
-  return withRowClock(node, clock)
+  return withRowChrome(node, chrome)
 }
 
 /**
- * Stamps the always-visible row clock in presentation order: key rows from
- * their own event time, every other timed row when it opens a gap of at least
- * {@link ROW_CLOCK_GAP_MS} over the previous timed row. Stamp values are
- * reference-stable, so the incremental apply path rewrites only rows whose
- * clock actually moved.
+ * Stamps the row chrome in presentation order: the always-visible clock (key
+ * rows from their own event time, every other timed row when it opens a gap
+ * of at least {@link ROW_CLOCK_GAP_MS} over the previous timed row) and the
+ * day separator (the first timed row of each local calendar day after the
+ * loaded window's opening row). Stamp values are reference-stable, so the
+ * incremental apply path rewrites only rows whose chrome actually moved.
  */
 export class RowClockProjector {
   replace(nodes: readonly ChatConversationViewNode[]): readonly ChatConversationViewNode[] {
-    const clocks = this.clocks(nodes)
-    return nodes.map(node => withRowClock(node, clocks.get(node.key)))
+    const chrome = this.chrome(nodes)
+    return nodes.map(node => withRowChrome(node, chrome.get(node.key) ?? NO_CHROME))
   }
 
   apply(
@@ -634,32 +647,41 @@ export class RowClockProjector {
   ): readonly ChatConversationViewNode[] {
     const merged = new Map(store.values().map(node => [node.key, node] as const))
     for (const node of upserts) merged.set(node.key, node)
-    const clocks = this.clocks([...merged.values()])
+    const chrome = this.chrome([...merged.values()])
     const result = new Map(
-      upserts.map(node => [node.key, alignRowClock(node, store.get(node.key), clocks.get(node.key))] as const),
+      upserts.map(node => [node.key, alignRowChrome(node, store.get(node.key), chrome.get(node.key) ?? NO_CHROME)] as const),
     )
     for (const node of store.values()) {
       // A rewritten stored neighbor must never displace this batch's upsert.
       if (result.has(node.key)) continue
-      const stamped = withRowClock(node, clocks.get(node.key))
+      const stamped = withRowChrome(node, chrome.get(node.key) ?? NO_CHROME)
       if (stamped !== node) result.set(node.key, stamped)
     }
     return [...result.values()]
   }
 
-  /** Walk presentation order once; untimed rows neither clock nor break the chain. */
-  private clocks(nodes: readonly ChatConversationViewNode[]): ReadonlyMap<string, number | undefined> {
-    const clocks = new Map<string, number | undefined>()
+  /**
+   * Walk presentation order once; untimed rows neither clock nor break the
+   * chain, and the window's opening timed row never opens a separator.
+   */
+  private chrome(nodes: readonly ChatConversationViewNode[]): ReadonlyMap<string, RowChrome> {
+    const chrome = new Map<string, RowChrome>()
     let previous: number | undefined
+    let previousDay: number | undefined
     for (const node of orderedVisibleChatNodes(nodes)) {
       const time = rowTimeOf(node)
       if (time === undefined) continue
       const clocked = ALWAYS_CLOCKED_KINDS.has(node.kind)
         || (previous !== undefined && time - previous >= ROW_CLOCK_GAP_MS)
-      if (clocked) clocks.set(node.key, time)
+      const day = startOfLocalDay(time)
+      const dayBreak = previousDay !== undefined && day !== previousDay ? day : undefined
+      if (clocked || dayBreak !== undefined) {
+        chrome.set(node.key, { clock: clocked ? time : undefined, dayBreak })
+      }
       previous = time
+      previousDay = day
     }
-    return clocks
+    return chrome
   }
 }
 

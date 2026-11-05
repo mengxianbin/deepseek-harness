@@ -202,6 +202,8 @@ export const zh = {
   'json.truncated': '… 已截断，共 {total} 字符',
   'clock.md': '{m}月{d}日',
   'clock.ymd': '{y}年{m}月{d}日',
+  'clock.today': '今天',
+  'clock.yesterday': '昨天',
 } satisfies Record<string, string>
 
 /** Chat dictionary key union. */
@@ -406,6 +408,8 @@ export const en = {
   'json.truncated': '… truncated, {total} characters total',
   'clock.md': '{m}/{d}',
   'clock.ymd': '{y}-{m}-{d}',
+  'clock.today': 'Today',
+  'clock.yesterday': 'Yesterday',
 } satisfies Record<ChatKey, string>
 
 /** Japanese copy, checked against the English keys. */
@@ -605,6 +609,8 @@ export const ja = {
   'json.truncated': '… 省略表示、全{total}文字',
   'clock.md': '{m}/{d}',
   'clock.ymd': '{y}-{m}-{d}',
+  'clock.today': '今日',
+  'clock.yesterday': '昨日',
   'message.failure.userStopped': 'このターンはあなたが停止しました——モデルは完全な返信を書き終えていません',
   'stats.dialog.retries': 'モデルの再試行',
 } satisfies Record<keyof typeof en, string>
@@ -806,6 +812,8 @@ export const es = {
   'json.truncated': '… truncado, caracteres {total} en total',
   'clock.md': '{m}/{d}',
   'clock.ymd': '{y}-{m}-{d}',
+  'clock.today': 'Hoy',
+  'clock.yesterday': 'Ayer',
   'message.failure.userStopped': 'Este turno lo detuviste tú; el modelo no terminó una respuesta completa.',
   'stats.dialog.retries': 'Reintentos del modelo',
 } satisfies Record<keyof typeof en, string>
@@ -1007,6 +1015,8 @@ export const fr = {
   'json.truncated': '… tronqué, nombre total de caractères {total}',
   'clock.md': '{m}/{d}',
   'clock.ymd': '{y}-{m}-{d}',
+  'clock.today': "Aujourd'hui",
+  'clock.yesterday': 'Hier',
   'message.failure.userStopped': 'Ce tour a été arrêté par vous ; le modèle n’a pas terminé une réponse complète.',
   'stats.dialog.retries': 'Nouvelles tentatives du modèle',
 } satisfies Record<keyof typeof en, string>
@@ -1208,6 +1218,8 @@ export const de = {
   'json.truncated': '… gekürzt, {total} Zeichen insgesamt',
   'clock.md': '{m}/{d}',
   'clock.ymd': '{y}-{m}-{d}',
+  'clock.today': 'Heute',
+  'clock.yesterday': 'Gestern',
   'message.failure.userStopped': 'Diese Runde wurde von Ihnen gestoppt; das Modell hat keine vollständige Antwort fertiggestellt.',
   'stats.dialog.retries': 'Modell-Wiederholungen',
 } satisfies Record<keyof typeof en, string>
@@ -1409,6 +1421,8 @@ export const ru = {
   'json.truncated': '… усечено, всего символов {total}',
   'clock.md': '{m}/{d}',
   'clock.ymd': '{y}-{m}-{d}',
+  'clock.today': 'Сегодня',
+  'clock.yesterday': 'Вчера',
   'message.failure.userStopped': 'Этот ход остановили вы; модель не завершила полный ответ.',
   'stats.dialog.retries': 'Повторы модели',
 } satisfies Record<keyof typeof en, string>
@@ -1610,6 +1624,8 @@ export const pt = {
   'json.truncated': '… truncado, {total} caracteres no total',
   'clock.md': '{m}/{d}',
   'clock.ymd': '{y}-{m}-{d}',
+  'clock.today': 'Hoje',
+  'clock.yesterday': 'Ontem',
   'message.failure.userStopped': 'Este turno foi interrompido por si; o modelo não terminou uma resposta completa.',
   'stats.dialog.retries': 'Novas tentativas do modelo',
 } satisfies Record<keyof typeof en, string>
