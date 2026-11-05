@@ -59,6 +59,13 @@ describe('resolveRestartSignal', () => {
       .toEqual({ state: 'BUILDING', startedAt: '2026-11-01T13:36:21.476Z' })
   })
 
+  it('passes the linked-drift repository name through for the lamp copy (build-scope-rework-1105 A)', () => {
+    expect(resolveRestartSignal({ state: 'NEED_BUILD', linkedRepo: 'D:/tech/dsh-web-worktrees/auto-route-1024' }))
+      .toEqual({ state: 'NEED_BUILD', linkedRepo: 'D:/tech/dsh-web-worktrees/auto-route-1024' })
+    // Absent stays absent: a main-tree NEED_BUILD keeps the generic copy seat.
+    expect(resolveRestartSignal({ state: 'NEED_BUILD' })).toEqual({ state: 'NEED_BUILD' })
+  })
+
   it.each([
     ['absent', undefined],
     ['null', null],
@@ -69,6 +76,8 @@ describe('resolveRestartSignal', () => {
     ['an unknown branch', { state: 'NEED_RESTART', reason: 'someday' }],
     ['a non-string build start', { state: 'BUILDING', startedAt: 7 }],
     ['an unreadable build start', { state: 'BUILDING', startedAt: 'yesterday' }],
+    ['a non-string linked repo', { state: 'NEED_BUILD', linkedRepo: 7 }],
+    ['an empty linked repo', { state: 'NEED_BUILD', linkedRepo: '' }],
   ])('rejects %s', (_label, value) => {
     expect(resolveRestartSignal(value)).toBeUndefined()
   })

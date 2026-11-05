@@ -635,7 +635,13 @@ export function registerAutoBuild(ctx: Context, internals: AutoBuildInternals = 
           if (!linkedDriftWarned) {
             linkedDriftWarned = true
             warn('ui-settings-general: auto-build deferred: NEED_BUILD comes from a linked repository source drift; this tree agrees with its own baseline')
-            journal('defer linked-source-drift')
+            // A (build-scope-rework-1105): name the drifted tree when the
+            // judgment carries one — a bare defer line cannot say WHICH
+            // repository owes a build. Fixtures without linkedRepo keep the
+            // pre-A line verbatim.
+            journal(fresh.linkedRepo === undefined
+              ? 'defer linked-source-drift'
+              : `defer linked-source-drift repo=${fresh.linkedRepo}`)
           }
           scheduleAt(now() + timings.intervalMs)
           return

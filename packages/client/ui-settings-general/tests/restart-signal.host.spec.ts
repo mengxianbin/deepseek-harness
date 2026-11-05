@@ -370,6 +370,10 @@ describe('collectRestartSignal', () => {
     expect(judgment.state).toBe('NEED_BUILD')
     expect(judgment.facts?.ownFaceMoved).toBe(false)
     expect(judgment.detail).toContain('linked repository source moved')
+    // A (build-scope-rework-1105): the drifted tree is named — `linkedRepo`
+    // rides the wire for the lamp copy, the full set rides the log-surface detail.
+    expect(judgment.linkedRepo).toBe(linked)
+    expect(judgment.detail).toContain(`drifted: ${linked}`)
   })
 
   it('recovers from a killed build process in the very next collect — no permanent BUILDING (acceptance ①, O-1103)', async () => {

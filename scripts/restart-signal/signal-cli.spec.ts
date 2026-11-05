@@ -8,7 +8,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { cachedFacePathSets, facePathsSignature, parseStampArgs, stampRepository } from './signal-cli.ts'
+import { linkedStampRepositories } from '../../packages/client/ui-settings-general/src/restart-stamp.ts'
+import { resolveDshHome } from '../../packages/util/home-paths/src/index.ts'
+import { type CohortEntry, cachedFacePathSets, facePathsSignature, parseStampArgs, stampRepository } from './signal-cli.ts'
 
 const temporary: string[] = []
 
@@ -88,5 +90,30 @@ describe('stamp CLI', () => {
     expect(parsed.stamps[0]?.repository).toBe(root)
     expect(parsed.stamps[0]?.kind).toBe('harness')
     expect(parsed.stamps[0]?.host).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  it('lists the cohort as linkedStampRepositories verbatim — one source for the lamp and its consumers (build-scope-rework-1105 B)', () => {
+    const cli = resolve(import.meta.dirname, 'signal-cli.ts')
+    const result = spawnSync(process.execPath, [cli, '--list-cohort'], {
+      encoding: 'utf8',
+      windowsHide: true,
+    })
+    expect(result.status).toBe(0)
+    const parsed = JSON.parse(result.stdout) as { cohort: CohortEntry[] }
+    // Single source of truth: the CLI's repository list IS the host judgment's
+    // capability-gated profile scan, element for element — a watchdog consuming
+    // --list-cohort can never drift from what the restart lamp combines.
+    expect(parsed.cohort.map(entry => entry.repository)).toEqual(linkedStampRepositories(resolveDshHome()))
+    for (const entry of parsed.cohort) {
+      if (entry.manifest === null) {
+        // A linked absence never locks the lamp and never triggers a build.
+        expect(entry.current).toBeNull()
+        continue
+      }
+      expect(entry.manifest.time).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+      expect(entry.manifest.sEnd.host).toMatch(/^[0-9a-f]{64}$/)
+      expect(entry.current).not.toBeNull()
+      expect(entry.current?.host).toMatch(/^[0-9a-f]{64}$/)
+    }
   })
 })

@@ -50,10 +50,13 @@ export function registerRestartSignal(ctx: Context, internals: RestartSignalInte
           // `startedAt` rides only on a BUILDING judgment whose start capture
           // carried a readable time; the browser renders it as the timer
           // tooltip's start stamp + elapsed age (build-timer-tooltip-1101).
+          // `linkedRepo` rides only on a linked-only NEED_BUILD: the drifted
+          // tree the copy names (build-scope-rework-1105 A).
           {
             state: judgment.state,
             ...(judgment.reason === undefined ? {} : { reason: judgment.reason }),
             ...(judgment.startedAt === undefined ? {} : { startedAt: judgment.startedAt }),
+            ...(judgment.linkedRepo === undefined ? {} : { linkedRepo: judgment.linkedRepo }),
           },
         )),
         (error: unknown): Promise<Response> => {

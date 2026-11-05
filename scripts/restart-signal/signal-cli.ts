@@ -20,6 +20,14 @@
  * or with `--explain` one `{"explanations":[…]}` carrying each tree's baseline
  * time, built faces, and per-face package change lists — method and known
  * approximations documented in ./explain.ts.
+ *
+ * `--list-cohort` (build-scope-rework-1105 B) answers the other direction —
+ * *which* repositories are in the restart-signal cohort at all: the in-cohort
+ * repository list straight from `linkedStampRepositories` (the capability-gated
+ * profile `link:` scan the host judgment itself uses — same source, so a
+ * consumer can never drift from the lamp), each entry carrying that tree's own
+ * manifest state and current stamps. Consumers: the m-note per-tree build
+ * watchdog, which must not re-implement the profile-link + capability scan.
  * @module scripts/restart-signal/signal-cli
  */
 
@@ -28,8 +36,11 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
+import { linkedStampRepositories } from '../../packages/client/ui-settings-general/src/restart-stamp.ts'
+import { resolveDshHome } from '../../packages/util/home-paths/src/index.ts'
 import { explainTree, readBaseline } from './explain.ts'
 import { resolveFacePathSets } from './face-paths.ts'
+import { manifestPath } from './manifest.ts'
 import { faceContentStamp, isRuntimeDataPath, wholeRepoContentStamp } from './repo-stamp.ts'
 
 /** One repository tree the CLI stamps, with the manifest kind that selects the stamp semantics. */
@@ -44,6 +55,28 @@ export interface CurrentStamp {
   readonly kind: 'harness' | 'dsh-web'
   readonly host: string
   readonly client: string
+}
+
+/** One cohort tree's own manifest state, read for the per-tree drift judgment. */
+export interface CohortManifest {
+  readonly kind: 'harness' | 'dsh-web'
+  /** Manifest write time (ISO 8601). */
+  readonly time: string
+  /** Build-end face baselines that tree's own last build wrote. */
+  readonly sEnd: { readonly host: string; readonly client: string }
+  /** Whether a built face's stamp moved during that build. */
+  readonly midBuildDirty: boolean
+}
+
+/** One in-cohort repository: list membership (single source) + manifest state + current stamps. */
+export interface CohortEntry {
+  readonly repository: string
+  /** The tree's own manifest; `null` when absent or unreadable — a linked
+   * absence never locks the lamp and never triggers a build on its own
+   * (linked-split 2026-11-01: only that tree's own bootstrap can write it). */
+  readonly manifest: CohortManifest | null
+  /** Current stamps under the manifest's kind; `null` when there is no manifest to stamp under. */
+  readonly current: { readonly host: string; readonly client: string } | null
 }
 
 /** Persisted face-path cache: the resolved sets plus the signature they were resolved under. */
@@ -164,6 +197,58 @@ export function stampRepository(spec: StampSpec): CurrentStamp {
 }
 
 /**
+ * Read one cohort tree's own manifest for the cohort listing (schema mirror of
+ * the write side: version 1, kind, time, sEnd, midBuildDirty). A missing or
+ * unreadable manifest reads as `null` — same downgrade the host judgment gives
+ * a linked absence (`notices`, never a lamp lock).
+ * @param repository - Repository tree whose `.dsh-build/restart-stamp.json` to read.
+ * @returns The manifest state, or `null` when absent or malformed.
+ */
+export function readCohortManifest(repository: string): CohortManifest | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(readFileSync(manifestPath(repository), 'utf8'))
+  } catch {
+    return null
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null
+  const record = parsed as Record<string, unknown>
+  const kind = record.kind
+  const time = record.time
+  const sEnd = record.sEnd
+  const midBuildDirty = record.midBuildDirty
+  if (record.version !== 1 || (kind !== 'harness' && kind !== 'dsh-web')) return null
+  if (typeof time !== 'string' || typeof midBuildDirty !== 'boolean') return null
+  if (typeof sEnd !== 'object' || sEnd === null || Array.isArray(sEnd)) return null
+  const host = (sEnd as Record<string, unknown>).host
+  const client = (sEnd as Record<string, unknown>).client
+  if (typeof host !== 'string' || typeof client !== 'string') return null
+  return { kind, time, sEnd: { host, client }, midBuildDirty }
+}
+
+/**
+ * The restart-signal cohort: every repository `linkedStampRepositories` puts in
+ * scope (profile `link:` dependencies that ship a capability marker), each with
+ * its own manifest state and current stamps. The list itself is that function's
+ * return verbatim — this module re-implements neither the profile scan nor the
+ * capability gate, so a watchdog consuming this output sees exactly the set the
+ * lamp's combination hash sees.
+ * @param dshHome - DSH home whose `profiles/*` to scan; defaults to the resolved home.
+ * @returns One entry per in-cohort repository, in `linkedStampRepositories` order.
+ */
+export function listCohort(dshHome: string = resolveDshHome()): CohortEntry[] {
+  return linkedStampRepositories(dshHome).map((repository) => {
+    const manifest = readCohortManifest(repository)
+    const current = manifest === null ? null : stampRepository({ repository, kind: manifest.kind })
+    return {
+      repository,
+      manifest,
+      current: current === null ? null : { host: current.host, client: current.client },
+    }
+  })
+}
+
+/**
  * Parse the command line into stamp specs.
  * @param args - Arguments after the script path.
  * @returns The repository trees to stamp, in argument order.
@@ -191,7 +276,17 @@ export function parseStampArgs(args: readonly string[]): StampSpec[] {
  */
 const EXPLAIN_FLAG = '--explain'
 
+/**
+ * The `--list-cohort` flag token (build-scope-rework-1105 B); it answers
+ * alone — no `--stamp` pair is required — and short-circuits the stamp modes.
+ */
+const COHORT_FLAG = '--list-cohort'
+
 function main(args: readonly string[]): number {
+  if (args.includes(COHORT_FLAG)) {
+    process.stdout.write(`${JSON.stringify({ cohort: listCohort() })}\n`)
+    return 0
+  }
   const explain = args.includes(EXPLAIN_FLAG)
   const specs = parseStampArgs(args.filter(argument => argument !== EXPLAIN_FLAG))
   if (explain) {
