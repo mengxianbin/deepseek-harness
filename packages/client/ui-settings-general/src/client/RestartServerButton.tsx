@@ -66,7 +66,13 @@ export function restartSignalCopy(t: PropsLocale<'settings'>['t'], signal: Resta
     case 'INIT': return t('restart.signal.init')
     case 'BUILDING': return buildingSignalCopy(t, signal, now)
     case 'BUILD_FAILED': return t('restart.signal.buildFailed')
-    case 'NEED_BUILD': return t('restart.signal.needBuild')
+    // A (build-scope-rework-1105): a linked-only drift names its tree — the
+    // copy points at the tree that owes a build instead of sending the user
+    // to a main-tree build that cannot clear it. R-1026 unchanged: this line
+    // rides tooltip / aria-label / confirm Modal first sentence only.
+    case 'NEED_BUILD': return signal.linkedRepo === undefined
+      ? t('restart.signal.needBuild')
+      : t('restart.signal.needBuild.linked', { repo: signal.linkedRepo })
     case 'NEED_RESTART': return signal.reason === 'config'
       ? t('restart.signal.needRestart.config')
       : t('restart.signal.needRestart.built')

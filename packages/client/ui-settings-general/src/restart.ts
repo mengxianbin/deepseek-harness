@@ -49,6 +49,11 @@ export interface RestartSignalView {
    * readable time: build start (ISO 8601), rendered locally as the restart
    * button's timer tooltip — `HH:mm 起 · 已 <elapsed>` (build-timer-tooltip-1101). */
   readonly startedAt?: string
+  /** Present only on a linked-only `NEED_BUILD` (own face agrees, a linked
+   * tree drifted): the drifted linked repository path the copy names, so the
+   * lamp points at the tree that owes a build instead of sending the user to
+   * a main-tree build that cannot clear it (build-scope-rework-1105 A). */
+  readonly linkedRepo?: string
 }
 
 /** Every legal signal state, for response validation. */
@@ -72,9 +77,14 @@ export function resolveRestartSignal(value: unknown): RestartSignalView | undefi
   // previous state) rather than rendering a broken timer string.
   const startedAt: unknown = Reflect.get(value, 'startedAt')
   if (startedAt !== undefined && (typeof startedAt !== 'string' || !Number.isFinite(Date.parse(startedAt)))) return undefined
+  // The linked-drift repository name is copy data: an empty or non-string
+  // value fails the view the same way (never render a broken repo seat).
+  const linkedRepo: unknown = Reflect.get(value, 'linkedRepo')
+  if (linkedRepo !== undefined && (typeof linkedRepo !== 'string' || linkedRepo === '')) return undefined
   return {
     state: state as RestartSignalState,
     ...(reason === undefined ? {} : { reason }),
     ...(startedAt === undefined ? {} : { startedAt }),
+    ...(linkedRepo === undefined ? {} : { linkedRepo }),
   }
 }

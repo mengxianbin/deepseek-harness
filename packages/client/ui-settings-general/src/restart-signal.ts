@@ -94,6 +94,12 @@ export interface RestartSignalInputs {
    * pre-split dispatch behaviour); `false` names linked-only drift, which no
    * build of this tree can clear. */
   readonly ownFaceMoved?: boolean | undefined
+  /** Linked repositories whose current host stamp moved past their own manifest
+   * baselines (build-scope-rework-1105 A): names the drift in the NEED_BUILD
+   * detail and rides the wire as `linkedRepo` so the lamp copy can point at the
+   * tree that owes a build. `undefined` on judgment paths that do not collect it
+   * (the detail then keeps its pre-A wording). */
+  readonly linkedRepos?: readonly string[] | undefined
 }
 
 /** The machine facts a judgment was computed from (P3 observation seam: change-sensitive
@@ -115,6 +121,10 @@ export interface RestartSignalJudgment {
   readonly state: RestartSignalState
   /** Present only on `NEED_RESTART`: which restart branch fired. */
   readonly reason?: RestartSignalReason
+  /** Present only on a linked-only `NEED_BUILD` (ownFaceMoved=false): the drifted
+   * linked repository path the lamp copy names — first of the drifted set, the
+   * full set riding `detail` (build-scope-rework-1105 A). Display data. */
+  readonly linkedRepo?: string
   /** Present only on `BUILDING` when the start capture carried a readable
    * time: the build-start instant (ISO 8601) the browser renders as the
    * timer tooltip's start stamp and elapsed age (build-timer-tooltip-1101). */
@@ -183,9 +193,16 @@ function judgeCore(inputs: RestartSignalInputs): RestartSignalJudgment {
     // (构建触发口径) stays on this tree's face, and the dispatcher defers instead
     // of rebuilding this tree forever (linked-split 2026-11-01, second loop).
     if (inputs.ownFaceMoved === false) {
+      // A (build-scope-rework-1105): name the drifted trees — the full set in
+      // the log-surface detail, the first as `linkedRepo` for the copy seat.
+      // Without linkedRepos (judgment paths that do not collect them) the
+      // pre-A detail and an absent linkedRepo both stay exactly as before.
+      const drifted = inputs.linkedRepos ?? []
+      const named = drifted.length === 0 ? '' : `; drifted: ${drifted.join(', ')}`
       return {
         state: 'NEED_BUILD',
-        detail: 'linked repository source moved past its build baseline while this tree agrees with its own; no build of this tree can clear it (build trigger scope: this tree only)',
+        ...(drifted.length === 0 ? {} : { linkedRepo: drifted[0] }),
+        detail: 'linked repository source moved past its build baseline while this tree agrees with its own; no build of this tree can clear it (build trigger scope: this tree only)'.concat(named),
       }
     }
     return { state: 'NEED_BUILD', detail: 'host-face source moved past the last build baseline' }
@@ -352,6 +369,7 @@ async function computeRestartSignal(options: RestartSignalOptions): Promise<Rest
   // the fact the dispatcher reads to keep harness builds off linked-only drift.
   const own = fresh.components.find(component => normalizeRepository(component.repository) === normalizeRepository(repositoryRoot))
   let ownFaceMoved: boolean | undefined = own !== undefined && own.hostFaceHash === null ? false : undefined
+  let linkedRepos: readonly string[] | undefined
   let currentHostFace: string | undefined
   let currentClientFace: string | undefined
   if (needsHostStamp) {
@@ -370,12 +388,25 @@ async function computeRestartSignal(options: RestartSignalOptions): Promise<Rest
       if (own !== undefined && own.hostFaceHash !== null) {
         ownFaceMoved = byRepository.get(normalizeRepository(own.repository))?.host !== own.hostFaceHash
       }
+      // A (build-scope-rework-1105): every non-own component whose current stamp
+      // exists and moved past its own baseline — the linked trees that owe a
+      // build. Only a *present* differing stamp counts: a missing current stamp
+      // already reads ABSENT in the combination and names nothing new here.
+      linkedRepos = fresh.components
+        .filter(component => normalizeRepository(component.repository) !== normalizeRepository(repositoryRoot)
+          && component.hostFaceHash !== null)
+        .filter((component) => {
+          const stamp = byRepository.get(normalizeRepository(component.repository))
+          return stamp !== undefined && stamp.host !== component.hostFaceHash
+        })
+        .map(component => component.repository)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       process.stderr.write(`ui-settings-general: restart-signal stamp gathering failed: ${message}\n`)
       currentHostFace = undefined
       currentClientFace = undefined
       ownFaceMoved = undefined
+      linkedRepos = undefined
     }
   } else {
     currentHostFace = undefined
@@ -384,7 +415,7 @@ async function computeRestartSignal(options: RestartSignalOptions): Promise<Rest
   return publishJudgment(
     judgeRestartSignal({
       runtime, fresh, configStamp, building, buildingStartedAt, failed,
-      currentHostFace, currentClientFace, ownFaceMoved,
+      currentHostFace, currentClientFace, ownFaceMoved, linkedRepos,
     }),
     { currentHostFace, configStamp, ownFaceMoved },
   )

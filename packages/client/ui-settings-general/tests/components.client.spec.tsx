@@ -457,6 +457,21 @@ describe('Restart server button', () => {
     expect(screen.getByRole('button', { name: en['restart.signal.needRestart.built'] })).toBeTruthy()
   })
 
+  it('names the drifted linked repository in the NEED_BUILD copy (build-scope-rework-1105 A)', () => {
+    const linkedRepo = 'D:/tech/dsh-web-worktrees/auto-route-1024'
+    const named = en['restart.signal.needBuild.linked'].replace('{repo}', linkedRepo)
+    // Function seat: the linked branch replaces the generic line; a main-tree
+    // NEED_BUILD (no linkedRepo) keeps the generic seat exactly.
+    expect(restartSignalCopy(base.t, { state: 'NEED_BUILD', linkedRepo })).toBe(named)
+    expect(restartSignalCopy(base.t, { state: 'NEED_BUILD' })).toBe(en['restart.signal.needBuild'])
+    // Render seat: the named line lands on the button's accessible name — the
+    // tooltip / aria-label / confirm-Modal-first-sentence seats R-1026 allows.
+    render(<RestartServerButton {...base} signal={{ state: 'NEED_BUILD', linkedRepo }} />)
+    const button = screen.getByRole('button')
+    expect(button.getAttribute('aria-label')).toBe(named)
+    expect(button.getAttribute('data-restart-signal')).toBe('NEED_BUILD')
+  })
+
   it.each([['INIT'], ['BUILDING'], ['BUILD_FAILED']] as const)('lights the %s button with its single next step', (state) => {
     render(<RestartServerButton {...base} signal={{ state }} />)
     const copy = {

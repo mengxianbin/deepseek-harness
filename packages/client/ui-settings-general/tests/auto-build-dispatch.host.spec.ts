@@ -453,6 +453,22 @@ describe('auto-build dispatch throttle', () => {
     expect(h.warn).toHaveBeenCalledWith(expect.stringContaining('linked repository source drift'))
   })
 
+  it('names the drifted linked repository in the defer journal line when the judgment carries one (build-scope-rework-1105 A)', async () => {
+    const h = harness()
+    const drift: RestartSignalJudgment = {
+      ...linkedDriftJudgment('h1'),
+      linkedRepo: 'D:/tech/dsh-web-worktrees/auto-route-1024',
+    }
+    h.collect.mockImplementation(async () => drift)
+    h.emit(drift)
+    await h.settle(10 * 60_000)
+    expect(h.launch).not.toHaveBeenCalled()
+    const lines = h.journal.mock.calls.map(([line]) => line)
+    // The named line replaces the bare one — never both (one line per episode).
+    expect(lines).toContain('defer linked-source-drift repo=D:/tech/dsh-web-worktrees/auto-route-1024')
+    expect(lines.filter((line): line is string => line === 'defer linked-source-drift')).toHaveLength(0)
+  })
+
   it('dispatches normally once the own face moves, even inside a linked-drift episode', async () => {
     const h = harness()
     const drift = linkedDriftJudgment('h1')
