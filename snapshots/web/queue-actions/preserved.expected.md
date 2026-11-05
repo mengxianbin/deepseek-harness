@@ -10,7 +10,11 @@
 - text: Reply with a one-sentence description of event sourcing, then stop. {{clock}}
 - button "Copy"
 - status: Stopped
-- button "Stopped" [disabled]
+- button "Stopped {{clock}} → {{clock}}" [disabled]:
+  - text: Stopped
+  - time: {{clock}}
+  - text: →
+  - time: {{clock}}
 - paragraph: partial
 - text: Stopped
 - status:

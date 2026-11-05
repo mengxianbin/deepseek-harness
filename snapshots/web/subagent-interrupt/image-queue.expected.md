@@ -16,7 +16,11 @@
 - text: "Explain event sourcing in one sentence.Your parent agent id is \"session-{{uuid}}\". Before you finish, send your result to that agent with send_message({ agent_id: \"session-{{uuid}}\", message: \"<self-contained result>\" }). The parent shares your workspace but does not automatically receive your transcript, tool output, or reasoning. Send earlier messages as well when a finding changes what the parent should do next; sending a message does not end your turn. {{clock}}"
 - button "Copy"
 - status: Stopped
-- button "Stopped" [disabled]
+- button "Stopped {{clock}} → {{clock}}" [disabled]:
+  - text: Stopped
+  - time: {{clock}}
+  - text: →
+  - time: {{clock}}
 - paragraph: partial
 - text: Stopped
 - button "Copy"

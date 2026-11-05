@@ -9,7 +9,11 @@
 - text: Render this mathematical proof. {{clock}}
 - button "Copy"
 - status: Completed
-- button "Completed in {{duration}}" [disabled]
+- button "Completed in {{duration}} {{clock}} → {{clock}}" [disabled]:
+  - text: Completed in {{duration}}
+  - time: {{clock}}
+  - text: →
+  - time: {{clock}}
 - heading "Math rendering" [level=2]
 - paragraph:
   - text: Inline dollar

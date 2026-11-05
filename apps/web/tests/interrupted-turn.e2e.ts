@@ -62,7 +62,13 @@ describe.skipIf(MODE === 'record')('web e2e: turn interrupted by a DSH stop', ()
     await notice.waitFor({ timeout: 15_000 })
     expect(await notice.textContent()).toContain('The DSH process exited before this turn finished')
     expect(await notice.textContent()).not.toContain('INTERRUPTED')
-    expect(await page.locator('[data-turn-process="1"]').textContent()).toBe('Stopped')
+    // Label assertion stays exact with the recorded Turn window removed; the
+    // golden below pins the window's normalized shape.
+    const label = await page.locator('[data-turn-process="1"]').evaluate((node) => {
+      const clock = node.querySelector('[data-turn-process-window]')
+      return (node.textContent ?? '').replace(clock?.textContent ?? '', '')
+    })
+    expect(label).toBe('Stopped')
 
     const snapshot = (await captureStableAria(page, '[class*="centerCol"]', scaffold.workspaceCwd))
       .split(SEED_ID).join('{{seededId}}')

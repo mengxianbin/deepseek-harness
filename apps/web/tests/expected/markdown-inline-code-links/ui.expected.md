@@ -8,7 +8,11 @@
 - text: Show the local preview URL. {{clock}}
 - button "Copy"
 - status: Completed
-- button "Completed in {{duration}}" [disabled]
+- button "Completed in {{duration}} {{clock}} → {{clock}}" [disabled]:
+  - text: Completed in {{duration}}
+  - time: {{clock}}
+  - text: →
+  - time: {{clock}}
 - heading "Inline code links" [level=2]
 - paragraph:
   - text: "Preview:"

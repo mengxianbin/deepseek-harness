@@ -9,7 +9,11 @@
 - text: Render adjacent CJK strong emphasis. {{clock}}
 - button "Copy"
 - status: Completed
-- button "Completed in {{duration}}" [disabled]
+- button "Completed in {{duration}} {{clock}} → {{clock}}" [disabled]:
+  - text: Completed in {{duration}}
+  - time: {{clock}}
+  - text: →
+  - time: {{clock}}
 - heading "CJK strong emphasis" [level=2]
 - paragraph:
   - strong: 注意：

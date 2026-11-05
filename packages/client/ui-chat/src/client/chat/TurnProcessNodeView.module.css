@@ -54,6 +54,17 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Recorded Turn window (start → end): shares the trigger-row clock size and
+   stays nowrap beside the shrinking duration label. */
+.clock {
+  flex: none;
+  margin-left: 8px;
+  font: var(--dsw-font-xxs-12);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: inherit;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .root,
   .chevron {

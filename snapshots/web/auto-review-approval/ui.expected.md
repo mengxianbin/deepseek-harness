@@ -11,7 +11,11 @@
 - text: Clean up the stale build log. {{clock}}
 - button "Copy"
 - status: Completed
-- button "Completed in {{duration}}" [expanded]
+- button "Completed in {{duration}} {{clock}} → {{clock}}" [expanded]:
+  - text: Completed in {{duration}}
+  - time: {{clock}}
+  - text: →
+  - time: {{clock}}
 - button "Called tools" [expanded]
 - text: Failed
 - 'button "Tool call Error: the user rejected tool \"mystery\""'
@@ -37,7 +41,11 @@
 - text: Clean up the stale build log. {{clock}}
 - button "Copy"
 - status: Completed
-- button "Completed in {{duration}}" [expanded]
+- button "Completed in {{duration}} {{clock}} → {{clock}}" [expanded]:
+  - text: Completed in {{duration}}
+  - time: {{clock}}
+  - text: →
+  - time: {{clock}}
 - button "Called tools" [expanded]
 - text: Failed
 - 'button "Tool call Error: the user rejected tool \"mystery\"" [expanded]'

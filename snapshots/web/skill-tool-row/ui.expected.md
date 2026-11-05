@@ -9,7 +9,11 @@
 - text: Load the editing-cordis-compositions skill with the skill tool, then reply DONE. {{date}} {{clock}}
 - button "Copy"
 - status: Completed
-- button "Completed in {{duration}}" [expanded]
+- button "Completed in {{duration}} {{date}} {{clock}} → {{date}} {{clock}}" [expanded]:
+  - text: Completed in {{duration}}
+  - time: {{date}} {{clock}}
+  - text: →
+  - time: {{date}} {{clock}}
 - button "Called tools" [expanded]
 - button "Think Load the requested skill."
 - button "Skill editing-cordis-compositions" [expanded]
