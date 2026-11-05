@@ -10,9 +10,14 @@
 - text: "Using ONE run_code program: run bash `echo CODE_ROUND_OK`, then read the file missing.txt catching its error in the program. Return an object with both outcomes. Then reply DONE and stop. {{clock}}"
 - button "Copy"
 - status: Completed
-- button "Completed in {{duration}}" [expanded]
+- button "Completed in {{duration}} {{clock}} → {{clock}}" [expanded]:
+  - text: Completed in {{duration}}
+  - time: {{clock}}
+  - text: →
+  - time: {{clock}}
 - button "Ran code, ran commands, read files" [expanded]
 - 'button "Think The user wants me to write a single `run_code` program that:"'
+- time: {{clock}}
 - button "Code Run bash echo and catch missing file read"
 - button "Bash Echo CODE_ROUND_OK" [expanded]
 - text: Done workspace echo CODE_ROUND_OK

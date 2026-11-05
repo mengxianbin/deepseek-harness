@@ -13,6 +13,7 @@ A Turn shows an answer and lets the reader inspect the work behind it. Start wit
 
 - [How one Turn becomes a transcript](#reading-model)
 - [Whole-Turn folding](#whole-turn-folding)
+- [Row clocks](#row-clocks)
 - [Display modes](#display-modes)
 - [Collapse timing](#collapse-timing)
 - [Replies after collapse](#folded-replies)
@@ -91,7 +92,7 @@ Trigger titles and icons use the recorded `source.kind`: `schedule`, `tool-jobs`
 | Visible input after the first process evidence | Whole-Turn collapse is unavailable. Preserve process segments, intermediate replies, and input order; group disclosures remain available. Consecutive opening inputs do not qualify. |
 | Other closed Turn with loaded process content | Initially collapse the process; allow manual opening and closing. Neither the Turn start nor the rest of Session history must already be loaded. |
 | Closed Turn with no final answer | Collapse all process rows when otherwise eligible. |
-| End is loaded but start is absent | Apply the closed-Turn rules above to loaded content. Show no elapsed duration; do not use the first loaded tool/message time as the start. |
+| End is loaded but start is absent | Apply the closed-Turn rules above to loaded content. Show no elapsed duration; do not use the first loaded tool/message time as the start. The window clock then prints only the ending instant. |
 | Neither start nor end is loaded | Keep process rows visible and withhold the whole-Turn control. |
 | A Turn control exists, but there is no process content | Retain its title, without a collapse action. |
 
@@ -105,9 +106,16 @@ Paging adds older content above the retained anchor without jumping to the new t
 
 While the Session runs, Chat shows a Session-level indicator at the running Turn's tail: a whale tail beside shimmering elapsed time. It follows the transcript rows and the echoes of submissions that open a Turn; steering still pending when a submission opens the next Turn is claimed first, so its echoes precede that submission's echo. Echoes of steering that waits for the running Turn's next Step follow the indicator. Output appearing above the indicator moves it without animation. When steering is admitted, the indicator enters its new slot below the admitted rows from one slot higher rather than from where it stood, and its fade-in covers the difference. Before the current Turn start time arrives, the indicator shows status text without a duration. The clock updates in whole seconds, starts at one second, and uses hours from 60 minutes. While the Client connection is disconnected or reconnecting, the clock holds its last value; after reconnection it shows the elapsed time since the Turn start again. When the Session stops running, the indicator keeps its slot, hidden and silent, until the Turn's actions row replaces it, so the tail does not shrink in between; the closed Turn process control shows the fixed duration, cancellation, or failure status. Lifecycle changes have a polite announcement; clock ticks do not. The whale is hidden from assistive technology and remains static under reduced motion.
 
-The top duration/status control and trigger title use the group-title font size and follow the font-size setting. Completed duration digits use the code font with tabular numerals; running and completed minutes and seconds have no leading zero. The timed running label ends with a space and “···”; completion shows “Completed in”.
+The top duration/status control and trigger title use the group-title font size and follow the font-size setting. Completed duration digits use the code font with tabular numerals; running and completed minutes and seconds have no leading zero. The timed running label ends with a space and “···”; completion shows “Completed in”. The completed-Turn control also prints the recorded Turn window as shared message-clock times: the Turn start, then the last content-bearing reply's instant — the same instant the footer clock shows, so the two views never disagree — falling back to the recorded Turn end when the Turn closed without a reply. Each side prints alone when the other sits outside the loaded window, and stopped or failed Turns print the window without a duration.
 
 Automatic collapse keeps the process open if hiding it would hide keyboard focus. Manual closing focuses the process control before hiding its members. Closing a whole Turn resets its groups and inner reasoning/tool disclosures; it does not reset unrelated renderer state. Browser find can reveal searchable hidden content.
+
+<a id="row-clocks"></a>
+## Row clocks
+
+Three row classes carry an always-visible clock at the row head as an independent `<time>` element, outside the hover-gated message actions, so a screenshot of tool work or a failure carries its instant. Tool rows stamp their own recorded event time — the stage that began: dispatch while the call runs, the result once it settles. Turn error and max-token notices stamp their recorded event time. Every other timed row stamps the instant that opens a loaded gap of at least ten minutes over the previous timed row in presentation order; rows without a durable time neither clock nor break the chain, and ordinary rows inside the gap keep the hover-only message clock.
+
+The Chat snapshot builder stamps these instants as the node-level `clock` field — key rows unconditionally, gap rows only when the threshold opens them — and the Chat node seat renders the field as the flow item's first child with the shared message-clock formatting and date rules. A row whose only difference is the derived field keeps its stored reference, so ordinary publishes do not re-create rows.
 
 -----
 

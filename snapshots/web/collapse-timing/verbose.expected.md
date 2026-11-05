@@ -1,11 +1,17 @@
 - text: "Use the read tool twice in one assistant message: read a.txt and b.txt. Then reply with the single word DONE and stop. {{clock}}"
 - button "Copy"
 - status: Completed
-- button "Completed in {{duration}}" [disabled] [expanded]
+- button "Completed in {{duration}} {{clock}} → {{clock}}" [disabled] [expanded]:
+  - text: Completed in {{duration}}
+  - time: {{clock}}
+  - text: →
+  - time: {{clock}}
 - button "Think The user wants me to read a.txt and b.txt, then reply with \"DONE\". Let me do both reads in parallel."
+- time: {{clock}}
 - button "Read a.txt":
   - text: Read
   - button "a.txt"
+- time: {{clock}}
 - button "Read b.txt":
   - text: Read
   - button "b.txt"
@@ -18,7 +24,11 @@
 - text: "{{clock}} Use the read tool twice in one assistant message: read a.txt and b.txt. Then reply with the single word DONE and stop. {{clock}}"
 - button "Copy"
 - status: Completed
-- button "Completed in {{duration}}" [disabled] [expanded]
+- button "Completed in {{duration}} {{clock}} → {{clock}}" [disabled] [expanded]:
+  - text: Completed in {{duration}}
+  - time: {{clock}}
+  - text: →
+  - time: {{clock}}
 - button "Tools updated 32 added"
 - button "Think Both files have been read. a.txt contains \"alpha\" and b.txt contains \"beta\". I'll now reply with DONE as instructed."
 - paragraph: DONE

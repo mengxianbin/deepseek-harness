@@ -111,7 +111,11 @@
 - text: Durable source phrase selected from an earlier message and preserved as structured quote metadata. Use that excerpt. {{clock}}
 - button "Copy"
 - status: Completed
-- button "Completed in {{duration}}" [expanded]
+- button "Completed in {{duration}} {{clock}} → {{clock}}" [expanded]:
+  - text: Completed in {{duration}}
+  - time: {{clock}}
+  - text: →
+  - time: {{clock}}
 - button "Analysis completed" [expanded]
 - button "Think Settled reasoning source"
 - paragraph: Quote fixture ready.

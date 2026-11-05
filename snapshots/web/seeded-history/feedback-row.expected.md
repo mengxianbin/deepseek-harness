@@ -12,12 +12,18 @@
 - text: "Use the read tool twice in one assistant message: read a.txt and b.txt. Then reply with the single word DONE and stop. {{clock}}"
 - button "Copy"
 - status: Completed
-- button "Completed in {{duration}}" [expanded]
+- button "Completed in {{duration}} {{clock}} → {{clock}}" [expanded]:
+  - text: Completed in {{duration}}
+  - time: {{clock}}
+  - text: →
+  - time: {{clock}}
 - button "Read files" [expanded]
 - button "Think The user wants me to read a.txt and b.txt, then reply with \"DONE\". Let me do both reads in parallel."
+- time: {{clock}}
 - button "Read a.txt":
   - text: Read
   - button "a.txt"
+- time: {{clock}}
 - button "Read b.txt":
   - text: Read
   - button "b.txt"
@@ -30,7 +36,11 @@
 - text: {{clock}}
 - button "compact Compacted 5 history items (~{{tokens}} tokens)"
 - status: Completed
-- button "Completed in {{duration}}" [disabled]
+- button "Completed in {{duration}} {{clock}} → {{clock}}" [disabled]:
+  - text: Completed in {{duration}}
+  - time: {{clock}}
+  - text: →
+  - time: {{clock}}
 - 'button "feedback Feedback recorded for session {{seededId}} Anonymous user: {{uuid}}." [expanded]'
 - text: "Feedback recorded for session {{seededId}} Anonymous user: {{uuid}}."
 - textbox "Message or run a task, / commands, @ files or sessions"

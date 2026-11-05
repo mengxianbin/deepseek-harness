@@ -18,6 +18,14 @@ export interface ChatConversationViewNode extends ConversationViewNode {
    * opening Turn, or at the first loaded Turn when none is loaded.
    */
   readonly groupTree?: ChatGroupTree | undefined
+  /**
+   * Always-visible row clock instant, rendered at the row head independently
+   * of the hover-gated message actions. Key rows (Tool calls, Turn errors,
+   * max-token notices) carry their own recorded event time; any timed row
+   * starts one when it opens a loaded gap of at least ten minutes over the
+   * previous timed row. Absence keeps the row on hover-only clocks.
+   */
+  readonly clock?: number | undefined
 }
 
 /** Merge-extensible payload registry keyed by final Chat renderer kind. */

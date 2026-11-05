@@ -10,8 +10,13 @@
 - text: Use read_image to inspect red.png. Then reply exactly MINIMAL_IMAGE_OK and stop. {{clock}}
 - button "Copy"
 - status: Completed
-- button "Completed in {{duration}}" [expanded]
+- button "Completed in {{duration}} {{clock}} → {{clock}}" [expanded]:
+  - text: Completed in {{duration}}
+  - time: {{clock}}
+  - text: →
+  - time: {{clock}}
 - button "Read images" [expanded]
+- time: {{clock}}
 - button "Read image red.png" [expanded]:
   - text: Read image
   - button "red.png"

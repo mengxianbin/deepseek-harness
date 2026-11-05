@@ -14,7 +14,11 @@
 - text: Give one concrete event sourcing example. {{clock}}
 - button "Copy"
 - status: Completed
-- button "Completed in {{duration}}" [disabled]
+- button "Completed in {{duration}} {{clock}} → {{clock}}" [disabled]:
+  - text: Completed in {{duration}}
+  - time: {{clock}}
+  - text: →
+  - time: {{clock}}
 - status:
   - strong: This subagent is read-only for now
   - text: The parent session is offline; reopen it to continue sending messages.

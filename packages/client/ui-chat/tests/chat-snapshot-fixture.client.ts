@@ -13,7 +13,7 @@ import type { TurnTokenUsage } from '../src/client/contract/chat-nodes.ts'
 import {
   sameTurnNavigationItem, turnNavigationItem,
 } from '../src/client/conversation-nodes/turn-navigation.ts'
-import { orderedVisibleChatNodes } from '../src/client/conversation-nodes/chat-snapshot-builder.ts'
+import { orderedVisibleChatNodes, RowClockProjector } from '../src/client/conversation-nodes/chat-snapshot-builder.ts'
 import { ChatTurnProcessProjector } from '../src/client/conversation-nodes/turn-process-presentation.ts'
 import { hasAssistantReplyContent } from '../src/client/contract/assistant-content.ts'
 import {
@@ -524,7 +524,10 @@ export function chatSnapshotFixture(input: {
     })
   }
   nodes.sort((left, right) => left.anchorSeq - right.anchorSeq || left.key.localeCompare(right.key))
-  const ordered = orderedVisibleChatNodes(nodes)
+  // Mirror production: the builder stamps the always-visible row clock before
+  // ordering, so fixture rows carry the same key-row/gap clocks.
+  const stamped = new RowClockProjector().replace(nodes)
+  const ordered = orderedVisibleChatNodes(stamped)
   const store = previous?.nodes instanceof FixtureNodeStore ? previous.nodes : new FixtureNodeStore()
   store.replace(ordered)
   const byKey = new Map(store.values().map(node => [node.key, node]))

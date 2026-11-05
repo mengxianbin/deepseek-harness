@@ -13,6 +13,7 @@
 - button "完了まで {{duration}}" [expanded]
 - button "コードを実行しました、コマンドを実行しました、ファイルを読み取りました" [expanded]
 - 'button "思考 The user wants me to write a single `run_code` program that:"'
+- time: {{clock}}
 - button "コード Run bash echo and catch missing file read"
 - button "Bash Echo CODE_ROUND_OK" [expanded]
 - text: 完了 workspace echo CODE_ROUND_OK

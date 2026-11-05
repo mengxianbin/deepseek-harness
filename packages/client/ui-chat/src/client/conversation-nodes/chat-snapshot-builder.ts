@@ -534,6 +534,135 @@ export function orderedVisibleChatNodes(
   })
 }
 
+/**
+ * Loaded gap that opens an always-visible row clock. 2026-11-05 裁定拍定
+ * 10 分钟：普通正文行只在距上一条带时行至少这么久时打点，其余维持 hover 时钟。
+ */
+export const ROW_CLOCK_GAP_MS = 10 * 60_000
+
+/** Key rows clock their own recorded event time regardless of the gap. */
+const ALWAYS_CLOCKED_KINDS: ReadonlySet<string> = new Set(['tool-call', 'turn-error', 'turn-max-tokens'])
+
+/**
+ * The recorded instant a row can clock: key rows take their own event time,
+ * ordinary timed rows join the gap chain, and rows without a durable time
+ * neither clock nor break the chain.
+ * @param node - projected Chat node.
+ * @returns Unix epoch ms, when the payload records one.
+ */
+function rowTimeOf(node: ChatConversationViewNode): number | undefined {
+  const candidate = node as ChatNode
+  switch (candidate.kind) {
+    case 'user':
+    case 'steering':
+    case 'context':
+    case 'turn-trigger':
+    case 'command':
+    case 'assistant-step':
+    case 'turn-error':
+    case 'turn-max-tokens':
+    case 'turn-tail':
+      return candidate.data.time
+    case 'model-retry':
+      return candidate.data.current.time
+    case 'tool-call':
+      return candidate.data.root.time
+    case 'manual-compaction':
+      return candidate.data.command.time
+    default:
+      return undefined
+  }
+}
+
+function withRowClock(node: ChatConversationViewNode, clock: number | undefined): ChatConversationViewNode {
+  if (node.clock === clock) return node
+  return clock === undefined ? { ...node, clock: undefined } : { ...node, clock }
+}
+
+/** Whether two rows are one row apart only by the derived clock field. */
+function sameRowExceptClock(
+  previous: ChatConversationViewNode,
+  node: ChatConversationViewNode,
+): boolean {
+  return previous.key === node.key
+    && previous.id === node.id
+    && previous.kind === node.kind
+    && previous.anchorSeq === node.anchorSeq
+    && previous.visibility === node.visibility
+    && previous.groupTree === node.groupTree
+    // Location by reference: an unchanged publish reuses the index's object,
+    // while content-only location upgrades (a Turn start joining the page)
+    // arrive as a new object even though locationIdentity stays coarse.
+    && previous.location === node.location
+    && previous.data === node.data
+}
+
+/**
+ * Align one row's clock while preserving identity: business upserts arrive
+ * without the derived field on every publish, so a row that differs from the
+ * stored one only by its clock keeps the stored reference instead of being
+ * re-stamped into a fresh object each time.
+ */
+function alignRowClock(
+  node: ChatConversationViewNode,
+  previous: ChatConversationViewNode | undefined,
+  clock: number | undefined,
+): ChatConversationViewNode {
+  if (previous !== undefined && sameRowExceptClock(previous, node)) {
+    if (previous.clock === clock) return previous
+    return clock === undefined ? node : { ...node, clock }
+  }
+  return withRowClock(node, clock)
+}
+
+/**
+ * Stamps the always-visible row clock in presentation order: key rows from
+ * their own event time, every other timed row when it opens a gap of at least
+ * {@link ROW_CLOCK_GAP_MS} over the previous timed row. Stamp values are
+ * reference-stable, so the incremental apply path rewrites only rows whose
+ * clock actually moved.
+ */
+export class RowClockProjector {
+  replace(nodes: readonly ChatConversationViewNode[]): readonly ChatConversationViewNode[] {
+    const clocks = this.clocks(nodes)
+    return nodes.map(node => withRowClock(node, clocks.get(node.key)))
+  }
+
+  apply(
+    upserts: readonly ChatConversationViewNode[],
+    store: ChatNodeStore,
+  ): readonly ChatConversationViewNode[] {
+    const merged = new Map(store.values().map(node => [node.key, node] as const))
+    for (const node of upserts) merged.set(node.key, node)
+    const clocks = this.clocks([...merged.values()])
+    const result = new Map(
+      upserts.map(node => [node.key, alignRowClock(node, store.get(node.key), clocks.get(node.key))] as const),
+    )
+    for (const node of store.values()) {
+      // A rewritten stored neighbor must never displace this batch's upsert.
+      if (result.has(node.key)) continue
+      const stamped = withRowClock(node, clocks.get(node.key))
+      if (stamped !== node) result.set(node.key, stamped)
+    }
+    return [...result.values()]
+  }
+
+  /** Walk presentation order once; untimed rows neither clock nor break the chain. */
+  private clocks(nodes: readonly ChatConversationViewNode[]): ReadonlyMap<string, number | undefined> {
+    const clocks = new Map<string, number | undefined>()
+    let previous: number | undefined
+    for (const node of orderedVisibleChatNodes(nodes)) {
+      const time = rowTimeOf(node)
+      if (time === undefined) continue
+      const clocked = ALWAYS_CLOCKED_KINDS.has(node.kind)
+        || (previous !== undefined && time - previous >= ROW_CLOCK_GAP_MS)
+      if (clocked) clocks.set(node.key, time)
+      previous = time
+    }
+    return clocks
+  }
+}
+
 function referenceMessageSeq(node: ChatConversationViewNode): number | undefined {
   const candidate = node as ChatNode
   return candidate.kind === 'user' || candidate.kind === 'steering'
@@ -1086,6 +1215,7 @@ export class ChatSnapshotBuilder implements ConversationViewBuilder<ChatConversa
   private readonly legacy = new LegacySliceBuilder()
   private readonly referenceLabels = new ReferenceLabelProjector()
   private readonly skillNames = new SkillNameProjector()
+  private readonly rowClocks = new RowClockProjector()
   private order: readonly string[] = EMPTY_KEYS
   private latestGroupInput: ConversationGroupInput<ChatConversationViewNode>
   private readonly readGroupNode = (key: NodeKey): ChatConversationViewNode | undefined => this.store.get(key)
@@ -1111,7 +1241,7 @@ export class ChatSnapshotBuilder implements ConversationViewBuilder<ChatConversa
     readonly nodes: readonly ChatConversationViewNode[]
     readonly timeline: ConversationTimelineSnapshot
   }): ChatSnapshot {
-    const nodes = this.skillNames.replace(this.referenceLabels.replace(input.nodes))
+    const nodes = this.rowClocks.replace(this.skillNames.replace(this.referenceLabels.replace(input.nodes)))
     this.store.replace(nodes)
     this.order = orderedVisibleChatNodes(nodes).map(node => node.key)
     this.locations.rebuild(this.order, this.store)
@@ -1136,7 +1266,10 @@ export class ChatSnapshotBuilder implements ConversationViewBuilder<ChatConversa
     readonly timeline: ConversationTimelineSnapshot
     readonly changedTurns?: readonly number[]
   }): ChatSnapshot {
-    const upserts = this.skillNames.apply(this.referenceLabels.apply(input.upserts, this.store), this.store)
+    const upserts = this.rowClocks.apply(
+      this.skillNames.apply(this.referenceLabels.apply(input.upserts, this.store), this.store),
+      this.store,
+    )
     const processTurns = new Set<number>()
     let structural = false
     const contentOnly: ChatConversationViewNode[] = []

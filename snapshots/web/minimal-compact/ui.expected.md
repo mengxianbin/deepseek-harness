@@ -13,7 +13,11 @@
 - text: "Remember the project requirements: implement image reading in minimal mode by reusing the existing filesystem tool. Preserve the fixed system prompt and keep standard mode unchanged. The new tool selection configuration must default to the full filesystem suite and reject unknown names, duplicate names, and empty lists. Minimal mode selects read_image only. Image reads must use the inherited filesystem authorization and durable attachment store, and the calling model must explicitly support image input. Do not register text read, write, or edit tools in minimal mode. Enable automatic compaction under context pressure and manual /compact while the agent is idle, using the existing backend to generate the summary. Keep the token meter shared and the compaction service isolated per preset. Preserve balanced tool-call and result pairs when replacing older history, retain recent context, and continue from the checkpoint. Dispose every tool, command, and listener with its owning plugin. Reply exactly MINIMAL_COMPACT_READY and stop. {{clock}}"
 - button "Copy"
 - status: Completed
-- button "Completed in {{duration}}" [disabled]
+- button "Completed in {{duration}} {{clock}} → {{clock}}" [disabled]:
+  - text: Completed in {{duration}}
+  - time: {{clock}}
+  - text: →
+  - time: {{clock}}
 - paragraph: MINIMAL_COMPACT_READY
 - button "Copy"
 - button "Good response"
@@ -25,7 +29,11 @@
 - text: Continue using the project requirements. Reply exactly MINIMAL_COMPACT_OK and stop. {{clock}}
 - button "Copy"
 - status: Completed
-- button "Completed in {{duration}}" [disabled]
+- button "Completed in {{duration}} {{clock}} → {{clock}}" [disabled]:
+  - text: Completed in {{duration}}
+  - time: {{clock}}
+  - text: →
+  - time: {{clock}}
 - paragraph: MINIMAL_COMPACT_OK
 - button "Copy"
 - button "Good response"

@@ -10,7 +10,11 @@
 - text: Reply with the single word LIGHTHOUSE and stop. {{clock}}
 - button "Copy"
 - status: Completed
-- button "Completed in {{duration}}" [expanded]
+- button "Completed in {{duration}} {{clock}} → {{clock}}" [expanded]:
+  - text: Completed in {{duration}}
+  - time: {{clock}}
+  - text: →
+  - time: {{clock}}
 - button "Analysis completed" [expanded]
 - button "Think The user wants me to reply with a single word. Let me comply."
 - paragraph: LIGHTHOUSE

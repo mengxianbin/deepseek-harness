@@ -9,12 +9,19 @@
 - text: "Run two shell commands: wait for cancellation, then write skipped.txt. {{clock}}"
 - button "Copy"
 - status: Stopped
-- button "Stopped" [disabled] [expanded]
+- button "Stopped {{clock}} → {{clock}}" [disabled] [expanded]:
+  - text: Stopped
+  - time: {{clock}}
+  - text: →
+  - time: {{clock}}
 - button "Ran commands" [expanded]
+- time: {{clock}}
 - 'button "Failed Bash Error: tool call aborted" [expanded]'
 - text: "IN { \"command\": \"node -e \\\"const fs=require('node:fs'); fs.writeFileSync('started.tmp', 'started'); fs.renameSync('started.tmp', 'started.txt'); setInterval(() => {}, 1000)\\\"\", \"description\": \"Wait until cancellation\" } OUT Error: tool call aborted"
 - button "Inspect"
+- time: {{clock}}
 - 'button "Failed Bash Error: tool call aborted before dispatch"'
+- time: {{clock}}
 - textbox "Message or run a task, / commands, @ files or sessions"
 - button "Add files or run commands"
 - 'button "Access mode, current: Full access"': Full access

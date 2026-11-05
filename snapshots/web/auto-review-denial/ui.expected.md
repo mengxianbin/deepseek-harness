@@ -11,10 +11,16 @@
 - text: Inspect the protected operation, but do not run it unless authorized. {{clock}}
 - button "Copy"
 - status: Completed
-- button "Completed in {{duration}}" [expanded]
+- button "Completed in {{duration}} {{clock}} → {{clock}}" [expanded]:
+  - text: Completed in {{duration}}
+  - time: {{clock}}
+  - text: →
+  - time: {{clock}}
 - button "Called tools, ran code, ran commands" [expanded]
+- time: {{clock}}
 - text: Failed
 - button "Tool call Rejected by Auto review"
+- time: {{clock}}
 - button "Code Catch an Auto-denied inner call"
 - text: Failed
 - button "Bash Rejected by Auto review"
@@ -38,12 +44,18 @@
 - text: Inspect the protected operation, but do not run it unless authorized. {{clock}}
 - button "Copy"
 - status: Completed
-- button "Completed in {{duration}}" [expanded]
+- button "Completed in {{duration}} {{clock}} → {{clock}}" [expanded]:
+  - text: Completed in {{duration}}
+  - time: {{clock}}
+  - text: →
+  - time: {{clock}}
 - button "Called tools, ran code, ran commands" [expanded]
+- time: {{clock}}
 - text: Failed
 - button "Tool call Rejected by Auto review" [expanded]
 - text: "OUT Tool was not executed. Reason: raw reason"
 - button "Inspect"
+- time: {{clock}}
 - button "Code Catch an Auto-denied inner call"
 - text: Failed
 - button "Bash Rejected by Auto review" [expanded]

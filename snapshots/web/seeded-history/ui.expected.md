@@ -12,7 +12,11 @@
 - text: "Use the read tool twice in one assistant message: read a.txt and b.txt. Then reply with the single word DONE and stop. {{clock}}"
 - button "Copy"
 - status: Completed
-- button "Completed in {{duration}}"
+- button "Completed in {{duration}} {{clock}} → {{clock}}":
+  - text: Completed in {{duration}}
+  - time: {{clock}}
+  - text: →
+  - time: {{clock}}
 - paragraph: DONE
 - button "Copy"
 - button "Good response"
@@ -21,7 +25,11 @@
 - text: {{clock}}
 - button "compact Compacted 5 history items (~{{tokens}} tokens)"
 - status: Completed
-- button "Completed in {{duration}}" [disabled]
+- button "Completed in {{duration}} {{clock}} → {{clock}}" [disabled]:
+  - text: Completed in {{duration}}
+  - time: {{clock}}
+  - text: →
+  - time: {{clock}}
 - textbox "Message or run a task, / commands, @ files or sessions"
 - button "Add files or run commands"
 - 'button "Access mode, current: Workspace Write"': Workspace Write

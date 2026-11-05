@@ -11,10 +11,16 @@
 - text: Clean up the stale build log. {{clock}}
 - button "Copy"
 - status: Completed
-- button "Completed in {{duration}}" [expanded]
+- button "Completed in {{duration}} {{clock}} → {{clock}}" [expanded]:
+  - text: Completed in {{duration}}
+  - time: {{clock}}
+  - text: →
+  - time: {{clock}}
 - button "Called tools" [expanded]
+- time: {{clock}}
 - text: Failed
 - 'button "Tool call Error: the user rejected tool \"mystery\""'
+- time: {{clock}}
 - text: Failed
 - 'button "Tool call Error: Auto review of tool \"mystery\" failed; its body was not executed: auto-review: reviewer ended with error UNKNOWN: provider unavailable"'
 - textbox "Message or run a task, / commands, @ files or sessions"
@@ -37,12 +43,18 @@
 - text: Clean up the stale build log. {{clock}}
 - button "Copy"
 - status: Completed
-- button "Completed in {{duration}}" [expanded]
+- button "Completed in {{duration}} {{clock}} → {{clock}}" [expanded]:
+  - text: Completed in {{duration}}
+  - time: {{clock}}
+  - text: →
+  - time: {{clock}}
 - button "Called tools" [expanded]
+- time: {{clock}}
 - text: Failed
 - 'button "Tool call Error: the user rejected tool \"mystery\"" [expanded]'
 - text: "IN { \"target\": \"old-build.log\" } OUT Error: the user rejected tool \"mystery\""
 - button "Inspect"
+- time: {{clock}}
 - text: Failed
 - 'button "Tool call Error: Auto review of tool \"mystery\" failed; its body was not executed: auto-review: reviewer ended with error UNKNOWN: provider unavailable" [expanded]'
 - text: "IN { \"target\": \"notes.txt\" } OUT Error: Auto review of tool \"mystery\" failed; its body was not executed: auto-review: reviewer ended with error UNKNOWN: provider unavailable"

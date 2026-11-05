@@ -11,26 +11,32 @@
 - status: Completed
 - button "Completed in {{duration}}" [expanded]
 - button "Wrote files, ran commands, called tools, etc." [expanded]
+- time: {{clock}}
 - button "Write site/report.html 1KB +1 -0":
   - text: Write
   - button "site/report.html"
   - text: 1KB +1 -0
+- time: {{clock}}
 - button "Write a/style.css 1KB +1 -0":
   - text: Write
   - button "a/style.css"
   - text: 1KB +1 -0
+- time: {{clock}}
 - button "Write b/style.css 1KB +1 -0":
   - text: Write
   - button "b/style.css"
   - text: 1KB +1 -0
+- time: {{clock}}
 - button "Write site/index.html 1KB +1 -0":
   - text: Write
   - button "site/index.html"
   - text: 1KB +1 -0
+- time: {{clock}}
 - button "Write site/app.js 1KB +1 -0":
   - text: Write
   - button "site/app.js"
   - text: 1KB +1 -0
+- time: {{clock}}
 - button "Edit src/tokens.css 1KB +1 -1" [expanded]:
   - text: Edit
   - button "src/tokens.css"
@@ -40,11 +46,14 @@
 - button "Copy"
 - text: "src/tokens.css - --inline-code: #EBEEF2; + --inline-code: #F5F5F5;"
 - button "Inspect"
+- time: {{clock}}
 - button "Tool call str_replace_editor · create" [expanded]
 - text: "IN { \"command\": \"create\", \"path\": \"docs/press.md\", \"file_text\": \"# Press kit\\n\" } OUT Created docs/press.md"
 - button "Inspect"
+- time: {{clock}}
 - text: Failed
 - 'button "Write permission denied: c/broken.css"'
+- time: {{clock}}
 - button "Read docs/guide.md" [expanded]:
   - text: Read
   - button "docs/guide.md"
@@ -55,6 +64,7 @@
 - button "Expand 4 more lines": … 4 more lines
 - text: guide line 9 guide line 10 guide line 11 guide line 12
 - button "Inspect"
+- time: {{clock}}
 - button "Grep linkColor" [expanded]
 - text: 9 matches · 3 files
 - button "Copy"
@@ -64,19 +74,25 @@
 - button "src/tokens.css 3" [expanded]
 - text: "3: color: var(--linkColor); 7: color: var(--linkColor); 11: color: var(--linkColor);"
 - button "Inspect"
+- time: {{clock}}
 - button "Glob **/*.css"
+- time: {{clock}}
 - button "Bash List the built site"
+- time: {{clock}}
 - button "Failed Bash Run the lint gate exit code 1" [expanded]
 - text: Failed site pnpm run lint exit code 1
 - button "Copy"
 - text: "style.css: unexpected hex literal"
 - button "Inspect"
+- time: {{clock}}
 - button "Failed Bash Check every generated stylesheet and component theme against the shared design tokens, inspect the application pages for inconsistent colors, and report all remaining lint failures before publishing the production build exit code 1"
+- time: {{clock}}
 - button "Failed Bash Build the site no exit code" [expanded]
 - text: Failed site pnpm run build no exit code
 - button "Copy"
 - text: (no output) [timed out after {{duration}}]
 - button "Inspect"
+- time: {{clock}}
 - button "Search clickable link styles, produced files ui" [expanded]
 - paragraph:
   - text: Unify links per
@@ -90,6 +106,7 @@
     - text: One cursor token, one focus ring.
   - listitem: Mirror spec (non-http) A non-http source renders inert.
 - button "Inspect"
+- time: {{clock}}
 - button "Fetch https://docs.example.test/tokens" [expanded]:
   - text: Fetch
   - link "https://docs.example.test/tokens":
@@ -98,6 +115,7 @@
   - /url: https://docs.example.test/tokens
 - text: HTTP 200
 - button "Inspect"
+- time: {{clock}}
 - button "Tool call design_tokens_sync · design-platform.css" [expanded]
 - text: "IN { \"source\": \"design-platform.css\", \"dryRun\": false } OUT {\"synced\":true,\"tokens\":12}"
 - button "Inspect"
