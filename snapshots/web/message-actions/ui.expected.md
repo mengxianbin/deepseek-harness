@@ -22,6 +22,7 @@
 - button "Analysis completed"
 - paragraph: I will read both files before answering.
 - button "Read files"
+- time: {{clock}}
 - button "Copy"
 - button "Good response"
 - button "Bad response"

@@ -16,6 +16,7 @@
   - time: {{clock}}
 - button "Analysis completed" [expanded]
 - button "Think The user wants me to use the ask_user_question tool with specific parameters. Let me do exactly that."
+- time: {{clock}}
 - button "Ask question" [expanded]
 - text: Ask question 1/1 answered
 - button "View answers"

@@ -13,6 +13,7 @@ A Turn shows an answer and lets the reader inspect the work behind it. Start wit
 
 - [How one Turn becomes a transcript](#reading-model)
 - [Whole-Turn folding](#whole-turn-folding)
+- [Row clocks](#row-clocks)
 - [Display modes](#display-modes)
 - [Collapse timing](#collapse-timing)
 - [Replies after collapse](#folded-replies)
@@ -108,6 +109,13 @@ While the Session runs, Chat shows a Session-level indicator at the running Turn
 The top duration/status control and trigger title use the group-title font size and follow the font-size setting. Completed duration digits use the code font with tabular numerals; running and completed minutes and seconds have no leading zero. The timed running label ends with a space and “···”; completion shows “Completed in”. The completed-Turn control also prints the recorded Turn window as shared message-clock times: the Turn start, then the last content-bearing reply's instant — the same instant the footer clock shows, so the two views never disagree — falling back to the recorded Turn end when the Turn closed without a reply. Each side prints alone when the other sits outside the loaded window, and stopped or failed Turns print the window without a duration.
 
 Automatic collapse keeps the process open if hiding it would hide keyboard focus. Manual closing focuses the process control before hiding its members. Closing a whole Turn resets its groups and inner reasoning/tool disclosures; it does not reset unrelated renderer state. Browser find can reveal searchable hidden content.
+
+<a id="row-clocks"></a>
+## Row clocks
+
+Three row classes carry an always-visible clock at the row head as an independent `<time>` element, outside the hover-gated message actions, so a screenshot of tool work or a failure carries its instant. Tool rows stamp their own recorded event time — the stage that began: dispatch while the call runs, the result once it settles. Turn error and max-token notices stamp their recorded event time. Every other timed row stamps the instant that opens a loaded gap of at least ten minutes over the previous timed row in presentation order; rows without a durable time neither clock nor break the chain, and ordinary rows inside the gap keep the hover-only message clock.
+
+The Chat snapshot builder stamps these instants as the node-level `clock` field — key rows unconditionally, gap rows only when the threshold opens them — and the Chat node seat renders the field as the flow item's first child with the shared message-clock formatting and date rules. A row whose only difference is the derived field keeps its stored reference, so ordinary publishes do not re-create rows.
 
 -----
 

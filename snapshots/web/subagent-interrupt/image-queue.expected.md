@@ -23,6 +23,7 @@
   - time: {{clock}}
 - paragraph: partial
 - text: Stopped
+- time: {{clock}}
 - button "Copy"
 - button "Good response"
 - button "Bad response"

@@ -12,8 +12,8 @@
   en: 660130914d717369
   zh: 7e0161dbfe788e96
 /chat-conversation-node-rules/table-of-contents:
-  en: a867dae21e71d327
-  zh: c33b815f08497a82
+  en: 4755ec4ed5e4fc1f
+  zh: c6ebfbd13e9fc807
 /chat-conversation-node-rules/how-one-turn-becomes-a-transcript:
   en: 8598bb1e29a37e02
   zh: d122146ab82568e9
@@ -24,8 +24,11 @@
   en: 75564701ecd3d1bd
   zh: 9c042288a15d441d
 /chat-conversation-node-rules/whole-turn-folding:
-  en: 93434f896da47172
-  zh: bf8d5f032e863204
+  en: 9b23ba323a8ab7b7
+  zh: 79dd7bc9bbb2f374
+/chat-conversation-node-rules/row-clocks:
+  en: 2e9036f46fd7170e
+  zh: 159094ad6df0e1a6
 /chat-conversation-node-rules/display-modes:
   en: ada5a60d2c46f6a8
   zh: f3eaeb5cb4d9b3de

@@ -3613,6 +3613,25 @@ describe('ChatView', () => {
     expect(control.textContent).toBe(`已完成 ${formatMessageClock(3_000, h.props.t)}`)
   })
 
+  it('stamps the always-visible row clock at the row head', () => {
+    const h = makeHarness({ chat: chatSnapshotFixture({
+      nodes: [user(1, 'hi'), turnError(2, 'INTERRUPTED'), assistant(603, 'late reply', 1, 1)],
+    }) })
+    const view = render(<h.ChatView {...h.props} />)
+    // The opening row has no previous timed row: hover-only, no stamp.
+    const opening = view.container.querySelector<HTMLElement>('[data-chat-flow-kind="user"]')!
+    expect(opening.querySelector('[class*="rowClock"]')).toBeNull()
+    // A key row always stamps its own event time, as the flow item's first child.
+    const failure = view.container.querySelector<HTMLElement>('[data-chat-flow-kind="turn-error"]')!
+    const stamp = failure.querySelector<HTMLElement>('[class*="rowClock"]')!
+    expect(stamp.tagName).toBe('TIME')
+    expect(stamp).toBe(failure.firstElementChild)
+    expect(stamp.textContent).toBe(formatMessageClock(2_000, h.props.t))
+    // 601s after the error row opens the ten-minute breakpoint on the reply.
+    const late = view.container.querySelector<HTMLElement>('[data-chat-flow-kind="assistant-step"]')!
+    expect(late.querySelector('[class*="rowClock"]')?.textContent).toBe(formatMessageClock(603_000, h.props.t))
+  })
+
   it('withholds the usage-details trigger when turn usage is outside the window', () => {
     const settled: AssistantMessageNode = {
       kind: 'assistant', seq: 2, time: 2_000, turn: 1, step: 1, blocks: [{ kind: 'text', text: 'answer' }],

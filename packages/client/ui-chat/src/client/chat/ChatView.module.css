@@ -98,6 +98,17 @@
   min-width: 0;
 }
 
+/* Row-head clock: key rows (Tool, Turn error, max-token) stamp their own
+   event time, and any timed row stamps the instant that opens a loaded gap
+   of at least ten minutes. Independent of the hover-gated message actions. */
+.rowClock {
+  display: block;
+  font: var(--dsw-font-xxs-12);
+  font-variant-numeric: tabular-nums;
+  color: var(--dsw-alias-label-tertiary);
+  margin-bottom: 2px;
+}
+
 /* Bottom room: sized by the viewport owner while rows above the reader close,
    given back only as later content grows into it. */
 .turnSpacer {

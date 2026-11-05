@@ -7,9 +7,11 @@
   - text: →
   - time: {{clock}}
 - button "Think The user wants me to read a.txt and b.txt, then reply with \"DONE\". Let me do both reads in parallel."
+- time: {{clock}}
 - button "Read a.txt":
   - text: Read
   - button "a.txt"
+- time: {{clock}}
 - button "Read b.txt":
   - text: Read
   - button "b.txt"

@@ -17,6 +17,7 @@
   - time: {{clock}}
 - paragraph: partial
 - text: Stopped
+- time: {{clock}}
 - status:
   - text: Task stoppedThis turn was stopped by you — the model did not finish a complete reply.
   - code: USER_STOPPED

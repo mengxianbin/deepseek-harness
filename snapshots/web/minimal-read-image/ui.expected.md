@@ -16,6 +16,7 @@
   - text: →
   - time: {{clock}}
 - button "Read images" [expanded]
+- time: {{clock}}
 - button "Read image red.png" [expanded]:
   - text: Read image
   - button "red.png"

@@ -10,6 +10,8 @@ import { isAtOrOutside } from '../contract/group-tree.ts'
 import { isQuestionCallNode, turnProcessAlwaysOpen } from '../contract/turn-process.ts'
 import { turnProcessOpen } from '../stores.ts'
 import { hiddenOrCollapsing } from './flow-motion.ts'
+import { formatMessageClock } from './message-chrome.ts'
+import { useCalendarDay } from './use-calendar-day.ts'
 import css from './ChatView.module.css'
 
 interface ChatNodeSeatProps extends ChatNodeOwnerProps {
@@ -55,6 +57,7 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
   const bottom = useChatNodeBottom(nodeKey)
   const node = useChatNode(nodeKey)
   const routedNode = node as ChatNode | undefined
+  const day = useCalendarDay()
   const turn = turnOf(routedNode)
   const processPresentation = useChatNodeProcess(nodeKey)
   const processSpec = processPresentation?.spec
@@ -167,6 +170,11 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
       data-turn-process-member={processMember || undefined}
       data-turn-process-hidden={processHidden || undefined}
     >
+      {routedNode.clock !== undefined && (
+        <time className={css.rowClock} dateTime={new Date(routedNode.clock).toISOString()}>
+          {formatMessageClock(routedNode.clock, t, day)}
+        </time>
+      )}
       {renderSlot('conversation.chat.node', routedOwner, {
         entryKey: routedNode.kind,
         hookContext,

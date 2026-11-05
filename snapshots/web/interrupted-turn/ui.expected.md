@@ -16,6 +16,7 @@
   - time: {{clock}}
 - button "Read files"
 - paragraph: DONE
+- time: {{clock}}
 - status: Task stoppedThe DSH process exited before this turn finished (for example, it was killed, crashed, or timed out while shutting down), so the turn was closed when DSH restarted. Unfinished tool calls have unknown outcomes.
 - button "Copy"
 - button "Good response"
