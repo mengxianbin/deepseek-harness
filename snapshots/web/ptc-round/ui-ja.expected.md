@@ -10,7 +10,11 @@
 - text: "Using ONE run_code program: run bash `echo CODE_ROUND_OK`, then read the file missing.txt catching its error in the program. Return an object with both outcomes. Then reply DONE and stop. {{clock}}"
 - button "コピー"
 - status: 完了
-- button "完了まで {{duration}}" [expanded]
+- button "完了まで {{duration}} {{clock}} → {{clock}}" [expanded]:
+  - text: 完了まで {{duration}}
+  - time: {{clock}}
+  - text: →
+  - time: {{clock}}
 - button "コードを実行しました、コマンドを実行しました、ファイルを読み取りました" [expanded]
 - 'button "思考 The user wants me to write a single `run_code` program that:"'
 - time: {{clock}}
