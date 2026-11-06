@@ -9,7 +9,8 @@
  */
 
 import type {} from '@deepseek-ai/dsh-working-directory'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
@@ -91,6 +92,101 @@ function nextHandlerId(point: string): string {
 /** The `{kind:'hooks-claude-code'}` producer source stamped on every context this bridge injects. */
 const CONTEXT_SOURCE: MessageSource = { kind: 'hooks-claude-code' }
 
+/**
+ * Event seams {@link apply} wires below. Startup probe ③ counts them on the
+ * event bus after wiring: a seam without its new listener means the hooks (and
+ * whatever guard they enforce) never registered — the fail-open this probe
+ * exists to make impossible (m-note `dsh-auto-route-config-layers.md` §7.1).
+ */
+const HOOK_SEAMS = [
+  'agent/created',
+  'agent/pre-step',
+  'tools/pre-execute',
+  'tools/post-execute',
+  'agent/turn-stopping',
+  'subagent/start',
+  'subagent/end',
+] as const
+
+/** Per-seam listener counts on `ctx.events` right now — probe ③'s baseline. */
+function hookSeamCounts(ctx: Context): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (const seam of HOOK_SEAMS) {
+    counts.set(seam, (ctx.events._hooks[seam] ?? []).length)
+  }
+  return counts
+}
+
+/**
+ * Startup probe ③ — throw unless every seam in {@link HOOK_SEAMS} gained a
+ * listener during this `apply()`, i.e. the hooks really registered. Checks the
+ * event bus rather than trusting the `ctx.on` calls: a listener can be
+ * intercepted by an `internal/listener` hook and never stored, and the
+ * pre-probe code path returned before wiring anything at all.
+ */
+function assertSeamsRegistered(ctx: Context, baseline: ReadonlyMap<string, number>): void {
+  for (const seam of HOOK_SEAMS) {
+    const before = baseline.get(seam) ?? 0
+    const now = (ctx.events._hooks[seam] ?? []).length
+    if (now <= before) {
+      throw new Error(
+        `hooks-claude-code: hook seam "${seam}" never registered (listeners ${before} → ${now})`
+        + ' — startup probe, refusing to run with hooks silently off',
+      )
+    }
+  }
+}
+
+/**
+ * Startup probes ① and ② — load and parse the hook config, or throw.
+ *
+ * A config the bridge cannot resolve, read, or parse used to log one warning
+ * and continue with no hooks registered: the guard was quietly switched off
+ * (fail-open; m-note `dsh-auto-route-config-layers.md` §7.1, 2026-09-23 guard
+ * postmortem). Every way to get there now fails loudly instead.
+ *
+ * ① the configured path resolves to a usable file path,
+ * ② that file exists (the classic broken-junction / moved-repo case),
+ * then the read + parse — also loud on failure.
+ */
+function loadHookConfig(ctx: Context, config: Config): ClaudeCodeHookConfig {
+  // Probe ① — resolution: a blank or non-string path (say a `!!js` env lookup
+  // that came back empty) must not fall through to reading something else.
+  const configured: unknown = config.configPath
+  if (typeof configured !== 'string' || configured.trim() === '') {
+    throw new Error(
+      `hooks-claude-code: configPath did not resolve to a file path (${String(configured)})`
+      + ' — startup probe, refusing to run with hooks silently off',
+    )
+  }
+  const configPath = resolve(configured)
+  // Probe ② — existence: explicit check so a missing file reads as itself in
+  // the boot log, not as whatever the reader happens to throw first.
+  if (!existsSync(configPath)) {
+    throw new Error(
+      `hooks-claude-code: hook config file does not exist: "${configPath}"`
+      + ' — startup probe, refusing to run with hooks silently off',
+    )
+  }
+  try {
+    const raw: unknown = JSON.parse(readFileSync(configPath, 'utf8'))
+    const result = parseClaudeCodeConfig(raw, {
+      ...config.pluginRoot !== undefined ? { pluginRoot: config.pluginRoot } : {},
+      ...config.projectDir !== undefined ? { projectDir: config.projectDir } : {},
+    })
+    for (const s of result.skipped) {
+      ctx.logger.warn(`hooks-claude-code: skipping unsupported "${s.type}" hook on ${s.event} (only command hooks run)`)
+    }
+    return result.config
+  } catch (error: unknown) {
+    throw new Error(
+      `hooks-claude-code: could not load hook config "${configPath}": ${String(error)}`
+      + ' — startup probe, refusing to run with hooks silently off',
+      { cause: error },
+    )
+  }
+}
+
 /** The summary cap bounds a persisted event field — a positive integer or the slice misbehaves silently. */
 function assertPositiveInteger(name: string, value: number): void {
   if (!Number.isInteger(value) || value < 1) {
@@ -99,26 +195,18 @@ function assertPositiveInteger(name: string, value: number): void {
 }
 
 export function apply(ctx: Context, config: Config): void {
-  // Validate before config parsing so a bad value cannot be hidden by its early return.
+  // Validate before config parsing so a bad value surfaces as itself rather
+  // than behind a config-load failure.
   const stderrSummaryMaxChars = config.stderrSummaryMaxChars ?? DEFAULT_STDERR_SUMMARY_MAX_CHARS
   assertPositiveInteger('stderrSummaryMaxChars', stderrSummaryMaxChars)
   const defaultTimeoutMs = config.defaultTimeoutMs ?? DEFAULT_HOOK_TIMEOUT_MS
-  // Parse once at load. A read or parse failure logs and registers nothing.
-  let parsed: ClaudeCodeHookConfig = {}
-  try {
-    const raw: unknown = JSON.parse(readFileSync(config.configPath, 'utf8'))
-    const result = parseClaudeCodeConfig(raw, {
-      ...config.pluginRoot !== undefined ? { pluginRoot: config.pluginRoot } : {},
-      ...config.projectDir !== undefined ? { projectDir: config.projectDir } : {},
-    })
-    parsed = result.config
-    for (const s of result.skipped) {
-      ctx.logger.warn(`hooks-claude-code: skipping unsupported "${s.type}" hook on ${s.event} (only command hooks run)`)
-    }
-  } catch (error: unknown) {
-    ctx.logger.warn(`hooks-claude-code: could not load hook config "${config.configPath}": ${String(error)} — no hooks registered`)
-    return
-  }
+  // Parse once at load, through startup probes ①/② (see loadHookConfig): a
+  // config that cannot be resolved, read, or parsed throws instead of the old
+  // warn-and-return that left the hooks silently off (fail-open).
+  const parsed = loadHookConfig(ctx, config)
+  // Probe ③ baseline: apply runs synchronously, so nothing else can interleave
+  // between this count and the post-wiring assertSeamsRegistered below.
+  const seamBaseline = hookSeamCounts(ctx)
 
   // Emit-shaped points run detached, so track their chains; disposal aborts
   // active hooks and drains continuations before resolving.
@@ -300,6 +388,10 @@ export function apply(ctx: Context, config: Config): void {
     detached.track(runPoint('SubagentStop', SUBAGENT_TYPE, subagentPayload('SubagentStop', info, child), { ...child ? { agent: child, directory: 'committed' } : {}, signal: detached.signal })
       .catch((error: unknown) => { ctx.logger.warn(`hooks-claude-code: SubagentStop hook failed: ${String(error)}`) }))
   })
+
+  // Startup probe ③: the config loaded, so every seam above must now carry the
+  // listener this apply() just added — otherwise the hooks never registered.
+  assertSeamsRegistered(ctx, seamBaseline)
 }
 
 /**

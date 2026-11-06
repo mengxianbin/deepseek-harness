@@ -71,7 +71,7 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 - `${CLAUDE_PLUGIN_ROOT}` and `${CLAUDE_PROJECT_DIR}` in command strings are replaced from your config, and `CLAUDE_PROJECT_DIR` is set for every hook process.
 - One config applies to the whole process: it is read once at startup, and a relative `configPath` resolves from the directory that launched the process.
 - Hooks on the same event run one after another, in config order.
-- If the config cannot be read or parsed, the bridge logs a warning and runs no hooks — the agent still starts.
+- If the config path does not resolve, the file is missing, or the config cannot be read or parsed, the bridge throws at load: startup fails loudly instead of continuing with the hooks silently off (the startup probe).
 - A hook that fails to run (a bad command or a crash) is logged, and the agent continues.
 
 -----
@@ -104,7 +104,7 @@ The three emit points (`SessionStart`, `SubagentStart`, `SubagentStop`) run deta
 
 - **A compatibility adapter, not a power tool.** The bridge exists to run the explicitly supported command-hook subset of an existing Claude Code config; bespoke behavior belongs in a native plugin on the same extension points.
 - **Adding context is not a veto.** A context-only hook delegates via `next()` before folding its message into a downstream enter decision, so a later `agent/pre-step` or `tools/post-execute` listener can still reject or rewrite.
-- **Containment at every failure.** Config read/parse failures and invalid matchers register nothing; a throwing detached inject is caught and logged instead of breaking session boot or the loop.
+- **Containment at every failure.** Invalid matchers register nothing; a config that cannot be resolved, read, or parsed aborts the load with a startup-probe error rather than silently registering nothing; a throwing detached inject is caught and logged instead of breaking session boot or the loop.
 - **Dispose reaches quiescence.** Detached runs are tracked and drained on disposal so no hook process or late callback outlives the fiber.
 - **Serial, not concurrent.** Matched hooks run serially in config order: each `hook/invoked` / `hook/result` pair stays adjacent in the log, and the decision fold is order-independent, so the outcome matches the reference engines' concurrent launch at the cost of serialized latency.
 
