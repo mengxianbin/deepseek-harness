@@ -382,40 +382,63 @@ describe('hooks-claude-code bridge — SubagentStart / SubagentStop (observe)', 
 })
 
 describe('hooks-claude-code bridge — load resilience', () => {
-  it('a missing config file registers no hooks and does not crash the loop', async () => {
-    const adapter = new MockAdapter([textResponse('fine')])
+  /** Minimal boot context for load-time probes (no turn ever runs). */
+  async function loadHarness(): Promise<Context> {
     const ctx = new Context()
     provideWorkingDirectoryFixture(ctx)
     await mountAgentLoopTestDependencies(ctx)
     await ctx.plugin(AgentLoop, { agents: [] })
     await ctx.plugin(LocalSubprocessRuntime)
     await ctx.plugin(LocalBashExecutor, { timeoutMs: 10_000 })
-    await ctx.plugin(HooksClaude, { configPath: '/nonexistent/hooks.json' })
-    ctx.llm.registerAdapter(['mock'], adapter)
-    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
-    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
-    await waitForIdle(ctx, agent)
-    // The turn ran normally — no hooks, no crash.
-    expect(adapter.requests).toHaveLength(1)
+    return ctx
+  }
+
+  it('a missing config file fails the load loudly (startup probe ②), never warn-and-continue', async () => {
+    // Pre-probe contract was the opposite: warn "no hooks registered" and keep
+    // running with the guard silently off (fail-open — the bug this probes).
+    const ctx = await loadHarness()
+    await expect(ctx.plugin(HooksClaude, { configPath: '/nonexistent/hooks.json' }))
+      .rejects.toThrow(/hooks-claude-code: hook config file does not exist: ".*nonexistent.*hooks\.json"/)
   })
 
-  it('an invalid regex matcher is reported and registers no hooks', async () => {
+  it('a configPath that resolves to nothing fails the load loudly (startup probe ①)', async () => {
+    const ctx = await loadHarness()
+    await expect(ctx.plugin(HooksClaude, { configPath: '   ' }))
+      .rejects.toThrow(/hooks-claude-code: configPath did not resolve to a file path/)
+  })
+
+  it('an unparsable config file fails the load loudly instead of registering nothing', async () => {
+    const dir = writeConfig({ UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'exit 0' }] }] })
+    writeFileSync(join(dir, 'hooks.json'), '{ not json')
+    const ctx = await loadHarness()
+    await expect(ctx.plugin(HooksClaude, { configPath: join(dir, 'hooks.json') }))
+      .rejects.toThrow(/hooks-claude-code: could not load hook config/)
+  })
+
+  it('a seam whose listener never lands fails the load loudly (startup probe ③)', async () => {
+    const dir = writeConfig({ UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'exit 0' }] }] })
+    const ctx = await loadHarness()
+    // Intercept the SessionStart seam the way an `internal/listener` hook can:
+    // a non-null result replaces registration, so ctx.on stores nothing there.
+    ctx.on('internal/listener', (name: string) => name === 'agent/created' ? true : undefined)
+    await expect(ctx.plugin(HooksClaude, { configPath: join(dir, 'hooks.json') }))
+      .rejects.toThrow(/hooks-claude-code: hook seam "agent\/created" never registered/)
+  })
+
+  it('an invalid regex matcher fails the load loudly instead of dropping the config behind one warning', async () => {
+    // The matcher SyntaxError is a parse failure: pre-probe it logged one
+    // warning and registered NOTHING — the valid UserPromptSubmit hook went
+    // with it, silently (the same fail-open shape as a missing file).
     const dir = writeConfig({
       UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'exit 2' }] }],
       PreToolUse: [{ matcher: '(', hooks: [{ type: 'command', command: 'exit 2' }] }],
     })
     const adapter = new MockAdapter([textResponse('fine')])
     const warn = vi.fn()
-    const ctx = await harness(dir, adapter, (ctx) => { ctx.logger.warn = warn as never })
-    const agent = await ctx.agentLoop.create(SessionId('invalid-claude-matcher'), { provider: 'mock', model: 'mock' })
-    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
-    await waitForIdle(ctx, agent)
-    expect(adapter.requests).toHaveLength(1)
-    expect(events(agent).some(event => event.type === 'hook/invoked')).toBe(false)
-
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining(
-      'invalid claude-code regex matcher "(" on event "PreToolUse"',
-    ))
+    await expect(harness(dir, adapter, (ctx) => { ctx.logger.warn = warn as never }))
+      .rejects.toThrow(/invalid claude-code regex matcher "\(" on event "PreToolUse"/)
+    // …and the old warn-and-continue report is gone, not merely duplicated.
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('no hooks registered'))
   })
 
   it('an invalid matcher on an unsupported event does not disable supported hooks', async () => {
