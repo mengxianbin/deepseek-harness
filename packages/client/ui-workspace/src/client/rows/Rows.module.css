@@ -262,10 +262,13 @@
 /* 归宿短标 (collab step3 §6.1 一眼层三元组): the owning group's short label
    sits between the title and the time in the search row's Workspace-label
    step (12px tertiary); the 40% share caps it against the row width, so a
-   long Workspace title truncates while the title cell absorbs the rest. */
+   long Workspace title truncates while the title cell absorbs the rest. The
+   6px end margin mirrors the title's own right margin — the row's flex gap
+   token is 0, so without it the label would touch the resting time strip. */
 .homeLabel {
   flex: none;
   max-width: 40%;
+  margin-inline-end: 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
