@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-/** Recheck flow: boot publish, visibility recheck, failure keeps the badge, listener lifetime,
- * and the P3 attestation (running-count body + NEED_RESTART refresh cadence). */
+/** Recheck flow: boot publish, visibility recheck, failure keeps the badge (including a fetch
+ * past its deadline), listener lifetime, and the P3 attestation (running-count body +
+ * NEED_RESTART refresh cadence). */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { startRestartSignalFlow } from '../src/client/restart-signal-flow.ts'
 import type { RestartSignalView } from '../src/restart.ts'
@@ -203,6 +204,24 @@ describe('restart-signal recheck attestation (P3)', () => {
     await flush()
     await vi.advanceTimersByTimeAsync(120_000)
     expect(fetchImpl).toHaveBeenCalledTimes(1)
+    flow.dispose()
+  })
+
+  it('drops a fetch past its deadline into the failure path — previous badge kept (stamp-recheck-cache-timeout-1107)', async () => {
+    const warn = vi.fn()
+    const publish = vi.fn<(view: RestartSignalView) => void>()
+    const hanging = vi.fn(() => new Promise<never>(() => {}))
+    const flow = startRestartSignalFlow(publish, { fetch: hanging, warn, timeoutMs: 1_000 })
+    await flush()
+    // Before the deadline: nothing published, nothing warned — the attempt is still open.
+    expect(hanging).toHaveBeenCalledTimes(1)
+    expect(publish).not.toHaveBeenCalled()
+    expect(warn).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1_000)
+    // At the deadline the existing failure path takes over: one warn, no publish,
+    // so the previously published badge stays on screen — no hang, no new machinery.
+    expect(warn).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('timed out after 1000ms'))
+    expect(publish).not.toHaveBeenCalled()
     flow.dispose()
   })
 })

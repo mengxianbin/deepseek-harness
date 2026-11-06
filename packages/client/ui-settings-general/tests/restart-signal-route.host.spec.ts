@@ -2,7 +2,9 @@
  * Recheck route: `POST /api/stamp-recheck` rides Connection's authenticated
  * exact-fetch fence like the restart dispatch — the fresh judgment answers
  * as JSON with its restart branch, a gather failure answers 500 with one
- * stderr line, and other methods stay natural 404s.
+ * stderr line, a gather past the deadline answers the last judgment (504
+ * with none) instead of hanging (stamp-recheck-cache-timeout-1107), and other
+ * methods stay natural 404s.
  */
 import { Context } from '@deepseek-ai/cordis'
 import { HostConnectionService } from '@deepseek-ai/dsh-client-connection'
@@ -10,6 +12,7 @@ import type { BrowserAuth } from '@deepseek-ai/dsh-client-connection/src/browser
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { registerRestartSignal } from '../src/restart-signal-host.ts'
 import { latestClientAttestation, resetDispositionStateForTest } from '../src/restart-disposition.ts'
+import type { RestartSignalJudgment } from '../src/restart-signal.ts'
 import { RECHECK_PATH } from '../src/restart.ts'
 
 afterEach(() => {
@@ -68,6 +71,44 @@ describe('restart-signal recheck route', () => {
     expect(response.status).toBe(500)
     expect(await response.json()).toEqual({ error: 'restart-signal recheck failed' })
     expect(write).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('git exploded'))
+  })
+
+  it('answers the last computed judgment when the gather hangs past the deadline', async () => {
+    const { ctx, post } = fixture()
+    const write = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    const hung: RestartSignalJudgment = {
+      state: 'BUILDING',
+      startedAt: '2026-11-06T19:30:17.345Z',
+      detail: 'previous computation',
+    }
+    registerRestartSignal(ctx, {
+      collect: () => new Promise<RestartSignalJudgment>(() => {}),
+      timeoutMs: 5,
+      lastJudgment: () => hung,
+    })
+    const started = Date.now()
+    const response = await post()
+    // The answer lands on the deadline, not on the (never-settling) gather:
+    // bounded wait, no throw, no 70s hang.
+    expect(Date.now() - started).toBeLessThan(5_000)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ state: 'BUILDING', startedAt: '2026-11-06T19:30:17.345Z' })
+    expect(write).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('timed out after 5ms'))
+  })
+
+  it('answers 504 at the deadline when no judgment exists yet', async () => {
+    const { ctx, post } = fixture()
+    const write = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    registerRestartSignal(ctx, {
+      collect: () => new Promise<RestartSignalJudgment>(() => {}),
+      timeoutMs: 5,
+      lastJudgment: () => undefined,
+    })
+    const response = await post()
+    expect(response.status).toBe(504)
+    expect(await response.json()).toEqual({ error: 'restart-signal recheck timed out' })
+    // Without a last judgment the line names the bare timeout (no "answering with").
+    expect(write).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('timed out after 5ms'))
   })
 
   it('keeps other methods on the natural 404 path', async () => {
