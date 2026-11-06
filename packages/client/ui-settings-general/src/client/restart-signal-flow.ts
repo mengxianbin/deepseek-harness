@@ -6,7 +6,9 @@
  * page returns to visibility (design trigger ③), and exposes `recheck` for
  * the connection-reconnect leg of the灯自灭 chain (R6: reconnect → recompute
  * → delivery). Failures — network, non-OK status, malformed body — keep the
- * previous published badge and warn once per attempt.
+ * previous published badge and warn once per attempt; so does a fetch that
+ * outlives its deadline (stamp-recheck-cache-timeout-1107), so a host stuck
+ * behind a slow full-tree recompute can never pin this page on a wait.
  *
  * P3 additions, both dark until the host's flag is on: every recheck carries
  * the page's own running-Session count (`runningCount`, the host's automatic
@@ -30,6 +32,13 @@ interface RecheckResponse {
 /** Default cadence of the NEED_RESTART attestation refresh (P3; host freshness window 90s). */
 const DEFAULT_REFRESH_MS = 30_000
 
+/** Default ceiling for one recheck fetch: past it the attempt drops into the
+ * existing failure path (previous badge kept, one warn), so no host-side hang
+ * ever holds the page. Sits above the host route's own 12s deadline — the
+ * server's last-judgment fallback normally wins the race, and this is the
+ * backstop for a host that stops answering entirely. */
+const DEFAULT_TIMEOUT_MS = 15_000
+
 /** Injectable browser surfaces; defaults come from the served page. */
 export interface RestartSignalSurfaces {
   /** Same-origin fetch of the recheck route. */
@@ -48,6 +57,8 @@ export interface RestartSignalSurfaces {
   runningCount?: () => number | undefined
   /** Cadence of the NEED_RESTART attestation refresh in milliseconds; `0` disables it. */
   refreshMs?: number
+  /** Ceiling for one recheck fetch in milliseconds; defaults to {@link DEFAULT_TIMEOUT_MS}. */
+  timeoutMs?: number
   /** Failure sink; defaults to a console warning. */
   warn?: (message: string) => void
 }
@@ -65,6 +76,32 @@ export interface RestartSignalFlow {
   recheck(): void
   /** Stop the visibility listener. */
   dispose(): void
+}
+
+/**
+ * Race one recheck fetch against a deadline: a fetch that never settles
+ * rejects into the flow's existing failure path (previous badge kept, one
+ * warn) instead of holding the attempt forever. The losing side is an ordinary
+ * promise — nothing to abort; the timer is the only cleanup.
+ * @param response - The in-flight recheck fetch.
+ * @param timeoutMs - Deadline in milliseconds.
+ * @returns The response when it lands inside the deadline; rejects at the deadline.
+ */
+function withDeadline(response: Promise<RecheckResponse>, timeoutMs: number): Promise<RecheckResponse> {
+  return new Promise((resolve, reject) => {
+    const deadline = setTimeout(() => { reject(new Error(`recheck timed out after ${String(timeoutMs)}ms`)) }, timeoutMs)
+    response.then(
+      (value) => { clearTimeout(deadline); resolve(value) },
+      (error: unknown) => {
+        clearTimeout(deadline)
+        // fetch rejects with an Error by specification, so a real reason
+        // travels on untouched; the wrap only guards an injected surface that
+        // rejects with anything else (the flow's catch formats both the same).
+        /* v8 ignore next -- fetch rejections are Errors by specification; the wrap is defensive */
+        reject(error instanceof Error ? error : new Error(String(error)))
+      },
+    )
+  })
 }
 
 function defaultSurfaces(): RestartSignalSurfaces {
@@ -91,6 +128,7 @@ export function startRestartSignalFlow(
   const fetchImpl = surfaces.fetch
   const warn = surfaces.warn ?? ((message: string) => { (globalThis as PageGlobals).console?.warn(message) })
   const refreshMs = surfaces.refreshMs ?? DEFAULT_REFRESH_MS
+  const timeoutMs = surfaces.timeoutMs ?? DEFAULT_TIMEOUT_MS
   let refreshTimer: ReturnType<typeof setInterval> | undefined
   const stopRefresh = (): void => {
     if (refreshTimer !== undefined) clearInterval(refreshTimer)
@@ -109,7 +147,7 @@ export function startRestartSignalFlow(
       ? { method: 'POST', body: JSON.stringify({ runningCount }), headers: { 'content-type': 'application/json' } }
       : { method: 'POST' }
     void Promise.resolve()
-      .then(() => fetchImpl(RECHECK_PATH, init))
+      .then(() => withDeadline(fetchImpl(RECHECK_PATH, init), timeoutMs))
       .then(async (response) => {
         if (!response.ok) throw new Error(`recheck answered HTTP ${String(response.status)}`)
         const view = resolveRestartSignal(await response.json())

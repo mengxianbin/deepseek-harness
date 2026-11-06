@@ -2,6 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": ".",
+    "noEmitOnError": true,
     "outDir": "lib/types",
     "jsx": "react-jsx",
     "lib": [

@@ -152,14 +152,15 @@ export type SealLightSnapshot = ReadonlyMap<SessionId, SealLightSeal>
  * light drives, injected into the browser and threaded to its rows. `watch`
  * registers one mounted light's row — the mounted set is exactly the id set
  * the check requests — and returns its release; `reportRunning` carries that
- * row's live `running` fact so a true→false flip, the moment a save can turn
- * green, raises a check of its own. Neither call binds the Session: the row
- * already carries its identity.
+ * row's live `running` fact, and either of its flips raises a check of its
+ * own (true→false = a save may have landed; false→true since 2026-11-06 =
+ * the verdict on screen goes stale — seal-light-running-dark-1106). Neither
+ * call binds the Session: the row already carries its identity.
  */
 export interface SealRowObserver {
   /** Register a mounted light's row; the returned callback releases it. */
   watch(sessionId: SessionId): () => void
-  /** Report the row's current running flag; true→false schedules a check. */
+  /** Report the row's current running flag; either flip schedules a check (false→true since 2026-11-06). */
   reportRunning(sessionId: SessionId, running: boolean): void
 }
 

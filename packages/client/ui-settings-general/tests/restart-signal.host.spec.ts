@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   combineHostFace,
   collectRestartSignal,
+  invalidateRestartSignalCache,
   judgeRestartSignal,
   readBuildStartCaptureTime,
   resetRestartSignalForTest,
@@ -338,6 +339,12 @@ describe('collectRestartSignal', () => {
     // combination, R (captured without it) no longer matches fresh B, and the
     // R/B comparison — which keeps linked in full — raises NEED_RESTART built.
     writeBaseline(linked, { host: 'b'.repeat(64), client: null })
+    // That manifest landing is a state move: in production the push sensor's
+    // in-scope marker signature (restart-stamp.json content hash) detects it
+    // and drops the result cache before its recheck — the same invalidation,
+    // performed here so the second collect recomputes instead of answering
+    // from the just-filled cache (stamp-recheck-cache-timeout-1107).
+    invalidateRestartSignalCache()
     const second = await collectRestartSignal({
       repositoryRoot,
       dshHome,
