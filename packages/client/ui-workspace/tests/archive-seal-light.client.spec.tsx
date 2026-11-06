@@ -2,11 +2,12 @@
 /**
  * FORK archive-seal-light-1101: the archive-seal row light — the lamp table
  * (archive-seal-light.md §四 灯绿/暗, asserted against the gate's 门绿 so the
- * two stay two tables), the C1 fetch policy (visible mounted ids only,
- * id-change / running-flip triggers, ≥2s throttle, single flight, no resident
- * polling), the fail-dark + console-warn backoff over the REAL
- * `requestSealCheck` (单1 在途 = 404 常态), the row's archived/blank gate
- * (§六.6), and the localized detail tooltip.
+ * two stay two tables), the 2026-11-06 running 短路 (a running row renders no
+ * lamp; both running flips re-check, seal-light-running-dark-1106), the C1
+ * fetch policy (visible mounted ids only, id-change / running-flip triggers,
+ * ≥2s throttle, single flight, no resident polling), the fail-dark +
+ * console-warn backoff over the REAL `requestSealCheck` (单1 在途 = 404 常态),
+ * the row's archived/blank gate (§六.6), and the localized detail tooltip.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
@@ -81,6 +82,18 @@ describe('sealLightTone (design §四: the lamp green is not the gate green)', (
     expect(isGreenSeal({ verdict: 'DONE' })).toBe(true)
     expect(isGreenSeal({ verdict: 'UNKNOWN' })).toBe(false)
   })
+
+  it('stays dark while the row runs — the running short-circuit precedes the lamp table (2026-11-06)', () => {
+    // A running row's verdict is the previous turn's reading: never `ready`,
+    // exactly the dark row's form (seal-light-running-dark-1106).
+    expect(sealLightTone({ verdict: 'DONE' }, true)).toBeUndefined()
+    expect(sealLightTone({ verdict: 'N_A' }, true)).toBeUndefined()
+    // The short-circuit is running's alone: stopped, the same verdicts light.
+    expect(sealLightTone({ verdict: 'DONE' }, false)).toBe('ready')
+    expect(sealLightTone({ verdict: 'N_A' }, false)).toBe('ready')
+    // Omitting the flag keeps the pre-revision table (the store registers rows as stopped).
+    expect(sealLightTone({ verdict: 'DONE' })).toBe('ready')
+  })
 })
 
 describe('createSealLightStore (the C1 fetch policy)', () => {
@@ -122,22 +135,43 @@ describe('createSealLightStore (the C1 fetch policy)', () => {
     expect(request).toHaveBeenLastCalledWith([sid('a')])
   })
 
-  it('raises a check on a running true→false flip and never on false→true', async () => {
+  it('raises a check on BOTH running flips, painting the verdict each flip proved (false→true since 2026-11-06)', async () => {
+    // Rewrite of the old 「never on false→true」 case: its premise ("while work
+    // runs no save can be DONE") was disproved by a fake sentinel answering
+    // DONE for a whole run (活样本 session-c879796c, 2026-11-06), so false→true
+    // now re-checks — the stale reading must not hold the lamp through the run
+    // (seal-light-running-dark-1106, conflict reported per AGENTS 必检 #12).
     vi.useFakeTimers()
-    const request = vi.fn(answerFor(sid('a')))
+    const answers: SealLightSeal[] = [
+      { verdict: 'DONE' }, // the previous turn's reading, already on screen
+      { verdict: 'UNSEALED', detail: 'sentinel-stale', followUpCount: 1 }, // the truth while running
+      { verdict: 'DONE' }, // sealed again after the stop
+    ]
+    const request = vi.fn(async (ids: readonly SessionId[]) => {
+      const seals = new Map<SessionId, SealLightSeal>()
+      const answer = answers.shift()
+      if (answer !== undefined) for (const id of ids) seals.set(id, answer)
+      return seals
+    })
     const store = createSealLightStore(request)
     store.sealRows.watch(sid('a'))
     await tick()
     expect(request).toHaveBeenCalledTimes(1)
+    expect(store.observable.getSnapshot().get(sid('a'))).toEqual({ verdict: 'DONE' })
 
+    // false→true: 开跑即复查 — the flip raises a check under the throttle.
     store.sealRows.reportRunning(sid('a'), true)
     await advance(5_000)
-    expect(request).toHaveBeenCalledTimes(1)
+    expect(request).toHaveBeenCalledTimes(2)
+    expect(store.observable.getSnapshot().get(sid('a')))
+      .toEqual({ verdict: 'UNSEALED', detail: 'sentinel-stale', followUpCount: 1 })
 
+    // true→false: turn 结束真值回灯 — the original trigger, unchanged.
     store.sealRows.reportRunning(sid('a'), false)
     await advance(2_000)
-    expect(request).toHaveBeenCalledTimes(2)
+    expect(request).toHaveBeenCalledTimes(3)
     expect(request).toHaveBeenLastCalledWith([sid('a')])
+    expect(store.observable.getSnapshot().get(sid('a'))).toEqual({ verdict: 'DONE' })
   })
 
   it('never runs two checks at once: a trigger mid-flight waits its turn', async () => {
@@ -309,6 +343,25 @@ describe('SealLight (the lamp on the row)', () => {
       // what lights it, so the id set does not depend on the current tone.
       expect(sealRows.watch).toHaveBeenCalledWith(sid('one'))
     }
+  })
+
+  it('renders nothing for a running row even on a green verdict, and lights when the turn ends (2026-11-06 running 短路)', () => {
+    const sealRows = observer()
+    const view = render(
+      <SealLight sessionId={sid('one')} running seal={{ verdict: 'DONE' }} sealRows={sealRows} t={t} />,
+    )
+    // The dark-row form, byte for byte: no lamp, no tone, no text.
+    expect(view.container.querySelector('[data-seal-tone]')).toBeNull()
+    expect(view.container.textContent).toBe('')
+    // Running or not, the mounted lamp registers and reports its running fact.
+    expect(sealRows.watch).toHaveBeenCalledWith(sid('one'))
+    expect(sealRows.reportRunning).toHaveBeenLastCalledWith(sid('one'), true)
+    // turn 结束真值回灯: the same verdict lights the moment the row stops.
+    view.rerender(
+      <SealLight sessionId={sid('one')} running={false} seal={{ verdict: 'DONE' }} sealRows={sealRows} t={t} />,
+    )
+    expect(screen.getByRole('img', { name: '归档就绪：save 已收口（DONE）' }).getAttribute('data-seal-tone'))
+      .toBe('ready')
   })
 
   it('registers on mount, reports running flips in place, releases on unmount', () => {

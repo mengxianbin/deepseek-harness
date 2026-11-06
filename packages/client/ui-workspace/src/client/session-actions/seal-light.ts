@@ -7,9 +7,14 @@
  * - **Who is asked** — exactly the rows whose light is mounted: visible,
  *   non-archived, non-blank Session rows (design §三 对象 / §六.6 归档态行
  *   不请求). A row joining or leaving that set raises a check.
- * - **When** — an id-set change, or one row's `running` true→false flip: the
- *   moment a save can turn green (设计点名的最可能变绿时刻). No resident
- *   polling: a settled check with no new trigger never re-arms itself.
+ * - **When** — an id-set change, or one row's `running` flip either way
+ *   (2026-11-06 修订, seal-light-running-dark-1106): true→false is the moment
+ *   a save can turn green (设计点名的最可能变绿时刻); false→true is the moment
+ *   the verdict on screen turns stale, so the reading refreshes instead of
+ *   holding the previous turn's answer through the run — the original premise
+ *   「while work runs no save can be DONE」 was disproved by a fake sentinel
+ *   answering DONE for a whole run (活样本 = `session-c879796c`, 2026-11-06).
+ *   No resident polling: a settled check with no new trigger never re-arms itself.
  * - **Pace** — at least {@link SEAL_LIGHT_THROTTLE_MS} between two checks and
  *   one in flight at a time (throttle + single flight, 任务书节流 ≥2 秒).
  * - **Failure** — `null` from `requestSealCheck` paints every light dark
@@ -176,9 +181,13 @@ export function createSealLightStore(request: SealCheckRequest = requestSealChec
       const known = rows.get(sessionId)
       if (known === undefined || known === running) return
       rows.set(sessionId, running)
-      // Only the stop matters: while work runs no save can be DONE, so
-      // false→true is not a moment worth a check.
-      if (known && !running) arm()
+      // Both flips are worth a check (2026-11-06 running 短路): true→false is
+      // when a save can turn green; false→true is when the verdict on screen
+      // goes stale — the old premise 「while work runs no save can be DONE」
+      // was disproved by a fake sentinel answering DONE for a whole run, so a
+      // start re-checks too and the lamp stops painting the previous turn's
+      // reading while work runs (seal-light-running-dark-1106).
+      arm()
     },
   }
 
