@@ -29,7 +29,14 @@
  *
  * Gathering runs the stamp CLI (`scripts/restart-signal/signal-cli.ts`) in a
  * short-lived child process so a recompute never blocks the host event loop;
- * concurrent rechecks coalesce into one in-flight computation.
+ * concurrent rechecks coalesce into one in-flight computation, and a repeat
+ * collect inside a short result cache answers the stored judgment without
+ * spawning the CLI again (stamp-recheck-cache-timeout-1107). The cache is
+ * bounded three ways — a 15s TTL, the own-tree build-marker state it was
+ * filled under (a BUILDING/failed flip invalidates at once, never waiting out
+ * the TTL), and an explicit invalidation the push sensor fires when its
+ * fingerprint delta proved a source/config move — so no judgment older than
+ * one of those bounds can be served.
  * @module @deepseek-ai/dsh-client-ui-settings-general/restart-signal
  */
 
@@ -314,6 +321,29 @@ export async function runStampCli(
 
 let inFlight: Promise<RestartSignalJudgment> | undefined
 
+/** Result-cache TTL: 15s — a sixth of the host's 90s attestation freshness window
+ * (`restart-disposition.ts` `ATTESTATION_MAX_AGE_MS`, design = P11 报告 §五) and
+ * half the client's 30s refresh cadence (`client/restart-signal-flow.ts`
+ * `DEFAULT_REFRESH_MS`), so a cached judgment can never age past one refresh tick
+ * (freshness-window check, stamp-recheck-cache-timeout-1107: TTL ≤ 90s 窗的保守份额 → 无语义变更). */
+const CACHE_TTL_MS = 15_000
+
+/** One cached judgment plus the inputs it was keyed and probed under. */
+interface RestartSignalCacheEntry {
+  /** The stored judgment; served verbatim on a hit (`startedAt` and all display fields ride along). */
+  readonly judgment: RestartSignalJudgment
+  /** Separator-normalized repository root the collect ran against (the cache key). */
+  readonly repositoryRoot: string
+  /** Epoch ms of the fill; a hit must land within {@link CACHE_TTL_MS}. */
+  readonly at: number
+  /** Own-tree build-start marker state probed *before* the compute it labels. */
+  readonly building: boolean
+  /** Own-tree build-failure marker state probed *before* the compute it labels. */
+  readonly failed: boolean
+}
+
+let cache: RestartSignalCacheEntry | undefined
+
 /** Host-side observers of every fresh judgment (P3: the auto-build throttle and the
  * restart disposition both ride the route/polling recheck stream instead of running
  * a second collector). Listener failures are isolated to one stderr line. */
@@ -421,20 +451,84 @@ async function computeRestartSignal(options: RestartSignalOptions): Promise<Rest
   )
 }
 
+/** The cheap own-tree build-marker state both sides of the cache decision probe:
+ * the same two reads the compute makes (the liveness probe may journal-and-clear an
+ * orphan, which the compute then simply observes as absent). Linked trees are out of
+ * scope here — their marker transitions ride the push sensor's in-scope signature
+ * (stamp-poll-host, ≤ one 30s tick). */
+function ownMarkerState(repositoryRoot: string): { readonly building: boolean; readonly failed: boolean } {
+  return {
+    building: readBuildingCapture(repositoryRoot),
+    failed: existsSync(join(repositoryRoot, STAMP_DIR, FAILURE_FILE)),
+  }
+}
+
 /**
  * Recompute the restart signal; concurrent callers coalesce into the one
  * in-flight computation, so repeated call paths (visibility, reconnect,
  * polling) stay idempotent per design (设计 §三: 各路只喊重查).
+ *
+ * A repeat collect inside the result cache answers the stored judgment
+ * without spawning the stamp CLI, keyed on the repository root, bounded by
+ * the TTL and the own-tree marker state the fill probed (see the module doc).
+ * A hit returns the stored object verbatim — display fields such as the
+ * BUILDING `startedAt` ride along untouched — and never publishes to the
+ * observer roster, because it is not a fresh computation (one publish per
+ * compute keeps the "单飞合并" contract exact).
  * @param options - Injection seams; production uses this process's tree and the stamp CLI.
- * @returns The fresh judgment.
+ * @returns The fresh (or, within the TTL, the stored) judgment.
  */
 export function collectRestartSignal(options: RestartSignalOptions = {}): Promise<RestartSignalJudgment> {
-  inFlight ??= computeRestartSignal(options).finally(() => { inFlight = undefined })
+  // The async wrapper keeps the original failure contract: a degenerate root
+  // resolution rejects the returned promise (as the compute always has), never
+  // throws synchronously at the caller — while the body still runs its cache
+  // check synchronously, so concurrent callers join one promise as before.
+  inFlight ??= (async () => {
+    const repositoryRoot = options.repositoryRoot ?? defaultRepositoryRoot()
+    const key = normalizeRepository(repositoryRoot)
+    // Probed on every collect — once — so the fill labels its judgment with the
+    // marker state the compute starts from, and a flip during or after the run
+    // surfaces as a hit-path mismatch (a recompute) instead of a stale serve.
+    const probed = ownMarkerState(repositoryRoot)
+    const entry = cache
+    if (entry !== undefined
+      && entry.repositoryRoot === key
+      && entry.building === probed.building
+      && entry.failed === probed.failed
+      && Date.now() - entry.at < CACHE_TTL_MS) {
+      return entry.judgment
+    }
+    const judgment = await computeRestartSignal(options)
+    cache = { judgment, repositoryRoot: key, at: Date.now(), building: probed.building, failed: probed.failed }
+    return judgment
+  })().finally(() => { inFlight = undefined })
   return inFlight
 }
 
-/** Drop the coalescing slot and the observer roster; tests only. */
+/**
+ * Drop the result cache so the next collect recomputes. The push sensor calls
+ * this when its fingerprint or build-marker delta proved a move
+ * (stamp-poll-host): that delta already knows the stored judgment is stale, so
+ * the recheck it triggers — and every page pull `restart-signal/changed` pokes
+ * after it — must recompute rather than answer from the pre-move result.
+ */
+export function invalidateRestartSignalCache(): void {
+  cache = undefined
+}
+
+/**
+ * The most recent judgment this process computed, however old — the recheck
+ * route's timeout answers from it so a hung gather can never hang the request
+ * (an old truth beats a hang, never a fresher-than-truth guess).
+ * @returns The stored judgment; `undefined` before the first computation.
+ */
+export function lastRestartSignalJudgment(): RestartSignalJudgment | undefined {
+  return cache?.judgment
+}
+
+/** Drop the coalescing slot, the result cache, and the observer roster; tests only. */
 export function resetRestartSignalForTest(): void {
   inFlight = undefined
+  cache = undefined
   judgmentListeners.clear()
 }

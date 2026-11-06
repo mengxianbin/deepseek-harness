@@ -42,7 +42,10 @@
  * the state machine. Both triggers share one recheck and one emit per tick
  * (at most one push per interval, regardless of how many inputs moved), and
  * a failed recheck emits nothing (there is no fresh judgment to deliver) and
- * keeps the pre-P2 warn line.
+ * keeps the pre-P2 warn line. A move this tick proved also drops the result
+ * cache before that recheck (stamp-recheck-cache-timeout-1107), so neither
+ * the recheck itself nor the page pulls `restart-signal/changed` pokes can
+ * answer from a pre-move judgment the sensor's own delta already discredited.
  * @module @deepseek-ai/dsh-client-ui-settings-general/stamp-poll-host
  */
 
@@ -56,7 +59,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
-import { collectRestartSignal } from './restart-signal.ts'
+import { collectRestartSignal, invalidateRestartSignalCache } from './restart-signal.ts'
 import { defaultRepositoryRoot, linkedStampRepositories } from './restart-stamp.ts'
 
 const execFileAsync = promisify(execFile)
@@ -350,6 +353,11 @@ export function registerStampPoll(ctx: Context, internals: StampPollInternals = 
       if (!moved) return
       baseline = probe
       markerBaseline = markers
+      // This delta already proved the stored judgment stale: drop the result
+      // cache so the recheck below — and every page pull the emit below it
+      // pokes — recomputes instead of answering from the pre-move result
+      // (stamp-recheck-cache-timeout-1107).
+      invalidateRestartSignalCache()
       void recheck().then(() => {
         if (disposed) return
         // Design C.5 push leg: the judgment was just recomputed, so poke
