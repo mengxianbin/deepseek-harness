@@ -533,9 +533,22 @@
   outline-offset: -2px;
 }
 
+/* FORK session-relay-1106: a gated row action (relay's seal, running, or
+   pending reason) stays focusable and hoverable so Tooltip can explain why —
+   a native disabled button would eat the events, same ruling as the message
+   actions' unavailable branch. */
+.iconButton[data-unavailable] {
+  cursor: default;
+  opacity: 0.4;
+}
+
 @media (hover: hover) {
   .iconButton:hover {
     color: var(--dsw-alias-label-primary);
+  }
+
+  .iconButton[data-unavailable]:hover {
+    color: var(--dsw-alias-label-tertiary);
   }
 }
 

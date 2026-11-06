@@ -23,7 +23,7 @@ import type { ArchiveToastEntryProps } from '../src/client/contract/toast.ts'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import type {
-  MenuOpenState, RowToast, RowToastState, SessionArchiveConfirmInjected, SessionArchiveConfirmRequest,
+  MenuOpenState, RowToast, RowToastState, SealLightSnapshot, SessionArchiveConfirmInjected, SessionArchiveConfirmRequest,
   SessionRenameDialogInjected, SessionRenameTarget,
 } from '../src/client/contract/slots.ts'
 import {
@@ -31,6 +31,8 @@ import {
 } from '../src/client/session-actions/ArchiveSession.tsx'
 import { ForkSessionMenuItem } from '../src/client/session-actions/ForkSession.tsx'
 import { PinSessionMenuItem, PinSessionRowButton } from '../src/client/session-actions/PinSession.tsx'
+import { RelaySessionRowButton } from '../src/client/session-actions/RelaySession.tsx'
+import type { SessionSealVerdict } from '../src/client/session-actions/seal.ts'
 import { RenameSessionMenuItem, SessionRenameDialog } from '../src/client/session-actions/RenameSession.tsx'
 import { RowActionToast } from '../src/client/session-actions/RowActionToast.tsx'
 import { SessionIdMenuItem } from '../src/client/session-actions/SessionId.tsx'
@@ -990,4 +992,95 @@ it('shows effective Session shortcuts while menu clicks keep the row target', ()
   expect(requestSessionRename).toHaveBeenCalledWith(ROW.sessionId, ROW.displayTitle)
   expect(forkSession).toHaveBeenCalledWith(ROW.sessionId)
   expect(archiveSession).toHaveBeenCalledWith(ROW.sessionId)
+})
+
+describe('relay action (FORK session-relay-1106)', () => {
+  /** The relay share over fixed membership and verdicts: the bound hooks and the callback. */
+  const relayShare = (options: { archived?: readonly string[]; verdict?: SessionSealVerdict } = {}) => {
+    const seals: SealLightSnapshot = new Map(
+      options.verdict === undefined ? [] : [[ROW.sessionId, { verdict: options.verdict }]],
+    )
+    return {
+      useArchived: hook(idSet(...(options.archived ?? []))),
+      useSealLight: hook(seals),
+      relaySession: vi.fn(async () => true),
+    }
+  }
+
+  it('absents itself on a blank, archived, or access-refused row', () => {
+    const blank = render(<RelaySessionRowButton {...actionRow} {...relayShare()} blank />)
+    expect(blank.container.childElementCount).toBe(0)
+    blank.unmount()
+    const archived = render(<RelaySessionRowButton {...actionRow} {...relayShare({ archived: ['one'] })} />)
+    expect(archived.container.childElementCount).toBe(0)
+    archived.unmount()
+    // Relay ends in an archive, so it asks for the same endpoint the archive button does.
+    const useSessionAccess = vi.fn((_id: SessionId, endpoint: string) => endpoint !== 'workspace/archiveSession')
+    const refused = render(<RelaySessionRowButton {...actionRow} {...relayShare()} useSessionAccess={useSessionAccess} />)
+    expect(refused.container.childElementCount).toBe(0)
+    expect(useSessionAccess).toHaveBeenCalledWith(sid('one'), 'workspace/archiveSession')
+  })
+
+  it('stays disabled with the save reason until the verdict is exactly DONE', () => {
+    // Absent verdict: the check is in flight or the channel failed (fail-dark).
+    const absent = render(<RelaySessionRowButton {...actionRow} {...relayShare()} />)
+    const button = absent.getByRole('button', { name: '接力会话' })
+    expect(button.getAttribute('aria-disabled')).toBe('true')
+    expect(button.getAttribute('data-unavailable')).toBe('true')
+    const reason = screen.getByText('先 save 收口')
+    expect(button.getAttribute('aria-describedby')).toBe(reason.id)
+    absent.unmount()
+    // A green-but-not-DONE verdict still does not relay: the gate is exact,
+    // the deliberate mirror of the archive gate's fail-open green groups.
+    const nA = render(<RelaySessionRowButton {...actionRow} {...relayShare({ verdict: 'N_A' })} />)
+    expect(nA.getByRole('button', { name: '接力会话' }).getAttribute('aria-disabled')).toBe('true')
+    nA.unmount()
+    const done = render(<RelaySessionRowButton {...actionRow} {...relayShare({ verdict: 'DONE' })} />)
+    const enabled = done.getByRole('button', { name: '接力会话' })
+    expect(enabled.getAttribute('aria-disabled')).toBeNull()
+    expect(enabled.hasAttribute('data-unavailable')).toBe(false)
+    expect(screen.queryByText('先 save 收口')).toBeNull()
+  })
+
+  it('stays disabled with the running reason while the Session runs', () => {
+    const running: SessionListState = { ...sessions, byId: { [one.id]: { ...one, running: true } } }
+    const view = render(
+      <RelaySessionRowButton {...actionRow} {...relayShare({ verdict: 'DONE' })} useSessions={hook(running)} />,
+    )
+    const button = view.getByRole('button', { name: '接力会话' })
+    expect(button.getAttribute('aria-disabled')).toBe('true')
+    expect(screen.getByText('会话运行中，停轮后再接力')).toBeTruthy()
+    expect(screen.queryByText('先 save 收口')).toBeNull()
+  })
+
+  it('offers the relay on a DONE, stopped row and spends the row once dispatched', async () => {
+    let settle: (dispatched: boolean) => void = () => {}
+    const relaySession = vi.fn(() => new Promise<boolean>((resolve) => { settle = resolve }))
+    const view = render(
+      <RelaySessionRowButton {...actionRow} {...relayShare({ verdict: 'DONE' })} relaySession={relaySession} />,
+    )
+    const button = view.getByRole('button', { name: '接力会话' })
+    expect(button.getAttribute('aria-disabled')).toBeNull()
+
+    fireEvent.click(button)
+    expect(relaySession).toHaveBeenCalledWith(sid('one'))
+    // Pending: the reason switches and the button cannot fire twice.
+    const pending = view.getByRole('button', { name: '接力会话' })
+    expect(pending.getAttribute('aria-disabled')).toBe('true')
+    expect(screen.getByText('接力中…')).toBeTruthy()
+    await act(async () => { settle(true); await Promise.resolve() })
+    // A successor exists: the row is spent and its button hides for good.
+    expect(view.container.childElementCount).toBe(0)
+  })
+
+  it('returns to offered when the dispatch failed', async () => {
+    let settle: (dispatched: boolean) => void = () => {}
+    const relaySession = vi.fn(() => new Promise<boolean>((resolve) => { settle = resolve }))
+    const view = render(
+      <RelaySessionRowButton {...actionRow} {...relayShare({ verdict: 'DONE' })} relaySession={relaySession} />,
+    )
+    fireEvent.click(view.getByRole('button', { name: '接力会话' }))
+    await act(async () => { settle(false); await Promise.resolve() })
+    expect(view.getByRole('button', { name: '接力会话' }).getAttribute('aria-disabled')).toBeNull()
+  })
 })

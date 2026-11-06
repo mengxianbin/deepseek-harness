@@ -239,8 +239,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     }
     /**
      * The hover buttons at the end of one Session row, in ascending `order`,
-     * after the "..." menu trigger. ui-workspace registers `archive` (100) and
-     * `pin` (200) here. An entry renders one icon button (or nothing, when its
+     * after the "..." menu trigger. ui-workspace registers `relay` (50),
+     * `archive` (100) and `pin` (200) here. An entry renders one icon button (or nothing, when its
      * action does not apply to the row) and owns the action it performs. Clicks
      * inside the strip stay in the strip, so the button needs no propagation
      * handling to keep the row from opening. Hoverless devices hide this slot;
@@ -399,6 +399,20 @@ export type RowToast =
    * a report can be searched by it — and any other failure's own message.
    */
   | { kind: 'createFailed'; message: string }
+  /**
+   * FORK session-relay-1106: a relay's dispatch half failed, so nothing was
+   * created and nothing was archived (create-new first). `message` is
+   * untranslated, same policy as `createFailed`: a server error string or a
+   * stable `code`, kept searchable. The row stays relayable for a retry.
+   */
+  | { kind: 'relayFailed'; message: string }
+  /**
+   * FORK session-relay-1106: the relay's successor was created and opened,
+   * but archiving this Session failed afterwards. Forward-only: the created
+   * Session is never rolled back, so the notice only names the missing half —
+   * the row keeps its plain archive entry for a manual retry.
+   */
+  | { kind: 'relayArchiveFailed' }
 
 /** The notice on display; `seq` keys remounts so a repeated notice restarts its hold. */
 export type RowToastState = RowToast & { seq: number }
@@ -447,6 +461,35 @@ export interface ArchiveSessionInjected {
   archiveSession: (sessionId: SessionId) => void
   /** Remove a Session from the registry-global archived set. */
   unarchiveSession: (sessionId: SessionId) => void
+}
+
+/**
+ * FORK session-relay-1106: relay action share. The callback carries the whole
+ * chain — the dispatch that creates and seeds a successor in the owning
+ * Workspace, seating and opening it, then the seal-gated archive of this row.
+ * Create-new first, archive-last, forward-only: a failed dispatch archives
+ * nothing and raises the retryable notice; a failed archive never rolls the
+ * created Session back. Unlike pin and archive this entry contributes no menu
+ * row (locked scope: hover-only; touch access is deferred), so the display
+ * gate lives entirely here: visible on a real, unarchived row, disabled with
+ * the reason in its tooltip until the row's C1 verdict is exactly `DONE` and
+ * the Session is stopped — fail-closed, the deliberate mirror of the archive
+ * gate's fail-open green groups (dispatch must never race a save).
+ */
+export interface RelaySessionInjected {
+  hooks: {
+    /** Archived Session ids (relay does not offer itself on an archived row). */
+    archived: HostObservable<ReadonlySet<SessionId>>
+    /** FORK archive-seal-light-1101: the row's C1 verdicts; the gate waits for exactly `DONE`. */
+    sealLight: HostObservable<SealLightSnapshot>
+  }
+  /**
+   * Relay this Session into a fresh one. Resolves `true` once a successor was
+   * created — the row is spent and its button hides — and `false` when the
+   * dispatch failed, which leaves the row relayable for a retry. Never
+   * rejects: every failure raises its notice inside.
+   */
+  relaySession: (sessionId: SessionId) => Promise<boolean>
 }
 
 /**

@@ -491,7 +491,8 @@ describe('web e2e: sidebar search alignment and row action targets', () => {
     const restingBox = await row.boundingBox()
     await row.hover()
     const labels = kind === 'session'
-      ? [`Session actions for ${sessionTitle}`, 'Archive session', 'Pin session'] as const
+      // FORK session-relay-1106: relay leads the strip before archive and pin.
+      ? [`Session actions for ${sessionTitle}`, 'Relay', 'Archive session', 'Pin session'] as const
       : [`Workspace actions for ${workspaceTitle}`, `New session in ${workspaceTitle}`] as const
     await row.getByRole('button', { name: labels[0], exact: true }).waitFor()
     const metrics = await measureRowActions(row)
@@ -542,7 +543,9 @@ describe('web e2e: sidebar search alignment and row action targets', () => {
       await menu.waitFor({ state: 'detached' })
       await menuButton.hover()
     }
-    const tooltipAnchor = row.getByRole('button', { name: labels[1], exact: true })
+    // FORK session-relay-1106: relay leads the session strip, so the archive
+    // tooltip anchor moved one seat over; the workspace tuple is unchanged.
+    const tooltipAnchor = row.getByRole('button', { name: kind === 'session' ? 'Archive session' : labels[1], exact: true })
     const tooltip = page.getByRole('tooltip').filter({ hasText: kind === 'session' ? 'Archive' : 'New session' })
     await tooltipAnchor.hover()
     await tooltip.waitFor({ timeout: 10_000 })

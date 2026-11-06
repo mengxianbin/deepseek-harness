@@ -6,14 +6,14 @@
  * Workspaces through the global useWorkspaces hook, and each declares its
  * own `single` directory-flow child hole for the composed picker package's
  * client half. WorkspaceBrowser additionally declares the two Session row
- * action lists, and this apply registers the shipped actions — pin, rename,
- * fork, archive, copy ID — into them the way any client plugin would, each
- * with its own behavior, plus the dialogs and the row-action notice into
- * `shell.overlay` (see the contract module doc). It also declares two
- * Session-row seats: the leading decoration a row renders only while its own
- * primary state is idle, and the section the row's hover card renders between
- * its relative time and its trailing status line. Export discipline:
- * packages/client/AGENTS.md.
+ * action lists, and this apply registers the shipped actions — relay, pin,
+ * rename, fork, archive, copy ID — into them the way any client plugin
+ * would, each with its own behavior, plus the dialogs and the row-action
+ * notice into `shell.overlay` (see the contract module doc). It also
+ * declares two Session-row seats: the leading decoration a row renders only
+ * while its own primary state is idle, and the section the row's hover card
+ * renders between its relative time and its trailing status line. Export
+ * discipline: packages/client/AGENTS.md.
  */
 import type {} from '@deepseek-ai/dsh-client-product-analytics/client'
 import type { Context } from '@deepseek-ai/cordis'
@@ -39,7 +39,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import {
   type ArchiveSessionInjected, type ForkSessionInjected, menuOpenStateFactory, type PinSessionInjected,
-  type SessionArchiveConfirmInjected, type SessionArchiveConfirmRequest,
+  type RelaySessionInjected, type SessionArchiveConfirmInjected, type SessionArchiveConfirmRequest,
   type RenameSessionInjected, type RowToast, type RowToastInjected, type RowToastState, type SessionRenameDialogInjected,
   type SessionIdInjected, type WorkspaceBrowserInjected, type WorkspacePickerInjected,
 } from './contract/slots.ts'
@@ -53,6 +53,10 @@ import {
   type SessionSealInfo,
 } from './session-actions/seal.ts'
 import { derive } from './session-actions/derived.ts'
+// FORK session-relay-1106: the successor dispatch POST (loopback, one call
+// that creates and seeds), and the row button that offers the chain.
+import { postSessionDispatch } from './session-actions/dispatch.ts'
+import { RelaySessionRowButton } from './session-actions/RelaySession.tsx'
 // FORK archive-seal-light-1101: the row lamps' C1 store (one handle created
 // here in apply, shared through the browser's inject face — no module-level handle).
 import { createSealLightStore } from './session-actions/seal-light.ts'
@@ -144,6 +148,11 @@ export function apply(ctx: Context): void {
     },
   })
   ctx.effect(() => ctx.locale.register(NS, { zh, en, ja, es, fr, de, ru, pt }), 'ui-workspace: dictionaries')
+  // The relay seed is dispatch payload with product copy in it (the source
+  // Session id rides the prompt), so it translates through the same bound
+  // seat the rows use — stable per namespace, reads the active locale at
+  // call time.
+  const t = ctx.locale.bind(NS)
   const shortcutControls = createWorkspaceShortcutControls()
 
   const searchSessions: WorkspaceBrowserInjected['searchSessions'] = async (query, signal) => {
@@ -213,8 +222,11 @@ export function apply(ctx: Context): void {
   // blank placeholder, or an unreachable seal service — fail-open), or the
   // operator continued past the stale line. No confirmation; the notice
   // offers undo and the archived filter, and a stale context rides the
-  // success callback as its ledger note.
-  const archiveQuietly = (sessionId: SessionId, seal?: SessionSealInfo): void => {
+  // success callback as its ledger note. FORK session-relay-1106:
+  // `onHardFailure` names the one rejection that has no surface of its own —
+  // neither running work (that opens the stop dialog) nor a Host error the
+  // caller already reported — for a caller whose chain moved on without it.
+  const archiveQuietly = (sessionId: SessionId, seal?: SessionSealInfo, onHardFailure?: () => void): void => {
     uiWorkspace.archiveSession(sessionId).then(() => {
       if (seal !== undefined) recordSealOverride(sessionId, seal)
       notify({ kind: 'archived', sessionId })
@@ -222,6 +234,7 @@ export function apply(ctx: Context): void {
       const activity = activeSessionRefusal(reason)
       if (activity === undefined) {
         console.warn('session archive rejected:', reason)
+        onHardFailure?.()
         return
       }
       const displayTitle = sessions.list.getSnapshot().byId[sessionId]?.displayTitle ?? sessionId
@@ -234,15 +247,19 @@ export function apply(ctx: Context): void {
   // stale raises the one-line prompt, red and UNKNOWN open the seal
   // confirmation. A blank placeholder holds no conversation to seal and
   // stays the one click the fork gave it (blank-row-archive-1026).
-  const archiveSealGated = (sessionId: SessionId): void => {
+  // FORK session-relay-1106: `onHardFailure` rides every quiet hop so a
+  // relay learns when its archive half died after the dispatch succeeded;
+  // the stale, red, and running-work branches have their own surfaces and
+  // are not failures.
+  const archiveSealGated = (sessionId: SessionId, onHardFailure?: () => void): void => {
     if (sessions.list.getSnapshot().byId[sessionId]?.blank === true) {
-      archiveQuietly(sessionId)
+      archiveQuietly(sessionId, undefined, onHardFailure)
       return
     }
     void requestSealCheck([sessionId]).then((results) => {
       const seal = results?.get(sessionId)
       if (seal === undefined || isGreenSeal(seal)) {
-        archiveQuietly(sessionId)
+        archiveQuietly(sessionId, undefined, onHardFailure)
         return
       }
       if (isStaleSeal(seal)) {
@@ -260,7 +277,7 @@ export function apply(ctx: Context): void {
        future contract break and must never swallow the operator's click. */
     }).catch((reason: unknown) => {
       console.warn('seal check rejected:', reason)
-      archiveQuietly(sessionId)
+      archiveQuietly(sessionId, undefined, onHardFailure)
     })
     /* v8 ignore stop */
   }
@@ -274,6 +291,51 @@ export function apply(ctx: Context): void {
     // to stop it.
     archiveSession: (sessionId) => { archiveSealGated(sessionId) },
     unarchiveSession,
+  })
+  // FORK session-relay-1106: the relay chain. Dispatch first (one loopback
+  // POST creates and seeds the successor), then seat and open it, then
+  // archive this row through the same seal gate every archive entry uses.
+  // Create-new first, archive-last, forward-only: a failed dispatch archives
+  // nothing and the row stays relayable; a failed archive never rolls the
+  // created Session back — it names itself in a notice while the row keeps
+  // its plain archive entry. The button already proved the gate (exact
+  // `DONE`, stopped); the archive's own re-check still runs, because a save
+  // may have landed between render and click.
+  const relayInjected = (): RelaySessionInjected => ({
+    hooks: { archived: archivedSet, sealLight: sealLight.observable },
+    relaySession: async (sessionId) => {
+      const owner = workspaces.list.getSnapshot().items.find(item => item.sessionIds.includes(sessionId))
+      if (owner === undefined) {
+        // No Workspace owns this Session (ungrouped), and dispatch pins the
+        // successor to one: nothing can be created. Stable code, searchable
+        // like createFailed's messages.
+        console.warn('session relay: no Workspace owns the Session:', sessionId)
+        notify({ kind: 'relayFailed', message: 'workspace:missing' })
+        return false
+      }
+      const sourceTitle = sessions.list.getSnapshot().byId[sessionId]?.displayTitle ?? ''
+      const result = await postSessionDispatch({
+        workspaceId: owner.workspaceId,
+        prompt: t('relay.seed', { id: sessionId }),
+        // The continuation keeps the source's name; the source archives
+        // below, so the two never compete for the default list.
+        ...(sourceTitle === '' ? {} : { title: sourceTitle }),
+      })
+      if (!result.ok) {
+        console.warn('session relay dispatch rejected:', result.message)
+        notify({ kind: 'relayFailed', message: result.message })
+        return false
+      }
+      // Same cross-transport seating createNamed does: the HTTP create
+      // returns before the workspace follow stream pushes the membership.
+      workspaces.seatSession(owner.workspaceId, result.sessionId)
+      // Open the successor before archiving: when this row was the current
+      // Session the selection moves first, so the archive clears nothing and
+      // the operator lands where the continuation runs.
+      openSession(result.sessionId)
+      archiveSealGated(sessionId, () => { notify({ kind: 'relayArchiveFailed' }) })
+      return true
+    },
   })
   installWorkspaceShortcuts(ctx, uiWorkspace, shortcutControls, archiveInjected().archiveSession,
     (reason) => { notify({ kind: 'shortcutForkFailed', reason }) })
@@ -426,6 +488,9 @@ export function apply(ctx: Context): void {
     yield ctx.slots.register({ name: 'sidebar.workspaces.session.menu.item', id: 'session-id', order: 450, locale: NS, inject: sessionIdInjected }, SessionIdMenuItem)
   })
   ctx.slots.inject('sidebar.workspaces.session.row.action', function* () {
+    // FORK session-relay-1106: relay first (order 50 — before archive, after
+    // the "..." trigger that renders outside the list).
+    yield ctx.slots.register({ name: 'sidebar.workspaces.session.row.action', id: 'relay', order: 50, locale: NS, inject: relayInjected }, RelaySessionRowButton)
     yield ctx.slots.register({ name: 'sidebar.workspaces.session.row.action', id: 'archive', order: 100, locale: NS, inject: archiveInjected }, ArchiveSessionRowButton)
     yield ctx.slots.register({ name: 'sidebar.workspaces.session.row.action', id: 'pin', order: 200, locale: NS, inject: pinInjected }, PinSessionRowButton)
   })

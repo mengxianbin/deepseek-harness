@@ -117,5 +117,25 @@ export function registerToasts(
         }),
       }),
     }, ToastEntry<PropsRuntime<'workspace.toast', 'sealStale'>>)
+    // FORK session-relay-1106: the dispatch half failed — nothing was
+    // created and nothing was archived, so the notice carries the failure's
+    // own message (untranslated, like createFailed) and the row stays
+    // relayable for a retry.
+    yield ctx.slots.register({
+      name: 'workspace.toast', key: 'relayFailed', locale: 'workspace',
+      inject: (): ToastDisplayInjected<'relayFailed'> => ({
+        display: (notice, t) => ({
+          text: t('toast.relayFailed', { message: notice.message }), tone: 'warning', holdMs: 6000,
+        }),
+      }),
+    }, ToastEntry<PropsRuntime<'workspace.toast', 'relayFailed'>>)
+    // The successor exists and is open; only the archive half died. Named,
+    // never rolled back — the row keeps its plain archive entry to retry.
+    yield ctx.slots.register({
+      name: 'workspace.toast', key: 'relayArchiveFailed', locale: 'workspace',
+      inject: (): ToastDisplayInjected<'relayArchiveFailed'> => ({
+        display: (_notice, t) => ({ text: t('toast.relayArchiveFailed'), tone: 'warning', holdMs: 6000 }),
+      }),
+    }, ToastEntry<PropsRuntime<'workspace.toast', 'relayArchiveFailed'>>)
   })
 }

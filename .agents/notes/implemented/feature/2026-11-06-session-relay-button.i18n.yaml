@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-11-06-session-relay-button.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-11-06-session-relay-button.md
+/agent-note-session-row-relay-dispatch-open-archive:
+  en: 111fbc1d77b2a7a5
+  zh: 4c469f83dada7cff
+/agent-note-session-row-relay-dispatch-open-archive/problem:
+  en: d9cb7ead9ab300c4
+  zh: 31bbe132318dce49
+/agent-note-session-row-relay-dispatch-open-archive/decision:
+  en: 88455dc283b29145
+  zh: 4ce8628257deade7
+/agent-note-session-row-relay-dispatch-open-archive/alternatives-considered:
+  en: 340e52eb83cfc3b3
+  zh: 8bfe926e9b17a349
+/agent-note-session-row-relay-dispatch-open-archive/consequences:
+  en: cb67f76be195179d
+  zh: a696a8ad4353aabe
