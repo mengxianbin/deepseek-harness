@@ -2,7 +2,9 @@
 /**
  * FORK archive-seal-light-1101: the archive-seal row light — the lamp table
  * (archive-seal-light.md §四 灯绿/暗, asserted against the gate's 门绿 so the
- * two stay two tables), the 2026-11-06 running 短路 (a running row renders no
+ * two stay two tables), the DONE-only lamp table (seal-light-nadark-1106: N_A
+ * went dark 2026-11-06 — the lamp stops guiding on a verdict with no
+ * product), the 2026-11-06 running 短路 (a running row renders no
  * lamp; both running flips re-check, seal-light-running-dark-1106), the C1
  * fetch policy (visible mounted ids only, id-change / running-flip triggers,
  * ≥2s throttle, single flight, no resident polling), the fail-dark +
@@ -63,9 +65,10 @@ function answerFor(greenId: SessionId) {
 }
 
 describe('sealLightTone (design §四: the lamp green is not the gate green)', () => {
-  it('lights green exactly on DONE and N_A', () => {
+  it('lights green exactly on DONE — N_A went dark 2026-11-06 (seal-light-nadark-1106)', () => {
     expect(sealLightTone({ verdict: 'DONE' })).toBe('ready')
-    expect(sealLightTone({ verdict: 'N_A' })).toBe('ready')
+    // N_A = 本轮无产物、归不归全凭人判: the lamp stops guiding, so no tone.
+    expect(sealLightTone({ verdict: 'N_A' })).toBeUndefined()
   })
 
   it('stays dark on UNSEALED and UNKNOWN (2026-11-02 丙-最简: red exits the row)', () => {
@@ -80,6 +83,8 @@ describe('sealLightTone (design §四: the lamp green is not the gate green)', (
     // archives quietly on NEUTRAL, the lamp still asks the human.
     expect(isGreenSeal({ verdict: 'NEUTRAL' })).toBe(true)
     expect(isGreenSeal({ verdict: 'DONE' })).toBe(true)
+    // The gate half is untouched by the lamp change: N_A still archives quietly.
+    expect(isGreenSeal({ verdict: 'N_A' })).toBe(true)
     expect(isGreenSeal({ verdict: 'UNKNOWN' })).toBe(false)
   })
 
@@ -88,9 +93,10 @@ describe('sealLightTone (design §四: the lamp green is not the gate green)', (
     // exactly the dark row's form (seal-light-running-dark-1106).
     expect(sealLightTone({ verdict: 'DONE' }, true)).toBeUndefined()
     expect(sealLightTone({ verdict: 'N_A' }, true)).toBeUndefined()
-    // The short-circuit is running's alone: stopped, the same verdicts light.
+    // The short-circuit is running's alone: stopped, a green verdict lights —
+    // DONE still; N_A stopped is dark since 2026-11-06 (seal-light-nadark-1106).
     expect(sealLightTone({ verdict: 'DONE' }, false)).toBe('ready')
-    expect(sealLightTone({ verdict: 'N_A' }, false)).toBe('ready')
+    expect(sealLightTone({ verdict: 'N_A' }, false)).toBeUndefined()
     // Omitting the flag keeps the pre-revision table (the store registers rows as stopped).
     expect(sealLightTone({ verdict: 'DONE' })).toBe('ready')
   })
@@ -322,11 +328,24 @@ describe('SealLight (the lamp on the row)', () => {
     expect(view.container.textContent).toBe('')
   })
 
-  it('takes its copy from the dictionary: the same verdict reads English in en', () => {
+  it('renders nothing for an N_A verdict — the lamp is DONE-only since 2026-11-06 (seal-light-nadark-1106)', () => {
     const sealRows = observer()
-    render(<SealLight sessionId={sid('one')} running={false} seal={{ verdict: 'N_A' }} sealRows={sealRows} t={tEn} />)
+    const view = render(
+      <SealLight sessionId={sid('one')} running={false} seal={{ verdict: 'N_A' }} sealRows={sealRows} t={t} />,
+    )
+    expect(view.container.querySelector('[data-seal-tone]')).toBeNull()
+    expect(view.container.textContent).toBe('')
+    // Dark or lit, a mounted lamp still registers its row.
+    expect(sealRows.watch).toHaveBeenCalledWith(sid('one'))
+  })
+
+  it('takes its copy from the dictionary: the same verdict reads English in en', () => {
+    // Rides DONE since 2026-11-06: an N_A verdict renders no lamp at all
+    // (seal-light-nadark-1106), so the copy assertion sits on a lit verdict.
+    const sealRows = observer()
+    render(<SealLight sessionId={sid('one')} running={false} seal={{ verdict: 'DONE' }} sealRows={sealRows} t={tEn} />)
     expect(screen.getByRole('img').getAttribute('aria-label'))
-      .toBe('Archive ready: the save is sealed (N_A)')
+      .toBe('Archive ready: the save is sealed (DONE)')
   })
 
   it('renders nothing for NEUTRAL / LEGACY / an absent verdict (fail-dark)', () => {

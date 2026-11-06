@@ -11,11 +11,15 @@
  * separation — the dot is a bare 6px core at the row's head, this lamp is a
  * ringed core at the row's end.
  *
- * Lamp table = design §四 (两绿对照, 刻意不同于归档门的 `isGreenSeal`),
+ * Lamp table = design §四 (刻意不同于归档门的 `isGreenSeal`),
  * GREEN-ONLY since the 2026-11-02 丙-最简 revision (m-note
  * content/tech/ai/dsh/archive-seal-light.md §〇修订注 / §四修订段,判据源 =
- * decision-log `2026-11-02T16:55` 条): 🟢 `DONE` / `N_A` (save 收口完成 =
- * 归档触发灯) · `UNSEALED` / `UNKNOWN` no longer paint red — 「未收口」是多轮
+ * decision-log `2026-11-02T16:55` 条): 🟢 `DONE` (save 收口完成 =
+ * 归档触发灯), DONE-only since 2026-11-06 — `N_A` went dark
+ * (seal-light-nadark-1106): N_A = 本轮无产物、归不归全凭人判, a lit lamp
+ * reads as 「有产物入 main」 so it stops guiding (判据源 = 用户 2026-11-06
+ * 原话「NA 灭灯」; the gate's `isGreenSeal` keeps `N_A` green, untouched
+ * here) · `UNSEALED` / `UNKNOWN` no longer paint red — 「未收口」是多轮
  * 编辑的正常中间态,常亮红把状态当警报、违反警报经济学,红的职责整体移交归档门
  * (单2,点归档那一刻的单条预检) · dark = `NEUTRAL` / `LEGACY` / no verdict for
  * the row — and the whole channel fails dark when contract C1's endpoint is
@@ -49,6 +53,11 @@ export type SealLightTone = 'ready'
  * every other verdict — including `UNSEALED` / `UNKNOWN`, whose red left the
  * row for the archive gate — stays dark for the human.
  *
+ * DONE-only since 2026-11-06 (seal-light-nadark-1106): `N_A` no longer
+ * lights. N_A = 本轮无产物、归不归全凭人判 — a lit lamp reads as 「有产物入
+ * main」, so the light stops guiding (判据源 = 用户 2026-11-06 原话「NA 灭灯」;
+ * the gate's `isGreenSeal` keeps `N_A` green, untouched here).
+ *
  * The running short-circuit (2026-11-06 seal-light-running-dark-1106) comes
  * first: while the row's session works, the verdict on screen is the previous
  * turn's reading, so a running row paints nothing and never a `ready` — the
@@ -61,7 +70,7 @@ export type SealLightTone = 'ready'
  */
 export function sealLightTone(seal: SealLightSeal, running = false): SealLightTone | undefined {
   if (running) return undefined
-  if (seal.verdict === 'DONE' || seal.verdict === 'N_A') return 'ready'
+  if (seal.verdict === 'DONE') return 'ready'
   return undefined
 }
 
