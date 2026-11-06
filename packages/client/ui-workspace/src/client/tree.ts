@@ -83,6 +83,13 @@ export interface SessionNode {
   updatedAt: number
   /** Session working directory; absent when the Host reports none or an empty path. */
   cwd?: string
+  /**
+   * The owning group's short label for this row (collab step3 §6.1 一眼层:
+   * title + home label + active time), sourced from the same Workspace title
+   * the group header renders; absent for the ungrouped bucket, whose rows the
+   * renderer localizes with `group.ungrouped`.
+   */
+  homeLabel?: string
 }
 
 /** Session order selected by the Workspace browser. */
@@ -168,6 +175,23 @@ export function workspaceLabel(cwd: string | undefined): string {
   if (cwd === undefined || cwd === '') return ''
   const base = workspaceTitleOf(cwd)
   return base !== '' ? base : cwd
+}
+
+/**
+ * Project known Workspace titles by Session identity: the group header's label
+ * source, so row-level home labels (collab step3 §6.1 归宿短标), search result
+ * labels, and the header itself all read one map instead of re-deriving.
+ * @param workspaces - Workspace membership and display labels.
+ * @returns the first Workspace title per member Session; loose Sessions are absent.
+ */
+function workspaceTitleBySession(workspaces: readonly WorkspaceView[]): Map<SessionId, string> {
+  const titles = new Map<SessionId, string>()
+  for (const workspace of workspaces) {
+    for (const sessionId of workspace.sessionIds) {
+      if (!titles.has(sessionId)) titles.set(sessionId, workspace.title)
+    }
+  }
+  return titles
 }
 
 /**
@@ -422,6 +446,7 @@ function sessionNode(
   statuses: SessionStatuses,
   pinned: ReadonlySet<SessionId>,
   archived: ReadonlySet<SessionId>,
+  homeLabel: string,
 ): SessionNode {
   const status = statuses.get(s.id)
   const pendingInteraction = visiblePendingKind(status?.pendingInteraction?.kind)
@@ -452,6 +477,7 @@ function sessionNode(
     archived: archived.has(s.id),
     updatedAt: s.updatedAt,
     ...(s.cwd === undefined || s.cwd === '' ? {} : { cwd: s.cwd }),
+    ...(homeLabel === '' ? {} : { homeLabel }),
     ...(pendingInteraction === undefined ? {} : { pendingInteraction }),
   }
 }
@@ -505,7 +531,7 @@ export function deriveGroups(
       containsCurrent: g.key === currentGroup,
       sessions: expanded
         ? sectionMembers(members, pinned, archived)
-          .map(session => sessionNode(session, list, statuses, pinned, archived))
+          .map(session => sessionNode(session, list, statuses, pinned, archived, g.label))
         : [],
     })
   }
@@ -547,6 +573,8 @@ export function visibleSessionIds(
  * @param sessionIds - complete account members in the selected order, including hidden archives.
  * @param rowState - registry-global pin and archive sets plus the archived filter.
  * @param statuses - unified UI status by Session.
+ * @param workspaces - Workspace membership for each row's home label (collab step3
+ *   §6.1 归宿短标); empty in compositions without the Workspace baseline.
  * @returns flat rows in sectioned order with current status indicators.
  */
 export function deriveFlat(
@@ -554,9 +582,11 @@ export function deriveFlat(
   sessionIds: readonly SessionId[],
   rowState: SessionRowState,
   statuses: SessionStatuses,
+  workspaces: readonly WorkspaceView[] = [],
 ): SessionNode[] {
   const archived = new Set(rowState.archivedSessionIds)
   const pinned = new Set(rowState.pinnedSessionIds)
+  const homeLabels = workspaceTitleBySession(workspaces)
   const members = sessionIds.flatMap((id) => {
     const session = list.byId[id]
     return session !== undefined && sessionVisible(session, archived, rowState.archivedFilter)
@@ -564,7 +594,7 @@ export function deriveFlat(
       : []
   })
   return sectionMembers(members, pinned, archived)
-    .map(session => sessionNode(session, list, statuses, pinned, archived))
+    .map(session => sessionNode(session, list, statuses, pinned, archived, homeLabels.get(session.id) ?? ''))
 }
 
 /**
@@ -595,12 +625,7 @@ export function deriveSearchResults(
   if (q === '') return { items: [], hasMore: false }
   const archived = new Set(archivedSessionIds)
 
-  const workspaceBySession = new Map<SessionId, string>()
-  for (const workspace of workspaces) {
-    for (const sessionId of workspace.sessionIds) {
-      if (!workspaceBySession.has(sessionId)) workspaceBySession.set(sessionId, workspace.title)
-    }
-  }
+  const workspaceBySession = workspaceTitleBySession(workspaces)
   const labelOf = (summary: SessionSummary): string =>
     workspaceBySession.get(summary.id) ?? workspaceLabel(summary.cwd)
   const contentBySession = new Map<SessionId, SessionSearchResultItem>()
@@ -732,21 +757,25 @@ export interface QueueSegment {
  * @param list - sessions list snapshot.
  * @param statuses - unified UI status by Session.
  * @param archivedIds - registry-global archive set.
+ * @param workspaces - Workspace membership for each queued row's home label
+ *   (collab step3 §6.1 归宿短标); empty in compositions without the Workspace baseline.
  * @returns the populated tiers plus the queued id set.
  */
 export function deriveQueue(
   list: SessionListState,
   statuses: SessionStatuses,
   archivedIds: readonly SessionId[],
+  workspaces: readonly WorkspaceView[] = [],
 ): QueueSegment {
   const archived = new Set(archivedIds)
   const pinned = new Set<SessionId>()
+  const homeLabels = workspaceTitleBySession(workspaces)
   const p0: SessionNode[] = []
   const p1: SessionNode[] = []
   for (const id of list.ids) {
     const s = list.byId[id]
     if (s === undefined || s.blank || s.origin === 'subagent' || archived.has(id)) continue
-    const node = sessionNode(s, list, statuses, pinned, archived)
+    const node = sessionNode(s, list, statuses, pinned, archived, homeLabels.get(id) ?? '')
     if (node.pendingInteraction !== undefined) p0.push(node)
     // 在跑不出队 (2026-10-31 裁定): a live re-run is being handled, not
     // awaiting a ruling; an unknown running state keeps the row visible.

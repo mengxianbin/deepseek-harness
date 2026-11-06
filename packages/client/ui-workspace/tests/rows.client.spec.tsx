@@ -276,6 +276,31 @@ describe('workspace browser rows', () => {
     expect(screen.getByText('Flat Session').previousElementSibling?.querySelector('[data-state="ongoing"]')).toBeTruthy()
   })
 
+  it('renders the owning group home label between the title and the resting time (collab step3 三元组)', () => {
+    const node: SessionNode = {
+      id: sid('home-label'), title: 'Titled', blank: false, running: false,
+      runningSubagentCount: 0, completed: false, updatedAt: 0, pinned: false, archived: false,
+      homeLabel: 'm-note',
+    }
+    render(<SessionNodeItem node={node} currentId={undefined} now={0} onOpen={vi.fn()} t={t} />)
+    const title = screen.getByText('Titled')
+    const label = screen.getByText('m-note')
+    // The 一眼层 order: title, home label, then the resting strip carrying the time.
+    expect(title.nextElementSibling).toBe(label)
+    expect(label.className).toContain('homeLabel')
+    expect(label.nextElementSibling?.className).toContain('rowResting')
+    expect(label.nextElementSibling?.querySelector('[class*="time"]')?.textContent).toBe('刚刚')
+  })
+
+  it('falls back to the ungrouped bucket label when the row owns no Workspace', () => {
+    const node: SessionNode = {
+      id: sid('loose'), title: 'Loose', blank: false, running: false,
+      runningSubagentCount: 0, completed: false, updatedAt: 0, pinned: false, archived: false,
+    }
+    render(<SessionNodeItem node={node} currentId={undefined} now={0} onOpen={vi.fn()} t={t} />)
+    expect(screen.getByText('未分组').className).toContain('homeLabel')
+  })
+
   it('renders a selected content-search row and opens only its session', () => {
     const onOpen = vi.fn()
     const result: SearchResultNode = {
@@ -1336,7 +1361,10 @@ describe('workspace browser rows', () => {
       expect(row.querySelector('[data-state="warning"]')).toBeTruthy()
       expect(row.querySelector('[data-state="ongoing"]')).toBeNull()
       expect(row.textContent).toContain(label)
-      expect(title.nextElementSibling?.textContent).toBe(compactLabel)
+      // The compact label replaces the time inside the resting strip, which now
+      // follows the row's home label (title → home label → time).
+      expect(title.nextElementSibling?.nextElementSibling?.querySelector('[class*="time"]')?.textContent)
+        .toBe(compactLabel)
       expect(row.querySelector('[class*="time"]')?.getAttribute('aria-hidden')).toBe('true')
       expect(row.textContent).not.toContain('刚刚')
 
@@ -1365,7 +1393,7 @@ describe('workspace browser rows', () => {
     }
     render(<SessionNodeItem node={node} currentId={undefined} now={0} onOpen={vi.fn()} t={tEn} />)
     const row = screen.getByRole('treeitem')
-    expect(screen.getByText('Needs input').nextElementSibling?.textContent).toBe(compactLabel)
+    expect(row.querySelector('[class*="time"]')?.textContent).toBe(compactLabel)
     expect(screen.getByText(compactLabel).getAttribute('aria-hidden')).toBe('true')
     expect(row.textContent).not.toContain('now')
   })
@@ -1655,13 +1683,16 @@ describe('session row decoration seats', () => {
     // Priority replacement: the idle row shows the clock seat INSTEAD of a dot.
     expect(row.querySelector('[data-state]')).toBeNull()
     // The seat sits in the leading 16px cell, before the clipped title: the
-    // cell is the row's first element, and the title follows the cell.
+    // cell is the row's first element, the title follows the cell, then the
+    // home label (collab step3 三元组) and the resting strip carrying the time.
     const assertPlacement = (): void => {
       const cell = screen.getByRole('treeitem')
         .querySelector('[data-seat="sidebar.session.row.leading"]')?.parentElement
       expect(cell?.previousElementSibling ?? null).toBeNull()
       expect(cell?.nextElementSibling?.textContent).toBe('Idle Session')
-      expect(cell?.nextElementSibling?.nextElementSibling?.textContent).toBe('刚刚')
+      expect(cell?.nextElementSibling?.nextElementSibling?.className).toContain('homeLabel')
+      expect(cell?.nextElementSibling?.nextElementSibling?.nextElementSibling
+        ?.querySelector('[class*="time"]')?.textContent).toBe('刚刚')
     }
     assertPlacement()
     // Rerender through the same row: the seat stays leading without the flat

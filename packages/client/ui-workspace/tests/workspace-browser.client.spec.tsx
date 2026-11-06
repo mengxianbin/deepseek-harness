@@ -162,6 +162,20 @@ function rerender(b: ReturnType<typeof mount>, overrides: Partial<WorkspaceBrows
   b.view.rerender(<WorkspaceBrowser {...b.props} />)
 }
 
+/**
+ * The group header title element: every session row under a Workspace also
+ * carries that Workspace title as its home label (collab step3 §6.1 归宿短标),
+ * so a bare getByText on the title matches the header plus each visible row.
+ * @param title - the Workspace or bucket title.
+ * @param root - subtree to search; defaults to the whole document.
+ * @returns the header's own title span.
+ */
+const groupHeaderTitle = (title: string, root: ParentNode = document): HTMLElement => {
+  const header = Array.from(root.querySelectorAll('[class*="projectRow"]'))
+    .find(row => row.querySelector('[class*="title"]')?.textContent === title)
+  return header?.querySelector('[class*="title"]') as HTMLElement
+}
+
 describe('WorkspaceBrowser', () => {
   it.each(['workspace', 'flat', 'ungrouped'] as const)('keeps %s recency independent of arrival order and saved manual positions', (mode) => {
     localStorage.clear()
@@ -520,7 +534,8 @@ describe('WorkspaceBrowser', () => {
     // Store-driven flip: title changes, rows flatten newest-first, headers gone.
     expect(b.store.getSnapshot().groupBy).toBe('flat')
     expect(screen.getByText('会话')).toBeTruthy()
-    expect(screen.queryByText('alpha')).toBeNull()
+    // Headers are gone; the flat rows keep their Workspace home labels.
+    expect(document.querySelector('[class*="projectRow"]')).toBeNull()
     expect(screen.getByText('alpha-s')).toBeTruthy()
     expect(screen.getByText('beta-s')).toBeTruthy()
 
@@ -661,7 +676,7 @@ describe('WorkspaceBrowser', () => {
       fireEvent.click(screen.getByRole('menuitem', { name }))
     }
     choose('按工作区树')
-    const parentSection = screen.getByText('Projects').closest<HTMLElement>('[class*="groupSection"]')!
+    const parentSection = groupHeaderTitle('Projects').closest<HTMLElement>('[class*="groupSection"]')!
     expect(within(parentSection).getByText('Child')).toBeTruthy()
 
     // Projects keeps no archived Sessions, so Child rises to the top level.
@@ -784,8 +799,8 @@ describe('WorkspaceBrowser', () => {
     fireEvent.click(screen.getByText('alpha'))
     fireEvent.click(screen.getByText('alpha-s'))
     expect(open).toHaveBeenCalledWith(sid('alpha-s'))
-    // Collapse hides the row again.
-    fireEvent.click(screen.getByText('alpha'))
+    // Collapse hides the row again (rows visible: the header owns the click).
+    fireEvent.click(groupHeaderTitle('alpha'))
     expect(screen.queryByText('alpha-s')).toBeNull()
   })
 
@@ -850,7 +865,7 @@ describe('WorkspaceBrowser', () => {
     expect(screen.getByText('session-7')).toBeTruthy()
     expect(screen.getByRole('button', { name: '收起' })).toBeTruthy()
 
-    fireEvent.click(screen.getByText('alpha'))
+    fireEvent.click(groupHeaderTitle('alpha'))
     expect(b.store.getSnapshot().groupExpansion).toEqual({ alpha: false })
     fireEvent.click(screen.getByText('alpha'))
     expect(b.store.getSnapshot().groupExpansion).toEqual({ alpha: true })
@@ -926,7 +941,9 @@ describe('WorkspaceBrowser', () => {
         running: false, pendingInteraction: undefined, completionUnread: false, ...value,
       }]]))
     const expectVisible = (count: number) => {
-      expect(screen.getAllByRole('treeitem').map(row => within(row).getByText(/^(alpha|session-\d+)$/u).textContent))
+      // The title cell, not the row text: every row also carries the group's
+      // home label, which repeats the header's Workspace title.
+      expect(screen.getAllByRole('treeitem').map(row => row.querySelector('[class*="title"]')?.textContent))
         .toEqual(['alpha', ...items.slice(0, count).map(item => item.displayTitle)])
     }
     fireEvent.click(screen.getByText('alpha'))
@@ -937,7 +954,7 @@ describe('WorkspaceBrowser', () => {
     rerender(b, { useSessionStatus: status('session-9', {}) })
     expectVisible(9)
 
-    fireEvent.click(screen.getByText('alpha'))
+    fireEvent.click(groupHeaderTitle('alpha'))
     fireEvent.click(screen.getByText('alpha'))
     expectVisible(5)
     rerender(b, { useSessionStatus: status('session-7', {
@@ -946,7 +963,7 @@ describe('WorkspaceBrowser', () => {
     // FORK dsh-local (collab-step4b-c1): an awaiting-interaction row leaves
     // its group for the hard top segment and leads the list there; the group
     // keeps the rows the watermark shows (队列段恒在置顶之前).
-    expect(screen.getAllByRole('treeitem').map(row => within(row).getByText(/^(alpha|session-\d+)$/u).textContent))
+    expect(screen.getAllByRole('treeitem').map(row => row.querySelector('[class*="title"]')?.textContent))
       .toEqual(['session-7', 'alpha', ...items.slice(0, 5).map(item => item.displayTitle)])
     rerender(b, { useSessionStatus: status('session-8', { completionUnread: true }) })
     expectVisible(8)
@@ -1103,7 +1120,7 @@ describe('WorkspaceBrowser', () => {
     fireEvent.click(screen.getByRole('button', { name: '展开其余 6 个会话' }))
     expect(screen.getByText('beta-10')).toBeTruthy()
     expect(screen.queryByText('beta-11')).toBeNull()
-    fireEvent.click(screen.getByText('alpha'))
+    fireEvent.click(groupHeaderTitle('alpha'))
     fireEvent.click(screen.getByText('alpha'))
     expect(screen.queryByText('alpha-6')).toBeNull()
     expect(screen.getByRole('button', { name: '展开其余 12 个会话' })).toBeTruthy()
@@ -1467,7 +1484,7 @@ describe('WorkspaceBrowser', () => {
     // expansion list unchanged (no duplicate key, group still open).
     rerender(b, { useSessions: hook({ ...first, main: sid('b') }) })
     expect(screen.getByText('b')).toBeTruthy()
-    fireEvent.click(screen.getByText('alpha'))
+    fireEvent.click(groupHeaderTitle('alpha'))
     expect(screen.queryByText('b')).toBeNull()
   })
 
@@ -1766,7 +1783,7 @@ describe('WorkspaceBrowser', () => {
     expect(scrollIntoView.mock.instances.at(-1)).toBe(screen.getByText('session-11').closest('[role="treeitem"]'))
     fireEvent.click(screen.getByRole('button', { name: '展开其余 6 个会话' }))
     expect(screen.getByText('session-16')).toBeTruthy()
-    fireEvent.click(screen.getByText('alpha'))
+    fireEvent.click(groupHeaderTitle('alpha'))
     fireEvent.click(screen.getByText('alpha'))
     expect(screen.queryByText('session-6')).toBeNull()
     expect(screen.getByRole('button', { name: '展开其余 12 个会话' })).toBeTruthy()
@@ -1845,7 +1862,8 @@ describe('WorkspaceBrowser', () => {
     expect(screen.queryByRole('tree', { name: '搜索结果' })).toBeNull()
     const targetRow = screen.getByText('Needle session').closest('[role="treeitem"]')
     expect(targetRow).toBeTruthy()
-    expect(screen.queryByText('alpha')).toBeNull()
+    // Flat rows keep their Workspace home labels; the grouped header is what's gone.
+    expect(document.querySelector('[class*="projectRow"]')).toBeNull()
     expect(scrollIntoView.mock.instances.at(-1)).toBe(targetRow)
     expect(b.store.getSnapshot().groupExpansion).toEqual({})
   })
@@ -2226,7 +2244,7 @@ describe('WorkspaceBrowser', () => {
     })
     fireEvent.click(screen.getByText('beta'))
     const source = screen.getByText('tail').closest('[role="treeitem"]') as HTMLElement
-    let targetSection = screen.getByText('beta').closest('[role="treeitem"]')?.parentElement as HTMLElement
+    let targetSection = groupHeaderTitle('beta').closest('[role="treeitem"]')?.parentElement as HTMLElement
     while (targetSection.parentElement?.getAttribute('role') !== 'tree') {
       targetSection = targetSection.parentElement as HTMLElement
     }
@@ -2770,7 +2788,7 @@ describe('Workspace tree grouping', () => {
   const root = { ...workspace('root', ['root-session'], 'Projects'), path: '/projects' }
   const team = workspace('team', ['team-session'], 'Team')
   const child = { ...workspace('child', ['child-session'], 'Child'), path: '/projects/team/child' }
-  const section = (title: string) => screen.getByText(title).closest<HTMLElement>('[class*="groupSection"]')!
+  const section = (title: string) => groupHeaderTitle(title).closest<HTMLElement>('[class*="groupSection"]')!
 
   it('adopts a parent directory and preserves its existing draft without confirmation', async () => {
     const b = mount({
@@ -2803,12 +2821,12 @@ describe('Workspace tree grouping', () => {
     fireEvent.click(within(section('Projects')).getAllByRole('button', { name: '展开其余 2 个会话' })[0]!)
     expect(screen.getByText('child-7')).toBeTruthy()
     expect(screen.getByText('root-7')).toBeTruthy()
-    fireEvent.click(screen.getByText('Child'))
+    fireEvent.click(groupHeaderTitle('Child'))
     fireEvent.click(screen.getByText('Child'))
     expect(screen.queryByText('child-6')).toBeNull()
     expect(screen.getByText('root-7')).toBeTruthy()
     fireEvent.click(within(section('Child')).getByRole('button', { name: '展开其余 2 个会话' }))
-    fireEvent.click(screen.getByText('Projects'))
+    fireEvent.click(groupHeaderTitle('Projects'))
     fireEvent.click(screen.getByText('Projects'))
     expect(screen.queryByText('root-6')).toBeNull()
     expect(screen.queryByText('child-6')).toBeNull()
@@ -2825,7 +2843,7 @@ describe('Workspace tree grouping', () => {
       ])),
     })
     fireEvent.click(screen.getByText('Child'))
-    fireEvent.click(screen.getByText('Projects'))
+    fireEvent.click(groupHeaderTitle('Projects'))
     const status = (running: boolean) => hook<SessionStatusSnapshot>(new Map([[sid('child-8'), {
       running, pendingInteraction: undefined, completionUnread: false,
     }]]))
@@ -2844,7 +2862,7 @@ describe('Workspace tree grouping', () => {
     })
     expect(within(section('Projects')).getByText('Child')).toBeTruthy()
     rerender(b, { useWorkspaces: hook(workspaceState([child, team, root])) })
-    expect(within(section('Projects')).getByText('Team')).toBeTruthy()
+    expect(groupHeaderTitle('Team', section('Projects'))).toBeTruthy()
     expect(within(section('Team')).getByText('Child')).toBeTruthy()
     expect(within(section('Team')).queryByText('root-session')).toBeNull()
     expect(within(section('Projects')).getByText('root-session')).toBeTruthy()
@@ -2856,7 +2874,7 @@ describe('Workspace tree grouping', () => {
     expect(b.props.startSession).toHaveBeenCalledWith(root.workspaceId)
     rerender(b, { useWorkspaces: hook(workspaceState([child, root])) })
     expect(screen.queryByText('Team')).toBeNull()
-    expect(within(section('Projects')).getByText('Child')).toBeTruthy()
+    expect(groupHeaderTitle('Child', section('Projects'))).toBeTruthy()
   })
 
   it('restores collapsed ancestors and keeps the flat view independent', () => {

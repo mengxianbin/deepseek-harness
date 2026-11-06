@@ -259,6 +259,21 @@
   margin-inline-end: -1px;
 }
 
+/* 归宿短标 (collab step3 §6.1 一眼层三元组): the owning group's short label
+   sits between the title and the time in the search row's Workspace-label
+   step (12px tertiary); the 40% share caps it against the row width, so a
+   long Workspace title truncates while the title cell absorbs the rest. */
+.homeLabel {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
 .pinIndicator {
   display: inline-flex;
   flex: none;
@@ -273,8 +288,10 @@
 /* Archived rows stay in place but read as inactive: titles drop to
    the caption label step (one step above dimmed, which reads as too faint
    over the sidebar fill). Archived search rows drop their meta line to the
-   same step so both lines read as one unit. */
+   same step so both lines read as one unit; the home label follows its row's
+   title to the same step. */
 .sessionRow.archived .title,
+.sessionRow.archived .homeLabel,
 .searchResultRow.archived .searchResultTitle,
 .searchResultRow.archived .searchResultWorkspace,
 .searchResultRow.archived .searchResultSnippet {

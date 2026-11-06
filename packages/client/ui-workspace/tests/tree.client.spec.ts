@@ -1134,6 +1134,38 @@ describe('deriveQueue (collab step3 §一, q1-placement)', () => {
   })
 })
 
+describe('home label (collab step3 §6.1 归宿短标)', () => {
+  it('reads the group header Workspace title on grouped rows and leaves the loose bucket unlabeled', () => {
+    const sessions = list(summary('member', 2), summary('loose', 1))
+    const groups = deriveGroups(
+      sessions, [workspace('alpha', ['member'], 'm-note')], noRows, noAttention, view(['alpha', UNGROUPED_KEY]),
+    )
+    expect(groups.map(group => group.label)).toEqual(['m-note', ''])
+    expect(groups[0]!.sessions.map(node => node.homeLabel)).toEqual(['m-note'])
+    expect(groups[1]!.sessions.map(node => node.homeLabel)).toEqual([undefined])
+  })
+
+  it('labels flat rows and queued rows from the same Workspace title map', () => {
+    const sessions = list(summary('member', 2), summary('loose', 1))
+    const workspaces = [workspace('alpha', ['member', 'ask', 'failed'], 'm-note')]
+    expect(deriveFlat(sessions, sessions.ids, noRows, noAttention, workspaces).map(node => node.homeLabel))
+      .toEqual(['m-note', undefined])
+    // A composition without the Workspace baseline keeps its rows unlabeled.
+    expect(deriveFlat(sessions, sessions.ids, noRows, noAttention).map(node => node.homeLabel))
+      .toEqual([undefined, undefined])
+
+    const queued = list(summary('ask', 20), summary('failed', 10))
+    const statuses: SessionStatusSnapshot = new Map([
+      [sid('ask'), status({ key: 'question:1', kind: 'question', sessionId: sid('ask') } as SessionPendingInteraction)],
+      [sid('failed'), status(undefined, { completionUnread: true, completionOutcome: 'failed' })],
+    ])
+    const queue = deriveQueue(queued, statuses, [], workspaces)
+    expect(queue.tiers.flatMap(tier => tier.sessions).map(node => [node.id, node.homeLabel])).toEqual([
+      [sid('ask'), 'm-note'], [sid('failed'), 'm-note'],
+    ])
+  })
+})
+
 describe('compareRestingRows (collab step3 §6.2, q6-attr)', () => {
   it('leads pinned rows, then the more recently active', () => {
     const pinnedOld = restingFacts(true, 'silent', 1)

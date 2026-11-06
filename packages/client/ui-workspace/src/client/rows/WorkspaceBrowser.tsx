@@ -613,8 +613,8 @@ function SessionTree({
   // 「要我拿主意」 segment owns its rows; the groups below drop them (and their
   // counts) so each queued Session shows once, at the top (step3 §一).
   const queue = useMemo(
-    () => deriveQueue(list, statuses, rowState.archivedSessionIds),
-    [list, statuses, rowState.archivedSessionIds],
+    () => deriveQueue(list, statuses, rowState.archivedSessionIds, workspaces),
+    [list, statuses, rowState.archivedSessionIds, workspaces],
   )
   const groups = useMemo(
     () => deriveGroups(list, workspaces, rowState, statuses, {
@@ -965,7 +965,7 @@ function SessionTree({
 function FlatList({
   list, sessionIds, rowState, onLeaveArchivedOnly, useSessionStatus, useSessionHealth, useSessionAccess, open,
   onSessionRenameRequest, usePanelInfo, setSessionOrder, workspaceReady, animationResetKey,
-  revealSessionId, onSessionRevealed, renderSlot, home, t, watchSessionJobs, seals, sealRows,
+  revealSessionId, onSessionRevealed, renderSlot, home, t, watchSessionJobs, seals, sealRows, workspaces,
 }: Pick<
   SessionTreeProps,
   | 'useSessionStatus'
@@ -987,6 +987,7 @@ function FlatList({
   | 'watchSessionJobs'
   | 'seals'
   | 'sealRows'
+  | 'workspaces'
 > & {
   list: SessionListState
   sessionIds: readonly SessionId[]
@@ -996,12 +997,12 @@ function FlatList({
   // FORK dsh-local (collab-step4b-c1, marker: queueSegment): the flat view
   // carries the same hard top segment; its rows leave the flat flow below.
   const queue = useMemo(
-    () => deriveQueue(list, statuses, rowState.archivedSessionIds),
-    [list, statuses, rowState.archivedSessionIds],
+    () => deriveQueue(list, statuses, rowState.archivedSessionIds, workspaces),
+    [list, statuses, rowState.archivedSessionIds, workspaces],
   )
   const allRows = useMemo(
-    () => deriveFlat(list, sessionIds, rowState, statuses),
-    [list, sessionIds, rowState, statuses],
+    () => deriveFlat(list, sessionIds, rowState, statuses, workspaces),
+    [list, sessionIds, rowState, statuses, workspaces],
   )
   const rows = useMemo(
     () => queue.queued.size === 0 ? allRows : allRows.filter(row => !queue.queued.has(row.id)),
@@ -1845,6 +1846,7 @@ export function WorkspaceBrowser({
                   home={home}
                   seals={seals}
                   sealRows={sealRows}
+                  workspaces={orderedWorkspaces}
                   t={t}
                 />
               )

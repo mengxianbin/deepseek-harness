@@ -799,8 +799,9 @@ export function SearchResultItem({
 
 /**
  * One top-level 32px session row: leading 16px cell (status dot, or the
- * leading seat while the row's primary state is idle), title, relative time or
- * compact pending label, and the row actions menu. A row that owns a state dot
+ * leading seat while the row's primary state is idle), title, the owning
+ * group's home label, relative time or compact pending label, and the row
+ * actions menu. A row that owns a state dot
  * keeps that cell and renders no seat, so an ambient automation mark never
  * appears beside the row's own state dot. An archived row keeps the cell blank:
  * neither marker renders there, and its live status stays on the hover card.
@@ -986,17 +987,25 @@ export function SessionNodeItem({
           the archive verb can dismiss an abandoned placeholder; each entry
           reads the owner `blank` flag for applicability. */}
       {!row.blank && (
-        <span className={css.rowResting}>
-          <span
-            className={css.time}
-            aria-hidden={primaryStatus.trailingLabel === undefined ? undefined : true}
-          >
-            {primaryStatus.trailingLabel ?? timeLabel(row.updatedAt, now, t)}
+        <>
+          {/* 归宿短标 (collab step3 §6.1 一眼层三元组: 标题 + 归宿短标 +
+              活跃时间): the owning group's short label between the title and
+              the time, reading the group header's Workspace title source; a
+              loose row falls back to the ungrouped bucket label, the same
+              fallback the search result row uses. */}
+          <span className={css.homeLabel}>{node.homeLabel || t('group.ungrouped')}</span>
+          <span className={css.rowResting}>
+            <span
+              className={css.time}
+              aria-hidden={primaryStatus.trailingLabel === undefined ? undefined : true}
+            >
+              {primaryStatus.trailingLabel ?? timeLabel(row.updatedAt, now, t)}
+            </span>
+            {renderSlot('sidebar.session.row.trailing', { sessionId: node.id })}
+            {row.readMarked === true && !row.archived && <ReadMarkIndicator t={t} />}
+            {row.pinned && !row.archived && <PinnedIndicator t={t} />}
           </span>
-          {renderSlot('sidebar.session.row.trailing', { sessionId: node.id })}
-          {row.readMarked === true && !row.archived && <ReadMarkIndicator t={t} />}
-          {row.pinned && !row.archived && <PinnedIndicator t={t} />}
-        </span>
+        </>
       )}
       {/* The strip's clicks stay in the strip: the trigger and every
           row.action entry act without also opening the row, so an entry's
