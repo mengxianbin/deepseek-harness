@@ -1,7 +1,11 @@
 /**
  * Host restart dispatch: registers `POST /api/restart` and the capability page
  * global when — and only when — the user configured a restart command, then
- * runs that command detached so the browser's 202 never waits for the restart.
+ * runs that command in the background so the browser's 202 never waits for
+ * the restart. The spawn is non-detached (2026-11-06 摘掉 detached 开关，
+ * 修法卡 D0/D1 验证): the child shares this process's hidden console — the
+ * default terminal (Windows Terminal) never gets a new window to show — and
+ * the child still outlives this process.
  */
 import { spawn } from 'node:child_process'
 import type { SpawnOptions } from 'node:child_process'
@@ -16,7 +20,7 @@ import { RESTART_GLOBAL, RESTART_PATH, type RestartCapability } from './restart.
 /** Environment variable carrying the whole restart command line. */
 export const RESTART_COMMAND_ENV = 'DSH_WEB_RESTART_COMMAND'
 
-/** Detached child-process surface the dispatch relies on. */
+/** Child-process surface the dispatch relies on. */
 export interface RestartChild {
   /** Keep the child out of this process's exit wait. */
   readonly unref: () => void
@@ -24,33 +28,34 @@ export interface RestartChild {
   readonly on: (event: 'error', listener: (error: Error) => void) => void
 }
 
-/** Detached command launcher seam: one whole command line through the OS shell. */
+/** Command launcher seam: one whole command line through the OS shell. */
 export type RestartLauncher = (commandLine: string, options: SpawnOptions) => RestartChild
 
-/** Injectable host facts: the detached launcher, defaulted from this process. */
+/** Injectable host facts: the launcher, defaulted from this process. */
 export interface RestartInternals {
-  /** Detached launcher; defaults to a hidden, stdio-ignored shell spawn. */
+  /** Launcher; defaults to a hidden, stdio-ignored, non-detached shell spawn. */
   launch?: RestartLauncher
 }
 
 /**
- * Default launcher: one command line through the OS shell, hidden and detached.
+ * Default launcher: one command line through the OS shell, hidden and
+ * non-detached (name kept for call-site stability; since 2026-11-06 the
+ * spawn shares this process's hidden console — zero new windows).
  * @param commandLine - whole command line to run through the OS shell.
- * @param options - spawn options passed through: shell, detached, stdio, windowsHide, env.
+ * @param options - spawn options passed through: shell, stdio, windowsHide, env.
  */
 export const spawnDetached: RestartLauncher = (commandLine, options) => spawn(commandLine, options)
 
 /**
- * Run the restart command detached from this process: the response never waits
+ * Run the restart command in the background: the response never waits
  * for it, the child outlives this process, and an asynchronous spawn failure
  * only reaches stderr.
  * @param commandLine - whole command line from the user's environment.
- * @param launch - detached launcher seam.
+ * @param launch - launcher seam.
  */
 export function dispatchRestart(commandLine: string, launch: RestartLauncher): void {
   const child = launch(commandLine, {
     shell: true,
-    detached: true,
     stdio: 'ignore',
     windowsHide: true,
     // Full inheritance on purpose: this child runs inside the server's own

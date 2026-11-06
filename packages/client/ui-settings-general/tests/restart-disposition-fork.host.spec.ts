@@ -21,7 +21,7 @@ import type { RestartSignalState } from '../src/restart.ts'
 
 const COMMAND = 'pwsh -NoProfile -File D:\\dsh\\restart.ps1 -NoBrowser'
 
-/** A child stand-in with the detached-dispatch surface. */
+/** A child stand-in with the dispatch surface. */
 function stubChild(): RestartChild {
   return { unref: vi.fn(), on: vi.fn() }
 }
@@ -68,7 +68,9 @@ describe('restart disposition driver', () => {
     expect(launch).toHaveBeenCalledOnce()
     const [commandLine, spawnOptions] = launch.mock.calls[0]!
     expect(commandLine).toBe(COMMAND)
-    expect(spawnOptions).toMatchObject({ shell: true, detached: true, stdio: 'ignore', windowsHide: true })
+    expect(spawnOptions).toMatchObject({ shell: true, stdio: 'ignore', windowsHide: true })
+    // Non-detached since 2026-11-06 popup fix: no new console, no focus-stealing window.
+    expect(spawnOptions).not.toHaveProperty('detached')
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('auto-restart dispatched'))
   })
 

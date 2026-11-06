@@ -4,7 +4,7 @@
  * host running count (P11 口径: the agents registry that the `session/list`
  * rows and `api-session/status` events are computed from), the client
  * running-count attestation, and the shared in-flight dispatch lock — and
- * dispatches the configured restart command detached when, and only when,
+ * dispatches the configured restart command in the background when, and only when,
  * every fact agrees at zero while the `DSH_AUTO_RESTART` flag is on.
  *
  * The default is dark: with the flag absent the entry tick does nothing at
