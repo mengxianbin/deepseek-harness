@@ -138,14 +138,20 @@ describe('CI workflow', () => {
       expect(job.steps).toContainEqual(expect.objectContaining({ run: command }))
     }
     for (const [file, command] of [
-      ['release-publish.yml', 'pnpm run build:official'],
+      ['release-publish.yml', 'pnpm run build:official --serial'],
       ['release-vendor-publish.yml', 'pnpm run build:lib:host'],
     ] as const) {
       expect(workflowJob(loadWorkflow('.github/workflows/' + file), 'pack').steps)
         .toContainEqual(expect.objectContaining({ name: 'Build', run: command }))
     }
     const scripts = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as { scripts: Record<string, string> }
-    const hostSteps = scripts.scripts['build:lib:host']!.split(' && ')
+    // FORK dsh-local: P0 restart-signal (a61a221001) wraps the whole host chain
+    // in build-stamp; peel the wrapper at the split so the original-text
+    // assertions below stay byte-identical (same pattern as run-gates.spec.ts).
+    const hostSteps = scripts.scripts['build:lib:host']!
+      .replace(/^tsx scripts\/restart-signal\/build-stamp\.ts run --faces host -- "/, '')
+      .replace(/"$/, '')
+      .split(' && ')
     expect(hostSteps[0]).toBe('tsx scripts/compile-referenced-projects.ts host-libraries')
     expect(hostSteps).toContain('node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc -p tsconfig.host.json')
     expect(hostSteps.at(-1)).toBe('pnpm --filter @deepseek-ai/dsh-desktop run bundle')
