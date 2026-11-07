@@ -89,6 +89,7 @@ function sealDetailLine(seal: SealLightSeal, t: SealLightTranslate): string | un
     case 'save-tail-no-sentinel': return t('archive.seal.status.save-tail-no-sentinel')
     case 'save-trace-no-sentinel': return t('archive.seal.status.save-trace-no-sentinel')
     case 'sentinel-stale': return t('archive.seal.status.sentinel-stale', { n: seal.followUpCount ?? 0 })
+    case 'no-endorsement': return t('archive.seal.status.no-endorsement')
     default: return undefined
   }
 }

@@ -26,6 +26,7 @@ export type SessionSealDetail =
   | 'save-tail-no-sentinel'
   | 'save-trace-no-sentinel'
   | 'sentinel-stale'
+  | 'no-endorsement'
 
 /** One Session's seal verdict as C1 reports it. */
 export interface SessionSealInfo {
@@ -66,6 +67,7 @@ const VERDICTS: ReadonlySet<SessionSealVerdict> = new Set<SessionSealVerdict>([
 /** The known detail vocabulary, for response parsing. */
 const DETAILS: ReadonlySet<SessionSealDetail> = new Set<SessionSealDetail>([
   'sentinel-pending', 'save-tail-no-sentinel', 'save-trace-no-sentinel', 'sentinel-stale',
+  'no-endorsement',
 ])
 
 /**
