@@ -3,7 +3,7 @@
  * cases keep the default.
  */
 import { spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest'
 import {
   acquireHeavyIoLock,
   breakStaleHeavyIoLock,
+  defaultHistoryFile,
   defaultLockDirectory,
   isProcessAlive,
   readHeavyIoLock,
@@ -29,11 +30,25 @@ function lockDir(name: string): string {
   return join(tmpdir(), `heavy-io-gate-spec-${name}`)
 }
 
+function historyPath(name: string): string {
+  return join(tmpdir(), `heavy-io-gate-spec-history-${name}.log`)
+}
+
 function runGate(args: readonly string[], env: Record<string, string>) {
   return spawnSync(process.execPath, [tsxCli, gateScript, ...args], {
     cwd: repositoryRoot,
     encoding: 'utf8',
-    env: { ...process.env, NO_COLOR: '1', ...env },
+    env: {
+      ...process.env,
+      NO_COLOR: '1',
+      // Pin the gate ON regardless of the runner's environment (CI=true would
+      // silently passthrough every case); per-case env below still overrides.
+      CI: 'false',
+      // Default every spawned gate to a scratch history file so tests never
+      // append to the machine-wide log; history cases override it per case.
+      DSH_HEAVY_IO_HISTORY: join(tmpdir(), 'heavy-io-gate-spec-history.log'),
+      ...env,
+    },
   })
 }
 
@@ -211,5 +226,157 @@ describe('heavy-io gate wiring', () => {
     expect(result.error).toBeUndefined()
     expect(result.status).toBe(0)
     expect(result.stdout.trim()).toBe('alpha beta')
+  }, 90_000)
+})
+
+describe('heavy-io gate history log', () => {
+  it('keeps the default history file user-level and outside the lock directory', () => {
+    const file = defaultHistoryFile({ LOCALAPPDATA: 'C:/Users/test/AppData/Local' })
+    expect(file).toContain('history.log')
+    // The lock directory is removed wholesale on release; the log must not sit
+    // inside it or every line would evaporate with the lock.
+    expect(file).not.toContain('dsh-heavy-io-gate.lock')
+    expect(file.startsWith(tmpdir())).toBe(false)
+  })
+
+  it('records acquire and release lines for a gated command', async () => {
+    const directory = lockDir('history-run')
+    const history = historyPath('run')
+    try {
+      await rm(directory, { recursive: true, force: true })
+      await rm(history, { force: true })
+      const result = runGate(['node -e "process.stdout.write(\'ok\')"'], {
+        DSH_HEAVY_IO_LOCK_DIR: directory,
+        DSH_HEAVY_IO_HISTORY: history,
+        DSH_HEAVY_IO_POLL_MS: '100',
+        DSH_HEAVY_IO_WAIT_MS: '2000',
+        DSH_HEAVY_IO_STALE_MS: '60000',
+      })
+
+      expect(result.error).toBeUndefined()
+      expect(result.status).toBe(0)
+      const lines = readFileSync(history, 'utf8').trim().split('\n')
+      const acquire = lines.find(line => line.includes(' acquire '))
+      const release = lines.find(line => line.includes(' release '))
+      expect(acquire).toMatch(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z acquire pid=\d+ cmd=node -e /)
+      expect(release).toMatch(/ release pid=\d+ heldMs=\d+ cmd=node -e /)
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+      await rm(history, { force: true })
+    }
+  }, 90_000)
+
+  it('records waiting and fail-open lines while queued behind a live holder', async () => {
+    const directory = lockDir('history-queue')
+    const history = historyPath('queue')
+    try {
+      await rm(directory, { recursive: true, force: true })
+      await rm(history, { force: true })
+      await mkdir(directory)
+      await writeFile(join(directory, 'owner.json'), JSON.stringify({
+        pid: process.pid,
+        startedAt: new Date().toISOString(),
+        command: 'other heavy job',
+      }))
+      const result = runGate(['node -e "process.stdout.write(\'queued\')"'], {
+        DSH_HEAVY_IO_LOCK_DIR: directory,
+        DSH_HEAVY_IO_HISTORY: history,
+        DSH_HEAVY_IO_POLL_MS: '50',
+        DSH_HEAVY_IO_WAIT_MS: '400',
+        DSH_HEAVY_IO_STALE_MS: '60000',
+      })
+
+      expect(result.error).toBeUndefined()
+      expect(result.status).toBe(0)
+      expect(result.stdout).toBe('queued')
+      expect(result.stderr).toContain('wait bound reached, proceeding anyway (fail-open)')
+      const text = readFileSync(history, 'utf8')
+      expect(text).toMatch(new RegExp(`waiting pid=\\d+ waitedMs=\\d+ holderPid=${process.pid} holderCmd=other heavy job cmd=`))
+      expect(text).toMatch(/ fail-open pid=\d+ waitedMs=\d+ cmd=/)
+      // Fail-open proceeds WITHOUT the lock: no acquire and no release line.
+      expect(text).not.toContain(' acquire ')
+      expect(text).not.toContain(' release ')
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+      await rm(history, { force: true })
+    }
+  }, 90_000)
+
+  it('records a stale-break line when a dead holder is broken', async () => {
+    const directory = lockDir('history-stale')
+    const history = historyPath('stale')
+    const deadPid = 2_147_480_000
+    try {
+      await rm(directory, { recursive: true, force: true })
+      await rm(history, { force: true })
+      await mkdir(directory)
+      await writeFile(join(directory, 'owner.json'), JSON.stringify({
+        pid: deadPid,
+        startedAt: new Date().toISOString(),
+        command: 'dead job',
+      }))
+      const result = runGate(['node -e "process.stdout.write(\'recovered\')"'], {
+        DSH_HEAVY_IO_LOCK_DIR: directory,
+        DSH_HEAVY_IO_HISTORY: history,
+        DSH_HEAVY_IO_POLL_MS: '100',
+        DSH_HEAVY_IO_WAIT_MS: '2000',
+        DSH_HEAVY_IO_STALE_MS: '60000',
+      })
+
+      expect(result.error).toBeUndefined()
+      expect(result.status).toBe(0)
+      const text = readFileSync(history, 'utf8')
+      expect(text).toMatch(/ stale-break pid=\d+ holderPid=2147480000 holderAgeMs=\d+ holderAlive=false cmd=/)
+      expect(text).toMatch(/ acquire pid=\d+ cmd=node -e /)
+      expect(text).toMatch(/ release pid=\d+ heldMs=\d+ cmd=node -e /)
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+      await rm(history, { force: true })
+    }
+  }, 90_000)
+
+  it('records which passthrough path skipped the gate', async () => {
+    const history = historyPath('passthrough')
+    try {
+      await rm(history, { force: true })
+      const result = runGate(['node -e "process.stdout.write(\'direct\')"'], {
+        DSH_HEAVY_IO_HISTORY: history,
+        DSH_HEAVY_IO: '0',
+      })
+
+      expect(result.error).toBeUndefined()
+      expect(result.status).toBe(0)
+      expect(result.stdout).toBe('direct')
+      expect(readFileSync(history, 'utf8')).toMatch(/ passthrough pid=\d+ reason=off cmd=node -e /)
+    } finally {
+      await rm(history, { force: true })
+    }
+  }, 90_000)
+
+  it('keeps running when the history path cannot be written', async () => {
+    const directory = lockDir('history-failsoft')
+    const blocker = join(tmpdir(), 'heavy-io-gate-spec-history-blocker')
+    try {
+      await rm(directory, { recursive: true, force: true })
+      rmSync(blocker, { force: true })
+      writeFileSync(blocker, 'not a directory')
+      // Parent is a regular file, so the history mkdir/append must fail —
+      // the gate itself has to run unaffected (fail-soft observation).
+      const result = runGate(['node -e "process.stdout.write(\'alive\')"'], {
+        DSH_HEAVY_IO_LOCK_DIR: directory,
+        DSH_HEAVY_IO_HISTORY: join(blocker, 'history.log'),
+        DSH_HEAVY_IO_POLL_MS: '100',
+        DSH_HEAVY_IO_WAIT_MS: '2000',
+        DSH_HEAVY_IO_STALE_MS: '60000',
+      })
+
+      expect(result.error).toBeUndefined()
+      expect(result.status).toBe(0)
+      expect(result.stdout).toBe('alive')
+      expect(readFileSync(blocker, 'utf8')).toBe('not a directory')
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+      rmSync(blocker, { force: true })
+    }
   }, 90_000)
 })
