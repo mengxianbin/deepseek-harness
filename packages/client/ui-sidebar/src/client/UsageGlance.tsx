@@ -240,6 +240,13 @@ interface ProviderSnapshotView {
    * figure instead of presenting it as live.
    */
   error?: string
+  /**
+   * Whether the host probes this route at all (FORK
+   * mimo-balance-freeze-1108): `false` with a retained balance means the
+   * probe is being skipped (the adapter is missing upstream), so the figure
+   * can never refresh — it must read stale even though no error was raised.
+   */
+  supported?: boolean
 }
 
 /** One per-day trend entry of the overview's ledger series. */
@@ -310,9 +317,12 @@ export interface GlanceState {
   mimoBalance?: BalanceView
   /**
    * True when the mimo balance is a stale-carried fact (FORK
-   * usage-glance-stale-fact-ttl): the host's probe half reports an error
-   * while the row still carries the last success — the figure is marked
-   * stale rather than presented as live. Absent alongside a fresh fact.
+   * usage-glance-stale-fact-ttl; three-form judgment added by FORK
+   * mimo-balance-freeze-1108): the host's probe half reports an error while
+   * the row still carries the last success, the probe is being skipped
+   * (`supported === false`), or the fact has aged past the host's
+   * stale-fact TTL — the figure is marked stale rather than presented as
+   * live. Absent alongside a fresh fact.
    */
   mimoBalanceStale?: boolean
 }
@@ -379,22 +389,38 @@ function pickPlanRow(overview: UsageOverviewView): ProviderSnapshotView | undefi
 }
 
 /**
+ * How long a retained balance fact may sit unrefreshed before the glance
+ * marks it stale (FORK mimo-balance-freeze-1108). Same value and same source
+ * as the host's own `STALE_FACT_TTL_MS` (dsh-web
+ * `packages/dsh-usage/src/host/usage-service.ts:61`, `7_200_000` = 2h at the
+ * default 60s poll) — kept in sync by citation, not by import, because that
+ * constant lives in the host package, outside this client package.
+ */
+const STALE_FACT_TTL_MS = 7_200_000
+
+/**
  * The mimo route's balance fact (FORK usage-glance-mimo-balance): bound to
  * the stable route id `mimo` — deliberately NOT the first provider carrying a
  * balance, which today would be deepseek-official's `-0.18 CNY` answering a
  * question about MiMo's wallet. The row degrades on its own when the host
  * reports no mimo balance (adapter absent, cookie expired, probe failed).
- * A row that still carries a balance while its probe half reports an error
- * is a STALE-CARRIED fact (FORK usage-glance-stale-fact-ttl): the host kept
- * the last success through a failing streak, so the figure is marked stale
- * instead of presented as live.
+ * Three forms mark the figure stale (FORK mimo-balance-freeze-1108): the
+ * probe half reports an error (the original usage-glance-stale-fact-ttl
+ * judgment); the probe is skipped outright — `supported === false` while a
+ * balance is retained means the adapter is missing upstream and the fact can
+ * never refresh, and a skipped probe raises no error, which is exactly the
+ * blind spot this branch closes; or the fact's own `updatedAt` has aged past
+ * the host's stale-fact TTL (`STALE_FACT_TTL_MS` above).
  * @param overview - the host overview document.
+ * @param now - the current instant; the age branch measures against it (same
+ *   injected-clock convention as `cycleTokenTotal`).
  * @returns the mimo balance fact with its staleness flag, or undefined when the host reports none.
  */
-function pickMimoBalance(overview: UsageOverviewView): { balance: BalanceView; stale: boolean } | undefined {
+function pickMimoBalance(overview: UsageOverviewView, now: number): { balance: BalanceView; stale: boolean } | undefined {
   const row = (overview.providers ?? []).find(entry => entry.provider === MIMO_ROUTE_ID)
   if (row?.balance === undefined) return undefined
-  return { balance: row.balance, stale: row.error !== undefined }
+  const ageStale = row.balance.updatedAt !== undefined && now - row.balance.updatedAt > STALE_FACT_TTL_MS
+  return { balance: row.balance, stale: row.error !== undefined || row.supported === false || ageStale }
 }
 
 /**
@@ -634,7 +660,7 @@ export function deriveGlance(overview: UsageOverviewView, now: number = Date.now
   }
   const todayTokens = todayTokenTotal(overview)
   const cycle = cycleTokenTotal(overview, pickWindow(overview), now)
-  const mimo = pickMimoBalance(overview)
+  const mimo = pickMimoBalance(overview, now)
   return {
     ...(rows.length === 0 ? {} : { windows: rows }),
     ...(todayTokens === undefined ? {} : { todayTokens }),
@@ -808,9 +834,11 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
   const cycleTokens = state?.cycleTokens
   const cycleTruncated = state?.cycleTruncated === true
   const mimoBalance = state?.mimoBalance
-  // A stale-carried fact (FORK usage-glance-stale-fact-ttl) asterisks the
-  // figure and swaps the load stamp for the fact's own probe instant: the
-  // number is the last success through a failing streak, not a live read.
+  // A stale-carried fact (FORK usage-glance-stale-fact-ttl; three-form
+  // judgment FORK mimo-balance-freeze-1108) asterisks the figure and swaps
+  // the load stamp for the fact's own probe instant: the number is the last
+  // success through a failing streak, a skipped probe, or an aged-out fact —
+  // not a live read.
   const mimoStale = state?.mimoBalanceStale === true && mimoBalance !== undefined
   const mimoFigure = mimoBalance === undefined
     ? '—'

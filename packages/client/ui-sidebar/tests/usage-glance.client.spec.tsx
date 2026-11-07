@@ -290,19 +290,49 @@ describe('deriveGlance', () => {
   it('marks a mimo balance stale when its row carries a probe error (FORK usage-glance-stale-fact-ttl)', () => {
     // The host keeps the last success through a failing streak (within its
     // TTL); the glance must mark that figure stale, not present it as live.
+    // updatedAt rides NOW so the age branch (FORK mimo-balance-freeze-1108)
+    // stays out of the way and the error branch alone carries the assertion.
     const overview: UsageOverviewView = {
       providers: [
-        { provider: 'mimo', balance: { currency: 'CNY', totalBalance: '36.87', updatedAt: 2 }, error: 'HTTP 401' },
+        { provider: 'mimo', balance: { currency: 'CNY', totalBalance: '36.87', updatedAt: NOW }, error: 'HTTP 401' },
       ],
     }
     const state = deriveGlance(overview, NOW)
-    expect(state.mimoBalance).toEqual({ currency: 'CNY', totalBalance: '36.87', updatedAt: 2 })
+    expect(state.mimoBalance).toEqual({ currency: 'CNY', totalBalance: '36.87', updatedAt: NOW })
     expect(state.mimoBalanceStale).toBe(true)
     // A healthy fact carries no stale flag.
     const healthy: UsageOverviewView = {
-      providers: [{ provider: 'mimo', balance: { currency: 'CNY', totalBalance: '36.87', updatedAt: 2 } }],
+      providers: [{ provider: 'mimo', balance: { currency: 'CNY', totalBalance: '36.87', updatedAt: NOW } }],
     }
     expect(deriveGlance(healthy, NOW).mimoBalanceStale).toBeUndefined()
+  })
+
+  it('marks a mimo balance stale when the host skips its probe (FORK mimo-balance-freeze-1108)', () => {
+    // supported:false with a retained balance = the adapter is missing
+    // upstream, so the fact can never refresh — and a skipped probe raises
+    // no error, which is exactly the blind spot this judgment closes.
+    const skipped: UsageOverviewView = {
+      providers: [{ provider: 'mimo', balance: { currency: 'CNY', totalBalance: '36.87', updatedAt: NOW }, supported: false }],
+    }
+    expect(deriveGlance(skipped, NOW).mimoBalanceStale).toBe(true)
+    // An actively probed row with a fresh fact stays live.
+    const probed: UsageOverviewView = {
+      providers: [{ provider: 'mimo', balance: { currency: 'CNY', totalBalance: '36.87', updatedAt: NOW }, supported: true }],
+    }
+    expect(deriveGlance(probed, NOW).mimoBalanceStale).toBeUndefined()
+  })
+
+  it('marks a mimo balance stale once its fact outlives the host stale-fact TTL (FORK mimo-balance-freeze-1108)', () => {
+    // Same 2h window as the host's STALE_FACT_TTL_MS (dsh-web
+    // usage-service.ts:61): exactly at the TTL stays live, one ms past flips.
+    const atTtl: UsageOverviewView = {
+      providers: [{ provider: 'mimo', balance: { currency: 'CNY', totalBalance: '36.87', updatedAt: NOW - 7_200_000 } }],
+    }
+    expect(deriveGlance(atTtl, NOW).mimoBalanceStale).toBeUndefined()
+    const pastTtl: UsageOverviewView = {
+      providers: [{ provider: 'mimo', balance: { currency: 'CNY', totalBalance: '36.87', updatedAt: NOW - 7_200_000 - 1 } }],
+    }
+    expect(deriveGlance(pastTtl, NOW).mimoBalanceStale).toBe(true)
   })
 })
 
@@ -488,7 +518,9 @@ describe('UsageGlance', () => {
     const overview: UsageOverviewView = {
       providers: [
         { provider: 'opencode-go', plan: { windows: [{ key: 'month', percent: 31, resetsAt: '2026-10-17T10:25:48Z' }] } },
-        { provider: 'mimo', balance: { currency: 'CNY', totalBalance: '6.16', updatedAt: 1 } },
+        // Fresh probe instant: the render path ages against the real clock
+        // (FORK mimo-balance-freeze-1108), so an ancient stamp would asterisk.
+        { provider: 'mimo', balance: { currency: 'CNY', totalBalance: '6.16', updatedAt: Date.now() } },
       ],
     }
     vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => overview })))
@@ -508,10 +540,13 @@ describe('UsageGlance', () => {
   it('marks a stale-carried mimo balance with an asterisk, the dimmed class, and its own probe stamp (FORK usage-glance-stale-fact-ttl)', async () => {
     // The probe half reports an error while the row still carries the last
     // success — the figure must read stale, with the FACT's probe instant in
-    // the tooltip instead of implying it is a live read.
+    // the tooltip instead of implying it is a live read. updatedAt rides a
+    // fresh stamp so the error branch alone carries the stale flag (FORK
+    // mimo-balance-freeze-1108 age branch stays out of the way).
+    const updatedAt = Date.now()
     const overview: UsageOverviewView = {
       providers: [
-        { provider: 'mimo', balance: { currency: 'CNY', totalBalance: '36.87', updatedAt: 1 }, error: 'HTTP 401' },
+        { provider: 'mimo', balance: { currency: 'CNY', totalBalance: '36.87', updatedAt }, error: 'HTTP 401' },
       ],
     }
     vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => overview })))
@@ -522,7 +557,7 @@ describe('UsageGlance', () => {
     expect(value.parentElement?.textContent)
       .toBe(`${t('glance.mimoBalance.label')}¥36.87*`)
     // The tooltip swaps in the stale marker and the fact's own probe stamp.
-    const probeStamp = formatRefreshStamp(1)
+    const probeStamp = formatRefreshStamp(updatedAt)
     screen.getByTitle(
       new RegExp(`^${t('glance.today')} · ${t('glance.cycle')} · ${t('glance.mimoBalance.label')} ¥36\\.87\\* ${t('glance.mimoBalance.stale')} ${probeStamp.replace(/[.:]/g, '\\$&')} · ${t('glance.refreshed')} \\d{2}\\.\\d{2}\\.\\d{2} \\d{2}:\\d{2}$`),
     )
