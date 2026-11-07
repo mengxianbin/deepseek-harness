@@ -11,11 +11,18 @@
  * Usage: `tsx scripts/heavy-io-gate.ts "<shell command>"`.
  * CI (`CI=true`), `DSH_HEAVY_IO=0`, and nested calls that already hold the gate
  * (`DSH_HEAVY_IO_HELD=1`) pass the command straight through.
+ *
+ * Every transition also appends one observation line to a history.log kept
+ * outside the lock directory (acquire / waiting / fail-open / stale-break /
+ * release / passthrough, each with ISO time, pid and command). Pure observation:
+ * no gate decision reads it and every write failure is swallowed, so a full disk
+ * costs at most the log line, never the gate.
  */
 import { spawn } from 'node:child_process'
+import { appendFileSync, mkdirSync } from 'node:fs'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const DEFAULT_POLL_INTERVAL_MS = 2_000
@@ -43,6 +50,55 @@ const DEFAULT_STALE_AFTER_MS = 90 * 60 * 1000
 export function defaultLockDirectory(env: NodeJS.ProcessEnv): string {
   if (process.platform === 'win32') return join(env.LOCALAPPDATA ?? tmpdir(), 'dsh-heavy-io-gate.lock')
   return join(env.XDG_CACHE_HOME ?? join(homedir(), '.cache'), 'dsh-heavy-io-gate.lock')
+}
+
+/**
+ * Resolve the default observation history file.
+ * It sits outside the lock directory on purpose: releasing the lock removes
+ * that directory wholesale, so a log inside it would evaporate with every run.
+ * @param env - Environment of this process.
+ * @returns the user-level history.log path shared by every run on the machine.
+ */
+export function defaultHistoryFile(env: NodeJS.ProcessEnv): string {
+  if (process.platform === 'win32') return join(env.LOCALAPPDATA ?? tmpdir(), 'dsh-heavy-io-gate', 'history.log')
+  return join(env.XDG_CACHE_HOME ?? join(homedir(), '.cache'), 'dsh-heavy-io-gate', 'history.log')
+}
+
+/** Observation history path; `DSH_HEAVY_IO_HISTORY` overrides it (spec isolation). */
+function historyFile(env: NodeJS.ProcessEnv): string {
+  return env.DSH_HEAVY_IO_HISTORY ?? defaultHistoryFile(env)
+}
+
+/** Repeat `waiting` lines are rate-limited so a 2s poll cannot flood the log. */
+const HISTORY_WAITING_INTERVAL_MS = 60_000
+
+/**
+ * Append one observation line to the history log (fail-soft).
+ * Format: `<ISO time> <event> pid=<n> [fields…] cmd=<command>`; `cmd` is always
+ * the last field so it may contain spaces and quotes.
+ * Every failure path (full disk, missing permission, bad override path) is
+ * swallowed here: history is pure observation and must never affect the gate.
+ * @param file - History file path.
+ * @param event - Event name (acquire / waiting / fail-open / stale-break / release / passthrough).
+ * @param command - The gated command.
+ * @param fields - Extra key=value fields, rendered before `cmd`.
+ */
+function recordHistory(
+  file: string,
+  event: string,
+  command: string,
+  fields: Record<string, string | number | boolean> = {},
+): void {
+  try {
+    const clean = (value: string): string => value.replace(/[\r\n]+/g, ' ')
+    const parts = [new Date().toISOString(), event, `pid=${process.pid}`]
+    for (const [key, value] of Object.entries(fields)) parts.push(`${key}=${clean(String(value))}`)
+    parts.push(`cmd=${clean(command)}`)
+    mkdirSync(dirname(file), { recursive: true })
+    appendFileSync(file, `${parts.join(' ')}\n`, 'utf8')
+  } catch {
+    // Observation only: a history write failure must never fail the gate.
+  }
 }
 
 /** Record written into the lock directory by the current owner. */
@@ -148,23 +204,55 @@ function sleep(ms: number): Promise<void> {
 
 async function runGated(command: string, env: NodeJS.ProcessEnv): Promise<number> {
   const directory = env.DSH_HEAVY_IO_LOCK_DIR ?? defaultLockDirectory(env)
+  const history = historyFile(env)
   const pollMs = Number(env.DSH_HEAVY_IO_POLL_MS ?? DEFAULT_POLL_INTERVAL_MS)
   const waitBoundMs = Number(env.DSH_HEAVY_IO_WAIT_MS ?? DEFAULT_WAIT_BOUND_MS)
   const staleAfterMs = Number(env.DSH_HEAVY_IO_STALE_MS ?? DEFAULT_STALE_AFTER_MS)
   const deadline = Date.now() + waitBoundMs
+  const startedAt = Date.now()
   let acquired = false
+  let acquiredAt = 0
+  let waitingLoggedAt = 0
   for (;;) {
     if (await acquireHeavyIoLock(directory, command) !== undefined) {
       acquired = true
+      acquiredAt = Date.now()
+      recordHistory(history, 'acquire', command)
       break
     }
-    if (await breakStaleHeavyIoLock(directory, staleAfterMs)) continue
+    // Observation pre-read: breakStaleHeavyIoLock re-reads internally and only
+    // answers yes/no, so the owner record about to be judged is captured here
+    // (the helper's exported contract stays byte-identical).
+    const heldForLog = await readHeavyIoLock(directory)
+    if (await breakStaleHeavyIoLock(directory, staleAfterMs)) {
+      if (heldForLog !== undefined) {
+        recordHistory(history, 'stale-break', command, {
+          holderPid: heldForLog.pid,
+          holderAgeMs: Date.now() - Date.parse(heldForLog.startedAt),
+          holderAlive: isProcessAlive(heldForLog.pid),
+        })
+      }
+      continue
+    }
     const holder = await readHeavyIoLock(directory)
     process.stderr.write(
       `heavy-io-gate: waiting for ${holder?.command ?? 'another heavy job'} (pid ${holder?.pid ?? 'unknown'})\n`,
     )
-    if (Date.now() + pollMs > deadline) {
+    // Captured at the original position (right after the waiting line, exactly
+    // where the previous code evaluated it) so the history write below cannot
+    // nudge the fail-open decision.
+    const boundReached = Date.now() + pollMs > deadline
+    if (Date.now() - waitingLoggedAt >= HISTORY_WAITING_INTERVAL_MS) {
+      waitingLoggedAt = Date.now()
+      recordHistory(history, 'waiting', command, {
+        waitedMs: Date.now() - startedAt,
+        holderPid: holder?.pid ?? 'none',
+        ...(holder !== undefined ? { holderCmd: holder.command } : {}),
+      })
+    }
+    if (boundReached) {
       process.stderr.write('heavy-io-gate: wait bound reached, proceeding anyway (fail-open).\n')
+      recordHistory(history, 'fail-open', command, { waitedMs: Date.now() - startedAt })
       break
     }
     await sleep(pollMs + Math.floor(Math.random() * 500))
@@ -172,7 +260,10 @@ async function runGated(command: string, env: NodeJS.ProcessEnv): Promise<number
   try {
     return await runCommand(command, env)
   } finally {
-    if (acquired) await releaseHeavyIoLock(directory)
+    if (acquired) {
+      await releaseHeavyIoLock(directory)
+      recordHistory(history, 'release', command, { heldMs: Date.now() - acquiredAt })
+    }
   }
 }
 
@@ -182,6 +273,13 @@ async function main(): Promise<void> {
   const passthrough = process.env.CI === 'true'
     || process.env.DSH_HEAVY_IO === '0'
     || process.env.DSH_HEAVY_IO_HELD === '1'
+  if (passthrough) {
+    // Which bypass path fired is exactly the "was this gated?" question the
+    // history exists to answer — record it, then proceed unchanged.
+    recordHistory(historyFile(process.env), 'passthrough', command, {
+      reason: process.env.CI === 'true' ? 'ci' : process.env.DSH_HEAVY_IO === '0' ? 'off' : 'held',
+    })
+  }
   process.exitCode = passthrough ? await runCommand(command, process.env) : await runGated(command, process.env)
 }
 
