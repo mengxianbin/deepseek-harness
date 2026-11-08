@@ -840,8 +840,40 @@ describe('current-source button (auto-route, dots fully retired 2026-11-04)', ()
     const title = container.querySelector('button')?.getAttribute('title') ?? ''
     expect(title).toContain(t('glance.source.pollError'))
     expect(title).toContain(t('glance.open'))
-    // A failing poll never dims the rows — the numbers are still the live Go truth.
+    // Baseline never dims whatever the poll says (2026-11-08: the phase alone
+    // gates the dim; the failure rides only its title line).
     expect(container.querySelector('[class*="glanceRowsFrozen"]')).toBeNull()
+  })
+
+  it('keeps the brightness through a poll blip — the phase alone gates the dim (2026-11-08)', async () => {
+    // Fake timers own the cadence here (the real-timer tests above use
+    // waitFor's polling). Regression pin for the reported 时不时闪烁:
+    // triggered + poll failing used to UN-dim the rows, so every meter blip
+    // flashed them bright and the recovery flashed them dark again.
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+    let status: unknown = statusDoc({ phase: 'triggered', effectiveSource: 'mimo', lastPoll: { at: NOW, ok: true } })
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => ({
+      status: 200,
+      ok: true,
+      json: async () => (url === STATUS_ROUTE ? status : OVERVIEW),
+    })))
+    const { container } = render(<UsageGlance t={t} />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(container.querySelector('[class*="glanceRowsFrozen"]')).toBeTruthy()
+    // The blip lands on the next 60s tick: the rows MUST stay dim, the
+    // failure speaking only through its own title line beside the switch line.
+    status = statusDoc({ phase: 'triggered', effectiveSource: 'mimo', lastPoll: { at: NOW, ok: false, error: 'meter source unreachable: fetch failed' } })
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    expect(container.querySelector('[class*="glanceRowsFrozen"]')).toBeTruthy()
+    const title = container.querySelector('button')?.getAttribute('title') ?? ''
+    expect(title).toContain(t('glance.source.pollError'))
+    expect(title).toContain(t('glance.source.frozen'))
+    // The recovery lands the same dim it never lost — no flash either way.
+    status = statusDoc({ phase: 'triggered', effectiveSource: 'mimo', lastPoll: { at: NOW, ok: true } })
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    expect(container.querySelector('[class*="glanceRowsFrozen"]')).toBeTruthy()
+    expect(container.querySelector('button')?.getAttribute('title')).not.toContain(t('glance.source.pollError'))
   })
 
   it('renders the two-leg fork as baseline — bar colors carry it, no chrome', async () => {

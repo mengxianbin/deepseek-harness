@@ -109,6 +109,11 @@
  * for blips (狼来了), while a SUSTAINED failure (≥ ~5 min) reddens the
  * 安康盾 on the harness side, which folds the same controller's poll ledger
  * into the health frame (2026-11-04 ruling: each fact has ONE alarm surface).
+ * The dim itself follows the phase ALONE (2026-11-08 用户裁定「轮询失败移出
+ * 明暗判定」): the poll state used to gate `frozen` too, so every meter blip
+ * un-dimmed the rows and the recovery re-dimmed them — the reported 时不时
+ * 闪烁. The failure keeps its title line; brightness moves only on a real
+ * phase edge.
  *
  * Remount cache (FORK usage-glance-swr-1031, 2026-10-31 用户要求「先读缓存
  * 再更新」): the sidebar's wide content unmounts when a collapse settles and
@@ -855,7 +860,14 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
   // while a SUSTAINED failure belongs to the 安康盾, which reads the same
   // controller's health frame on the harness side (2026-11-04 ruling).
   const pollFailing = sourceBadge?.pollFailing === true
-  const frozen = sourceBadge?.triggered === true && !pollFailing
+  // 2026-11-08 用户裁定「轮询失败移出明暗判定」: `frozen` reads the phase
+  // ALONE. A meter blip used to un-dim the rows and the recovery re-dimmed
+  // them — a明暗 flash on every network hiccup (the reported 时不时闪烁).
+  // The failing poll keeps its own title line; a SUSTAINED failure stays the
+  // 安康盾's alarm (2026-11-04 ruling, unchanged). Brightness now moves only
+  // on a real phase edge — the policy's 0.99/0.95 hysteresis, or a controller
+  // restart resetting the phase in memory.
+  const frozen = sourceBadge?.triggered === true
   // One tooltip for the whole column: every reading plus the refresh stamp
   // (the stamp stays off-screen; v2.2 spent a third line on it).
   const columnTitle = [
