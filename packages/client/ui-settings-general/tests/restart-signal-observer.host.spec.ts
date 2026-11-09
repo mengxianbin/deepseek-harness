@@ -1,15 +1,21 @@
 /**
- * Restart-signal observation seam (P3): every production collect carries its
- * machine facts, listeners fire once per coalesced computation, a throwing
- * listener degrades to one stderr line, and the test reset drops the roster.
+ * Restart-signal observation seam (P3, carried through the off-host move):
+ * every refreshed state read publishes to the judgment roster and the push
+ * listeners, a throwing listener degrades to one stderr line, and the test
+ * reset drops both rosters. (The publish itself — once per moved judgment,
+ * never on an identical rewrite — is pinned in restart-signal.host.spec.)
  */
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  RESTART_SIGNAL_STATE_FILE,
+  RESTART_SIGNAL_STATE_SCHEMA,
+  STATE_FRESH_MS,
   collectRestartSignal,
   onRestartSignalJudgment,
+  onRestartSignalStateRefresh,
   resetRestartSignalForTest,
   type RestartSignalJudgment,
 } from '../src/restart-signal.ts'
@@ -22,69 +28,82 @@ afterEach(() => {
   resetRestartSignalForTest()
 })
 
-/** A bare tree pair whose manifest read lands in INIT. */
-function fixtureTree(): { repositoryRoot: string; dshHome: string } {
-  const repositoryRoot = mkdtempSync(join(tmpdir(), 'p3-observer-repo-'))
-  temporary.push(repositoryRoot)
+/** A DSH home holding one fresh collector state file. */
+function fixtureState(judgment: Partial<RestartSignalJudgment> & Pick<RestartSignalJudgment, 'state'> = { state: 'OK' }, ageMs?: number): string {
   const dshHome = mkdtempSync(join(tmpdir(), 'p3-observer-home-'))
   temporary.push(dshHome)
-  mkdirSync(join(dshHome, 'profiles'))
-  return { repositoryRoot, dshHome }
+  writeFileSync(join(dshHome, RESTART_SIGNAL_STATE_FILE), JSON.stringify({
+    schema: RESTART_SIGNAL_STATE_SCHEMA,
+    collectedAt: new Date().toISOString(),
+    repositoryRoot: 'C:\\repo',
+    judgment: { detail: 'fixture', ...judgment },
+  }))
+  if (ageMs !== undefined) {
+    const backdated = new Date(Date.now() - ageMs)
+    utimesSync(join(dshHome, RESTART_SIGNAL_STATE_FILE), backdated, backdated)
+  }
+  return dshHome
 }
 
 describe('restart-signal judgment observation', () => {
-  it('attaches machine facts to every judgment, INIT included', async () => {
-    const { repositoryRoot, dshHome } = fixtureTree()
+  it('publishes a fresh state read to both the judgment roster and the refresh listeners', async () => {
+    const dshHome = fixtureState({ state: 'NEED_BUILD', detail: 'host-face source moved past the last build baseline' })
     const seen: RestartSignalJudgment[] = []
+    const refreshes: RestartSignalJudgment[] = []
     const off = onRestartSignalJudgment((judgment) => { seen.push(judgment) })
-    const judgment = await collectRestartSignal({ repositoryRoot, dshHome, registryQuery: () => '', runStampCli: vi.fn() })
+    const offRefresh = onRestartSignalStateRefresh((judgment) => { refreshes.push(judgment) })
+    const judgment = await collectRestartSignal({ dshHome })
     off()
-    expect(judgment.state).toBe('INIT')
-    expect(judgment.facts?.currentHostFace).toBeUndefined()
-    expect(typeof judgment.facts?.configStamp).toBe('string')
+    offRefresh()
+    expect(judgment.state).toBe('NEED_BUILD')
     expect(seen).toEqual([judgment])
+    expect(refreshes).toEqual([judgment])
   })
 
-  it('fires listeners once per coalesced computation', async () => {
-    const { repositoryRoot, dshHome } = fixtureTree()
+  it('never publishes a stale read — no roster, no refresh bell', async () => {
+    const dshHome = fixtureState({ state: 'OK' }, STATE_FRESH_MS + 60_000)
     const seen: RestartSignalJudgment[] = []
+    const refreshes: RestartSignalJudgment[] = []
     const off = onRestartSignalJudgment((judgment) => { seen.push(judgment) })
-    const first = collectRestartSignal({ repositoryRoot, dshHome, registryQuery: () => '', runStampCli: vi.fn() })
-    const second = collectRestartSignal({ repositoryRoot, dshHome, registryQuery: () => '', runStampCli: vi.fn() })
-    expect(second).toBe(first)
-    await first
+    const offRefresh = onRestartSignalStateRefresh((judgment) => { refreshes.push(judgment) })
+    await expect(collectRestartSignal({ dshHome })).rejects.toThrow('state file stale')
     off()
-    expect(seen).toHaveLength(1)
+    offRefresh()
+    expect(seen).toHaveLength(0)
+    expect(refreshes).toHaveLength(0)
   })
 
   it('isolates a throwing listener to one stderr line and keeps the others', async () => {
-    const { repositoryRoot, dshHome } = fixtureTree()
+    const dshHome = fixtureState()
     const write = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
     const seen: RestartSignalJudgment[] = []
     const offThrowing = onRestartSignalJudgment(() => { throw new Error('boom') })
     const offKeeping = onRestartSignalJudgment((judgment) => { seen.push(judgment) })
-    await collectRestartSignal({ repositoryRoot, dshHome, registryQuery: () => '', runStampCli: vi.fn() })
+    await collectRestartSignal({ dshHome })
     offThrowing()
     offKeeping()
     expect(write).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('boom'))
     expect(seen).toHaveLength(1)
   })
 
-  it('drops the roster through the test reset', async () => {
-    const { repositoryRoot, dshHome } = fixtureTree()
+  it('drops both rosters through the test reset', async () => {
+    const dshHome = fixtureState()
     const seen: RestartSignalJudgment[] = []
+    const refreshes: RestartSignalJudgment[] = []
     onRestartSignalJudgment((judgment) => { seen.push(judgment) })
+    onRestartSignalStateRefresh((judgment) => { refreshes.push(judgment) })
     resetRestartSignalForTest()
-    await collectRestartSignal({ repositoryRoot, dshHome, registryQuery: () => '', runStampCli: vi.fn() })
+    await collectRestartSignal({ dshHome })
     expect(seen).toEqual([])
+    expect(refreshes).toEqual([])
   })
 
   it('stops firing after unsubscribe', async () => {
-    const { repositoryRoot, dshHome } = fixtureTree()
+    const dshHome = fixtureState()
     const seen: RestartSignalJudgment[] = []
     const off = onRestartSignalJudgment((judgment) => { seen.push(judgment) })
     off()
-    await collectRestartSignal({ repositoryRoot, dshHome, registryQuery: () => '', runStampCli: vi.fn() })
+    await collectRestartSignal({ dshHome })
     expect(seen).toEqual([])
   })
 })

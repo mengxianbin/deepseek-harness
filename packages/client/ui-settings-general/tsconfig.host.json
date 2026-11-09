@@ -18,7 +18,7 @@
     "src/auto-build-dispatch.ts",
     "src/auto-build-journal.ts",
     "src/build-start-liveness.ts",
-    "src/stamp-poll-host.ts"
+    "src/restart-signal-poll-host.ts"
   ],
   "references": [
     { "path": "../../../vendor/cordis" },

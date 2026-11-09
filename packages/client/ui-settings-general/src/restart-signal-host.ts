@@ -1,41 +1,61 @@
 /**
- * Host recheck route: registers `POST /api/stamp-recheck` on Connection's
- * authenticated exact-fetch fence — the same fence the restart dispatch
- * rides — so a recheck only triggers a state-machine recomputation and
- * answers with the fresh judgment. Unlike the restart dispatch, the route
- * registers unconditionally: the signal machine matters whether or not the
- * user configured a restart command (the browser badge gates itself on the
- * configured capability).
+ * Host restart-signal state route: registers `POST /api/restart-signal/state`
+ * on Connection's authenticated exact-fetch fence — the same fence the restart
+ * dispatch rides — and answers with the judgment the external collector
+ * collected (offhost-1110): the route itself recomputes nothing,
+ * it reads the DSH-home state file through `collectRestartSignal` (fresh file
+ * served directly, stale file falls back to the last fresh judgment). Unlike
+ * the restart dispatch, the route registers unconditionally: the signal
+ * machine matters whether or not the user configured a restart command (the
+ * browser badge gates itself on the configured capability).
  *
- * Every answer is deadline-bounded (stamp-recheck-cache-timeout-1107): past
- * {@link RECHECK_TIMEOUT_MS} the route serves the last computed judgment — or
- * 504 when none exists yet — instead of hanging the request behind a
- * multi-tens-of-seconds full-tree recompute (observed 5–77s, peak 76.9s).
- * The timed-out computation itself keeps running and fills the result cache,
- * so the recheck after it answers fresh. The attestation leg is untouched:
- * the body is recorded before the deadline races, so a served-from-timeout or
- * cached answer never starves the 90s freshness window.
+ * Registration is also the host's two off-host wiring points, both one-shot:
+ * it persists this process's runtime capture (R) for the collector to judge
+ * against, and it maps state refreshes onto the allowlisted
+ * `restart-signal/changed` push, so every open page pulls when — and only
+ * when — a new collection moved the judgment.
+ *
+ * Every answer stays deadline-bounded (the 1107 cache/timeout fix's semantics,
+ * unchanged by the move): past {@link RESTART_SIGNAL_STATE_TIMEOUT_MS} the
+ * route serves the last fresh judgment — or 504 when none exists yet —
+ * instead of hanging the request behind a stalled read. A collect that finds
+ * no servable state (file absent or stale with no previous judgment) answers
+ * that same 504 shape; a malformed state file answers 500 with one stderr
+ * line. The attestation leg is untouched: the body is recorded before the
+ * deadline races, so a served-from-timeout or cached answer never starves the
+ * 90s freshness window.
  */
 import type { Context } from '@deepseek-ai/cordis'
 // Type-only: pulls the ctx.connection merge (exact Fetch-route registry).
 import type {} from '@deepseek-ai/dsh-client-connection'
 import { recordClientRunningCount } from './restart-disposition.ts'
-import { collectRestartSignal, lastRestartSignalJudgment, type RestartSignalJudgment } from './restart-signal.ts'
-import { RECHECK_PATH } from './restart.ts'
+import {
+  collectRestartSignal,
+  lastRestartSignalJudgment,
+  onRestartSignalStateRefresh,
+  persistRestartSignalRuntime,
+  RestartSignalStateUnavailableError,
+  type RestartSignalJudgment,
+} from './restart-signal.ts'
+import { RESTART_SIGNAL_STATE_PATH } from './restart.ts'
 
-/** Ceiling for one recheck answer: past it the route serves the last computed
+/** Ceiling for one state answer: past it the route serves the last fresh
  * judgment (or 504 with none) instead of hanging the request. Kept under the
  * client flow's own fetch deadline so the server's fallback wins the race. */
-export const RECHECK_TIMEOUT_MS = 12_000
+export const RESTART_SIGNAL_STATE_TIMEOUT_MS = 12_000
 
 /** Injectable gatherer seam: tests substitute a fixed judgment. */
 export interface RestartSignalInternals {
-  /** Judgment source; defaults to the production collect. */
+  /** Judgment source; defaults to the production state-file read. */
   readonly collect?: () => Promise<RestartSignalJudgment>
-  /** Answer deadline in milliseconds; defaults to {@link RECHECK_TIMEOUT_MS}. Tests shorten it. */
+  /** Answer deadline in milliseconds; defaults to {@link RESTART_SIGNAL_STATE_TIMEOUT_MS}. Tests shorten it. */
   readonly timeoutMs?: number
-  /** Last-computed judgment behind the timeout; defaults to the state machine's own store. */
+  /** Last-fresh judgment behind the timeout and the stale file; defaults to the state reader's own store. */
   readonly lastJudgment?: () => RestartSignalJudgment | undefined
+  /** Push the `restart-signal/changed` bell on a refreshed judgment; defaults to the host event. Tests spy. */
+  readonly emitChanged?: () => void
+  /** Persist this process's runtime capture for the collector; defaults to the production writer. Tests observe. */
+  readonly persistRuntime?: () => void
 }
 
 /** The wire body of one judgment: only the fields the badge renders.
@@ -55,22 +75,33 @@ function judgmentBody(judgment: RestartSignalJudgment): Record<string, unknown> 
 }
 
 /**
- * Serve `POST /api/stamp-recheck`: recompute the signal and answer its
- * state; a gather failure answers 500 with one stderr line instead of
- * crashing the route, and a gather past the deadline answers the last
- * judgment (504 when none exists) with one stderr line instead of hanging.
- * @param ctx - Host context carrying the connection service.
- * @param internals - Injectable gatherer, deadline, and last-judgment seams for tests.
+ * Serve `POST /api/restart-signal/state`: answer the externally collected
+ * judgment; a malformed state file answers 500 with one stderr line instead
+ * of crashing the route, an absent/unfresh state answers 504 (响亮，不静默),
+ * and a read past the deadline answers the last fresh judgment (504 when none
+ * exists) with one stderr line instead of hanging.
+ * @param ctx - Host context carrying the connection service and the push event bus.
+ * @param internals - Injectable gatherer, deadline, last-judgment, push, and persist seams for tests.
  */
 export function registerRestartSignal(ctx: Context, internals: RestartSignalInternals = {}): void {
   const collect = internals.collect ?? (() => collectRestartSignal())
-  const timeoutMs = internals.timeoutMs ?? RECHECK_TIMEOUT_MS
+  const timeoutMs = internals.timeoutMs ?? RESTART_SIGNAL_STATE_TIMEOUT_MS
   const lastJudgment = internals.lastJudgment ?? lastRestartSignalJudgment
+  // Off-host wiring ①: a refreshed judgment rings every open page (payload-free
+  // by design — the judgment itself keeps riding this route, so the push can
+  // never drift from the state the reader served).
+  const emitChanged = internals.emitChanged ?? ((): void => { ctx.emit('restart-signal/changed') })
+  const offRefresh = onRestartSignalStateRefresh(() => { emitChanged() })
+  ctx.effect(() => () => { offRefresh() }, 'ui-settings-general: restart-signal state push')
+  // Off-host wiring ②: R (what this process loaded) leaves the process here,
+  // once, so the collector's judgment can keep its NEED_RESTART branch.
+  const persistRuntime = internals.persistRuntime ?? ((): void => { persistRestartSignalRuntime() })
+  persistRuntime()
   ctx.connection.fetch.register({
-    path: RECHECK_PATH,
+    path: RESTART_SIGNAL_STATE_PATH,
     methods: ['POST'],
     requestBody: 'buffered',
-    // The browser rides its own running-count report on the recheck (P3
+    // The browser rides its own running-count report on the state pull (P3
     // attestation): the disposition compares it against the host count and a
     // missing or malformed body simply leaves the slot unrefreshed, which
     // holds the automatic restart (fail-closed, P11 报告 §五).
@@ -83,9 +114,9 @@ export function registerRestartSignal(ctx: Context, internals: RestartSignalInte
         recordClientRunningCount(Reflect.get(parsed, 'runningCount'))
       }, () => {})
       // One deadline per request. `Promise.race` subscribes to the collect
-      // outcome too, so a late rejection of the timed-out computation is
-      // absorbed here instead of surfacing as an unhandled rejection, and the
-      // timer never outlives the answer.
+      // outcome too, so a late rejection of the timed-out read is absorbed
+      // here instead of surfacing as an unhandled rejection, and the timer
+      // never outlives the answer.
       let deadline: ReturnType<typeof setTimeout> | undefined
       const timeout = new Promise<'timeout'>((resolve) => {
         deadline = setTimeout(() => { resolve('timeout') }, timeoutMs)
@@ -98,13 +129,17 @@ export function registerRestartSignal(ctx: Context, internals: RestartSignalInte
       return Promise.race([outcome, timeout]).then((winner): Response => {
         if (winner === 'timeout') {
           const last = lastJudgment()
-          process.stderr.write(`ui-settings-general: restart-signal recheck timed out after ${String(timeoutMs)}ms${last === undefined ? '' : '; answering with the last judgment'}\n`)
-          if (last === undefined) return Response.json({ error: 'restart-signal recheck timed out' }, { status: 504 })
+          process.stderr.write(`ui-settings-general: restart-signal state read timed out after ${String(timeoutMs)}ms${last === undefined ? '' : '; answering with the last judgment'}\n`)
+          if (last === undefined) return Response.json({ error: 'restart-signal state read timed out' }, { status: 504 })
           return Response.json(judgmentBody(last))
         }
         if ('error' in winner) {
-          process.stderr.write(`ui-settings-general: restart-signal recheck failed: ${winner.error instanceof Error ? winner.error.message : String(winner.error)}\n`)
-          return Response.json({ error: 'restart-signal recheck failed' }, { status: 500 })
+          if (winner.error instanceof RestartSignalStateUnavailableError) {
+            process.stderr.write(`ui-settings-general: restart-signal state unavailable: ${winner.error.message}\n`)
+            return Response.json({ error: 'restart-signal state unavailable' }, { status: 504 })
+          }
+          process.stderr.write(`ui-settings-general: restart-signal state read failed: ${winner.error instanceof Error ? winner.error.message : String(winner.error)}\n`)
+          return Response.json({ error: 'restart-signal state read failed' }, { status: 500 })
         }
         return Response.json(judgmentBody(winner.judgment))
       }).finally(() => {

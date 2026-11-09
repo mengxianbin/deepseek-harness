@@ -1,35 +1,52 @@
 /**
- * Recheck route: `POST /api/stamp-recheck` rides Connection's authenticated
- * exact-fetch fence like the restart dispatch — the fresh judgment answers
- * as JSON with its restart branch, a gather failure answers 500 with one
- * stderr line, a gather past the deadline answers the last judgment (504
- * with none) instead of hanging (stamp-recheck-cache-timeout-1107), and other
- * methods stay natural 404s.
+ * State route: `POST /api/restart-signal/state` rides Connection's
+ * authenticated exact-fetch fence like the restart dispatch — the externally
+ * collected judgment answers as JSON with its restart branch, a malformed
+ * state file answers 500 with one stderr line, an absent/unfresh state
+ * answers 504 with one stderr line, a read past the deadline answers the last
+ * fresh judgment (504 with none) instead of hanging (the 1107 cache/timeout
+ * fix's semantics, kept through the off-host move), and other methods stay
+ * natural 404s.
  */
 import { Context } from '@deepseek-ai/cordis'
 import { HostConnectionService } from '@deepseek-ai/dsh-client-connection'
 import type { BrowserAuth } from '@deepseek-ai/dsh-client-connection/src/browser-auth.ts'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { registerRestartSignal } from '../src/restart-signal-host.ts'
 import { latestClientAttestation, resetDispositionStateForTest } from '../src/restart-disposition.ts'
-import type { RestartSignalJudgment } from '../src/restart-signal.ts'
-import { RECHECK_PATH } from '../src/restart.ts'
+import {
+  RESTART_SIGNAL_STATE_FILE,
+  RESTART_SIGNAL_STATE_SCHEMA,
+  RestartSignalStateUnavailableError,
+  collectRestartSignal,
+  resetRestartSignalForTest,
+  type RestartSignalJudgment,
+} from '../src/restart-signal.ts'
+import { RESTART_SIGNAL_STATE_PATH } from '../src/restart.ts'
+
+/** Throwaway DSH homes this spec wrote state files into. */
+const temporary: string[] = []
 
 afterEach(() => {
   vi.restoreAllMocks()
   resetDispositionStateForTest()
+  resetRestartSignalForTest()
+  for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true })
 })
 
-/** Fresh context, real Connection fetch registry, and request helpers over `/api/stamp-recheck`. */
+/** Fresh context, real Connection fetch registry, and request helpers over `/api/restart-signal/state`. */
 function fixture() {
   const ctx = new Context()
   const connection = new HostConnectionService(ctx, [], {} as BrowserAuth)
   const handler = connection.createSharedFetchHandler('/api')
-  const post = (body?: string) => handler.fetch(new Request(`http://localhost${RECHECK_PATH}`, {
+  const post = (body?: string) => handler.fetch(new Request(`http://localhost${RESTART_SIGNAL_STATE_PATH}`, {
     method: 'POST',
     ...(body === undefined ? {} : { body, headers: { 'content-type': 'application/json' } }),
   }), connection.browserPeer)
-  const get = () => handler.fetch(new Request(`http://localhost${RECHECK_PATH}`, { method: 'GET' }),
+  const get = () => handler.fetch(new Request(`http://localhost${RESTART_SIGNAL_STATE_PATH}`, { method: 'GET' }),
     connection.browserPeer)
   return { ctx, post, get }
 }
@@ -69,7 +86,7 @@ describe('restart-signal recheck route', () => {
     registerRestartSignal(ctx, { collect: async () => { throw new Error('git exploded') } })
     const response = await post()
     expect(response.status).toBe(500)
-    expect(await response.json()).toEqual({ error: 'restart-signal recheck failed' })
+    expect(await response.json()).toEqual({ error: 'restart-signal state read failed' })
     expect(write).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('git exploded'))
   })
 
@@ -106,9 +123,40 @@ describe('restart-signal recheck route', () => {
     })
     const response = await post()
     expect(response.status).toBe(504)
-    expect(await response.json()).toEqual({ error: 'restart-signal recheck timed out' })
+    expect(await response.json()).toEqual({ error: 'restart-signal state read timed out' })
     // Without a last judgment the line names the bare timeout (no "answering with").
     expect(write).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('timed out after 5ms'))
+  })
+
+  it('answers 504 with one stderr line when no servable state exists (absent / stale with none)', async () => {
+    const { ctx, post } = fixture()
+    const write = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    registerRestartSignal(ctx, {
+      collect: async () => { throw new RestartSignalStateUnavailableError('restart-signal state file absent: C:\\nope') },
+    })
+    const response = await post()
+    expect(response.status).toBe(504)
+    expect(await response.json()).toEqual({ error: 'restart-signal state unavailable' })
+    expect(write).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('restart-signal state unavailable:'))
+  })
+
+  it('emits restart-signal/changed when a real collect lands a refreshed judgment (语义随迁 ②)', async () => {
+    const { ctx, post } = fixture()
+    const pushed: unknown[] = []
+    ctx.on('restart-signal/changed', () => { pushed.push('push') })
+    const dshHome = mkdtempSync(join(tmpdir(), 'route-push-home-'))
+    temporary.push(dshHome)
+    writeFileSync(join(dshHome, RESTART_SIGNAL_STATE_FILE), JSON.stringify({
+      schema: RESTART_SIGNAL_STATE_SCHEMA,
+      collectedAt: new Date().toISOString(),
+      repositoryRoot: 'C:\\repo',
+      judgment: { state: 'NEED_BUILD', detail: 'refreshed by a new state file' },
+    }))
+    registerRestartSignal(ctx, { collect: () => collectRestartSignal({ dshHome }) })
+    const response = await post()
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ state: 'NEED_BUILD' })
+    await vi.waitFor(() => { expect(pushed).toHaveLength(1) })
   })
 
   it('keeps other methods on the natural 404 path', async () => {

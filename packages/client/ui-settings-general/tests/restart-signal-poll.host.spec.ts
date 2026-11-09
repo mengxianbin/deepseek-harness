@@ -15,13 +15,13 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import {
   buildFingerprintProbeCode,
   parseProbeOutput,
-  registerStampPoll,
+  registerRestartSignalPoll,
   resolvePollIntervalMs,
   runFingerprintProbe,
   type FingerprintProbe,
   type FingerprintRunner,
-  type StampPollInternals,
-} from '../src/stamp-poll-host.ts'
+  type RestartSignalPollInternals,
+} from '../src/restart-signal-poll-host.ts'
 
 /** A fixed home so production profile discovery never leaks into the seams. */
 const TEST_HOME = 'C:\\dsh-home-unused'
@@ -45,7 +45,7 @@ function tempRoot(): string {
   return root
 }
 
-function pollFixture(runProbe: FingerprintRunner, extra: Partial<StampPollInternals> = {}) {
+function pollFixture(runProbe: FingerprintRunner, extra: Partial<RestartSignalPollInternals> = {}) {
   const ctx = new Context()
   onTestFinished(() => ctx.fiber.dispose())
   const recheck = vi.fn(() => Promise.resolve({ state: 'OK' }))
@@ -53,7 +53,7 @@ function pollFixture(runProbe: FingerprintRunner, extra: Partial<StampPollIntern
   // A temp root keeps the marker signature hermetic: real `.dsh-build` churn
   // in this tree (a build running elsewhere) must never move a test baseline.
   const repositoryRoot = tempRoot()
-  registerStampPoll(ctx, { intervalMs: 30_000, runProbe, recheck, warn, dshHome: TEST_HOME, repositoryRoot, ...extra })
+  registerRestartSignalPoll(ctx, { intervalMs: 30_000, runProbe, recheck, warn, dshHome: TEST_HOME, repositoryRoot, ...extra })
   return { recheck, warn, ctx, repositoryRoot }
 }
 
@@ -199,7 +199,7 @@ describe('stamp poll', () => {
     const runProbe = vi.fn(() => Promise.resolve(probe({ '/r': 'a' })))
     const ctx = new Context()
     onTestFinished(() => ctx.fiber.dispose())
-    registerStampPoll(ctx, { runProbe, recheck: vi.fn(), warn: vi.fn(), dshHome: TEST_HOME })
+    registerRestartSignalPoll(ctx, { runProbe, recheck: vi.fn(), warn: vi.fn(), dshHome: TEST_HOME })
     await vi.advanceTimersByTimeAsync(120_000)
     expect(runProbe).not.toHaveBeenCalled()
   })
@@ -212,7 +212,7 @@ describe('stamp poll', () => {
     const warn = vi.fn()
     const ctx = new Context()
     onTestFinished(() => ctx.fiber.dispose())
-    registerStampPoll(ctx, { intervalMs: 30_000, runProbe, recheck, warn, dshHome: TEST_HOME })
+    registerRestartSignalPoll(ctx, { intervalMs: 30_000, runProbe, recheck, warn, dshHome: TEST_HOME })
 
     await vi.advanceTimersByTimeAsync(2_000)
     await vi.advanceTimersByTimeAsync(30_000)
@@ -223,7 +223,7 @@ describe('stamp poll', () => {
     vi.useFakeTimers()
     const ctx = new Context()
     const runProbe = vi.fn(() => Promise.resolve(probe({ '/r': 'a' })))
-    registerStampPoll(ctx, { intervalMs: 30_000, runProbe, recheck: vi.fn(), warn: vi.fn(), dshHome: TEST_HOME })
+    registerRestartSignalPoll(ctx, { intervalMs: 30_000, runProbe, recheck: vi.fn(), warn: vi.fn(), dshHome: TEST_HOME })
 
     await vi.advanceTimersByTimeAsync(2_000)
     expect(runProbe).toHaveBeenCalledTimes(1)
@@ -266,7 +266,7 @@ describe('restart-signal push leg (design C.5)', () => {
     const warn = vi.fn()
     const ctx = new Context()
     onTestFinished(() => ctx.fiber.dispose())
-    registerStampPoll(ctx, { intervalMs: 30_000, runProbe, recheck, warn, dshHome: TEST_HOME })
+    registerRestartSignalPoll(ctx, { intervalMs: 30_000, runProbe, recheck, warn, dshHome: TEST_HOME })
     const pushed = vi.fn()
     ctx.on('restart-signal/changed', pushed)
 
@@ -284,7 +284,7 @@ describe('restart-signal push leg (design C.5)', () => {
     const recheck = vi.fn(() => new Promise((resolve) => { release = resolve }))
     const answers = [probe({ '/r': 'a' }), probe({ '/r': 'b' })]
     const runProbe = vi.fn(() => Promise.resolve(answers.shift() ?? probe({ '/r': 'b' })))
-    registerStampPoll(ctx, { intervalMs: 30_000, runProbe, recheck, warn: vi.fn(), dshHome: TEST_HOME })
+    registerRestartSignalPoll(ctx, { intervalMs: 30_000, runProbe, recheck, warn: vi.fn(), dshHome: TEST_HOME })
     const pushed = vi.fn()
     ctx.on('restart-signal/changed', pushed)
 

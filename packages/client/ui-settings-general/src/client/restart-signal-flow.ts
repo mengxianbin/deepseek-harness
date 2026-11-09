@@ -1,14 +1,16 @@
 /**
  * Restart-signal recheck flow: the browser half's single command — ask the
- * Host to recompute the signal and publish the delivered judgment.
+ * Host for the current restart-signal state and publish the delivered
+ * judgment (the Host answers its externally collected state file, off-host
+ * since offhost-1110 — this half never knew the difference).
  *
  * The flow runs once at start (the page's boot recheck), re-runs whenever the
  * page returns to visibility (design trigger ③), and exposes `recheck` for
- * the connection-reconnect leg of the灯自灭 chain (R6: reconnect → recompute
+ * the connection-reconnect leg of the灯自灭 chain (R6: reconnect → pull
  * → delivery). Failures — network, non-OK status, malformed body — keep the
  * previous published badge and warn once per attempt; so does a fetch that
- * outlives its deadline (stamp-recheck-cache-timeout-1107), so a host stuck
- * behind a slow full-tree recompute can never pin this page on a wait.
+ * outlives its deadline (the 1107 cache/timeout fix's client leg), so a host
+ * stuck answering can never pin this page on a wait.
  *
  * P3 additions, both dark until the host's flag is on: every recheck carries
  * the page's own running-Session count (`runningCount`, the host's automatic
@@ -20,7 +22,7 @@
  * cadence even when the host push leg never fires
  * (restart-badge-blindspot-1103).
  */
-import { RECHECK_PATH, resolveRestartSignal, type RestartSignalView } from '../restart.ts'
+import { RESTART_SIGNAL_STATE_PATH, resolveRestartSignal, type RestartSignalView } from '../restart.ts'
 
 /** Minimal response facts the recheck acts on. */
 interface RecheckResponse {
@@ -147,7 +149,7 @@ export function startRestartSignalFlow(
       ? { method: 'POST', body: JSON.stringify({ runningCount }), headers: { 'content-type': 'application/json' } }
       : { method: 'POST' }
     void Promise.resolve()
-      .then(() => withDeadline(fetchImpl(RECHECK_PATH, init), timeoutMs))
+      .then(() => withDeadline(fetchImpl(RESTART_SIGNAL_STATE_PATH, init), timeoutMs))
       .then(async (response) => {
         if (!response.ok) throw new Error(`recheck answered HTTP ${String(response.status)}`)
         const view = resolveRestartSignal(await response.json())

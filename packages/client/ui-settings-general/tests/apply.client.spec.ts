@@ -317,7 +317,7 @@ describe('ui-settings-general apply', () => {
     const fetchSpy = vi.fn(async (_input: string, _init?: unknown) => ({ ok: true, status: 200, json: async () => ({ state: 'OK' }) }))
     vi.stubGlobal('fetch', fetchSpy)
     onTestFinished(() => { vi.unstubAllGlobals() })
-    const rechecks = () => fetchSpy.mock.calls.filter(call => call[0] === '/api/stamp-recheck')
+    const rechecks = () => fetchSpy.mock.calls.filter(call => call[0] === '/api/restart-signal/state')
     const { c } = await client(mock, start)
     await vi.waitFor(() => { expect(rechecks().length).toBeGreaterThan(0) })
     const bootRechecks = rechecks().length
