@@ -87,7 +87,7 @@ describe('real Loader composition', () => {
     }, { surfaceOp: 'append' })
     session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
     expect(loaded.sessionProjections.snapshot(session).values.turnOutline)
-      .toEqual([{ turn: 1, seq: boundary, prompt: 'composed prompt', response: 'composed answer' }])
+      .toEqual([{ turn: 1, seq: boundary, prompt: 'composed prompt', response: 'composed answer', interventions: [] }])
   })
 
   it('keeps the function-plugin namespace free of a default export', () => {

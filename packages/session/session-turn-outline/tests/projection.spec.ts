@@ -1,17 +1,19 @@
 /**
  * The `turnOutline` projection unit: mounting the plugin beside the
  * projection registry serves the whole-log turn outline (turn number,
- * `turn/start` seq, bounded prompt and final-response previews);
- * compositions without the registry are unaffected; unmounting the plugin
- * removes the key (HMR safety). The response buffers as a draft and commits
- * at `turn/end`, keeping the identity-gated change feed at three pushes per
- * turn. Narrow fold paths with fabricated envelopes (non-human sources,
- * regressive turn numbers) run against the exported definition directly.
+ * `turn/start` seq, bounded prompt and final-response previews, and the human
+ * interventions inside each turn); compositions without the registry are
+ * unaffected; unmounting the plugin removes the key (HMR safety). The response
+ * buffers as a draft and commits at `turn/end`, and an answered decision
+ * request records only once its result lands, so the identity-gated change
+ * feed pushes when — and only when — a served value changes. Narrow fold paths
+ * with fabricated envelopes (non-human sources, regressive turn numbers,
+ * outlived results) run against the exported definition directly.
  */
 
 import { describe, expect, expectTypeOf, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { createAssistantMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createAssistantMessage, createToolResultMessage, createUserMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { ContextFormed } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId, SessionLogOffset, SessionSeq } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
@@ -59,6 +61,26 @@ function endTurn(session: Session, turn: number): SessionSeq {
   return session.append('turn/end', { turn, reason: { kind: 'completed' } }).seq
 }
 
+/** Append one decision-request tool call. */
+function appendAsk(session: Session, turn: number, callId: string, argumentsRaw: string): SessionSeq {
+  return session.append('tool/call', {
+    turn, step: 1, callId: ToolCallId(callId), name: 'ask_user_question', arguments: argumentsRaw,
+  }).seq
+}
+
+/** Append the result answering a call; returns its seq — the mark's anchor. */
+function appendResult(session: Session, turn: number, callId: string): SessionSeq {
+  return session.append('tool/result', {
+    turn,
+    step: 1,
+    message: createToolResultMessage({
+      callId: ToolCallId(callId),
+      content: [{ type: 'text', text: '{}' }],
+      isError: false,
+    }),
+  }, { surfaceOp: 'append' }).seq
+}
+
 function outlineOf(ctx: Context, session: Session): readonly TurnOutlineEntry[] {
   return ctx.sessionProjections.snapshot(session).values.turnOutline as readonly TurnOutlineEntry[]
 }
@@ -72,22 +94,28 @@ describe('turn outline projection unit', () => {
     const { ctx, session } = await harness(true)
     expect(outlineOf(ctx, session)).toEqual([])
     expect(ctx.sessionProjections.checkpoint(session).turnOutline)
-      .toEqual({ ver: 2, seq: -1, val: { turns: [], draft: '' } })
+      .toEqual({ ver: 3, seq: -1, val: { turns: [], draft: '', pendingAsks: [] } })
   })
 
-  it('folds each turn with its boundary seq, first prompt, and turn-end response', async () => {
+  it('folds each turn with its boundary seq, first prompt, turn-end response, and later inputs', async () => {
     const { ctx, session } = await harness(true)
     const firstBoundary = session.append('turn/start', { turn: 1 }).seq
     appendPrompt(session, 'hello world')
-    appendPrompt(session, 'a later steer must not replace the prompt')
+    const steerSeq = appendPrompt(session, 'a later steer must not replace the prompt')
     appendAssistant(session, 1, 1, 'first draft answer')
     appendAssistant(session, 1, 2, 'final answer of turn one')
     endTurn(session, 1)
     const secondBoundary = session.append('turn/start', { turn: 2 }).seq
     appendPrompt(session, 'second prompt')
     expect(outlineOf(ctx, session)).toEqual([
-      { turn: 1, seq: firstBoundary, prompt: 'hello world', response: 'final answer of turn one' },
-      { turn: 2, seq: secondBoundary, prompt: 'second prompt', response: '' },
+      {
+        turn: 1,
+        seq: firstBoundary,
+        prompt: 'hello world',
+        response: 'final answer of turn one',
+        interventions: [{ seq: steerSeq, kind: 'input', preview: 'a later steer must not replace the prompt' }],
+      },
+      { turn: 2, seq: secondBoundary, prompt: 'second prompt', response: '', interventions: [] },
     ])
   })
 
@@ -146,11 +174,11 @@ describe('turn outline projection unit', () => {
       source: { kind: 'test-injector', form: 'relay' },
     }), { surfaceOp: 'append' })
     expect(outlineOf(ctx, session)).toEqual([
-      { turn: 1, seq: 1, prompt: '', response: '' },
+      { turn: 1, seq: 1, prompt: '', response: '', interventions: [] },
     ])
   })
 
-  it('pushes at most three times per turn: boundary, prompt, and settled response', async () => {
+  it('pushes once per served change: boundary, prompt, intervention, and settled response', async () => {
     const { ctx, session } = await harness(true)
     const changes: { seq: SessionSeq; last: TurnOutlineEntry | undefined }[] = []
     ctx.sessionProjections.onChanged((_session, key, value, seq) => {
@@ -160,12 +188,13 @@ describe('turn outline projection unit', () => {
     const boundarySeq = session.append('turn/start', { turn: 1 }).seq
     session.append('step/start', { turn: 1, step: 1 })
     const promptSeq = appendPrompt(session, 'hello')
-    appendPrompt(session, 'second human message in the same turn')
+    const steerSeq = appendPrompt(session, 'second human message in the same turn')
     appendAssistant(session, 1, 1, 'draft one')
     appendAssistant(session, 1, 2, 'draft two')
     session.append('step/end', { turn: 1, step: 2 })
     const endSeq = endTurn(session, 1)
-    expect(changes.map(change => change.seq)).toEqual([boundarySeq, promptSeq, endSeq])
+    expect(changes.map(change => change.seq)).toEqual([boundarySeq, promptSeq, steerSeq, endSeq])
+    expect(changes.at(-2)?.last?.interventions).toHaveLength(1)
     expect(changes.at(-1)?.last?.response).toBe('draft two')
   })
 
@@ -175,7 +204,7 @@ describe('turn outline projection unit', () => {
     // Whitespace-only prompt text normalizes to nothing: the entry stays unlabeled.
     appendPrompt(session, ' \t  ')
     endTurn(session, 1)
-    expect(outlineOf(ctx, session)).toEqual([{ turn: 1, seq: 0, prompt: '', response: '' }])
+    expect(outlineOf(ctx, session)).toEqual([{ turn: 1, seq: 0, prompt: '', response: '', interventions: [] }])
   })
 
   it('bounds preview reading and keeps repeated or empty drafts quiet (fabricated envelopes)', () => {
@@ -186,7 +215,11 @@ describe('turn outline projection unit', () => {
       time: 0,
       data: { message: { content: blocks } },
     }) as unknown as SessionEvent
-    const base: TurnOutlineState = { turns: [{ turn: 1, seq: SessionSeq(0), prompt: 'p', response: '' }], draft: '' }
+    const base: TurnOutlineState = {
+      turns: [{ turn: 1, seq: SessionSeq(0), prompt: 'p', response: '', interventions: [] }],
+      draft: '',
+      pendingAsks: [],
+    }
     // Non-text blocks are skipped; whitespace-heavy short blocks cross the raw
     // reading bound early, so the collapsed (short) draft still marks the
     // unread remainder with an ellipsis.
@@ -205,16 +238,25 @@ describe('turn outline projection unit', () => {
       time: 0,
       data: { turn: 1, reason: { kind: 'completed' } },
     } as unknown as SessionEvent
-    expect(def.apply({ turns: [], draft: 'orphan' }, end)).toEqual({ turns: [], draft: '' })
+    expect(def.apply({ turns: [], draft: 'orphan', pendingAsks: [] }, end))
+      .toEqual({ turns: [], draft: '', pendingAsks: [] })
     // …and a re-settled identical response keeps the entries' identity.
-    const settled: TurnOutlineState = { turns: [{ turn: 1, seq: SessionSeq(0), prompt: 'p', response: 'done' }], draft: 'done' }
+    const settled: TurnOutlineState = {
+      turns: [{ turn: 1, seq: SessionSeq(0), prompt: 'p', response: 'done', interventions: [] }],
+      draft: 'done',
+      pendingAsks: [],
+    }
     const recommitted = def.apply(settled, end)
     expect(recommitted.turns).toBe(settled.turns)
     expect(recommitted.draft).toBe('')
   })
 
   it('skips a boundary that does not advance the turn number (fabricated envelope)', () => {
-    const state: TurnOutlineState = { turns: [{ turn: 2, seq: SessionSeq(5), prompt: 'kept', response: '' }], draft: '' }
+    const state: TurnOutlineState = {
+      turns: [{ turn: 2, seq: SessionSeq(5), prompt: 'kept', response: '', interventions: [] }],
+      draft: '',
+      pendingAsks: [],
+    }
     const regressive = {
       type: 'turn/start',
       seq: SessionSeq(9),
@@ -229,7 +271,7 @@ describe('turn outline projection unit', () => {
     session.append('turn/start', { turn: 1 })
     appendPrompt(session, 'pre-mount prompt')
     await ctx.plugin(SessionTurnOutlinePlugin)
-    expect(outlineOf(ctx, session)).toEqual([{ turn: 1, seq: 0, prompt: 'pre-mount prompt', response: '' }])
+    expect(outlineOf(ctx, session)).toEqual([{ turn: 1, seq: 0, prompt: 'pre-mount prompt', response: '', interventions: [] }])
   })
 
   it('has no key without the plugin and drops it when the plugin unloads (HMR safety)', async () => {
@@ -253,10 +295,11 @@ describe('turn outline projection unit', () => {
         ...row!,
         val: {
           turns: [
-            { turn: 2, seq: 1, prompt: '', response: '' },
-            { turn: 2, seq: 4, prompt: '', response: '' },
+            { turn: 2, seq: 1, prompt: '', response: '', interventions: [] },
+            { turn: 2, seq: 4, prompt: '', response: '', interventions: [] },
           ],
           draft: '',
+          pendingAsks: [],
         },
       },
     }, [], SessionLogOffset(0), session.header, session.inheritedEventCount)).toThrow(/strictly increasing/)
@@ -266,12 +309,98 @@ describe('turn outline projection unit', () => {
         ...row!,
         val: {
           turns: [
-            { turn: 1, seq: 1, prompt: 'ok', response: 'done' },
-            { turn: 2, seq: 4, prompt: '', response: '' },
+            { turn: 1, seq: 1, prompt: 'ok', response: 'done', interventions: [] },
+            { turn: 2, seq: 4, prompt: '', response: '', interventions: [] },
           ],
           draft: '',
+          pendingAsks: [],
         },
       },
     }, [], SessionLogOffset(0), session.header, session.inheritedEventCount)).not.toThrow()
+  })
+
+  it('anchors an answered decision request on its result, not its call', async () => {
+    const { ctx, session } = await harness(true)
+    session.append('turn/start', { turn: 1 })
+    appendPrompt(session, 'choose a direction')
+    appendAsk(session, 1, 'call-q', JSON.stringify({ questions: [{ id: 'q0', question: 'Ship it now?' }] }))
+    const resultSeq = appendResult(session, 1, 'call-q')
+    expect(outlineOf(ctx, session)[0]?.interventions).toEqual([
+      { seq: resultSeq, kind: 'question', preview: 'Ship it now?' },
+    ])
+  })
+
+  it('pushes nothing while a decision request waits for its result', async () => {
+    const { ctx, session } = await harness(true)
+    const changes: SessionSeq[] = []
+    ctx.sessionProjections.onChanged((_session, key, _value, seq) => {
+      if (key !== 'turnOutline') return
+      changes.push(seq)
+    })
+    const boundarySeq = session.append('turn/start', { turn: 1 }).seq
+    const promptSeq = appendPrompt(session, 'choose')
+    appendAsk(session, 1, 'call-open', '{"questions":[{"id":"q0","question":"Still deciding?"}]}')
+    expect(changes).toEqual([boundarySeq, promptSeq])
+    expect(outlineOf(ctx, session)[0]?.interventions).toEqual([])
+  })
+
+  it('marks no result that was never a decision request', async () => {
+    const { ctx, session } = await harness(true)
+    session.append('turn/start', { turn: 1 })
+    appendPrompt(session, 'run something')
+    session.append('tool/call', {
+      turn: 1, step: 1, callId: ToolCallId('call-shell'), name: 'bash', arguments: '{"command":"ls"}',
+    })
+    appendResult(session, 1, 'call-shell')
+    expect(outlineOf(ctx, session)[0]?.interventions).toEqual([])
+  })
+
+  it('degrades an unparseable decision request to a mark with no preview', async () => {
+    const { ctx, session } = await harness(true)
+    session.append('turn/start', { turn: 1 })
+    appendPrompt(session, 'choose')
+    appendAsk(session, 1, 'call-bad', 'not json at all')
+    const resultSeq = appendResult(session, 1, 'call-bad')
+    expect(outlineOf(ctx, session)[0]?.interventions).toEqual([
+      { seq: resultSeq, kind: 'question', preview: '' },
+    ])
+  })
+
+  it('records a late decision answer as an input intervention with no preview (fabricated envelope)', () => {
+    const def = turnOutlineProjectionDefinition
+    const base: TurnOutlineState = {
+      turns: [{ turn: 1, seq: SessionSeq(0), prompt: 'p', response: '', interventions: [] }],
+      draft: '',
+      pendingAsks: [],
+    }
+    const reply = {
+      type: 'user/message',
+      seq: SessionSeq(7),
+      time: 0,
+      data: {
+        source: { kind: 'user-question-reply', callId: 'call-late' },
+        content: [{ type: 'text', text: '{"answers":[{"id":"q0","selected":"a"}]}' }],
+      },
+    } as unknown as SessionEvent
+    expect(def.apply(base, reply).turns[0]?.interventions)
+      .toEqual([{ seq: SessionSeq(7), kind: 'input', preview: '' }])
+  })
+
+  it('records nothing for a result that outlived its turn (fabricated envelope)', () => {
+    const def = turnOutlineProjectionDefinition
+    const base: TurnOutlineState = {
+      turns: [{ turn: 1, seq: SessionSeq(0), prompt: 'p', response: '', interventions: [] }],
+      draft: '',
+      pendingAsks: [{ callId: 'call-stale', preview: '' }],
+    }
+    const stale = {
+      type: 'tool/result',
+      seq: SessionSeq(9),
+      time: 0,
+      data: { turn: 4, step: 1, message: { role: 'tool', source: { kind: 'tool', callId: 'call-stale' } } },
+    } as unknown as SessionEvent
+    const applied = def.apply(base, stale)
+    expect(applied.turns[0]?.interventions).toEqual([])
+    expect(applied.pendingAsks).toEqual([])
   })
 })
