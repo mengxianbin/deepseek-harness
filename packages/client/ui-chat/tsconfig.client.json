@@ -76,6 +76,9 @@
       "path": "../store"
     },
     {
+      "path": "../shortcuts/tsconfig.client.json"
+    },
+    {
       "path": "../ui-approval"
     },
     {

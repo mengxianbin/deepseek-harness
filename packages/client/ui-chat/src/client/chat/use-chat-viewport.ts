@@ -758,6 +758,59 @@ export class ChatViewport {
   }
 
   /**
+   * Align the row recorded at a known anchor seq and return its actual clamped position.
+   * Several rows can share one seq — a result and the answer bubble it produced —
+   * so the intervention row itself wins over a neighbour that merely coincides.
+   * @param seq - anchor seq of the row to align below the scrollport's top edge.
+   * @param turn - Turn the row belongs to, for the landing's turn attribution.
+   * @returns the actual landing, or null when no mounted row carries the seq.
+   */
+  scrollToSeq(seq: number, turn: number): ViewportLanding | null {
+    const elements = this.elements
+    if (elements === null) return null
+    const wanted = String(seq)
+    let neighbour: HTMLElement | null = null
+    const rows = elements.list.querySelectorAll<HTMLElement>(
+      '[data-chat-anchor-seq]:not([hidden]):not([hidden] *)',
+    )
+    for (const row of rows) {
+      if (row.dataset.chatAnchorSeq !== wanted) continue
+      if (row.dataset.chatIntervention === wanted) return this.align(row, 24, turn)
+      neighbour ??= row
+    }
+    return neighbour === null ? null : this.align(neighbour, 24, turn)
+  }
+
+  /**
+   * Seq of the newest intervention row at or above the reading line. The rows
+   * are sparse, so the search walks interventions alone rather than the whole
+   * transcript; a reader gesture can afford the geometry that costs.
+   * @param metrics - reusable scroll metrics; omitted callers request a fresh read.
+   * @returns that intervention's seq, or null while detached or before the first one.
+   */
+  readVisibleIntervention(metrics = this.metrics()): number | null {
+    const elements = this.elements
+    if (elements === null || metrics === null) return null
+    const line = elements.scroller.getBoundingClientRect().top + Math.min(96, metrics.height * 0.2)
+    const rows = elements.column.querySelectorAll<HTMLElement>(
+      '[data-chat-intervention]:not([hidden]):not([hidden] *)',
+    )
+    let low = 0
+    let high = rows.length
+    while (low < high) {
+      const middle = (low + high) >>> 1
+      const probe = rows[middle]
+      if (probe === undefined || probe.getBoundingClientRect().top > line) high = middle
+      else low = middle + 1
+    }
+    const reading = low === 0 ? undefined : rows[low - 1]
+    if (reading === undefined) return null
+    const value = reading.dataset.chatIntervention
+    const seq = value === undefined ? NaN : Number(value)
+    return Number.isSafeInteger(seq) ? seq : null
+  }
+
+  /**
    * Restore a semantic anchor with a raw-position fallback.
    * @param position - semantic scroll memory; raw top is used only if its row is absent.
    * @returns the actual landing, or null while detached.

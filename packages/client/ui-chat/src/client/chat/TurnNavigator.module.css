@@ -18,7 +18,9 @@
   position: sticky;
 }
 
-.frame {
+/* The whole rail column: the prev/next intervention controls stacked above
+   and below the ladder, all centered on the band a reader actually sees. */
+.rail {
   /* The band a reader actually sees: the scrollport minus the sticky composer
      stack covering its floor. ConversationRoot publishes both measurements on
      the scrollport; the fallbacks carry the first paint before its observer
@@ -32,6 +34,16 @@
   top: calc(var(--turn-rail-band) / 2);
   right: 12px;
   width: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transform: translateY(-50%);
+  pointer-events: auto;
+}
+
+.frame {
+  position: relative;
+  width: 100%;
   /* Fixed-pitch marks never compress: a ladder taller than the band scrolls
      inside this frame instead of pushing marks under the composer or above
      the scrollport. */
@@ -41,8 +53,38 @@
   );
   contain: layout;
   cursor: pointer;
-  pointer-events: auto;
-  transform: translateY(-50%);
+}
+
+/* Step to the neighbouring human intervention. Disabled while the session has
+   none, so the control never claims a jump it cannot make. */
+.step {
+  box-sizing: border-box;
+  width: 100%;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.step:hover:not(:disabled) {
+  color: var(--dsw-alias-label-primary);
+}
+
+.step:focus-visible {
+  outline: 1px solid var(--dsh-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: -1px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.step:disabled {
+  cursor: default;
+  opacity: 0.4;
 }
 
 /* The frame's inner scroller: no visible scrollbar, no scroll chaining into
@@ -106,6 +148,13 @@
   transform: translateY(-50%) scaleX(0.6);
   transform-origin: right center;
   transition: transform 140ms ease, background-color 140ms ease;
+}
+
+/* An intervention is a sub-mark of its Turn: a shorter tick pulled in from
+   the rail edge, so a Turn's decisions read as children of its own mark. */
+.markIntervention::before {
+  right: 9px;
+  width: 11px;
 }
 
 /* Ordered before hover/active so those states keep their stronger tick. */

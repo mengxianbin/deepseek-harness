@@ -164,12 +164,23 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
   // distribute an object containing a union into a union of objects itself.
   const routedOwner = { ...owner, node: routedNode } as RoutedChatNodeOwner
   const flowKey = groupPart === undefined || groupPart === 'response' ? routedNode.key : JSON.stringify([routedNode.key, groupPart])
+  // A rail intervention mark addresses the row the reader lands on: the answer
+  // to a decision request, or a human message admitted into a running Turn.
+  // Both anchor at their own event seq, which is the seq the turn outline
+  // records for the same intervention. The answer bubble's kind is contributed
+  // by another plugin, so it compares as the string every kind already is.
+  const nodeKind: string = routedNode.kind
+  const interventionSeq = nodeKind === 'question-reply' || nodeKind === 'steering'
+    ? routedNode.anchorSeq
+    : undefined
   return (
     <div
       ref={wrapperRef}
       className={css.flowItem}
       data-chat-anchor-key={flowKey}
       data-chat-flow-key={flowKey}
+      data-chat-anchor-seq={routedNode.anchorSeq}
+      data-chat-intervention={interventionSeq}
       data-chat-paging-anchor={routedNode.kind !== 'turn-process' || undefined}
       data-chat-node-key={routedNode.key}
       data-chat-group-part={groupPart}

@@ -3,9 +3,9 @@ import { useLayoutEffect, useState } from 'react'
 import type { SessionSeq } from '@deepseek-ai/dsh-session/types'
 import type { ChatNode } from '../contract/chat-nodes.ts'
 import type { ChatViewSlotProps } from '../contract/slots.ts'
-import type { TurnRailItem } from './turn-rail-items.ts'
+import type { RailMark } from './turn-rail-items.ts'
 import type { ChatReading, ReadingSample } from './use-chat-reading.ts'
-import type { ChatViewport } from './use-chat-viewport.ts'
+import type { ChatViewport, ViewportLanding } from './use-chat-viewport.ts'
 
 /** History availability and loading operations for the committed Chat window. */
 export interface ChatNavigationInput extends Pick<ChatViewSlotProps, 'loadOlder' | 'loadThrough'> {
@@ -17,6 +17,8 @@ export interface ChatNavigationInput extends Pick<ChatViewSlotProps, 'loadOlder'
 interface TurnJump {
   readonly turn: number
   readonly seq: SessionSeq
+  /** Row to align once history covers the jump; `null` aligns the Turn's own anchor. */
+  readonly anchorSeq: number | null
   phase: 'loading' | 'settled'
   landing: 'pending' | 'landed' | 'interrupted'
   repageHead: ChatNavigationInput['firstSeq']
@@ -63,31 +65,70 @@ export class ChatNavigation {
   }
 
   /**
-   * Replace the current jump with an explicit turn selection.
-   * @param item - loaded anchor or unloaded turn to fetch before landing.
+   * Replace the current jump with an explicit rail selection.
+   * @param mark - a Turn mark, or a human-intervention mark inside one.
    */
-  readonly navigateToTurn = (item: TurnRailItem): void => {
-    if (item.anchor.kind === 'loaded') {
+  readonly navigateTo = (mark: RailMark): void => {
+    if (mark.kind === 'turn') {
       this.cancel()
-      const landing = this.viewport.scrollToTurn(item.turn)
-      if (landing === null) return
-      this.reading.acceptNavigation(landing)
-      if (this.input.loadingOlder) this.viewport.beginPreserving(landing.position)
+      if (mark.item.anchor.kind === 'loaded') {
+        this.acceptLanding(this.viewport.scrollToTurn(mark.item.turn))
+        return
+      }
+      this.beginJump(mark.item.turn, mark.item.anchor.seq, null)
       return
     }
     this.cancel()
+    // An intervention whose row is already mounted lands directly; history
+    // only has to buy rows the window has not delivered.
+    if (this.acceptLanding(this.viewport.scrollToSeq(mark.item.seq, mark.item.turn))) return
+    this.beginJump(mark.item.turn, mark.item.seq, mark.item.seq)
+  }
+
+  /** Open a paging jump through `seq`, landing on `anchorSeq` once history covers it. */
+  private beginJump(turn: number, seq: SessionSeq, anchorSeq: number | null): void {
     this.viewport.beginPreserving()
     this.reading.pauseFollowing()
-    const jump: TurnJump = {
-      turn: item.turn,
-      seq: item.anchor.seq,
-      phase: 'loading',
-      landing: 'pending',
-      repageHead: null,
-    }
+    const jump: TurnJump = { turn, seq, anchorSeq, phase: 'loading', landing: 'pending', repageHead: null }
     this.jump = jump
     this.onBusyTurn(jump.turn)
     this.request(jump)
+  }
+
+  /**
+   * Step to the neighbouring human-intervention mark in reading order, which
+   * is how a Turn holding several decisions becomes walkable without hunting
+   * for each row. The current position is the newest intervention at or above
+   * the reading line; with none loaded there, the reading line's own Turn
+   * decides whether the neighbour is an older, still-unloaded mark.
+   * @param marks - the rail's flattened marks, ascending by Turn and seq.
+   * @param delta - `1` for the next intervention, `-1` for the previous one.
+   */
+  readonly stepIntervention = (marks: readonly RailMark[], delta: 1 | -1): void => {
+    const interventions = marks.filter((mark): mark is Extract<RailMark, { kind: 'intervention' }> =>
+      mark.kind === 'intervention')
+    if (interventions.length === 0) return
+    const loaded = this.viewport.readVisibleIntervention()
+    let target: Extract<RailMark, { kind: 'intervention' }> | undefined
+    if (loaded === null) {
+      const turn = this.viewport.readVisibleTurn()
+      target = delta > 0
+        ? interventions.find(mark => turn === null || mark.item.turn >= turn)
+        : interventions.findLast(mark => turn !== null && mark.item.turn < turn)
+    } else {
+      target = delta > 0
+        ? interventions.find(mark => mark.item.seq > loaded)
+        : interventions.findLast(mark => mark.item.seq < loaded)
+    }
+    if (target !== undefined) this.navigateTo(target)
+  }
+
+  /** Accept a landing that needs no history request; @returns whether it landed. */
+  private acceptLanding(landing: ViewportLanding | null): boolean {
+    if (landing === null) return false
+    this.reading.acceptNavigation(landing)
+    if (this.input.loadingOlder) this.viewport.beginPreserving(landing.position)
+    return true
   }
 
   /** Request one older page while retaining the current semantic position. */
@@ -156,7 +197,9 @@ export class ChatNavigation {
       if (settle) { this.cancel(); return true }
       return false
     }
-    const landing = this.viewport.scrollToTurn(jump.turn)
+    const landing = jump.anchorSeq === null
+      ? this.viewport.scrollToTurn(jump.turn)
+      : this.viewport.scrollToSeq(jump.anchorSeq, jump.turn) ?? this.viewport.scrollToTurn(jump.turn)
     if (landing === null) return false
     this.reading.acceptNavigation(landing)
     if (settle) this.cancel()

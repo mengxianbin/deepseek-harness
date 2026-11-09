@@ -8,6 +8,7 @@ import type { SessionBinding } from '@deepseek-ai/dsh-api-session-controller/cli
 import type { GroupKey } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { createSnapshotStore, type ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { ShortcutCommandId } from '@deepseek-ai/dsh-client-shortcuts/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-browser/client'
 import type {} from '@deepseek-ai/dsh-client-ui-input-trigger/client'
@@ -42,6 +43,7 @@ import { TranscriptViewRow, type TranscriptViewRowInjected } from './settings/Tr
 import { createChatStore } from './stores.ts'
 import { TranscriptViewPolicy } from './transcript-view.ts'
 import { derivePresentationPolicy } from './presentation-policy.ts'
+import { installInterventionStep } from './intervention-step.ts'
 import { CHAT_SETTINGS_NAMESPACE, DEFAULT_LINK_OPENING, DEFAULT_TRANSCRIPT_VIEW_MODE, type ChatSettings } from '../chat-settings.ts'
 import { LinkOpeningRow, type LinkOpeningRowInjected } from './settings/LinkOpeningRow.tsx'
 import { PerformanceUsageRow, type PerformanceUsageRowInjected } from './settings/PerformanceUsageRow.tsx'
@@ -138,12 +140,50 @@ export function apply(ctx: Context): void {
   const t = ctx.locale.bind(NS)
   const chatStore = createChatStore()
   const chatScrollPositions = new Map<SessionId, ChatScrollPosition>()
+  // The rail's fixed chord is registered here because this plugin owns the
+  // shortcut service; the mounted Chat view owns the action it drives, keyed
+  // by the Session whose conversation the chord was pressed inside. Registrars
+  // are cached per Session so a re-render cannot re-register the same view.
+  const railSteps = new Map<SessionId, (delta: 1 | -1) => void>()
+  const railStepRegistrars = new Map<SessionId, (step: (delta: 1 | -1) => void) => () => void>()
+  const registerRailStep = (sessionId: SessionId): ((step: (delta: 1 | -1) => void) => () => void) => {
+    const cached = railStepRegistrars.get(sessionId)
+    if (cached !== undefined) return cached
+    const registrar = (step: (delta: 1 | -1) => void): (() => void) => {
+      railSteps.set(sessionId, step)
+      return () => {
+        if (railSteps.get(sessionId) === step) railSteps.delete(sessionId)
+      }
+    }
+    railStepRegistrars.set(sessionId, registrar)
+    return registrar
+  }
   const chatSettings = ctx.configForms.get<ChatSettings>(CHAT_SETTINGS_NAMESPACE)
   const linkOpening = createSnapshotStore(chatSettings.getSnapshot().value?.linkOpening ?? DEFAULT_LINK_OPENING)
   ctx.effect(() => chatSettings.subscribe(() => {
     const accepted = chatSettings.getSnapshot().value?.linkOpening
     if (accepted !== undefined) linkOpening.set(accepted)
   }))
+  ctx.inject(['shortcuts'], (scope) => {
+    const describe = (code: 'ArrowUp' | 'ArrowDown'): readonly string[] =>
+      scope.shortcuts.describeBinding({ code, modifiers: ['alt'] }).keys
+    scope.effect(() => scope.shortcuts.registerFixed({
+      id: 'chat.intervention.previous' as ShortcutCommandId,
+      label: () => t('chat.turnNavigation.previous'),
+      keys: describe('ArrowUp'),
+      bindings: [{ code: 'ArrowUp', modifiers: ['alt'] }],
+      group: 'application',
+    }), 'ui-chat: fixed intervention previous')
+    scope.effect(() => scope.shortcuts.registerFixed({
+      id: 'chat.intervention.next' as ShortcutCommandId,
+      label: () => t('chat.turnNavigation.next'),
+      keys: describe('ArrowDown'),
+      bindings: [{ code: 'ArrowDown', modifiers: ['alt'] }],
+      group: 'application',
+    }), 'ui-chat: fixed intervention next')
+    scope.effect(() => installInterventionStep(scope.shortcuts, railSteps),
+      'ui-chat: intervention step input')
+  })
   ctx.inject(['sidebarRightTabs'], (scope) => {
     const tabs = scope.sidebarRightTabs
     const browserAvailable: ObservableSnapshot<boolean> = {
@@ -296,6 +336,7 @@ export function apply(ctx: Context): void {
             },
             read: () => chatScrollPositions.get(sessionId) ?? null,
           },
+          registerRailStep: registerRailStep(sessionId),
           forkAt: (seq) => {
             const turn = [...chat.getSnapshot().timeline.turns.values()].find(turn => turn.end?.seq === seq)
             const messageId = turn?.data.get('turn-tail')?.closing?.finalNode.messageId

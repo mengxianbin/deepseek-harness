@@ -4,9 +4,10 @@ import { createRef, StrictMode } from 'react'
 import { act, cleanup, fireEvent, render, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
+import { SessionSeq } from '@deepseek-ai/dsh-session/types'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import { TurnNavigator, type TurnNavigatorHandle } from '../src/client/chat/TurnNavigator.tsx'
-import type { TurnRailItem } from '../src/client/chat/turn-rail-items.ts'
+import { railMarks, type TurnRailItem } from '../src/client/chat/turn-rail-items.ts'
 import { zh } from '../src/client/locale.ts'
 import { installTurnNavigatorObserver } from './turn-navigator-fixture.ts'
 
@@ -20,15 +21,20 @@ const items: readonly TurnRailItem[] = Array.from({ length: 1_000 }, (_, index) 
   turn: index + 1,
   prompt: `prompt ${String(index + 1)}`,
   response: '',
+  interventions: [],
   anchor: { kind: 'loaded', key: `turn:${String(index + 1)}` },
 }))
+const marks = railMarks(items)
+const onStep = (): void => {}
 const t = makeTranslate(zh, commonZh)
 
 describe('TurnNavigator', () => {
   it('places the latest committed active turn on its first viewport size without scroll commands', () => {
     const observer = installTurnNavigatorObserver(null)
     const onNavigate = vi.fn()
-    const view = render(<TurnNavigator items={items} activeTurn={1} busyTurn={null} onNavigate={onNavigate} t={t} />)
+    const view = render(
+      <TurnNavigator marks={marks} activeTurn={1} busyTurn={null} onNavigate={onNavigate} onStep={onStep} t={t} />,
+    )
     const nav = view.getByRole('navigation')
     const scroller = nav.firstElementChild as HTMLElement
     const scrollTo = vi.spyOn(scroller, 'scrollTo')
@@ -36,7 +42,9 @@ describe('TurnNavigator', () => {
     Object.defineProperty(scroller, 'scrollHeight', { get: () => { throw new Error('scroll extent read') } })
     Object.defineProperty(scroller, 'clientHeight', { get: () => { throw new Error('viewport height read') } })
 
-    view.rerender(<TurnNavigator items={items} activeTurn={1_000} busyTurn={null} onNavigate={onNavigate} t={t} />)
+    view.rerender(
+      <TurnNavigator marks={marks} activeTurn={1_000} busyTurn={null} onNavigate={onNavigate} onStep={onStep} t={t} />,
+    )
     act(() => { observer.resize(300) })
 
     expect(scroller.scrollTop).toBe(9_702)
@@ -51,7 +59,9 @@ describe('TurnNavigator', () => {
     installTurnNavigatorObserver()
     const ref = createRef<TurnNavigatorHandle>()
     const onNavigate = vi.fn()
-    const view = render(<TurnNavigator ref={ref} items={items} activeTurn={1} busyTurn={null} onNavigate={onNavigate} t={t} />)
+    const view = render(
+      <TurnNavigator ref={ref} marks={marks} activeTurn={1} busyTurn={null} onNavigate={onNavigate} onStep={onStep} t={t} />,
+    )
     await view.findByRole('button', { name: '跳转到第 1 轮' })
     const scroller = view.getByRole('navigation').firstElementChild as HTMLElement
     Object.defineProperty(scroller, 'scrollHeight', { get: () => { throw new Error('scroll extent read') } })
@@ -63,7 +73,7 @@ describe('TurnNavigator', () => {
     expect(onNavigate).not.toHaveBeenCalled()
 
     act(() => { ref.current?.activateTurn(700) })
-    expect(onNavigate).toHaveBeenCalledExactlyOnceWith(items[699])
+    expect(onNavigate).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind: 'turn', item: items[699] }))
     expect(scroller.scrollTop).toBe(4_846)
   })
 
@@ -72,7 +82,7 @@ describe('TurnNavigator', () => {
     const ref = createRef<TurnNavigatorHandle>()
     const view = render(
       <StrictMode>
-        <TurnNavigator ref={ref} items={items} activeTurn={1} busyTurn={null} onNavigate={vi.fn()} t={t} />
+        <TurnNavigator ref={ref} marks={marks} activeTurn={1} busyTurn={null} onNavigate={vi.fn()} onStep={onStep} t={t} />
       </StrictMode>,
     )
     const first = await view.findByRole('button', { name: '跳转到第 1 轮' })
@@ -90,7 +100,7 @@ describe('TurnNavigator', () => {
 
   it('keeps active marks inside the safe band still and centers only after crossing either edge', async () => {
     installTurnNavigatorObserver(288)
-    const props = { items, activeTurn: 50, busyTurn: null, onNavigate: vi.fn(), t }
+    const props = { marks, activeTurn: 50, busyTurn: null, onNavigate: vi.fn(), onStep, t }
     const view = render(<TurnNavigator {...props} />)
     await view.findByRole('button', { name: '跳转到第 50 轮' })
     const scroller = view.getByRole('navigation').firstElementChild as HTMLElement
@@ -122,7 +132,9 @@ describe('TurnNavigator', () => {
 
   it('does not let scroll-induced pointer entry replace a hover or focused preview', async () => {
     installTurnNavigatorObserver()
-    const view = render(<TurnNavigator items={items} activeTurn={1} busyTurn={null} onNavigate={vi.fn()} t={t} />)
+    const view = render(
+      <TurnNavigator marks={marks} activeTurn={1} busyTurn={null} onNavigate={vi.fn()} onStep={onStep} t={t} />,
+    )
     const twentieth = await view.findByRole('button', { name: '跳转到第 20 轮' })
     const nav = view.getByRole('navigation')
     const scroller = nav.firstElementChild as HTMLElement
@@ -151,5 +163,74 @@ describe('TurnNavigator', () => {
     fireEvent.pointerMove(underPointer)
     expect(view.getByRole('tooltip').textContent).toBe('prompt 70')
     expect(underPointer.getAttribute('aria-describedby')).toBe(previewId)
+  })
+
+  it('renders interventions as sub-marks beside their Turn and steps to a neighbour', async () => {
+    installTurnNavigatorObserver()
+    const onNavigate = vi.fn()
+    const step = vi.fn()
+    const itemsWithDecisions: readonly TurnRailItem[] = [
+      {
+        turn: 1,
+        prompt: 'prompt 1',
+        response: '',
+        interventions: [
+          { turn: 1, seq: SessionSeq(3), kind: 'question', ordinal: 1, preview: 'ship it?' },
+          { turn: 1, seq: SessionSeq(5), kind: 'question', ordinal: 2, preview: 'review it?' },
+          { turn: 1, seq: SessionSeq(7), kind: 'input', ordinal: 1, preview: 'steer first' },
+        ],
+        anchor: { kind: 'loaded', key: 'turn:1' },
+      },
+      {
+        turn: 2,
+        prompt: 'prompt 2',
+        response: '',
+        interventions: [],
+        anchor: { kind: 'loaded', key: 'turn:2' },
+      },
+    ]
+    const view = render(
+      <TurnNavigator
+        marks={railMarks(itemsWithDecisions)}
+        activeTurn={1}
+        busyTurn={null}
+        onNavigate={onNavigate}
+        onStep={step}
+        t={t}
+      />,
+    )
+    const firstQuestion = await view.findByRole('button', { name: '跳转到第 1 轮的第 1 个提问' })
+    expect(view.getByRole('button', { name: '跳转到第 1 轮的第 2 个提问' })).toBeTruthy()
+    expect(view.getByRole('button', { name: '跳转到第 1 轮的第 1 条输入' })).toBeTruthy()
+
+    fireEvent.pointerMove(firstQuestion)
+    expect(view.getByRole('tooltip').textContent).toBe('第 1 个提问ship it?')
+    fireEvent.click(firstQuestion)
+    expect(onNavigate).toHaveBeenCalledExactlyOnceWith({
+      kind: 'intervention',
+      key: 'input:1:3',
+      item: { turn: 1, seq: 3, kind: 'question', ordinal: 1, preview: 'ship it?' },
+    })
+
+    const next = view.getByRole('button', { name: '下一个介入点' })
+    const previous = view.getByRole('button', { name: '上一个介入点' })
+    fireEvent.click(next)
+    fireEvent.click(previous)
+    expect(step.mock.calls).toEqual([[1], [-1]])
+  })
+
+  it('steps through the rail handle and disables the controls when no intervention exists', async () => {
+    installTurnNavigatorObserver()
+    const ref = createRef<TurnNavigatorHandle>()
+    const step = vi.fn()
+    const view = render(
+      <TurnNavigator ref={ref} marks={marks} activeTurn={1} busyTurn={null} onNavigate={vi.fn()} onStep={step} t={t} />,
+    )
+    await view.findByRole('button', { name: '跳转到第 1 轮' })
+    expect(view.getByRole('button', { name: '下一个介入点' }).hasAttribute('disabled')).toBe(true)
+    expect(view.getByRole('button', { name: '上一个介入点' }).hasAttribute('disabled')).toBe(true)
+
+    act(() => { ref.current?.stepIntervention(1) })
+    expect(step).toHaveBeenCalledExactlyOnceWith(1)
   })
 })
