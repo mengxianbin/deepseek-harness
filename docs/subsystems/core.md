@@ -514,14 +514,17 @@ Owns the default model selection independently of any Host or transport. Each op
 ```ts cordis-catalog
 /**
  * Read the current default model selection.
- * @returns a detached provider, model, and optional reasoning selection.
+ * @returns a detached provider and model; effort is never stored here.
  */
 currentSelection(): ModelSelection
 
 /**
- * Save the complete default model selection. A deployment without a configuration
- * editor keeps its composition entry. Saves commit in submission order; a failed
- * save rejects its caller without blocking later saves.
+ * Save the direction of the default model selection. A deployment without a
+ * configuration editor keeps its composition entry. Any effort on `next` is
+ * dropped rather than persisted: effort lives in the model-level memory, and
+ * writing it here would let a model switch repin a level. Saves commit in
+ * submission order; a failed save rejects its caller without blocking later
+ * saves.
  * @param next - resolved selection accepted by an entry point.
  * @returns fulfillment after the optional profile write settles.
  */
@@ -880,6 +883,41 @@ roots(): Agent[]
 Types: [Session](session.md)
 
 Source: [`packages/core/agent/src/index.ts`](../../packages/core/agent/src/index.ts)
+
+<a id="ctxmodeleffortmemory--modeleffortmemory"></a>
+
+### `ctx.modelEffortMemory` — `ModelEffortMemory`
+
+Owns the model-level effort memory independently of any Host or transport. The dictionary root is volatile, so writes commit into the running reference and only the effort pane's calls ever change it.
+
+```ts cordis-catalog
+/**
+ * Read the effort remembered for one model id.
+ * @param model - provider-owned model id to look up.
+ * @returns the remembered effort id, or undefined when this model has none.
+ */
+effortFor(model: string): string | undefined
+
+/**
+ * Remember an effort for one model id in the owning profile entry.
+ * A deployment without a configuration editor keeps its composition entry.
+ * Writes commit in submission order; a failed write rejects its caller
+ * without blocking later writes.
+ * @param model - provider-owned model id to remember.
+ * @param effort - adapter-owned effort id to associate with it.
+ * @returns fulfillment after the optional profile write settles.
+ */
+async remember(model: string, effort: string): Promise<void>
+
+/**
+ * Drop the effort remembered for one model id, leaving other models untouched.
+ * @param model - provider-owned model id to forget.
+ * @returns fulfillment after the optional profile write settles.
+ */
+async forget(model: string): Promise<void>
+```
+
+Source: [`packages/core/model-effort-memory/src/index.ts`](../../packages/core/model-effort-memory/src/index.ts)
 
 <a id="agent-events"></a>
 

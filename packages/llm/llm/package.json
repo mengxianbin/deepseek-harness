@@ -70,8 +70,9 @@
     "@deepseek-ai/dsh-typert-protocol": "workspace:*"
   },
   "devDependencies": {
+    "@deepseek-ai/cordis": "workspace:~",
     "@deepseek-ai/dsh-attachment": "workspace:*",
-    "@deepseek-ai/dsh-package-manifest": "workspace:*",
-    "@deepseek-ai/cordis": "workspace:~"
+    "@deepseek-ai/dsh-model-effort-memory": "workspace:*",
+    "@deepseek-ai/dsh-package-manifest": "workspace:*"
   }
 }

@@ -87,9 +87,12 @@ export class ModelDirectory {
    * projection frame updates the shared current; failures surface on the store
    * and return with the operation so each entry can present its own failure.
    * @param selection - provider, provider-owned model id, and optional adapter-owned effort.
+   * @param effortMemory - model-level effort memory to write alongside: a string
+   *   remembers, null forgets, and omission leaves memory untouched. Selecting a
+   *   model without addressing effort therefore cannot write it.
    * @returns the selection outcome, including the original Remote failure.
    */
-  async select(selection: ModelSelection): Promise<RemoteResult<void>> {
+  async select(selection: ModelSelection, effortMemory?: string | null): Promise<RemoteResult<void>> {
     this.assertAvailable()
     const previous = this.store.getSnapshot().current
     const previousEffort = previous?.reasoningEffort ?? (previous === null ? undefined : this.catalog.reasoningFor(previous)?.defaultEffort)
@@ -103,6 +106,7 @@ export class ModelDirectory {
       ...selection.reasoningEffort === undefined
         ? {}
         : { reasoningEffort: selection.reasoningEffort },
+      ...effortMemory === undefined ? {} : { effortMemory },
     })
     if (this.disposed || generation !== this.generation) {
       return result.ok ? { ok: true, value: undefined } : result

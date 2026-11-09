@@ -122,11 +122,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         signature: 'currentSelection(): ModelSelection',
         description: 'Read the current default model selection.',
         parameters: [],
-        returns: 'a detached provider, model, and optional reasoning selection.',
+        returns: 'a detached provider and model; effort is never stored here.',
       },
       {
         signature: 'async saveSelection(next: ModelSelection): Promise<void>',
-        description: 'Save the complete default model selection. A deployment without a configuration editor keeps its composition entry. Saves commit in submission order; a failed save rejects its caller without blocking later saves.',
+        description: 'Save the direction of the default model selection. A deployment without a configuration editor keeps its composition entry. Any effort on `next` is dropped rather than persisted: effort lives in the model-level memory, and writing it here would let a model switch repin a level. Saves commit in submission order; a failed save rejects its caller without blocking later saves.',
         parameters: [{ name: 'next', description: 'resolved selection accepted by an entry point.' }],
         returns: 'fulfillment after the optional profile write settles.',
       },
@@ -786,9 +786,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'Detached layer values alongside their Loader entries.',
       },
       {
-        signature: 'async edit( entry: Entry, change: (current: Record<string, unknown>, inherited: Record<string, unknown>) => Record<string, unknown>, ): Promise<void>',
+        signature: 'async edit( entry: Entry, change: (current: Record<string, unknown>, inherited: Record<string, unknown>) => Record<string, unknown>, by: string = \'unknown\', ): Promise<void>',
         description: 'Validate, persist, and reconcile a plugin\'s next config; ordinary fields keep normal lifecycle rules.',
-        parameters: [{ name: 'entry', description: 'Current Loader entry, also used to detect replacement during the write.' }, { name: 'change', description: 'Derive a raw config from the current entry and its inherited layer.' }],
+        parameters: [{ name: 'entry', description: 'Current Loader entry, also used to detect replacement during the write.' }, { name: 'change', description: 'Derive a raw config from the current entry and its inherited layer.' }, { name: 'by', description: 'Author of the write — the Remote caller\'s `peer:<id>` when the change arrived over the gateway, `unknown` for in-process callers; recorded on the `patch written` journal line once the write commits.' }],
         returns: 'Fulfillment after Loader reconciliation completes.',
       },
     ],
@@ -2078,6 +2078,31 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Delete one item after checking its version; absence succeeds without an event.',
         parameters: [{ name: 'request', description: 'Session, message, and observed item version.' }],
         returns: 'the stable absent postcondition or an explicit failure.',
+      },
+    ],
+  },
+  {
+    key: 'modelEffortMemory',
+    summary: 'Owns the model-level effort memory independently of any Host or transport.',
+    description: 'Owns the model-level effort memory independently of any Host or transport. The dictionary root is volatile, so writes commit into the running reference and only the effort pane\'s calls ever change it.',
+    methods: [
+      {
+        signature: 'effortFor(model: string): string | undefined',
+        description: 'Read the effort remembered for one model id.',
+        parameters: [{ name: 'model', description: 'provider-owned model id to look up.' }],
+        returns: 'the remembered effort id, or undefined when this model has none.',
+      },
+      {
+        signature: 'async remember(model: string, effort: string): Promise<void>',
+        description: 'Remember an effort for one model id in the owning profile entry. A deployment without a configuration editor keeps its composition entry. Writes commit in submission order; a failed write rejects its caller without blocking later writes.',
+        parameters: [{ name: 'model', description: 'provider-owned model id to remember.' }, { name: 'effort', description: 'adapter-owned effort id to associate with it.' }],
+        returns: 'fulfillment after the optional profile write settles.',
+      },
+      {
+        signature: 'async forget(model: string): Promise<void>',
+        description: 'Drop the effort remembered for one model id, leaving other models untouched.',
+        parameters: [{ name: 'model', description: 'provider-owned model id to forget.' }],
+        returns: 'fulfillment after the optional profile write settles.',
       },
     ],
   },
@@ -5668,6 +5693,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type AuthorizationStatus = \'authorized\' | \'cancelled\';',
   },
   {
+    name: 'AutoRoutePollReport',
+    declaration: 'export interface AutoRoutePollReport {\n    readonly ok: boolean;\n    readonly failingSince?: number;\n    readonly failingForSec?: number;\n    readonly sustained: boolean;\n    readonly error?: string;\n    readonly ageSec: number;\n}',
+  },
+  {
     name: 'BackendRegistry',
     declaration: 'export class BackendRegistry {\n    register(name: string, backend: StorageBackend): () => void;\n    get(name: string): StorageBackend;\n    names(): string[];\n}',
   },
@@ -6234,6 +6263,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'DshEnvironmentKey',
     declaration: 'export type DshEnvironmentKey = `${typeof DSH_ENV_PREFIX}${string}`;',
+  },
+  {
+    name: 'DutyInventoryItem',
+    declaration: 'export interface DutyInventoryItem {\n    readonly id: string;\n    readonly status: \'healthy\' | \'disabled\' | \'failed\';\n    readonly intentional: boolean;\n    readonly reasons: readonly string[];\n    readonly cadenceLabel?: string;\n}',
+  },
+  {
+    name: 'DutyInventoryReport',
+    declaration: 'export interface DutyInventoryReport {\n    readonly ok: boolean;\n    readonly fresh: boolean;\n    readonly ageSec?: number;\n    readonly counts: {\n        readonly total: number;\n        readonly healthy: number;\n        readonly disabled: number;\n        readonly failed: number;\n    };\n    readonly items: readonly DutyInventoryItem[];\n}',
   },
   {
     name: 'DynamicCordisPackage',
@@ -6893,7 +6930,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'LlmModelReasoningInfo',
-    declaration: 'export interface LlmModelReasoningInfo {\n    efforts: readonly LlmReasoningEffortInfo[];\n    defaultEffort?: ReasoningEffortId;\n}',
+    declaration: 'export interface LlmModelReasoningInfo {\n    efforts: readonly LlmReasoningEffortInfo[];\n    defaultEffort?: ReasoningEffortId;\n    effortMemory?: ReasoningEffortId;\n}',
   },
   {
     name: 'LlmNativeAuth',
@@ -7205,7 +7242,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ModelReasoning',
-    declaration: 'export interface ModelReasoning {\n    readonly efforts: readonly ModelReasoningEffort[];\n    readonly defaultEffort?: string;\n}',
+    declaration: 'export interface ModelReasoning {\n    readonly efforts: readonly ModelReasoningEffort[];\n    readonly defaultEffort?: string;\n    readonly effortMemory?: string;\n}',
   },
   {
     name: 'ModelReasoningEffort',
@@ -8317,7 +8354,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionHealthReport',
-    declaration: 'export interface SessionHealthReport {\n    readonly ok: boolean;\n    readonly total: number;\n    readonly counts: SessionHealthCounts;\n    readonly issues: readonly SessionHealthIssue[];\n}',
+    declaration: 'export interface SessionHealthReport {\n    readonly ok: boolean;\n    readonly total: number;\n    readonly counts: SessionHealthCounts;\n    readonly issues: readonly SessionHealthIssue[];\n    readonly duty?: DutyInventoryReport;\n    readonly autoRoute?: AutoRoutePollReport;\n}',
   },
   {
     name: 'SessionHistoryRecord',
@@ -8585,7 +8622,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionSelectModelRequest',
-    declaration: 'export interface SessionSelectModelRequest extends ModelSelection {\n    readonly sessionId: SessionId;\n}',
+    declaration: 'export interface SessionSelectModelRequest extends ModelSelection {\n    readonly sessionId: SessionId;\n    readonly effortMemory?: string | null;\n}',
   },
   {
     name: 'SessionSelectModelValue',

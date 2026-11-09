@@ -150,7 +150,18 @@ export interface ModelReasoningEffort {
 /** Selectable reasoning metadata for one exact model route. */
 export interface ModelReasoning {
   readonly efforts: readonly ModelReasoningEffort[]
+  /**
+   * Default in effect when a selection omits an effort: the model's remembered
+   * level when one is stored and this route accepts it, otherwise the route's
+   * own default. Display and request both read it, so they cannot disagree.
+   */
   readonly defaultEffort?: string
+  /**
+   * The remembered effort this route accepts for its model, or undefined when
+   * this model has nothing stored. Selections use it to tell a remembered level
+   * from a route default; it is never itself a default.
+   */
+  readonly effortMemory?: string
 }
 
 /** One model displayed inside its provider group. */
@@ -358,6 +369,14 @@ export interface SessionCreateValue {
 /** Session model-selection request. */
 export interface SessionSelectModelRequest extends ModelSelection {
   readonly sessionId: SessionId
+  /**
+   * Model-level effort memory change carried alongside the selection: a string
+   * remembers that effort for this model, null forgets it, and absence leaves
+   * the memory untouched. Selections that never address effort — routing
+   * automation above all — omit it, which is what keeps them structurally
+   * unable to write memory.
+   */
+  readonly effortMemory?: string | null
 }
 
 /** Accepted model selection after Host resolution. */

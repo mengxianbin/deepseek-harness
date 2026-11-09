@@ -60,7 +60,10 @@ export interface ModelSelectInjected {
   /**
    * Select a complete provider/model/reasoning selection.
    * @param selection - model selection and optional adapter-owned effort.
+   * @param effortMemory - model-level effort memory written alongside the
+   *   selection: a string remembers it for this model, null forgets it, and
+   *   omission leaves the memory untouched.
    * @returns the Host outcome, or undefined when this Session cannot select a model.
    */
-  select: (selection: ModelSelection) => Promise<RemoteResult<void> | undefined>
+  select: (selection: ModelSelection, effortMemory?: string | null) => Promise<RemoteResult<void> | undefined>
 }

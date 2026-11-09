@@ -41,7 +41,6 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ModelLabelOwner, ModelSelectInjected } from './slots.ts'
-import { forgetModelEffort, modelEffortFor, rememberModelEffort } from './effort-memory.ts'
 import css from './ModelSelect.module.css'
 import { orderModelProviders } from './provider-order.ts'
 
@@ -140,9 +139,16 @@ export function ModelSelect(
   const effortChoices = useMemo<readonly EffortChoice[]>(() => reasoning === undefined
     ? []
     : [
-      ...reasoning.defaultEffort === undefined
-        ? [{ key: 'provider-default', effort: undefined, label: t('effort.providerDefault') }]
-        : [],
+      // The provider-default row is always present: it is the only way out of
+      // a remembered level, and when the model resolves to one it says so
+      // instead of hiding behind an unnamed default.
+      {
+        key: 'provider-default',
+        effort: undefined,
+        label: reasoning.defaultEffort === undefined
+          ? t('effort.providerDefault')
+          : `${t('effort.providerDefault')} → ${reasoning.efforts.find(level => level.id === reasoning.defaultEffort)?.name ?? reasoning.defaultEffort}`,
+      },
       ...reasoning.efforts.map((effort: ModelReasoningEffort) => ({
         key: `effort:${effort.id}`,
         effort: effort.id,
@@ -392,12 +398,15 @@ export function ModelSelect(
     })
   }
 
-  const submit = (selection: ModelSelection): void => {
+  const submit = (selection: ModelSelection, effortMemory?: string | null): void => {
     lastActionRef.current = 'select'
     // Disabled option rows cannot retain focus while a selection is pending.
     setSelectionFocus(true)
     triggerRef.current?.focus()
-    void select(selection).then(settleSelection)
+    // Only the effort pane carries a memory change, so a model switch passes
+    // no memory argument at all rather than an explicit "leave it alone".
+    const request = effortMemory === undefined ? select(selection) : select(selection, effortMemory)
+    void request.then(settleSelection)
   }
 
   const choose = (selection: ModelSelection): void => {
@@ -405,23 +414,24 @@ export function ModelSelect(
       closeAfterSelection()
       return
     }
-    // Per-model effort memory: switching restores the level this route was
-    // last explicitly set to (validated against its current vocabulary, so a
-    // foreign provider's ids never ride along); an untouched route submits
-    // bare and the Host resolves its model default.
+    // Attaching a remembered level restores the one this model was last
+    // explicitly set to, so switching away and back restores it by snapshot
+    // rather than by whatever the memory holds now. A model without one
+    // submits bare and the Host resolves its default; either way this path
+    // only reads the memory and never writes it.
     const target = groups.find(group => group.id === selection.provider)
       ?.models.find(model => model.id === selection.model)
-    const remembered = modelEffortFor(selection.provider, selection.model, target?.reasoning)
+    const remembered = target?.reasoning?.effortMemory
     submit(remembered === undefined ? selection : { ...selection, reasoningEffort: remembered })
   }
 
   const chooseEffort = (effort: string | undefined): void => {
     if (state.current === null) return
-    // The effort pane is the only writer of the memory: an explicit level is
-    // remembered for this route; re-picking Provider default forgets it.
-    if (effort === undefined) forgetModelEffort(state.current.provider, state.current.model)
-    else rememberModelEffort(state.current.provider, state.current.model, effort)
-    if (effectiveEffort === effort) {
+    // Compare the session's own explicit level, never the folded display
+    // value, and do it before anything is written: re-picking what the session
+    // already holds is a no-op, so a bare session clicking the default row
+    // leaves a remembered level alone instead of erasing it.
+    if (state.current.reasoningEffort === effort) {
       closeAfterSelection()
       return
     }
@@ -430,7 +440,9 @@ export function ModelSelect(
       model: state.current.model,
       ...effort === undefined ? {} : { reasoningEffort: effort },
     }
-    submit(selection)
+    // The effort pane is the only writer of the memory: an explicit level is
+    // remembered for this model, and re-picking the provider default clears it.
+    submit(selection, effort ?? null)
   }
 
   const waiting = currentChoice === undefined && state.status === 'loading'
@@ -658,28 +670,34 @@ export function ModelSelect(
               )}
               {effortChoices.length === 0
                 ? <div className={css.empty}>{t('empty.efforts')}</div>
-                : effortChoices.map(level => (
-                  <button
-                    ref={itemRef()}
-                    type="button"
-                    role="menuitemradio"
-                    aria-checked={effectiveEffort === level.effort}
-                    className={clsx(css.option, effectiveEffort === level.effort && css.selected)}
-                    key={level.key}
-                    disabled={busy}
-                    onClick={() => { chooseEffort(level.effort) }}
-                  >
-                    <span className={css.optionCopy}>
-                      <span className={css.modelName}>{level.label}</span>
-                    </span>
-                    <span className={css.check}>
-                      {pending !== null && pending.provider === state.current?.provider
-                        && pending.model === state.current.model && pending.reasoningEffort === level.effort
-                        ? <StateDot state="ongoing" />
-                        : effectiveEffort === level.effort ? <IconCheckOutlineRegular /> : null}
-                    </span>
-                  </button>
-                ))}
+                : effortChoices.map((level) => {
+                  // The check marks this session's own effort, not the folded
+                  // display value: a bare session with a remembered level must
+                  // show the provider-default row checked rather than both.
+                  const chosen = state.current?.reasoningEffort === level.effort
+                  return (
+                    <button
+                      ref={itemRef()}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={chosen}
+                      className={clsx(css.option, chosen && css.selected)}
+                      key={level.key}
+                      disabled={busy}
+                      onClick={() => { chooseEffort(level.effort) }}
+                    >
+                      <span className={css.optionCopy}>
+                        <span className={css.modelName}>{level.label}</span>
+                      </span>
+                      <span className={css.check}>
+                        {pending !== null && pending.provider === state.current?.provider
+                          && pending.model === state.current.model && pending.reasoningEffort === level.effort
+                          ? <StateDot state="ongoing" />
+                          : chosen ? <IconCheckOutlineRegular /> : null}
+                      </span>
+                    </button>
+                  )
+                })}
             </>
           )}
         </MenuSurface>,

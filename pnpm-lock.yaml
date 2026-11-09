@@ -1688,6 +1688,9 @@ importers:
       '@deepseek-ai/dsh-llm':
         specifier: workspace:*
         version: link:../../llm/llm
+      '@deepseek-ai/dsh-model-effort-memory':
+        specifier: workspace:*
+        version: link:../../core/model-effort-memory
       '@deepseek-ai/dsh-native-command':
         specifier: workspace:*
         version: link:../../util/native-command
@@ -7711,6 +7714,22 @@ importers:
         specifier: workspace:*
         version: link:../tools
 
+  packages/core/model-effort-memory:
+    dependencies:
+      '@deepseek-ai/dsh-config-editor':
+        specifier: workspace:*
+        version: link:../../boot/config-editor
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-settings':
+        specifier: workspace:*
+        version: link:../../settings/settings
+
   packages/core/scope:
     devDependencies:
       '@deepseek-ai/cordis':
@@ -12945,6 +12964,9 @@ importers:
       '@deepseek-ai/dsh-attachment':
         specifier: workspace:*
         version: link:../../attachment/attachment
+      '@deepseek-ai/dsh-model-effort-memory':
+        specifier: workspace:*
+        version: link:../../core/model-effort-memory
       '@deepseek-ai/dsh-package-manifest':
         specifier: workspace:*
         version: link:../../util/package-manifest

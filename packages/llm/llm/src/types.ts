@@ -425,10 +425,22 @@ export interface LlmModelReasoningInfo {
   /** Supported efforts from least to greatest selectable reasoning effort, not predicted token use or latency. */
   efforts: readonly LlmReasoningEffortInfo[]
   /**
-   * Adapter-configured default materialized into requests when callers omit
-   * an effort. Absence preserves the provider's own default.
+   * Default materialized into requests when callers omit an effort. Absence
+   * preserves the provider's own default.
+   *
+   * This is the fold `model memory ?? adapter default`: when the deployment
+   * remembers an effort for this model and this route's vocabulary accepts it,
+   * that remembered level is this value, so display and request share one
+   * answer instead of computing the fold again downstream.
    */
   defaultEffort?: ReasoningEffortId
+  /**
+   * The model-level effort memory entry this route's vocabulary accepted, or
+   * undefined when this model has no remembered effort. Attachment reads it to
+   * tell a remembered level from an adapter default; it never feeds requests,
+   * which already read {@link LlmModelReasoningInfo.defaultEffort}.
+   */
+  effortMemory?: ReasoningEffortId
 }
 
 /**

@@ -38,6 +38,13 @@ export async function buildModelCatalog(
             ...(resolved.reasoning.defaultEffort === undefined
               ? {}
               : { defaultEffort: resolved.reasoning.defaultEffort }),
+            // The stored level rides alongside the fold, so the effort pane can
+            // attach it without re-deriving it: defaultEffort says what the
+            // model resolves to, effortMemory says what this model was last
+            // explicitly set to.
+            ...(resolved.reasoning.effortMemory === undefined
+              ? {}
+              : { effortMemory: resolved.reasoning.effortMemory }),
           }
         return {
           id: model.id,

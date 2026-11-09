@@ -1,7 +1,14 @@
 {
   "files": [],
   "references": [
-    { "path": "./tsconfig.host.json" },
-    { "path": "./tsconfig.client.json" }
+    {
+      "path": "./tsconfig.host.json"
+    },
+    {
+      "path": "./tsconfig.client.json"
+    },
+    {
+      "path": "../../core/model-effort-memory"
+    }
   ]
 }

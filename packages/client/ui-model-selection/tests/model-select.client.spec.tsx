@@ -71,9 +71,6 @@ function modelGroups(count: number): ModelDirectoryState['groups'] {
 const scrollIntoView = vi.fn()
 beforeEach(() => {
   scrollIntoView.mockClear()
-  // jsdom's store outlives one test; the seat now reads/writes per-model
-  // effort memory, which must never leak between tests.
-  localStorage.clear()
   const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView')
   Object.defineProperty(Element.prototype, 'scrollIntoView', { configurable: true, writable: true, value: scrollIntoView })
   onTestFinished(() => {
@@ -228,50 +225,56 @@ describe('ModelSelect reasoning effort', () => {
     })
     fireEvent.click(trigger)
     fireEvent.click(screen.getByRole('menuitem', { name: /推理等级/ }))
+    // The provider-default row is always first and names the level this route
+    // resolves to, so a bare session can both see and clear it.
     expect(screen.getAllByRole('menuitemradio').map(item => item.textContent))
-      .toEqual(['Off', 'High', 'Max'])
+      .toEqual(['Default → High', 'Off', 'High', 'Max'])
     expect(screen.queryByText('Largest budget')).toBeNull()
 
     fireEvent.click(screen.getByRole('menuitemradio', { name: /Max/ }))
     await waitFor(() => {
+      // The second argument is the model-level memory write that rides along.
       expect(select).toHaveBeenCalledWith({
         provider: 'deepseek-official',
         model: 'deepseek-v4-flash',
         reasoningEffort: 'max',
-      })
+      }, 'max')
       expect(trigger.getAttribute('aria-label')).toBe('选择模型，当前 DeepSeek-V4-Flash，推理等级 Max')
       expect(document.activeElement).toBe(trigger)
     })
   })
 
-  it('offers provider default only when the adapter does not configure a model default', () => {
-    const directory = createSnapshotStore(state({
-      groups: [{
-        id: 'provider',
-        name: 'Provider',
-        models: [{
-          id: 'model',
-          name: 'Model',
-          reasoning: { efforts: [{ id: 'standard', name: 'Standard' }] },
+  it('always offers the provider default row, naming the resolved level when one exists', () => {
+    const mount = (modelReasoning: NonNullable<ModelDirectoryState['groups'][number]['models'][number]['reasoning']>) => {
+      const directory = createSnapshotStore(state({
+        groups: [{
+          id: 'provider',
+          name: 'Provider',
+          models: [{ id: 'model', name: 'Model', reasoning: modelReasoning }],
         }],
-      }],
-      current: { provider: 'provider', model: 'model' },
-    }))
-    render(<ModelSelect renderSlot={renderLabel}
-      locked={false}
-      available
-      directory={directory}
-      load={vi.fn()} resolveText={resolveText}
-      select={vi.fn().mockResolvedValue({ ok: true, value: undefined })}
-      t={t}
-    />)
+        current: { provider: 'provider', model: 'model' },
+      }))
+      render(<ModelSelect renderSlot={renderLabel}
+        locked={false}
+        available
+        directory={directory}
+        load={vi.fn()} resolveText={resolveText}
+        select={vi.fn().mockResolvedValue({ ok: true, value: undefined })}
+        t={t}
+      />)
+      fireEvent.click(screen.getByRole('button', { name: /选择模型，当前/ }))
+      fireEvent.click(screen.getByRole('menuitem', { name: /推理等级/ }))
+      return screen.getAllByRole('menuitemradio').map(item => item.textContent)
+    }
 
-    fireEvent.click(screen.getByRole('button', {
-      name: '选择模型，当前 Model，推理等级 Default',
-    }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /推理等级/ }))
-    expect(screen.getAllByRole('menuitemradio').map(item => item.textContent))
+    // No resolved level: the row stands alone, without an arrow.
+    cleanup()
+    expect(mount({ efforts: [{ id: 'standard', name: 'Standard' }] }))
       .toEqual(['Default', 'Standard'])
+    // A resolved level is spelled out instead of hiding behind the default.
+    cleanup()
+    expect(mount({ efforts: [{ id: 'standard', name: 'Standard' }], defaultEffort: 'standard' }))
+      .toEqual(['Default → Standard', 'Standard'])
   })
 
   it('opens model choices without exposing a saved route absent from the catalog', () => {
@@ -507,12 +510,15 @@ describe('ModelSelect reasoning effort', () => {
 describe('ModelSelect per-model effort memory', () => {
   const dualGroups = (
     externalReasoning?: ModelDirectoryState['groups'][number]['models'][number]['reasoning'],
+    remembered?: { model: string; effortMemory: string },
   ): ModelDirectoryState['groups'] => [{
     id: 'deepseek-official',
     name: 'DeepSeek',
     models: [
       { id: 'deepseek-v4-flash', name: 'DeepSeek-V4-Flash', reasoning },
-      { id: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro', reasoning },
+      { id: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro', reasoning: remembered?.model === 'deepseek-v4-pro'
+        ? { ...reasoning, effortMemory: remembered.effortMemory }
+        : reasoning },
     ],
   }, {
     id: 'external',
@@ -533,75 +539,87 @@ describe('ModelSelect per-model effort memory', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: /^模型/ }))
   }
 
-  it('restores the chosen route\'s own remembered level when switching to it', () => {
-    localStorage.setItem('dsh.model-selection.effort-memory.v1', JSON.stringify({
-      '["deepseek-official","deepseek-v4-pro"]': 'max',
-    }))
-    const select = mountSeat(dualGroups(), { provider: 'deepseek-official', model: 'deepseek-v4-flash' })
+  const openEffortPane = (): void => {
+    fireEvent.click(screen.getByRole('button', { name: /选择模型|当前/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /推理等级/ }))
+  }
+
+  it('attaches the level the Host stores for the picked route when there is one', () => {
+    const select = mountSeat(
+      dualGroups(undefined, { model: 'deepseek-v4-pro', effortMemory: 'max' }),
+      { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+    )
     openModelPane()
     fireEvent.click(screen.getByRole('menuitemradio', { name: /DeepSeek-V4-Pro/ }))
+    // Attaching only reads the memory: no memory change rides along.
     expect(select).toHaveBeenCalledWith({
       provider: 'deepseek-official', model: 'deepseek-v4-pro', reasoningEffort: 'max',
     })
   })
 
-  it('submits a bare selection for a route with no memory and never borrows another route\'s level', () => {
-    localStorage.setItem('dsh.model-selection.effort-memory.v1', JSON.stringify({
-      '["deepseek-official","deepseek-v4-flash"]': 'max',
-    }))
-    const select = mountSeat(dualGroups(), { provider: 'deepseek-official', model: 'deepseek-v4-flash' })
+  it('submits a bare selection for a route the Host stores nothing for', () => {
+    const select = mountSeat(
+      dualGroups(undefined, { model: 'deepseek-v4-flash', effortMemory: 'max' }),
+      { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+    )
     openModelPane()
     fireEvent.click(screen.getByRole('menuitemradio', { name: /External Model/ }))
+    // A different route's stored level never rides along.
     expect(select).toHaveBeenCalledWith({ provider: 'external', model: 'external-model' })
   })
 
-  it('falls back to the model default when the remembered level left the route\'s vocabulary', () => {
-    localStorage.setItem('dsh.model-selection.effort-memory.v1', JSON.stringify({
-      '["deepseek-official","deepseek-v4-pro"]': 'ultra',
-    }))
+  it('carries a memory write when an explicit level is picked', () => {
     const select = mountSeat(dualGroups(), { provider: 'deepseek-official', model: 'deepseek-v4-flash' })
-    openModelPane()
-    fireEvent.click(screen.getByRole('menuitemradio', { name: /DeepSeek-V4-Pro/ }))
-    expect(select).toHaveBeenCalledWith({ provider: 'deepseek-official', model: 'deepseek-v4-pro' })
-  })
-
-  it('an explicit effort pick writes the memory; re-picking Provider default forgets it', () => {
-    const groups = dualGroups({ efforts: [{ id: 'standard', name: 'Standard' }] })
-    const select = mountSeat(groups, { provider: 'deepseek-official', model: 'deepseek-v4-flash' })
-    const memory = () => JSON.parse(localStorage.getItem('dsh.model-selection.effort-memory.v1') ?? '{}') as Record<string, string>
-
-    fireEvent.click(screen.getByRole('button', { name: /选择模型|当前/ }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /推理等级/ }))
+    openEffortPane()
     fireEvent.click(screen.getByRole('menuitemradio', { name: /Max/ }))
     expect(select).toHaveBeenCalledWith({
       provider: 'deepseek-official', model: 'deepseek-v4-flash', reasoningEffort: 'max',
-    })
-    expect(memory()).toEqual({ '["deepseek-official","deepseek-v4-flash"]': 'max' })
+    }, 'max')
+  })
 
-    // The external route has no model default, so its pane offers Provider
-    // default — which is already its effective value, so re-picking it only
-    // closes the menu, but still drops that route's memory.
-    cleanup()
-    localStorage.setItem('dsh.model-selection.effort-memory.v1', JSON.stringify({
-      '["deepseek-official","deepseek-v4-flash"]': 'max',
-      '["external","external-model"]': 'standard',
-    }))
-    const external = mountSeat(groups, { provider: 'external', model: 'external-model' })
-    fireEvent.click(screen.getByRole('button', { name: /选择模型|当前/ }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /推理等级/ }))
+  it('leaves the stored level alone when a bare session re-picks the provider default', () => {
+    // Bare already equals the default row, so this is a no-op that must not
+    // clear what the Host stores.
+    const select = mountSeat(dualGroups(), { provider: 'deepseek-official', model: 'deepseek-v4-flash' })
+    openEffortPane()
     fireEvent.click(screen.getByRole('menuitemradio', { name: /Default/ }))
-    expect(external).not.toHaveBeenCalled()
-    expect(memory()).toEqual({ '["deepseek-official","deepseek-v4-flash"]': 'max' })
+    expect(select).not.toHaveBeenCalled()
+  })
+
+  it('clears the stored level when an explicit session picks the provider default', () => {
+    const select = mountSeat(dualGroups(), {
+      provider: 'deepseek-official', model: 'deepseek-v4-flash', reasoningEffort: 'max',
+    })
+    openEffortPane()
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /Default/ }))
+    expect(select).toHaveBeenCalledWith(
+      { provider: 'deepseek-official', model: 'deepseek-v4-flash' }, null,
+    )
+  })
+
+  it('does not offer a stored level this route no longer declares', () => {
+    // The Host only ever advertises a stored level its vocabulary accepts, so
+    // the pane cannot render an id the route would reject.
+    const select = mountSeat(
+      dualGroups(undefined, { model: 'deepseek-v4-pro', effortMemory: 'max' }),
+      { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+    )
+    openModelPane()
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /DeepSeek-V4-Pro/ }))
+    expect(select).not.toHaveBeenCalledWith(
+      expect.objectContaining({ reasoningEffort: 'ultra' }),
+      expect.anything(),
+    )
   })
 })
 
 describe('ModelSelect keyboard walk', () => {
-  function mountOpen() {
+  function mountOpen(current: ModelDirectoryState['current'] = state().current) {
     const select = vi.fn().mockResolvedValue({ ok: true, value: undefined })
     render(<ModelSelect renderSlot={renderLabel}
       locked={false}
       available
-      directory={createSnapshotStore(state())}
+      directory={createSnapshotStore(state({ current }))}
       load={vi.fn()} resolveText={resolveText}
       select={select}
       t={t}
@@ -630,7 +648,12 @@ describe('ModelSelect keyboard walk', () => {
       onTestFinished(() => { device.mockRestore() })
       const select = vi.fn()
       render(<ModelSelect renderSlot={renderLabel} locked={false} available
-        directory={createSnapshotStore(state({ groups: modelGroups(modelCount) }))}
+        directory={createSnapshotStore(state({
+          groups: modelGroups(modelCount),
+          // An explicit level puts the checked row mid-list, so this proves the
+          // keyboard lands on the value in use rather than the first row.
+          current: { provider: 'deepseek-official', model: 'deepseek-v4-flash', reasoningEffort: 'high' },
+        }))}
         load={vi.fn()} resolveText={resolveText} select={select} t={t}
       />)
       const trigger = screen.getByRole('button', { name: /选择模型/ })
@@ -699,14 +722,19 @@ describe('ModelSelect keyboard walk', () => {
 
     fireEvent.click(screen.getByRole('menuitem', { name: /推理等级/ }))
     const rows = screen.getAllByRole('menuitemradio')
-    expect(rows.map(row => row.textContent)).toEqual(['Off', 'High', 'Max'])
-    // The pane opens on its checked row, so walking starts from High.
+    expect(rows.map(row => row.textContent)).toEqual(['Default → High', 'Off', 'High', 'Max'])
+    // This session holds no explicit level, so the provider-default row is the
+    // checked one and the walk starts there.
+    fireEvent.keyDown(rows[0]!, { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(rows[1])
     fireEvent.keyDown(rows[1]!, { key: 'ArrowDown' })
     expect(document.activeElement).toBe(rows[2])
-    fireEvent.keyDown(rows[2]!, { key: 'ArrowDown' }) // wraps to the top
+    fireEvent.keyDown(rows[2]!, { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(rows[3])
+    fireEvent.keyDown(rows[3]!, { key: 'ArrowDown' }) // wraps to the top
     expect(document.activeElement).toBe(rows[0])
     fireEvent.keyDown(rows[0]!, { key: 'ArrowUp' }) // wraps to the bottom
-    expect(document.activeElement).toBe(rows[2])
+    expect(document.activeElement).toBe(rows[3])
     expect(screen.getByRole('menu')).toBeTruthy()
   })
 
@@ -714,11 +742,13 @@ describe('ModelSelect keyboard walk', () => {
     const select = mountOpen()
     fireEvent.click(screen.getByRole('menuitem', { name: /推理等级/ }))
     const rows = screen.getAllByRole('menuitemradio')
-    fireEvent.keyDown(rows[1]!, { key: 'ArrowDown' }) // High → Max
-    expect(fireEvent.keyDown(rows[2]!, { key: 'Tab' })).toBe(false)
-    expect(select).toHaveBeenCalledWith({
-      provider: 'deepseek-official', model: 'deepseek-v4-flash', reasoningEffort: 'max',
-    })
+    fireEvent.keyDown(rows[0]!, { key: 'ArrowDown' }) // default → Off
+    fireEvent.keyDown(rows[1]!, { key: 'ArrowDown' }) // Off → High
+    fireEvent.keyDown(rows[2]!, { key: 'ArrowDown' }) // High → Max
+    expect(fireEvent.keyDown(rows[3]!, { key: 'Tab' })).toBe(false)
+    expect(select).toHaveBeenCalledWith(
+      { provider: 'deepseek-official', model: 'deepseek-v4-flash', reasoningEffort: 'max' }, 'max',
+    )
     await waitFor(() => { expect(screen.queryByRole('menu')).toBeNull() })
   })
 
@@ -765,16 +795,17 @@ describe('ModelSelect keyboard walk', () => {
   })
 
   it('hands a drilled pane the focus its unmounted cell left behind, on the value in use', () => {
-    mountOpen()
+    // The session holds High explicitly, so the checked row sits mid-list and
+    // the keyboard lands there rather than at the top.
+    mountOpen({ provider: 'deepseek-official', model: 'deepseek-v4-flash', reasoningEffort: 'high' })
     fireEvent.click(screen.getByRole('menuitem', { name: /推理等级/ }))
     const rows = screen.getAllByRole('menuitemradio')
-    // The fixture's model defaults to the High effort: the checked row is where
-    // the keyboard lands, not the top of the list.
-    expect(rows[1]!.getAttribute('aria-checked')).toBe('true')
-    expect(document.activeElement).toBe(rows[1])
-    // The walk continues from there.
-    fireEvent.keyDown(rows[1]!, { key: 'ArrowDown' })
+    expect(rows.map(row => row.textContent)).toEqual(['Default → High', 'Off', 'High', 'Max'])
+    expect(rows[2]!.getAttribute('aria-checked')).toBe('true')
     expect(document.activeElement).toBe(rows[2])
+    // The walk continues from there.
+    fireEvent.keyDown(rows[2]!, { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(rows[3])
   })
 
   it('keeps the card navigable when a pane has no rows, and leaves a retry its Tab', () => {

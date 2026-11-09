@@ -221,6 +221,31 @@ export class SessionCommandController {
             : { reasoningEffort: ReasoningEffortId(request.reasoningEffort) }),
         }
         await this.ctx.llm.resolveCallConfig(selected)
+        // The memory change rides the same request as the selection, and lands
+        // first: a caller that cannot persist its effort finds nothing changed
+        // rather than a session that moved without remembering why. Callers
+        // that never address effort never reach this, so routing automation
+        // stays structurally unable to write memory.
+        if (request.effortMemory !== undefined) {
+          const memory = this.ctx.get('modelEffortMemory')
+          if (memory === undefined) {
+            throw new RemoteError(
+              'gateway/internal',
+              'effort memory is unavailable: this deployment mounts no model-effort-memory entry',
+              { provider: request.provider, model: request.model },
+            )
+          }
+          try {
+            if (request.effortMemory === null) await memory.forget(request.model)
+            else await memory.remember(request.model, request.effortMemory)
+          } catch (error) {
+            throw new RemoteError(
+              'gateway/internal',
+              `effort memory could not be saved: ${error instanceof Error ? error.message : String(error)}`,
+              { provider: request.provider, model: request.model },
+            )
+          }
+        }
         agent.model.select(selected)
         void this.ctx.agentDefaultModel.saveSelection(selected).catch((error: unknown) => {
           this.ctx.logger.warn(

@@ -70,6 +70,7 @@ export const SERVICE_PAGE: Record<string, string> = {
   mcpResources: 'mcp.md',
   agentLoop: 'core.md',
   agentDefaultModel: 'core.md',
+  modelEffortMemory: 'core.md',
   agentPresets: 'core.md',
   agents: 'core.md',
   approval: 'approval.md',
