@@ -1288,7 +1288,9 @@ describe('web e2e: long Chat scroll contract', () => {
       await expectControls()
 
       const rail = world.page.getByRole('navigation', { name: 'Turn navigation', includeHidden: true })
-      const frame = rail.locator('../..')
+      // The rail column (prev/next intervention controls around the nav) sits
+      // between the nav and the Chat frame that owns the width under test.
+      const frame = rail.locator('../../..')
       const originalStyle = await frame.getAttribute('style')
       try {
         for (const clearance of [16, 8]) {
@@ -1574,7 +1576,8 @@ describe('web e2e: long Chat scroll contract', () => {
       await world.page.mouse.wheel(0, -80)
       await expect.poll(() => railScroller.evaluate(element => element.scrollTop)).toBe(0)
       const transcriptLayers = await tooltip.evaluate((preview) => {
-        const railSlot = preview.closest('nav')?.parentElement
+        // nav → rail column → the full-bleed slot that owns the layer.
+        const railSlot = preview.closest('nav')?.parentElement?.parentElement
         const codeBanner = document.querySelector<HTMLElement>('.md-code-block > :first-child')
         if (!(railSlot instanceof HTMLElement) || codeBanner === null) {
           throw new Error('turn preview or code-block banner stacking context is unavailable')
