@@ -242,7 +242,8 @@ describe('Session-list work slices', () => {
       if (id === abortAt) betweenRows(() => { controller.abort(reason) })
     }
 
-    // Explicit row cuts (f5-contract-a2-1030) ride beside the signal.
+    // Explicit row cuts ride beside the signal (F′ flip: omission would cut
+    // the same way now; these stay explicit on the wire).
     await expect(h.list.list({ includeArchived: false, includeSubagents: false }, controller.signal)).rejects.toBe(reason)
     expect(h.trace).toEqual(abortAt === 'first'
       ? [`${phase}:first`]

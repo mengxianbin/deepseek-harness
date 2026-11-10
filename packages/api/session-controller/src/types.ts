@@ -304,28 +304,30 @@ export interface SkillListValue {
 export interface SessionListRequest {
   readonly cursor?: string
   /**
-      Archived row scope. Omitted or true, the listing keeps the pre-f5
-      full-corpus contract and returns archived Sessions as rows. Only an
-      explicit false excludes the registry's archived ids from the directory
-      scan before any header read, so that listing never opens, decompresses,
-      or stats an archived session.
+      Archived row scope (F′ default flip). Omitted or false, the listing
+      cuts archived rows: the registry's archived ids are excluded from the
+      directory scan before any header read, so that listing never opens,
+      decompresses, or stats an archived session. Only an explicit true
+      returns archived Sessions as rows.
   */
   readonly includeArchived?: boolean
   /**
-      Subagent-origin row scope. Omitted or true, the listing keeps the pre-f5
-      full-corpus contract and returns subagent-origin Sessions as rows. Only
-      an explicit false drops a subagent row the moment its header reveals
-      `origin`, before its stat. The two flags are independent: the thin
-      first-party listing passes both false, full-corpus consumers omit both.
+      Subagent-origin row scope (F′ default flip). Omitted or false, the
+      listing cuts subagent-origin rows: the registry's in-memory header
+      index pre-excludes their ids, and a subagent row the index has not
+      seen is dropped the moment its header reveals `origin`, before its
+      stat. Only an explicit true returns subagent Sessions as rows. The
+      two flags are independent: the thin first-party listing omits both,
+      full-corpus consumers pass both true.
   */
   readonly includeSubagents?: boolean
   /**
       Trim the display-heavy projection keys (`tokenUsage`, `contextPressure`,
       `contextBreakdown`, `sessionStats`, `inbox`, `turnOutline`) from list
-      hints. Omitted or false, list hints carry every value their source holds
-      (the pre-f5 contract); only an explicit true opts into the thin column
-      set the main-page listing passes. Cold-row authorities (`title`,
-      `subagentCatalog`, `goal`, `agentPreset`) are kept either way.
+      hints (F′ default flip). Omitted or true, list hints carry the thin
+      column set; only an explicit false restores every value the source
+      holds. Cold-row authorities (`title`, `subagentCatalog`, `goal`,
+      `agentPreset`) are kept either way.
   */
   readonly trimHeavyProjections?: boolean
 }

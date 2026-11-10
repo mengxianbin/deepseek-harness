@@ -1,10 +1,12 @@
 /**
  * Row scope and projection trimming of `session/list`
- * (f5-contract-a2-1030): the default `{}` request serves the pre-f5 full
- * corpus — archived rows, subagent-origin rows, and untrimmed hints — and
- * only explicit flags cut rows (`includeArchived: false` /
- * `includeSubagents: false`, each cutting at its earliest layer) or trim the
- * heavy columns (`trimHeavyProjections: true`).
+ * (F′ default flip, session-list-full-slim-1110 P2): the default request
+ * serves the thin first-party listing — no archived rows, no
+ * subagent-origin rows, heavy hint columns trimmed — and explicit flags
+ * widen back (`includeArchived: true` / `includeSubagents: true` restore
+ * rows cut at their earliest layer, `trimHeavyProjections: false` restores
+ * the heavy columns). The pre-f5 full corpus (f5-contract-a2-1030) is now
+ * an explicit all-true request, never the omission.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -90,77 +92,88 @@ describe('session/list row scope', () => {
     record(ARCHIVED_SUBAGENT, { origin: 'subagent', parentSession: ACTIVE }),
   ]
 
-  it('serves the full pre-f5 corpus by default with no row-cut options', async () => {
+  it('serves the thin first-party listing by default (F′ flip)', async () => {
     const { list, listSessions } = await harness(rows)
 
     const items = await list.list()
 
-    expect(items.map(item => item.sessionId).sort())
-      .toEqual([ACTIVE, SUBAGENT, ARCHIVED, ARCHIVED_SUBAGENT].sort())
-    // No flag, no filter: the machine only engages on an explicit `false`.
+    expect(items.map(item => item.sessionId)).toEqual([ACTIVE])
+    // Omission is now a row cut: both registry sets feed the pre-exclusion
+    // set and the header predicate runs as the correctness backstop.
     const options = listSessions.mock.calls[0]?.[1]
-    expect(options?.excludeSessionIds).toBeUndefined()
-    expect(options?.select).toBeUndefined()
+    expect(options?.excludeSessionIds?.has(ARCHIVED)).toBe(true)
+    expect(options?.excludeSessionIds?.has(ARCHIVED_SUBAGENT)).toBe(true)
+    expect(options?.excludeSessionIds?.has(SUBAGENT)).toBe(true)
+    expect(options?.select?.(rows[1]?.header as SessionRecord['header'])).toBe(false)
+    expect(options?.select?.(rows[0]?.header as SessionRecord['header'])).toBe(true)
   })
 
-  it('an explicit includeArchived:false pre-excludes archived ids before any header read', async () => {
+  it('an explicit includeArchived:false matches the omitted default for archived rows', async () => {
     const { list, listSessions } = await harness(rows)
 
     const items = await list.list({ includeArchived: false })
 
-    expect(items.map(item => item.sessionId).sort()).toEqual([ACTIVE, SUBAGENT].sort())
+    // Subagents stay cut by their own omitted default.
+    expect(items.map(item => item.sessionId)).toEqual([ACTIVE])
     const options = listSessions.mock.calls[0]?.[1]
     expect(options?.excludeSessionIds?.has(ARCHIVED)).toBe(true)
     expect(options?.excludeSessionIds?.has(ARCHIVED_SUBAGENT)).toBe(true)
-    // Subagent rows stay in unless their own flag opts out.
-    expect(options?.select).toBeUndefined()
+    expect(options?.select).toBeDefined()
   })
 
-  it('an explicit includeSubagents:false pre-excludes known subagent ids and keeps the header predicate as backstop', async () => {
+  it('an explicit includeArchived:true restores archived rows before any header read', async () => {
     const { list, listSessions } = await harness(rows)
 
-    const items = await list.list({ includeSubagents: false })
+    const items = await list.list({ includeArchived: true })
 
     expect(items.map(item => item.sessionId).sort()).toEqual([ACTIVE, ARCHIVED].sort())
     const options = listSessions.mock.calls[0]?.[1]
-    // The registry's in-memory header index pre-excludes subagent ids before
-    // any directory read — the same earliest-layer cut archived ids get.
+    // Archived ids leave the pre-exclusion set; subagent ids stay in it
+    // (their own flag keeps the omitted default cut), so the archived
+    // subagent stays excluded as a subagent even with archives widened.
+    expect(options?.excludeSessionIds?.has(ARCHIVED)).toBe(false)
     expect(options?.excludeSessionIds?.has(SUBAGENT)).toBe(true)
     expect(options?.excludeSessionIds?.has(ARCHIVED_SUBAGENT)).toBe(true)
-    expect(options?.excludeSessionIds?.has(ARCHIVED)).toBe(false)
-    // Origin exists only in the header: the predicate stays as the
-    // correctness backstop for ids the index has not seen yet.
     expect(options?.select?.(rows[1]?.header as SessionRecord['header'])).toBe(false)
-    expect(options?.select?.(rows[0]?.header as SessionRecord['header'])).toBe(true)
+  })
+
+  it('an explicit includeSubagents:true restores subagent rows and drops the header predicate', async () => {
+    const { list, listSessions } = await harness(rows)
+
+    const items = await list.list({ includeSubagents: true })
+
+    expect(items.map(item => item.sessionId).sort()).toEqual([ACTIVE, SUBAGENT].sort())
+    const options = listSessions.mock.calls[0]?.[1]
+    // Subagent ids leave the pre-exclusion set; archived ids stay in it.
+    expect(options?.excludeSessionIds?.has(SUBAGENT)).toBe(false)
+    expect(options?.excludeSessionIds?.has(ARCHIVED)).toBe(true)
+    // Nothing left for the predicate to cut.
+    expect(options?.select).toBeUndefined()
   })
 
   it('falls back to the header predicate alone when the registry index has not seen a subagent id', async () => {
     const { list, listSessions } = await harness(rows, {}, new Set())
 
-    const items = await list.list({ includeSubagents: false })
+    const items = await list.list({ includeArchived: true, includeSubagents: false })
 
     expect(items.map(item => item.sessionId).sort()).toEqual([ACTIVE, ARCHIVED].sort())
     const options = listSessions.mock.calls[0]?.[1]
-    // Empty index, nothing to pre-exclude: the post-read predicate still cuts.
+    // Empty subagent index, archived widened: nothing to pre-exclude, the
+    // post-read predicate still cuts.
     expect(options?.excludeSessionIds?.size).toBe(0)
     expect(options?.select?.(rows[1]?.header as SessionRecord['header'])).toBe(false)
     expect(options?.select?.(rows[0]?.header as SessionRecord['header'])).toBe(true)
   })
 
-  it('both explicit cuts restore the thin active first-party listing', async () => {
-    const { list } = await harness(rows)
+  it('full-corpus consumers pass every flag explicitly (all-true request)', async () => {
+    const { list, listSessions } = await harness(rows)
 
-    const items = await list.list({ includeArchived: false, includeSubagents: false })
-
-    expect(items.map(item => item.sessionId)).toEqual([ACTIVE])
-  })
-
-  it('explicit true matches the omitted default (full rows)', async () => {
-    const { list } = await harness(rows)
-
-    const items = await list.list({ includeArchived: true, includeSubagents: true })
+    const items = await list.list({ includeArchived: true, includeSubagents: true, trimHeavyProjections: false })
 
     expect(items).toHaveLength(4)
+    const options = listSessions.mock.calls[0]?.[1]
+    expect(options?.excludeSessionIds).toBeUndefined()
+    expect(options?.select).toBeUndefined()
   })
 })
 
@@ -180,21 +193,10 @@ describe('session/list projection trimming', () => {
     },
   }
 
-  it('keeps every hint key by default (pre-f5 full columns)', async () => {
+  it('drops the display-heavy keys by default (F′ flip) and keeps the cold-row authorities', async () => {
     const { list } = await harness([record(ACTIVE)], heavyFixture)
 
     const [item] = await list.list()
-    const values = item?.projections?.values as Record<string, unknown>
-
-    for (const key of ['tokenUsage', 'contextPressure', 'contextBreakdown', 'sessionStats', 'inbox', 'turnOutline']) {
-      expect(values).toHaveProperty(key)
-    }
-  })
-
-  it('drops the display-heavy keys only under trimHeavyProjections:true and keeps the cold-row authorities', async () => {
-    const { list } = await harness([record(ACTIVE)], heavyFixture)
-
-    const [item] = await list.list({ trimHeavyProjections: true })
     const values = item?.projections?.values as Record<string, unknown>
 
     for (const key of ['tokenUsage', 'contextPressure', 'contextBreakdown', 'sessionStats', 'inbox', 'turnOutline']) {
@@ -204,5 +206,16 @@ describe('session/list projection trimming', () => {
     expect(values).toHaveProperty('subagentCatalog')
     expect(values).toHaveProperty('goal')
     expect(values).toHaveProperty('agentPreset')
+  })
+
+  it('an explicit trimHeavyProjections:false restores every hint key', async () => {
+    const { list } = await harness([record(ACTIVE)], heavyFixture)
+
+    const [item] = await list.list({ trimHeavyProjections: false })
+    const values = item?.projections?.values as Record<string, unknown>
+
+    for (const key of ['tokenUsage', 'contextPressure', 'contextBreakdown', 'sessionStats', 'inbox', 'turnOutline']) {
+      expect(values).toHaveProperty(key)
+    }
   })
 })
