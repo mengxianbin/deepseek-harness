@@ -317,9 +317,14 @@ describe('SessionController attention status', () => {
     let listener: ((session: { readonly id: SessionId }, key: string) => void) | undefined
     ctx.provide('sessionProjections', {
       // The controller registers its own projections at construction; the
-      // stand-in accepts them without a fold of its own.
+      // stand-in accepts them without a fold of its own. Keyed reads: the
+      // status emitters ask `userQuestions` (attention) and `seal`
+      // (seal-light-host-state-1109) structurally, and each key must answer
+      // in its own shape.
       register: () => () => {},
-      stateOf: () => ({ questions: { active: questionActive ? [{}] : [] } }),
+      stateOf: (_session: unknown, key: string) => key === 'userQuestions'
+        ? { questions: { active: questionActive ? [{}] : [] } }
+        : null,
       onChanged: (registered: typeof listener) => {
         listener = registered
         return () => { listener = undefined }
@@ -338,7 +343,7 @@ describe('SessionController attention status', () => {
       list: () => Promise.resolve([header]),
       inspect: () => Promise.resolve({ meta: header, inheritedEventCount: SessionLogOffset(0), events: [] }),
     }) as never)
-    createSessionTestController(ctx, defaults)
+    await createSessionTestController(ctx, defaults)
     const status = vi.fn()
     ctx.on('api-session/status', status)
 
@@ -366,6 +371,89 @@ describe('SessionController attention status', () => {
     questionActive = true
     ctx.emit('agent/status', { agent, status: 'running' })
     expect(status).toHaveBeenLastCalledWith(sessionId, true, 'question')
+    await ctx.fiber.dispose()
+  })
+})
+
+describe('SessionController seal status (seal-light-host-state-1109 裁点2A)', () => {
+  it('carries the seal verdict on frames, fills arg3 with null when there is no attention, and re-emits on the seal key and the 15s sweep', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    // The structural registry answers `userQuestions` and `seal` in their own
+    // shapes; `seal` starts as a verdict and later folds to null (unit
+    // released / no record yet) — the frame then drops back to its old shape.
+    let sealValue: { readonly verdict: string; readonly detail?: string } | null = { verdict: 'DONE', detail: 'sentinel-ok' }
+    let questionActive = false
+    let listener: ((session: { readonly id: SessionId }, key: string) => void) | undefined
+    ctx.provide('sessionProjections', {
+      register: () => () => {},
+      stateOf: (_session: unknown, key: string) => key === 'userQuestions'
+        ? { questions: { active: questionActive ? [{}] : [] } }
+        : sealValue,
+      onChanged: (registered: typeof listener) => {
+        listener = registered
+        return () => { listener = undefined }
+      },
+    } as never)
+    await ctx.plugin(AgentRegistry)
+    const sessionId = SessionId('seal-status-session')
+    const header: SessionHeader = {
+      version: SESSION_FORMAT_VERSION,
+      id: sessionId,
+      createdAt: 1,
+      cwd: '/workspace',
+      isSeeded: false,
+    }
+    ctx.provide('sessionPersistence', testSessionPersistence(ctx, {
+      list: () => Promise.resolve([header]),
+      inspect: () => Promise.resolve({ meta: header, inheritedEventCount: SessionLogOffset(0), events: [] }),
+    }) as never)
+    // Fake timers BEFORE the controller mounts so its 15s sweep interval is a
+    // fake timer this test can drive (机检④: the sweep traversal re-emits the
+    // current truth, verdict included).
+    vi.useFakeTimers()
+    onTestFinished(() => { vi.useRealTimers() })
+    await createSessionTestController(ctx, defaults)
+    const status = vi.fn()
+    ctx.on('api-session/status', status)
+
+    const session = ctx.sessions.create(sessionId, { meta: header })
+    const agent = { id: sessionId, session, status: 'idle', ctx } as Agent
+    await ctx.agents.register(agent)
+
+    // A seal-bearing frame with no attention: arg3 is the null positional
+    // placeholder (explicit `undefined` is not lossless JSON), arg4 the verdict.
+    ctx.emit('agent/status', { agent, status: 'running' })
+    expect(status).toHaveBeenLastCalledWith(sessionId, true, null, { verdict: 'DONE', detail: 'sentinel-ok' })
+
+    // Attention and seal together ride the same frame.
+    questionActive = true
+    ctx.emit('agent/status', { agent, status: 'running' })
+    expect(status).toHaveBeenLastCalledWith(sessionId, true, 'question', { verdict: 'DONE', detail: 'sentinel-ok' })
+
+    // A turn-end record lands: the projection change stream re-emits right away
+    // (推腿) instead of waiting for the next sweep.
+    sealValue = { verdict: 'UNSEALED', detail: 'sentinel-pending' }
+    listener?.(session, 'seal')
+    expect(status).toHaveBeenLastCalledWith(sessionId, true, 'question', { verdict: 'UNSEALED', detail: 'sentinel-pending' })
+
+    // Unrelated projection keys never re-emit status.
+    const emissions = status.mock.calls.length
+    listener?.(session, 'lastTurnOutcome')
+    expect(status).toHaveBeenCalledTimes(emissions)
+
+    // The Host holds no verdict (registering unit released): the frame falls
+    // back to its pre-seal shape — absent arg reads as "no verdict".
+    sealValue = null
+    ctx.emit('agent/status', { agent, status: 'running' })
+    expect(status).toHaveBeenLastCalledWith(sessionId, true, 'question')
+
+    // 机检④: the 15s sweep re-sends the current truth for every published row —
+    // verdict included, no separate seal timer or channel.
+    sealValue = { verdict: 'DONE', detail: 'sentinel-ok' }
+    questionActive = false
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(status).toHaveBeenLastCalledWith(sessionId, true, null, { verdict: 'DONE', detail: 'sentinel-ok' })
     await ctx.fiber.dispose()
   })
 })

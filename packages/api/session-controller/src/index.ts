@@ -41,6 +41,7 @@ import type {
   SessionAttachmentRequest,
   SessionAttachmentValue,
   SessionAttentionKind,
+  SessionSealState,
   SessionCancelRequest,
   SessionCancelValue,
   SessionControlFrame,
@@ -286,6 +287,21 @@ export class SessionController extends TypertRemoteService {
         ? 'question'
         : undefined
     }
+    /**
+     * The archive-seal verdict while the registering unit holds one
+     * (seal-light-host-state-1109 裁点2A): the same structural read as
+     * attention, keyed `seal`. `undefined` covers both the key being absent
+     * (unit never registered) and a `null` value (no record folded yet) —
+     * the frame then omits the argument entirely (省参缺省模式), and the
+     * client paints fail-visible rather than the old fail-dark silence.
+     */
+    const sealFor = (sessionId: SessionId): SessionSealState | undefined => {
+      if (projections === undefined) return undefined
+      const session = ctx.sessions.get(sessionId)
+      if (session === undefined) return undefined
+      const state = projections.stateOf(session, 'seal') as SessionSealState | null | undefined
+      return state == null ? undefined : state
+    }
     // Every id this controller has published a status for; the heartbeat sweep
     // re-emits their current truth so a dropped frame heals itself.
     const sweepSessions = new Set<SessionId>()
@@ -297,10 +313,22 @@ export class SessionController extends TypertRemoteService {
       // callback is uncaught and takes the whole Host process down
       // (api-session/status arg2 crash, 2026-10-31). Omit the argument
       // entirely when there is no attention so listeners still see
-      // `attention === undefined`.
+      // `attention === undefined`. The seal arg (seal-light-host-state-1109
+      // 裁点2A) follows the same omission rule: absent = the Host holds no
+      // verdict, so old frame shapes stay valid in both directions. A frame
+      // that carries a seal but no attention fills arg3 with `null` — the
+      // positional placeholder is lossless JSON where `undefined` is not;
+      // listeners fold `null` to absent.
       const attention = attentionFor(sessionId)
-      if (attention === undefined) ctx.emit('api-session/status', sessionId, running)
-      else ctx.emit('api-session/status', sessionId, running, attention)
+      const seal = sealFor(sessionId)
+      if (seal === undefined) {
+        if (attention === undefined) ctx.emit('api-session/status', sessionId, running)
+        else ctx.emit('api-session/status', sessionId, running, attention)
+      } else if (attention === undefined) {
+        ctx.emit('api-session/status', sessionId, running, null, seal)
+      } else {
+        ctx.emit('api-session/status', sessionId, running, attention, seal)
+      }
     }
     ctx.on('agent/status', ({ agent, status }) => {
       const running = status === 'running'
@@ -318,7 +346,11 @@ export class SessionController extends TypertRemoteService {
       projections = registry
       ctx.effect(() => {
         const dispose = registry.onChanged((session, key) => {
-          if (key !== 'userQuestions') return
+          // Two keys refresh the status frame: the attention fold (question
+          // open/close) and the archive-seal verdict (seal-light-host-state-1109
+          // 裁点2A 推腿 — a turn-end record lands, this re-emits the row's
+          // current truth instead of waiting for the next 15s sweep).
+          if (key !== 'userQuestions' && key !== 'seal') return
           if (ctx.sessions.get(session.id) === undefined) return
           // `runningBySession` is memory only and is written solely by
           // `agent/status`, so a Host that restarted without this Session

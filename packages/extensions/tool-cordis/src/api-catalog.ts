@@ -786,9 +786,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'Detached layer values alongside their Loader entries.',
       },
       {
-        signature: 'async edit( entry: Entry, change: (current: Record<string, unknown>, inherited: Record<string, unknown>) => Record<string, unknown>, ): Promise<void>',
+        signature: 'async edit( entry: Entry, change: (current: Record<string, unknown>, inherited: Record<string, unknown>) => Record<string, unknown>, by: string = \'unknown\', ): Promise<void>',
         description: 'Validate, persist, and reconcile a plugin\'s next config; ordinary fields keep normal lifecycle rules.',
-        parameters: [{ name: 'entry', description: 'Current Loader entry, also used to detect replacement during the write.' }, { name: 'change', description: 'Derive a raw config from the current entry and its inherited layer.' }],
+        parameters: [{ name: 'entry', description: 'Current Loader entry, also used to detect replacement during the write.' }, { name: 'change', description: 'Derive a raw config from the current entry and its inherited layer.' }, { name: 'by', description: 'Author of the write — the Remote caller\'s `peer:<id>` when the change arrived over the gateway, `unknown` for in-process callers; recorded on the `patch written` journal line once the write commits.' }],
         returns: 'Fulfillment after Loader reconciliation completes.',
       },
     ],
@@ -4774,10 +4774,10 @@ export const EVENT_API: readonly EventApiEntry[] = [
   {
     name: 'api-session/status',
     mode: 'emit',
-    signature: '\'api-session/status\'(sessionId: SessionId, running: boolean, attention?: SessionAttentionKind): void',
-    summary: 'One Agent changed running state, or a Session\'s objective attention fold refreshed.',
-    description: 'One Agent changed running state, or a Session\'s objective attention fold refreshed.',
-    parameters: [{ name: 'sessionId', description: 'Agent and Session identity.' }, { name: 'running', description: 'whether the Agent is running.' }, { name: 'attention', description: 'the Session\'s objective blocked-on-the-user kind while one is active (\'question\' = an unanswered durable ask); absent otherwise. Card-free: every connected client renders it the same way regardless of which view is open.' }],
+    signature: '\'api-session/status\'( sessionId: SessionId, running: boolean, attention?: SessionAttentionKind | null, seal?: SessionSealState, ): void',
+    summary: 'One Agent changed running state, a Session\'s objective attention fold refreshed, or the archive-seal verdict on the row refreshed (seal-light-host-state-1109 裁点2A).',
+    description: 'One Agent changed running state, a Session\'s objective attention fold refreshed, or the archive-seal verdict on the row refreshed (seal-light-host-state-1109 裁点2A).',
+    parameters: [{ name: 'sessionId', description: 'Agent and Session identity.' }, { name: 'running', description: 'whether the Agent is running.' }, { name: 'attention', description: 'the Session\'s objective blocked-on-the-user kind while one is active (\'question\' = an unanswered durable ask); absent otherwise. Card-free: every connected client renders it the same way regardless of which view is open. `null` is the positional placeholder a frame carries when it has a seal but no attention (an explicit `undefined` arg is not lossless JSON — arg2 crash precedent, 2026-10-31); listeners fold `null` to absent.' }, { name: 'seal', description: 'the Session\'s latest archive-seal verdict while the registering unit holds one; the argument is omitted entirely (old frame shape) when the Host holds no verdict, so an absent arg reads as "no verdict" rather than a schema break. Re-sent by the 15s sweep for every published Session.' }],
   },
   {
     name: 'app-boot/config-reload',
@@ -5668,6 +5668,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type AuthorizationStatus = \'authorized\' | \'cancelled\';',
   },
   {
+    name: 'AutoRoutePollReport',
+    declaration: 'export interface AutoRoutePollReport {\n    readonly ok: boolean;\n    readonly failingSince?: number;\n    readonly failingForSec?: number;\n    readonly sustained: boolean;\n    readonly error?: string;\n    readonly ageSec: number;\n}',
+  },
+  {
     name: 'BackendRegistry',
     declaration: 'export class BackendRegistry {\n    register(name: string, backend: StorageBackend): () => void;\n    get(name: string): StorageBackend;\n    names(): string[];\n}',
   },
@@ -6234,6 +6238,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'DshEnvironmentKey',
     declaration: 'export type DshEnvironmentKey = `${typeof DSH_ENV_PREFIX}${string}`;',
+  },
+  {
+    name: 'DutyInventoryItem',
+    declaration: 'export interface DutyInventoryItem {\n    readonly id: string;\n    readonly status: \'healthy\' | \'disabled\' | \'failed\';\n    readonly intentional: boolean;\n    readonly reasons: readonly string[];\n    readonly cadenceLabel?: string;\n}',
+  },
+  {
+    name: 'DutyInventoryReport',
+    declaration: 'export interface DutyInventoryReport {\n    readonly ok: boolean;\n    readonly fresh: boolean;\n    readonly ageSec?: number;\n    readonly counts: {\n        readonly total: number;\n        readonly healthy: number;\n        readonly disabled: number;\n        readonly failed: number;\n    };\n    readonly items: readonly DutyInventoryItem[];\n}',
   },
   {
     name: 'DynamicCordisPackage',
@@ -8317,7 +8329,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionHealthReport',
-    declaration: 'export interface SessionHealthReport {\n    readonly ok: boolean;\n    readonly total: number;\n    readonly counts: SessionHealthCounts;\n    readonly issues: readonly SessionHealthIssue[];\n}',
+    declaration: 'export interface SessionHealthReport {\n    readonly ok: boolean;\n    readonly total: number;\n    readonly counts: SessionHealthCounts;\n    readonly issues: readonly SessionHealthIssue[];\n    readonly duty?: DutyInventoryReport;\n    readonly autoRoute?: AutoRoutePollReport;\n}',
   },
   {
     name: 'SessionHistoryRecord',
@@ -8554,6 +8566,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SessionResultRange',
     declaration: 'export interface SessionResultRange {\n    from?: number;\n    to?: number;\n}',
+  },
+  {
+    name: 'SessionSealState',
+    declaration: 'export interface SessionSealState {\n    readonly verdict: string;\n    readonly detail?: string;\n    readonly followUpCount?: number;\n}',
   },
   {
     name: 'SessionSearchCursor',

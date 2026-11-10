@@ -38,6 +38,15 @@ declare module '@deepseek-ai/dsh-session-projection/types' {
      */
     lastReceipt: SessionLastReceipt | null
     /**
+     * The archive-seal verdict folded from plugin records
+     * (seal-light-host-state-1109, 裁点3A): `null` until the domain's turn-end
+     * compute lands a record, then the latest one. Carried in the Session
+     * summary (`summaryKeys()` default) so `session/list` rows reconcile the
+     * pushed `api-session/status` seal without a second channel — the key is
+     * projection-face addition only; slim 选项 D must not cut it (跨单钉子).
+     */
+    seal: SessionSealState | null
+    /**
      * Image-intake limits enforced by the Session prompt endpoint. Boot
      * constant, excluded from Session summary payloads: every Session shares
      * it, so a list row would repeat one host-wide fact.
@@ -679,6 +688,23 @@ export type SessionControlFrame =
  */
 export type SessionAttentionKind = 'question'
 
+/**
+ * The archive-seal verdict as the Host carries it (seal-light-host-state-1109,
+ * 裁点2A/3A): a structural value the Host never interprets — the six-value
+ * grouping vocabulary belongs to the seal domain and its clients, so this
+ * package only shuttles `{verdict, detail, followUpCount?}` from the
+ * registering unit's projection onto `api-session/status` frames and
+ * `SessionSummary.projections.seal`.
+ */
+export interface SessionSealState {
+  /** The domain's verdict token; the Host treats it as an opaque string. */
+  readonly verdict: string
+  /** Machine breakdown the domain attached (contract C1 detail vocabulary). */
+  readonly detail?: string
+  /** Chat messages after the last sentinel; stale rows only. */
+  readonly followUpCount?: number
+}
+
 /** One pending live-Agent inbox item, preserving placement and content order. */
 export interface SessionQueuedItem {
   readonly id: MessageId
@@ -913,15 +939,28 @@ declare module '@deepseek-ai/cordis' {
      */
     'api-session/removed'(sessionId: SessionId): void
     /**
-     * One Agent changed running state, or a Session's objective attention fold refreshed.
+     * One Agent changed running state, a Session's objective attention fold refreshed,
+     * or the archive-seal verdict on the row refreshed (seal-light-host-state-1109 裁点2A).
      * @mode emit
      * @param sessionId - Agent and Session identity.
      * @param running - whether the Agent is running.
      * @param attention - the Session's objective blocked-on-the-user kind while one is
      *   active ('question' = an unanswered durable ask); absent otherwise. Card-free:
      *   every connected client renders it the same way regardless of which view is open.
+     *   `null` is the positional placeholder a frame carries when it has a seal but no
+     *   attention (an explicit `undefined` arg is not lossless JSON — arg2 crash
+     *   precedent, 2026-10-31); listeners fold `null` to absent.
+     * @param seal - the Session's latest archive-seal verdict while the registering
+     *   unit holds one; the argument is omitted entirely (old frame shape) when the
+     *   Host holds no verdict, so an absent arg reads as "no verdict" rather than a
+     *   schema break. Re-sent by the 15s sweep for every published Session.
      */
-    'api-session/status'(sessionId: SessionId, running: boolean, attention?: SessionAttentionKind): void
+    'api-session/status'(
+      sessionId: SessionId,
+      running: boolean,
+      attention?: SessionAttentionKind | null,
+      seal?: SessionSealState,
+    ): void
     /**
      * One 安康位 sweep audit (collab step2 §4.3, step4b 接力批2 件C5): the
      * heartbeat sweep's same traversal folds its Session set into the

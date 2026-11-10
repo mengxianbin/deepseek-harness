@@ -265,6 +265,25 @@ type SessionAttentionKind = 'question'
 
 ```ts type-equiv
 /**
+ * The archive-seal verdict as the Host carries it (seal-light-host-state-1109,
+ * 裁点2A/3A): a structural value the Host never interprets — the six-value
+ * grouping vocabulary belongs to the seal domain and its clients, so this
+ * package only shuttles `{verdict, detail, followUpCount?}` from the
+ * registering unit's projection onto `api-session/status` frames and
+ * `SessionSummary.projections.seal`.
+ */
+interface SessionSealState {
+  /** The domain's verdict token; the Host treats it as an opaque string. */
+  readonly verdict: string
+  /** Machine breakdown the domain attached (contract C1 detail vocabulary). */
+  readonly detail?: string
+  /** Chat messages after the last sentinel; stale rows only. */
+  readonly followUpCount?: number
+}
+```
+
+```ts type-equiv
+/**
  * One immutable entry in the session log.
  *
  * A proper discriminated union over `type` (not independent `type`/`data`
@@ -1310,19 +1329,27 @@ Source: [`packages/api/session-controller/src/types.ts`](../../packages/api/sess
 
 #### `api-session/status` — emit
 
-One Agent changed running state, or a Session's objective attention fold refreshed.
+One Agent changed running state, a Session's objective attention fold refreshed, or the archive-seal verdict on the row refreshed (seal-light-host-state-1109 裁点2A).
 
 ```ts cordis-catalog
 /**
- * One Agent changed running state, or a Session's objective attention fold refreshed.
+ * One Agent changed running state, a Session's objective attention fold refreshed,
+ * or the archive-seal verdict on the row refreshed (seal-light-host-state-1109 裁点2A).
  * @mode emit
  * @param sessionId - Agent and Session identity.
  * @param running - whether the Agent is running.
  * @param attention - the Session's objective blocked-on-the-user kind while one is
  *   active ('question' = an unanswered durable ask); absent otherwise. Card-free:
  *   every connected client renders it the same way regardless of which view is open.
+ *   `null` is the positional placeholder a frame carries when it has a seal but no
+ *   attention (an explicit `undefined` arg is not lossless JSON — arg2 crash
+ *   precedent, 2026-10-31); listeners fold `null` to absent.
+ * @param seal - the Session's latest archive-seal verdict while the registering
+ *   unit holds one; the argument is omitted entirely (old frame shape) when the
+ *   Host holds no verdict, so an absent arg reads as "no verdict" rather than a
+ *   schema break. Re-sent by the 15s sweep for every published Session.
  */
-'api-session/status'(sessionId: SessionId, running: boolean, attention?: SessionAttentionKind): void
+'api-session/status'( sessionId: SessionId, running: boolean, attention?: SessionAttentionKind | null, seal?: SessionSealState, ): void
 ```
 
 Types: [SessionId](core.md)
