@@ -17,12 +17,16 @@
  *   No resident polling: a settled check with no new trigger never re-arms itself.
  * - **Pace** — at least {@link SEAL_LIGHT_THROTTLE_MS} between two checks and
  *   one in flight at a time (throttle + single flight, 任务书节流 ≥2 秒).
- * - **Failure** — `null` from `requestSealCheck` paints every light dark
- *   (fail-dark, the deliberate mirror of the archive gate's fail-open) and
- *   starts an exponential cooldown. `seal.ts` warns once per failed attempt,
- *   so the cooldown is what keeps a page lifetime from turning into a warning
- *   flood while 单1's endpoint is still absent (当前预期常态): the same
- *   failure state costs one warning per backoff window, never one per flip.
+ * - **Failure** — `null` from `requestSealCheck` stamps every asked row
+ *   `UNKNOWN` (fail-visible since seal-light-host-state-1109 ④, superseding
+ *   the old fail-dark clear): 「查失败」 must not paint the same dark as
+ *   「未收口」, so the lamp renders the amber dashed unreadable ring instead of
+ *   silence, while the relay gate keeps failing closed (`UNKNOWN !== DONE`).
+ *   The failure still starts an exponential cooldown, and `seal.ts` warns once
+ *   per failed attempt, so the cooldown is what keeps a page lifetime from
+ *   turning into a warning flood while 单1's endpoint is still absent
+ *   (当前预期常态): the same failure state costs one warning per backoff
+ *   window, never one per flip.
  *
  * The handle is created in `apply` and shared through the browser's inject
  * face (no module-level handle — packages/client/AGENTS.md store discipline);
@@ -30,9 +34,77 @@
  * plain `sealRows` observer.
  */
 import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
+import type { SessionSealState } from '@deepseek-ai/dsh-api-session-controller/types'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { SealLightSnapshot, SealRowObserver } from '../contract/slots.ts'
-import { requestSealCheck, type SessionSealInfo } from './seal.ts'
+import { requestSealCheck, type SessionSealInfo, type SessionSealVerdict } from './seal.ts'
+
+/** The stamp a failed check leaves on every asked row (④): the lamp renders it as the amber dashed unreadable ring. */
+const UNREADABLE_SEAL: SessionSealInfo = { verdict: 'UNKNOWN' }
+
+/** The six-value vocabulary this build understands; a newer token reads as UNKNOWN (fail-visible, never silent). */
+const SEAL_VERDICTS: ReadonlySet<string> = new Set<SessionSealVerdict>([
+  'DONE', 'N_A', 'UNSEALED', 'NEUTRAL', 'LEGACY', 'UNKNOWN',
+])
+
+/** Content equality for one verdict row: maps hold fresh objects per frame. */
+function sameSealInfo(left: SessionSealInfo | undefined, right: SessionSealInfo | undefined): boolean {
+  if (left === right) return true
+  if (left === undefined || right === undefined) return false
+  return left.verdict === right.verdict
+    && left.detail === right.detail
+    && left.followUpCount === right.followUpCount
+}
+
+/** Content equality for two snapshots; identity-equal inputs are equal. */
+function sameSealMaps(left: SealLightSnapshot, right: SealLightSnapshot): boolean {
+  if (left === right) return true
+  if (left.size !== right.size) return false
+  for (const [id, seal] of left) {
+    if (!sameSealInfo(seal, right.get(id))) return false
+  }
+  return true
+}
+
+/** Narrow a Host-carried verdict (opaque string) into this build's vocabulary; unknown tokens read UNKNOWN. */
+function sealInfoOf(state: SessionSealState): SessionSealInfo {
+  const verdict: SessionSealVerdict = SEAL_VERDICTS.has(state.verdict)
+    ? state.verdict as SessionSealVerdict
+    : 'UNKNOWN'
+  return {
+    verdict,
+    ...(state.detail === undefined ? {} : { detail: state.detail as NonNullable<SessionSealInfo['detail']> }),
+    ...(state.followUpCount === undefined ? {} : { followUpCount: state.followUpCount }),
+  }
+}
+
+/**
+ * Overlay the Host's status-carried seal verdicts (seal-light-host-state-1109
+ * 裁点2A 推腿 + 裁点3A 对账腿, both folded into `SessionStatus.seal` by
+ * ui-session) over the C1 pull snapshot the store holds. Host truth wins
+ * whenever it carries a verdict; a row the Host holds nothing for keeps the
+ * pull's value (the pull chain stays the coverage fallback — 拉取链退役未裁).
+ * Returns the input snapshot identity when nothing changes, so React
+ * subscribers see no spurious republish.
+ * @param store - the C1 pull snapshot.
+ * @param statuses - the status snapshot rows, structural to avoid depending
+ *   on ui-session's concrete type here.
+ * @returns the merged snapshot the row lamps paint from.
+ */
+export function mergeHostSeals(
+  store: SealLightSnapshot,
+  statuses: ReadonlyMap<SessionId, { readonly seal?: SessionSealState }>,
+): SealLightSnapshot {
+  let next: Map<SessionId, SessionSealInfo> | undefined
+  for (const [id, status] of statuses) {
+    if (status.seal === undefined) continue
+    const info = sealInfoOf(status.seal)
+    if (sameSealInfo(store.get(id), info)) continue
+    next ??= new Map(store)
+    next.set(id, info)
+  }
+  return next ?? store
+}
 
 /** The C1 ask the store drives; `null` is the contracted failure answer (seal.ts never rejects). */
 export type SealCheckRequest = (ids: readonly SessionId[]) => Promise<Map<SessionId, SessionSealInfo> | null>
@@ -134,10 +206,16 @@ export function createSealLightStore(request: SealCheckRequest = requestSealChec
         SEAL_LIGHT_FAIL_BACKOFF_BASE_MS * 2 ** (failures - 1),
         SEAL_LIGHT_FAIL_BACKOFF_MAX_MS,
       )
-      // Fail-dark: an unreadable answer paints nothing rather than leaving the
-      // last known lamp lit (灯暗 = 不制造假信号, 与门的 fail-open 刻意相反).
-      if (seals.size > 0) {
-        seals = new Map()
+      // Fail-visible (seal-light-host-state-1109 ④, supersedes fail-dark):
+      // an unreadable answer stamps every asked row UNKNOWN instead of
+      // clearing the map. 熄灯伪装成未收口 is the exact failure this单 cures —
+      // the lamp paints the amber dashed "unreadable" ring (unknown ≠
+      // not-ready), rows outside this check keep what they last proved, and
+      // the relay gate still fails closed because UNKNOWN !== DONE.
+      const next = new Map(seals)
+      for (const id of ids) next.set(id, UNREADABLE_SEAL)
+      if (!sameSealMaps(seals, next)) {
+        seals = next
         publish()
       }
     } else {

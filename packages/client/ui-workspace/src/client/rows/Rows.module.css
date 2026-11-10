@@ -671,3 +671,20 @@
 .sealLight[data-seal-tone='blocked'] {
   color: var(--dsw-alias-state-error-primary);
 }
+
+/* 查失败可见 (seal-light-host-state-1109 ④): the amber dashed halo + hollow
+   core reads "this verdict could not be produced" — the staleRing vocabulary
+   (未知不吞已知) applied to the lamp, distinct from both the lit green and the
+   dark row that means 未收口. */
+.sealLight[data-seal-tone='unreadable'] {
+  color: var(--dsw-alias-state-warn-primary);
+}
+
+.sealLight[data-seal-tone='unreadable']::before {
+  border-style: dashed;
+}
+
+.sealLight[data-seal-tone='unreadable']::after {
+  background: transparent;
+  border: 1.5px solid currentColor;
+}

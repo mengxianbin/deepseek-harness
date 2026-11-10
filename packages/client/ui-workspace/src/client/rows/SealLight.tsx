@@ -22,11 +22,12 @@
  * here) · `UNSEALED` / `UNKNOWN` no longer paint red — 「未收口」是多轮
  * 编辑的正常中间态,常亮红把状态当警报、违反警报经济学,红的职责整体移交归档门
  * (单2,点归档那一刻的单条预检) · dark = `NEUTRAL` / `LEGACY` / no verdict for
- * the row — and the whole channel fails dark when contract C1's endpoint is
- * absent or fails (单1 在途 = 当前预期常态), so an unlanded endpoint paints
- * nothing and says nothing. Registration rides the component's mount, so an
- * archived or blank row — which renders no lamp — never joins the check's id
- * set either.
+ * the row — and a failed check (contract C1 endpoint absent or failing, 单1
+ * 在途 = 当前预期常态) stamps `UNKNOWN`, which paints the amber dashed
+ * `unreadable` ring: 查失败 reads visibly since seal-light-host-state-1109 ④,
+ * never the silence that impersonates 未收口. Registration rides the
+ * component's mount, so an archived or blank row — which renders no lamp —
+ * never joins the check's id set either.
  *
  * The 2026-11-06 running 短路 (seal-light-running-dark-1106) precedes the
  * table: a row whose session is working renders exactly what a dark row
@@ -44,8 +45,14 @@ import css from './Rows.module.css'
 /** The locale seat, prop-passed from the browser root (Rows' own alias). */
 type SealLightTranslate = WorkspaceBrowserProps['t']
 
-/** The lamp's only lit tone (2026-11-02 丙-最简: red exited the row); no tone is a dark row — or a running one (2026-11-06 短路). */
-export type SealLightTone = 'ready'
+/**
+ * The lamp's tones: `ready` is the lit green (2026-11-02 丙-最简: red exited
+ * the row); `unreadable` is the amber dashed ring a `UNKNOWN` verdict paints
+ * (seal-light-host-state-1109 ④ — 查失败 reads visibly, never as the dark
+ * that means 未收口). No tone is a dark row with a real non-green verdict —
+ * or a running one (2026-11-06 短路).
+ */
+export type SealLightTone = 'ready' | 'unreadable'
 
 /**
  * The design's lamp table (archive-seal-light.md §四 灯绿; 2026-11-02 丙-最简
@@ -62,7 +69,12 @@ export type SealLightTone = 'ready'
  * first: while the row's session works, the verdict on screen is the previous
  * turn's reading, so a running row paints nothing and never a `ready` — the
  * same form as a dark row.
- * @param seal - the verdict C1 reported for this row.
+ *
+ * `UNKNOWN` paints the `unreadable` ring (seal-light-host-state-1109 ④):
+ * a verdict the channel could not produce — a failed check's stamp, an
+ * undecodable transcript, or a Host with no verdict yet — must read as
+ * 「查失败」, not as the dark that reads 「未收口」(unknown ≠ not-ready).
+ * @param seal - the verdict the channel reported for this row.
  * @param running - the row's live running flag; defaults to false, the state
  *   the store registers a row in (`watch`), so an unreported row keeps the
  *   pre-revision lamp table exactly.
@@ -71,6 +83,7 @@ export type SealLightTone = 'ready'
 export function sealLightTone(seal: SealLightSeal, running = false): SealLightTone | undefined {
   if (running) return undefined
   if (seal.verdict === 'DONE') return 'ready'
+  if (seal.verdict === 'UNKNOWN') return 'unreadable'
   return undefined
 }
 
@@ -109,6 +122,18 @@ function sealLightLabel(seal: SealLightSeal, t: SealLightTranslate): string {
   return detail === undefined ? head : `${head} · ${detail}`
 }
 
+/**
+ * The unreadable ring's label (seal-light-host-state-1109 ④): names the
+ * verdict token without claiming readiness — the head must never read
+ * 「归档就绪」 for a row whose check failed.
+ * @param seal - the verdict the channel stamped for this row.
+ * @param t - the browser root's locale seat.
+ * @returns the localized label.
+ */
+function sealUnreadableLabel(seal: SealLightSeal, t: SealLightTranslate): string {
+  return t('sealLight.unreadable', { v: seal.verdict })
+}
+
 type SealLightProps = {
   /** Session the row shows; the lamp addresses its C1 verdict by this id. */
   sessionId: SessionId
@@ -141,7 +166,7 @@ export function SealLight({ sessionId, running, seal, sealRows, t }: SealLightPr
   }, [sessionId, running, sealRows])
   const tone = seal === undefined ? undefined : sealLightTone(seal, running)
   if (seal === undefined || tone === undefined) return null
-  const label = sealLightLabel(seal, t)
+  const label = tone === 'unreadable' ? sealUnreadableLabel(seal, t) : sealLightLabel(seal, t)
   return (
     <Tooltip label={label} delayMs={500} side="left">
       <span className={css.sealLight} data-seal-tone={tone} role="img" aria-label={label} />

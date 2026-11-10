@@ -7,9 +7,12 @@
  * product), the 2026-11-06 running 短路 (a running row renders no
  * lamp; both running flips re-check, seal-light-running-dark-1106), the C1
  * fetch policy (visible mounted ids only, id-change / running-flip triggers,
- * ≥2s throttle, single flight, no resident polling), the fail-dark +
- * console-warn backoff over the REAL `requestSealCheck` (单1 在途 = 404 常态),
- * the row's archived/blank gate (§六.6), and the localized detail tooltip.
+ * ≥2s throttle, single flight, no resident polling), the fail-visible +
+ * console-warn backoff over the REAL `requestSealCheck` (单1 在途 = 404 常态:
+ * a failed check stamps UNKNOWN — the amber `unreadable` ring, never the
+ * fail-dark silence — seal-light-host-state-1109 ④), the Host overlay
+ * (`mergeHostSeals`: status-carried verdicts over the pull snapshot), the
+ * row's archived/blank gate (§六.6), and the localized detail tooltip.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
@@ -21,7 +24,7 @@ import type {
 import type { SessionNode } from '../src/client/tree.ts'
 import { SealLight, sealLightTone } from '../src/client/rows/SealLight.tsx'
 import { SessionNodeItem } from '../src/client/rows/Rows.tsx'
-import { createSealLightStore } from '../src/client/session-actions/seal-light.ts'
+import { createSealLightStore, mergeHostSeals } from '../src/client/session-actions/seal-light.ts'
 import { isGreenSeal } from '../src/client/session-actions/seal.ts'
 import { de, en, es, fr, ja, pt, ru, zh, type WorkspaceKey } from '../src/client/locales.ts'
 
@@ -71,9 +74,9 @@ describe('sealLightTone (design §四: the lamp green is not the gate green)', (
     expect(sealLightTone({ verdict: 'N_A' })).toBeUndefined()
   })
 
-  it('stays dark on UNSEALED and UNKNOWN (2026-11-02 丙-最简: red exits the row)', () => {
+  it('keeps UNSEALED dark (2026-11-02 丙-最简) but rings UNKNOWN — 查失败可见, never a dark that impersonates 未收口 (④)', () => {
     expect(sealLightTone({ verdict: 'UNSEALED' })).toBeUndefined()
-    expect(sealLightTone({ verdict: 'UNKNOWN' })).toBeUndefined()
+    expect(sealLightTone({ verdict: 'UNKNOWN' })).toBe('unreadable')
   })
 
   it('keeps NEUTRAL and LEGACY dark even though the archive gate calls them green', () => {
@@ -93,6 +96,10 @@ describe('sealLightTone (design §四: the lamp green is not the gate green)', (
     // exactly the dark row's form (seal-light-running-dark-1106).
     expect(sealLightTone({ verdict: 'DONE' }, true)).toBeUndefined()
     expect(sealLightTone({ verdict: 'N_A' }, true)).toBeUndefined()
+    // The short-circuit outranks the unreadable ring too: while work runs the
+    // UNKNOWN stamp is equally un-confirmable, so a running row stays dark.
+    expect(sealLightTone({ verdict: 'UNKNOWN' }, true)).toBeUndefined()
+    expect(sealLightTone({ verdict: 'UNKNOWN' }, false)).toBe('unreadable')
     // The short-circuit is running's alone: stopped, a green verdict lights —
     // DONE still; N_A stopped is dark since 2026-11-06 (seal-light-nadark-1106).
     expect(sealLightTone({ verdict: 'DONE' }, false)).toBe('ready')
@@ -242,8 +249,8 @@ describe('createSealLightStore (the C1 fetch policy)', () => {
   })
 })
 
-describe('fail-dark + warning backoff (real requestSealCheck, 单1 endpoint absent)', () => {
-  it('paints every light dark on a failed check and warns once per backoff window', async () => {
+describe('fail-visible + warning backoff (real requestSealCheck, 单1 endpoint absent)', () => {
+  it('stamps every asked row UNKNOWN on a failed check — visible degradation, never fail-dark — and warns once per backoff window', async () => {
     vi.useFakeTimers()
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const fetchMock = vi.fn()
@@ -266,9 +273,10 @@ describe('fail-dark + warning backoff (real requestSealCheck, 单1 endpoint abse
     store.sealRows.reportRunning(sid('one'), false)
     await advance(2_000)
     expect(fetchMock).toHaveBeenCalledTimes(2)
-    // Fail-dark: the previously lit lamp goes out instead of staying stale.
-    expect(store.observable.getSnapshot().size).toBe(0)
-    expect(warn).toHaveBeenCalledExactlyOnceWith('seal check rejected: HTTP 404')
+    // Fail-visible (seal-light-host-state-1109 ④): the previously lit row goes
+    // UNKNOWN — the lamp renders the amber dashed unreadable ring, so 查失败
+    // never impersonates 未收口's dark — instead of the map clearing to empty.
+    expect(store.observable.getSnapshot().get(sid('one'))).toEqual({ verdict: 'UNKNOWN' })
 
     // Ten more flip waves inside the cooldown: the failure state still costs
     // exactly one warning — seal.ts warns per attempt, so the store simply
@@ -280,12 +288,51 @@ describe('fail-dark + warning backoff (real requestSealCheck, 单1 endpoint abse
     }
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(warn).toHaveBeenCalledTimes(1)
+    expect(store.observable.getSnapshot().get(sid('one'))).toEqual({ verdict: 'UNKNOWN' })
 
     // The backoff window elapses: one retry, one more warning — not ten.
     await advance(30_000)
     expect(fetchMock).toHaveBeenCalledTimes(3)
     expect(warn).toHaveBeenCalledTimes(2)
-    expect(store.observable.getSnapshot().size).toBe(0)
+    expect(store.observable.getSnapshot().get(sid('one'))).toEqual({ verdict: 'UNKNOWN' })
+  })
+})
+
+describe('mergeHostSeals (status-carried verdicts overlay the pull snapshot)', () => {
+  it('lets the host verdict win over the pull value and carries its detail fields', () => {
+    const store: SealLightSnapshot = new Map([[sid('one'), { verdict: 'UNSEALED' }]])
+    const statuses = new Map([[sid('one'), { seal: { verdict: 'DONE', detail: 'sentinel-ok', followUpCount: 3 } }]])
+    const merged = mergeHostSeals(store, statuses)
+    expect(merged.get(sid('one'))).toEqual({ verdict: 'DONE', detail: 'sentinel-ok', followUpCount: 3 })
+    // The pull snapshot itself is untouched: merge is a read-side overlay.
+    expect(store.get(sid('one'))).toEqual({ verdict: 'UNSEALED' })
+  })
+
+  it('keeps the pull value for a row the host holds no verdict for (拉取链 fallback)', () => {
+    const store: SealLightSnapshot = new Map([[sid('one'), { verdict: 'DONE' }]])
+    const statuses = new Map([
+      [sid('one'), {}],
+      [sid('two'), {}],
+    ])
+    expect(mergeHostSeals(store, statuses)).toBe(store)
+  })
+
+  it('returns the store identity when every host verdict already matches — no spurious republish', () => {
+    const store: SealLightSnapshot = new Map([[sid('one'), { verdict: 'DONE' }]])
+    const statuses = new Map([[sid('one'), { seal: { verdict: 'DONE' } }]])
+    expect(mergeHostSeals(store, statuses)).toBe(store)
+    expect(mergeHostSeals(store, new Map())).toBe(store)
+  })
+
+  it('reads a host verdict token this build does not know as UNKNOWN (fail-visible, never silent)', () => {
+    const store: SealLightSnapshot = new Map()
+    const statuses = new Map([[sid('one'), { seal: { verdict: 'SOMETHING_NEW' } }]])
+    expect(mergeHostSeals(store, statuses).get(sid('one'))).toEqual({ verdict: 'UNKNOWN' })
+  })
+
+  it('fills a row only the host knows about', () => {
+    const statuses = new Map([[sid('host-only'), { seal: { verdict: 'NEUTRAL' } }]])
+    expect(mergeHostSeals(new Map(), statuses).get(sid('host-only'))).toEqual({ verdict: 'NEUTRAL' })
   })
 })
 
@@ -319,13 +366,15 @@ describe('SealLight (the lamp on the row)', () => {
     expect(sealRows.watch).toHaveBeenCalledWith(sid('one'))
   })
 
-  it('renders nothing for an unreadable verdict (UNKNOWN has no row seat)', () => {
+  it('renders the amber unreadable ring for UNKNOWN with its verdict in the label (④ fail-visible)', () => {
     const sealRows = observer()
     const view = render(
-      <SealLight sessionId={sid('one')} running={false} seal={{ verdict: 'UNKNOWN' }} sealRows={sealRows} t={t} />,
+      <SealLight sessionId={sid('one')} running={false} seal={{ verdict: 'UNKNOWN' }} sealRows={sealRows} t={tEn} />,
     )
-    expect(view.container.querySelector('[data-seal-tone]')).toBeNull()
-    expect(view.container.textContent).toBe('')
+    expect(view.container.querySelector('[data-seal-tone]')?.getAttribute('data-seal-tone')).toBe('unreadable')
+    expect(screen.getByRole('img').getAttribute('aria-label'))
+      .toBe('Archive status unreadable (UNKNOWN)')
+    expect(sealRows.watch).toHaveBeenCalledWith(sid('one'))
   })
 
   it('renders nothing for an N_A verdict — the lamp is DONE-only since 2026-11-06 (seal-light-nadark-1106)', () => {
@@ -348,7 +397,7 @@ describe('SealLight (the lamp on the row)', () => {
       .toBe('Archive ready: the save is sealed (DONE)')
   })
 
-  it('renders nothing for NEUTRAL / LEGACY / an absent verdict (fail-dark)', () => {
+  it('renders nothing for NEUTRAL / LEGACY / an absent verdict — real non-green verdicts and no data stay dark', () => {
     const seals: readonly (SealLightSeal | undefined)[] = [
       { verdict: 'NEUTRAL' }, { verdict: 'LEGACY' }, undefined,
     ]
@@ -486,7 +535,7 @@ describe('the light copy ships with every published language', () => {
   // The literal keys are checked against `WorkspaceKey` at compile time (a
   // typo stops the build), and every dictionary already `satisfies` that key
   // set — the runtime check below covers the placeholder and the values.
-  const KEYS: readonly WorkspaceKey[] = ['sealLight.ready']
+  const KEYS: readonly WorkspaceKey[] = ['sealLight.ready', 'sealLight.unreadable']
 
   it('carries the lamp line, {v} intact, in all eight dictionaries', () => {
     for (const dictionary of [zh, en, ja, es, fr, de, ru, pt]) {

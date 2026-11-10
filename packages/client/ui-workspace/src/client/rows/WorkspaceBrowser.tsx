@@ -34,6 +34,7 @@ import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
   SealLightSnapshot, SealRowObserver, WorkspaceBrowserProps,
 } from '../contract/slots.ts'
+import { mergeHostSeals } from '../session-actions/seal-light.ts'
 import type { ArchivedFilter, GroupNode, QueueSegment, SessionNode, SessionOrderBy, SessionRowState } from '../tree.ts'
 import {
   deriveFlat, deriveGroups, deriveQueue, deriveSearchResults, orderByResting, owningGroupKey, owningParentFolder,
@@ -1261,9 +1262,10 @@ export function WorkspaceBrowser({
   const home = useHostInfo(info => info.home)
   // FORK archive-seal-light-1101: the archive-seal verdicts (contract C1) the
   // row lamps paint, read once here and threaded down as plain data — an
-  // endpoint that does not exist yet keeps this snapshot empty and every lamp
-  // dark (fail-dark), and the rows' own registration drives when it refreshes.
-  const seals = useSealLight(snapshot => snapshot)
+  // endpoint that does not exist yet leaves this snapshot at its failed-check
+  // stamps, and the rows' own registration drives when it refreshes. The
+  // Host-carried verdicts (seal-light-host-state-1109) overlay it below.
+  const storeSeals = useSealLight(snapshot => snapshot)
   const shortcuts = useShortcuts(rows => rows)
   const searchShortcut = shortcuts.find(row => row.id === 'session.search')
   const addShortcut = shortcuts.find(row => row.id === 'workspace.add')
@@ -1276,6 +1278,13 @@ export function WorkspaceBrowser({
   // fact actually changed (`sameSessionStatus` de-dupes the heartbeat tick), so
   // this is a re-render per status event, not per tick.
   const statuses = useSessionStatus(state => state)
+  // 行灯数据 = Host 状态优先 (seal-light-host-state-1109 裁点2A/3A): the
+  // status snapshot's `seal` carries the pushed frame + the list 对账 leg,
+  // so it overlays the C1 pull snapshot; a row the Host holds no verdict for
+  // keeps the pull's value (拉取链退役未裁 = pull stays the fallback).
+  // Identity-stable: mergeHostSeals returns the store snapshot unchanged when
+  // nothing differs, so this is a re-render per verdict change, not per tick.
+  const seals = useMemo(() => mergeHostSeals(storeSeals, statuses), [storeSeals, statuses])
   const storedWorkspaces = useWorkspaces(state => state.items)
   // The resolved name, not `t`, is the memo dependency: the bound seat keeps
   // its identity across a language switch.
