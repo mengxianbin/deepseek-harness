@@ -294,8 +294,9 @@ export class ApiSessionList {
    *   again (f5-contract-a2-1030) — omitted flags return archived rows,
    *   subagent-origin rows, and untrimmed hints. An explicit
    *   `includeArchived: false` excludes archived ids from the directory scan
-   *   before any header read, an explicit `includeSubagents: false` drops
-   *   subagent rows right after their header read, and
+   *   before any header read, an explicit `includeSubagents: false` excludes
+   *   subagent ids the same way via the registry's in-memory header index
+   *   (with a post-header-read predicate as the correctness backstop), and
    *   `trimHeavyProjections: true` trims the heavy hint columns; the flags are
    *   independent and the thin main-page listing passes all three.
    * @param signal - optional cancellation for persistence reads and summary generation.
@@ -308,15 +309,26 @@ export class ApiSessionList {
     const includeArchived = request?.includeArchived !== false
     const includeSubagents = request?.includeSubagents !== false
     const trimHeavyProjections = request?.trimHeavyProjections === true
-    // One consistent archived snapshot serves both the directory-level
-    // pre-exclusion and every record the listing merges.
-    const archivedSessionIds = includeArchived
-      ? undefined
-      : new Set<SessionId>(this.ctx.workspaceRegistry.archivedSessionIds)
+    // One consistent exclusion snapshot serves both the directory-level
+    // pre-exclusion and every record the listing merges. Subagent ids come
+    // from the registry's in-memory header index (built at startup, no I/O),
+    // so the common thin listing skips their directory reads entirely; the
+    // select predicate below stays as the correctness backstop for any id
+    // the index has not seen yet.
+    const excludeSessionIds = new Set<SessionId>()
+    if (!includeArchived) {
+      for (const id of this.ctx.workspaceRegistry.archivedSessionIds) excludeSessionIds.add(id)
+    }
+    if (!includeSubagents) {
+      for (const id of this.ctx.workspaceRegistry.subagentSessionIds) excludeSessionIds.add(id)
+    }
     const records = await this.ctx.sessionQuery.listSessions(signal, {
-      ...(archivedSessionIds === undefined ? {} : { excludeSessionIds: archivedSessionIds }),
+      // Any explicit row cut engages the pre-exclusion set (even when both
+      // registry sets are empty), matching the flag-gated presence contract.
+      ...(!includeArchived || !includeSubagents ? { excludeSessionIds } : {}),
       // Origin lives only in the header: this predicate runs after the header
-      // read and before the stat, the earliest point it can decide.
+      // read and before the stat, the earliest point it can decide. Ids the
+      // registry index already knows never reach it (excluded above).
       ...(includeSubagents ? {} : { select: (header: SessionHeader) => header.origin !== 'subagent' }),
     })
     signal?.throwIfAborted()

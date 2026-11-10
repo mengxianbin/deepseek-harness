@@ -346,6 +346,25 @@ export class WorkspaceRegistry extends Service {
   }
 
   /**
+   * The subagent-origin ids known to the startup/live header index: sessions
+   * whose stored or live header carries `origin: 'subagent'`. Derived from
+   * the in-memory index on each read (one pass over the index, no I/O), so
+   * every mutation site of that index is automatically reflected. Callers use
+   * it to pre-exclude subagent rows from directory scans the way
+   * {@link archivedSessionIds} pre-excludes archived ones; the index is
+   * built at startup from stored headers and refreshed lazily, so an id it
+   * has not seen yet simply will not appear here.
+   * @returns the subagent-origin session ids in index order.
+   */
+  get subagentSessionIds(): ReadonlySet<SessionId> {
+    const ids = new Set<SessionId>()
+    for (const [id, header] of this.headers) {
+      if (header.origin === 'subagent') ids.add(id)
+    }
+    return ids
+  }
+
+  /**
    * Archive one session durably. The session must exist (live or in session
    * persistence); its workspace accounting — or lack of one — is irrelevant.
    * Without `stopActivity` the session must also be inactive: the

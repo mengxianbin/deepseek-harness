@@ -47,7 +47,11 @@ function record(id: SessionId, extra: Record<string, unknown> = {}): SessionReco
   }
 }
 
-async function harness(records: readonly SessionRecord[], projections: Record<string, Record<string, unknown>> = {}) {
+async function harness(
+  records: readonly SessionRecord[],
+  projections: Record<string, Record<string, unknown>> = {},
+  subagentIds: ReadonlySet<SessionId> = new Set([SUBAGENT, ARCHIVED_SUBAGENT]),
+) {
   const ctx = new Context()
   contexts.add(ctx)
   await ctx.plugin(SessionStore)
@@ -55,6 +59,7 @@ async function harness(records: readonly SessionRecord[], projections: Record<st
   await ctx.plugin(AgentRegistry)
   ctx.provide('workspaceRegistry', {
     get archivedSessionIds() { return [ARCHIVED, ARCHIVED_SUBAGENT] },
+    get subagentSessionIds() { return subagentIds },
   } as never)
   const listSessions = vi.fn(async (
     _signal?: AbortSignal,
@@ -111,15 +116,33 @@ describe('session/list row scope', () => {
     expect(options?.select).toBeUndefined()
   })
 
-  it('an explicit includeSubagents:false post-selects subagent rows on their header', async () => {
+  it('an explicit includeSubagents:false pre-excludes known subagent ids and keeps the header predicate as backstop', async () => {
     const { list, listSessions } = await harness(rows)
 
     const items = await list.list({ includeSubagents: false })
 
     expect(items.map(item => item.sessionId).sort()).toEqual([ACTIVE, ARCHIVED].sort())
     const options = listSessions.mock.calls[0]?.[1]
-    expect(options?.excludeSessionIds).toBeUndefined()
-    // Origin exists only in the header: the predicate is the earliest cut.
+    // The registry's in-memory header index pre-excludes subagent ids before
+    // any directory read — the same earliest-layer cut archived ids get.
+    expect(options?.excludeSessionIds?.has(SUBAGENT)).toBe(true)
+    expect(options?.excludeSessionIds?.has(ARCHIVED_SUBAGENT)).toBe(true)
+    expect(options?.excludeSessionIds?.has(ARCHIVED)).toBe(false)
+    // Origin exists only in the header: the predicate stays as the
+    // correctness backstop for ids the index has not seen yet.
+    expect(options?.select?.(rows[1]?.header as SessionRecord['header'])).toBe(false)
+    expect(options?.select?.(rows[0]?.header as SessionRecord['header'])).toBe(true)
+  })
+
+  it('falls back to the header predicate alone when the registry index has not seen a subagent id', async () => {
+    const { list, listSessions } = await harness(rows, {}, new Set())
+
+    const items = await list.list({ includeSubagents: false })
+
+    expect(items.map(item => item.sessionId).sort()).toEqual([ACTIVE, ARCHIVED].sort())
+    const options = listSessions.mock.calls[0]?.[1]
+    // Empty index, nothing to pre-exclude: the post-read predicate still cuts.
+    expect(options?.excludeSessionIds?.size).toBe(0)
     expect(options?.select?.(rows[1]?.header as SessionRecord['header'])).toBe(false)
     expect(options?.select?.(rows[0]?.header as SessionRecord['header'])).toBe(true)
   })
