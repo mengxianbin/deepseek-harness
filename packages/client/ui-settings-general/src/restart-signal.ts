@@ -1,6 +1,7 @@
 /**
  * Restart-signal state machine: the design's seven-state judgment over the
- * S/B/R stamp comparison, plus the async gathering that feeds it.
+ * S/B/R stamp comparison, plus the off-host gather that feeds it
+ * (offhost-1110).
  *
  * The judgment is a pure function of machine facts — the process-start
  * runtime stamp (R), a fresh manifest read (B), the current configured-source
@@ -27,36 +28,43 @@
  * process loaded comes from those trees ("linked just rebuilt, process not
  * reloaded" must keep raising NEED_RESTART `built`).
  *
- * Gathering runs the stamp CLI (`scripts/restart-signal/signal-cli.ts`) in a
- * short-lived child process so a recompute never blocks the host event loop;
- * concurrent rechecks coalesce into one in-flight computation, and a repeat
- * collect inside a short result cache answers the stored judgment without
- * spawning the CLI again (stamp-recheck-cache-timeout-1107). The cache is
- * bounded three ways — a 15s TTL, the own-tree build-marker state it was
- * filled under (a BUILDING/failed flip invalidates at once, never waiting out
- * the TTL), and an explicit invalidation the push sensor fires when its
- * fingerprint delta proved a source/config move — so no judgment older than
- * one of those bounds can be served.
+ * **Gathering runs outside the host** (负载外移, offhost-1110):
+ * the external collector (`scripts/restart-signal/signal-collect.ts`,
+ * scheduled as the schtasks task `DSH-Restart-Signal-Collect` on the 60s
+ * edge of the design's 30–60s band) is the only process that spawns
+ * `scripts/restart-signal/signal-cli.ts`; it re-reads the stamp CLI single
+ * source together with this host's persisted runtime capture
+ * (`restart-signal-runtime.json`, written once at route registration),
+ * judges, and atomically writes `~/.dsh/restart-signal-state.json` carrying
+ * its collection instant. This module — and every host request path — only
+ * reads that one small file:
+ *
+ * - stat by `mtime+size`; a changed key is a new collection → parse, publish
+ *   the refreshed judgment to the observer roster, and notify the refresh
+ *   listeners (which is what makes the host emit `restart-signal/changed`);
+ * - a file younger than {@link STATE_FRESH_MS} answers directly (新鲜即读);
+ * - a file older than the freshness bound never answers for itself — the
+ *   last fresh judgment serves instead (过期回上次值), and with none yet the
+ *   collect rejects with {@link RestartSignalStateUnavailableError} so the
+ *   route answers its unavailable 504 (响亮，不静默);
+ * - `invalidateRestartSignalCache` (the push sensor's move signal) drops the
+ *   mtime key, so the next collect re-reads the file instead of answering
+ *   from the pre-move read.
+ *
+ * The host never spawns the stamp CLI: this package's `src` contains no
+ * spawn call and no stamp-CLI invocation of any kind — the stamp CLI belongs
+ * to the external collector alone (the machine check greps the src tree for
+ * the old spawn chain and must find nothing).
  * @module @deepseek-ai/dsh-client-ui-settings-general/restart-signal
  */
 
-import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { promisify } from 'node:util'
-import { readBuildingCapture } from './build-start-liveness.ts'
-import {
-  defaultRepositoryRoot,
-  readRestartStamp,
-  restartStamp,
-  type RestartManifestComponent,
-  type RestartStamp,
-  type RestartStampOptions,
-} from './restart-stamp.ts'
-import type { RestartSignalReason, RestartSignalState } from './restart.ts'
-
-const execFileAsync = promisify(execFile)
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { readFile, stat } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
+import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { restartStamp, type RestartStamp } from './restart-stamp.ts'
+import { RESTART_SIGNAL_STATES, type RestartSignalReason, type RestartSignalState } from './restart.ts'
 
 /** Gitignored directory holding the per-tree build markers (mirrors the scripts-side constant). */
 const STAMP_DIR = '.dsh-build'
@@ -67,12 +75,40 @@ const START_CAPTURE_FILE = 'restart-stamp.start.json'
 /** Build-failure record file name inside the stamp directory (mirrors the scripts-side constant). */
 const FAILURE_FILE = 'restart-stamp.failed.json'
 
-/** One repository tree's current source face stamps, as the stamp CLI reports them. */
-export interface CurrentStamp {
-  readonly repository: string
-  readonly kind: 'harness' | 'dsh-web'
-  readonly host: string
-  readonly client: string
+/** State file the external collector writes into the DSH home (仓外运行态). */
+export const RESTART_SIGNAL_STATE_FILE = 'restart-signal-state.json'
+
+/** Runtime-capture file this host writes into the DSH home at registration; the
+ * collector reads it to compare "what this process loaded" (R) against a fresh
+ * baseline — R lives in this process's memory and exists nowhere else, so this
+ * file is how the off-host judgment keeps its NEED_RESTART branch honest. */
+export const RESTART_SIGNAL_RUNTIME_FILE = 'restart-signal-runtime.json'
+
+/** Schema id pinning the collector-written file's shape; a mismatch reads as a
+ * hard failure (loud) instead of a silently wrong judgment. */
+export const RESTART_SIGNAL_STATE_SCHEMA = 'restart-signal-state/1'
+
+/** Schema id of the host runtime capture (mirrors the collector-side constant). */
+export const RESTART_SIGNAL_RUNTIME_SCHEMA = 'restart-signal-runtime/1'
+
+/** Freshness bound for one collected state file: the collector's 30–60s
+ * cadence plus one late tick. A younger file is served directly; an older one
+ * never answers for itself. This bound replaces the 15s result-cache TTL the
+ * 1107 cache/timeout fix introduced — that fix's semantics (timeout fallback,
+ * 504 with none) stay untouched in the route. */
+export const STATE_FRESH_MS = 90_000
+
+/**
+ * No servable judgment exists: the state file is absent, or every read so far
+ * was stale and none is fresh yet. The route maps this to its unavailable
+ * 504 (the "no previous judgment" branch the 12s deadline already had) —
+ * never a hang, never a silently stale answer.
+ */
+export class RestartSignalStateUnavailableError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'RestartSignalStateUnavailableError'
+  }
 }
 
 /** Everything the judgment consumes; every field is a machine fact. */
@@ -142,15 +178,22 @@ export interface RestartSignalJudgment {
   readonly facts?: RestartSignalFacts
 }
 
-/** Normalize a repository path for combination/lookup comparisons (separator-insensitive). */
-function normalizeRepository(repository: string): string {
-  return repository.replace(/\\/g, '/')
+/** One row of the collector-written state file: the judgment plus its collection instant. */
+export interface RestartSignalStateEntry {
+  /** Collection instant (ISO 8601) the collector stamped the write with. */
+  readonly collectedAt: string
+  /** The judgment this collection landed on. */
+  readonly judgment: RestartSignalJudgment
+  /** Repository tree the collection ran against; display/forensics only. */
+  readonly repositoryRoot: string | undefined
 }
 
 /**
  * Combine per-repository host-face stamps into one hash, mirroring the
  * runtime stamp's own combination (restart-stamp.ts) so a current-stamp
  * combination is directly comparable to the cached R and the fresh B.
+ * Production use moved to the external collector with the rest of the gather;
+ * kept here as the same combination the R stamp hashes.
  * @param rows - Per-repository `(normalized repository path, host face stamp)` pairs, in component order.
  * @returns sha256 hex over the same line format the runtime stamp hashes.
  */
@@ -234,14 +277,13 @@ function judgeCore(inputs: RestartSignalInputs): RestartSignalJudgment {
   return { state: 'OK', detail: 'source, build baseline, runtime stamp, and configuration all agree' }
 }
 
-/** Injection seam for the current-stamp gatherer; production spawns the stamp CLI. */
-export type StampCliRunner = (repositoryRoot: string, components: readonly RestartManifestComponent[]) => Promise<readonly CurrentStamp[]>
-
 /**
  * Read the build-start capture time behind the BUILDING lamp, for the timer
  * tooltip only (build-timer-tooltip-1101); the lamp itself keys on the
  * capture's existence. A malformed or unreadable capture degrades to
  * `undefined` — the plain Building copy — instead of failing the judgment.
+ * Production reads it in the external collector while gathering; kept as a
+ * pure file read for that consumer and for tests.
  * @param repositoryRoot - Harness repository tree holding `.dsh-build`.
  * @returns The capture time (ISO 8601) or `undefined` when unreadable.
  */
@@ -265,93 +307,139 @@ export function readBuildStartCaptureTime(repositoryRoot: string): string | unde
   return typeof time === 'string' && Number.isFinite(Date.parse(time)) ? time : undefined
 }
 
-/** Injection seams for one collect; production defaults come from this process and the CLI. */
-export interface RestartSignalOptions extends RestartStampOptions {
-  /** Current-stamp gatherer; defaults to spawning `scripts/restart-signal/signal-cli.ts`. */
-  readonly runStampCli?: StampCliRunner
+/** Injection seams for one state read: the DSH home (or a direct path) holding
+ * the collector's state file. Production resolves the DSH home. */
+export interface RestartSignalOptions {
+  /** DSH home whose state file answers; defaults to `resolveDshHome()`. */
+  readonly dshHome?: string
+  /** Direct state-file path; wins over `dshHome`. Tests substitute a fixture file. */
+  readonly statePath?: string
 }
 
-function parseCliStamps(text: string): CurrentStamp[] {
-  const parsed: unknown = JSON.parse(text)
+/** Resolve the state file one collect reads. */
+function statePathOf(options: RestartSignalOptions): string {
+  if (options.statePath !== undefined) return options.statePath
+  return join(resolveDshHome(options.dshHome), RESTART_SIGNAL_STATE_FILE)
+}
+
+/** Validate one parsed state-file body; a malformed file is a hard failure
+ * (loud), never a silently wrong answer. */
+function parseStateEntry(text: string, path: string): RestartSignalStateEntry {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch (error) {
+    const cause = error instanceof Error ? error.message : String(error)
+    throw new Error(`restart-signal state file is not JSON (${path}): ${cause}`)
+  }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw new Error('restart-signal: stamp CLI returned a non-object body')
+    throw new Error(`restart-signal state file has a non-object body (${path})`)
   }
-  const stamps: unknown = Reflect.get(parsed, 'stamps')
-  if (!Array.isArray(stamps)) throw new Error('restart-signal: stamp CLI response has no stamps array')
-  return stamps.map((entry) => {
-    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
-      throw new Error('restart-signal: stamp CLI reported a non-object stamp')
-    }
-    const kind: unknown = Reflect.get(entry, 'kind')
-    if (kind !== 'harness' && kind !== 'dsh-web') throw new Error('restart-signal: stamp CLI reported an unknown kind')
-    const host: unknown = Reflect.get(entry, 'host')
-    const client: unknown = Reflect.get(entry, 'client')
-    if (typeof host !== 'string' || typeof client !== 'string') throw new Error('restart-signal: stamp CLI reported a non-string face stamp')
-    return { repository: String(Reflect.get(entry, 'repository')), kind, host, client }
-  })
+  const schema: unknown = Reflect.get(parsed, 'schema')
+  if (schema !== RESTART_SIGNAL_STATE_SCHEMA) {
+    throw new Error(`restart-signal state file schema mismatch (${path}): ${String(schema)}`)
+  }
+  const collectedAt: unknown = Reflect.get(parsed, 'collectedAt')
+  if (typeof collectedAt !== 'string' || !Number.isFinite(Date.parse(collectedAt))) {
+    throw new Error(`restart-signal state file has no readable collectedAt (${path})`)
+  }
+  const judgment = parseStateJudgment(Reflect.get(parsed, 'judgment'))
+  if (judgment === undefined) {
+    throw new Error(`restart-signal state file has a malformed judgment (${path})`)
+  }
+  const repositoryRoot: unknown = Reflect.get(parsed, 'repositoryRoot')
+  return { collectedAt, judgment, repositoryRoot: typeof repositoryRoot === 'string' ? repositoryRoot : undefined }
 }
 
-/**
- * The production gatherer: spawn the stamp CLI against every repository whose
- * manifest carries a host-face baseline (a `null` baseline contributes the
- * combination's `ABSENT` token on both sides, so it needs no current stamp).
- * @param repositoryRoot - Harness repository tree holding the CLI.
- * @param components - Fresh manifest components naming the in-scope repositories.
- * @returns Current per-repository stamps.
- * @throws When the CLI exits non-zero or prints an unreadable body.
- */
-export async function runStampCli(
-  repositoryRoot: string,
-  components: readonly RestartManifestComponent[],
-): Promise<readonly CurrentStamp[]> {
-  const cli = join(repositoryRoot, 'scripts', 'restart-signal', 'signal-cli.ts')
-  const args: string[] = [cli]
-  for (const component of components) {
-    if (component.hostFaceHash === null) continue
-    args.push('--stamp', `${component.repository}:${component.kind}`)
+/** Shape-check the collector's judgment against the same vocabulary the wire
+ * validator uses, plus the judgment-only `detail`/`facts` seats. */
+function parseStateJudgment(value: unknown): RestartSignalJudgment | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const state: unknown = Reflect.get(value, 'state')
+  if (typeof state !== 'string' || !RESTART_SIGNAL_STATES.includes(state as RestartSignalState)) return undefined
+  const detail: unknown = Reflect.get(value, 'detail')
+  if (typeof detail !== 'string') return undefined
+  const reason: unknown = Reflect.get(value, 'reason')
+  if (reason !== undefined && reason !== 'config' && reason !== 'built') return undefined
+  const startedAt: unknown = Reflect.get(value, 'startedAt')
+  if (startedAt !== undefined && (typeof startedAt !== 'string' || !Number.isFinite(Date.parse(startedAt)))) return undefined
+  const linkedRepo: unknown = Reflect.get(value, 'linkedRepo')
+  if (linkedRepo !== undefined && (typeof linkedRepo !== 'string' || linkedRepo === '')) return undefined
+  const facts = parseStateFacts(Reflect.get(value, 'facts'))
+  if (facts === 'invalid') return undefined
+  return {
+    state: state as RestartSignalState,
+    detail,
+    ...(reason === undefined ? {} : { reason }),
+    ...(startedAt === undefined ? {} : { startedAt }),
+    ...(linkedRepo === undefined ? {} : { linkedRepo }),
+    ...(facts === undefined ? {} : { facts }),
   }
-  if (args.length === 1) return []
-  const { stdout } = await execFileAsync(process.execPath, args, {
-    cwd: repositoryRoot,
-    windowsHide: true,
-    maxBuffer: 16 * 1024 * 1024,
-  })
-  return parseCliStamps(stdout)
 }
+
+/** Shape-check the optional facts seat; `undefined` = absent, `'invalid'` = malformed. */
+function parseStateFacts(value: unknown): RestartSignalFacts | undefined | 'invalid' {
+  if (value === undefined) return undefined
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return 'invalid'
+  const configStamp: unknown = Reflect.get(value, 'configStamp')
+  if (typeof configStamp !== 'string') return 'invalid'
+  const rawHost: unknown = Reflect.get(value, 'currentHostFace')
+  if (rawHost !== undefined && typeof rawHost !== 'string') return 'invalid'
+  const ownFaceMoved: unknown = Reflect.get(value, 'ownFaceMoved')
+  if (ownFaceMoved !== undefined && typeof ownFaceMoved !== 'boolean') return 'invalid'
+  return {
+    currentHostFace: rawHost === undefined ? undefined : rawHost,
+    configStamp,
+    ...(ownFaceMoved === undefined ? {} : { ownFaceMoved }),
+  }
+}
+
+/** Identity of one judgment for change detection: only the seats that can move
+ * a listener's mind, in a fixed order, so a rewritten-but-identical file never
+ * re-fires the roster or the push leg. */
+function judgmentKey(judgment: RestartSignalJudgment): string {
+  return JSON.stringify([
+    judgment.state,
+    judgment.reason ?? null,
+    judgment.startedAt ?? null,
+    judgment.linkedRepo ?? null,
+    judgment.detail,
+    judgment.facts === undefined
+      ? null
+      : [judgment.facts.currentHostFace ?? null, judgment.facts.configStamp, judgment.facts.ownFaceMoved ?? null],
+  ])
+}
+
+/** Path of the file the current reader is keyed on; a path switch (fixture
+ * swap) resets the whole read state so one store never answers for another. */
+let readPath: string | undefined
+
+/** `mtimeMs|size` of the last parsed file; a change is a new collection. */
+let readKey: string | undefined
+
+/** The most recent FRESH judgment this process served — the stale-file
+ * fallback (过期回上次值) and the route's timeout fallback alike. */
+let lastJudgment: RestartSignalJudgment | undefined
+
+/** Key of the judgment last published, so identical rewrites stay quiet. */
+let publishedKey: string | undefined
 
 let inFlight: Promise<RestartSignalJudgment> | undefined
 
-/** Result-cache TTL: 15s — a sixth of the host's 90s attestation freshness window
- * (`restart-disposition.ts` `ATTESTATION_MAX_AGE_MS`, design = P11 报告 §五) and
- * half the client's 30s refresh cadence (`client/restart-signal-flow.ts`
- * `DEFAULT_REFRESH_MS`), so a cached judgment can never age past one refresh tick
- * (freshness-window check, stamp-recheck-cache-timeout-1107: TTL ≤ 90s 窗的保守份额 → 无语义变更). */
-const CACHE_TTL_MS = 15_000
-
-/** One cached judgment plus the inputs it was keyed and probed under. */
-interface RestartSignalCacheEntry {
-  /** The stored judgment; served verbatim on a hit (`startedAt` and all display fields ride along). */
-  readonly judgment: RestartSignalJudgment
-  /** Separator-normalized repository root the collect ran against (the cache key). */
-  readonly repositoryRoot: string
-  /** Epoch ms of the fill; a hit must land within {@link CACHE_TTL_MS}. */
-  readonly at: number
-  /** Own-tree build-start marker state probed *before* the compute it labels. */
-  readonly building: boolean
-  /** Own-tree build-failure marker state probed *before* the compute it labels. */
-  readonly failed: boolean
-}
-
-let cache: RestartSignalCacheEntry | undefined
-
 /** Host-side observers of every fresh judgment (P3: the auto-build throttle and the
- * restart disposition both ride the route/polling recheck stream instead of running
+ * restart disposition both ride the route/polling stream instead of running
  * a second collector). Listener failures are isolated to one stderr line. */
 const judgmentListeners = new Set<(judgment: RestartSignalJudgment) => void>()
 
+/** Host-side observers of a refreshed state read — the route registration maps
+ * this onto the allowlisted `restart-signal/changed` push (语义随迁 ②: the
+ * host still rings the bell when, and only when, the judgment moved). */
+const refreshListeners = new Set<(judgment: RestartSignalJudgment) => void>()
+
 /**
- * Observe every fresh judgment the state machine produces (once per coalesced
- * computation, on every collect path: recheck route, polling, client calls).
+ * Observe every fresh judgment the state machine delivers (once per new state
+ * file read whose judgment moved, on every collect path: recheck route,
+ * polling, client calls).
  * @param listener - Called with the judgment carrying its machine facts.
  * @returns Unsubscribe handle.
  */
@@ -360,175 +448,163 @@ export function onRestartSignalJudgment(listener: (judgment: RestartSignalJudgme
   return () => { judgmentListeners.delete(listener) }
 }
 
-function publishJudgment(judgment: RestartSignalJudgment, facts: RestartSignalFacts): RestartSignalJudgment {
-  const enriched: RestartSignalJudgment = judgment.facts === undefined ? { ...judgment, facts } : judgment
+/**
+ * Observe refreshed state reads (a new collection whose judgment moved): the
+ * push leg's source. Fires at most once per collector write, never on a
+ * repeated identical judgment.
+ * @param listener - Called with the refreshed judgment.
+ * @returns Unsubscribe handle.
+ */
+export function onRestartSignalStateRefresh(listener: (judgment: RestartSignalJudgment) => void): () => void {
+  refreshListeners.add(listener)
+  return () => { refreshListeners.delete(listener) }
+}
+
+function publishJudgment(judgment: RestartSignalJudgment): void {
   for (const listener of judgmentListeners) {
     try {
-      listener(enriched)
+      listener(judgment)
     } catch (error) {
       process.stderr.write(`ui-settings-general: restart-signal judgment listener failed: ${error instanceof Error ? error.message : String(error)}\n`)
     }
   }
-  return enriched
-}
-
-async function computeRestartSignal(options: RestartSignalOptions): Promise<RestartSignalJudgment> {
-  const repositoryRoot = options.repositoryRoot ?? defaultRepositoryRoot()
-  const runtime = restartStamp(options)
-  const fresh = readRestartStamp(options)
-  // O-1103: this read doubles as the liveness probe — a marker whose build
-  // process died is cleared here (one `orphan-start-marker-cleared` journal
-  // line), so the judgment below recovers from a permanent BUILDING in the
-  // same pass instead of waiting for a rerun's beginBuild to overwrite it.
-  const building = readBuildingCapture(repositoryRoot)
-  const buildingStartedAt = building ? readBuildStartCaptureTime(repositoryRoot) : undefined
-  const failed = existsSync(join(repositoryRoot, STAMP_DIR, FAILURE_FILE))
-  const configStamp = fresh.sCfg
-  if (fresh.state === 'INIT') {
-    return publishJudgment(
-      judgeRestartSignal({
-        runtime, fresh, configStamp, building, buildingStartedAt, failed,
-        currentHostFace: undefined, currentClientFace: undefined,
-      }),
-      { currentHostFace: undefined, configStamp },
-    )
-  }
-  const needsHostStamp = fresh.components.some(component => component.hostFaceHash !== null)
-  // 构建触发口径 = 主仓面: this tree's own component (always present at BASELINE —
-  // INIT owns the missing-own case) and its current stamp decide ownFaceMoved,
-  // the fact the dispatcher reads to keep harness builds off linked-only drift.
-  const own = fresh.components.find(component => normalizeRepository(component.repository) === normalizeRepository(repositoryRoot))
-  let ownFaceMoved: boolean | undefined = own !== undefined && own.hostFaceHash === null ? false : undefined
-  let linkedRepos: readonly string[] | undefined
-  let currentHostFace: string | undefined
-  let currentClientFace: string | undefined
-  if (needsHostStamp) {
+  for (const listener of refreshListeners) {
     try {
-      // The CLI always launches from this module's own harness tree (it lives
-      // there); the components it stamps may name other repositories.
-      const stamps = await (options.runStampCli ?? runStampCli)(defaultRepositoryRoot(), fresh.components)
-      const byRepository = new Map(stamps.map(stamp => [stamp.repository.replace(/\\/g, '/'), stamp]))
-      currentHostFace = combineHostFace(
-        fresh.components.map(component => [component.repository, component.hostFaceHash === null
-          ? 'ABSENT'
-          : byRepository.get(component.repository.replace(/\\/g, '/'))?.host ?? 'ABSENT'] as const),
-      )
-      const harness = stamps.find(stamp => stamp.kind === 'harness')
-      currentClientFace = harness?.client
-      if (own !== undefined && own.hostFaceHash !== null) {
-        ownFaceMoved = byRepository.get(normalizeRepository(own.repository))?.host !== own.hostFaceHash
-      }
-      // A (build-scope-rework-1105): every non-own component whose current stamp
-      // exists and moved past its own baseline — the linked trees that owe a
-      // build. Only a *present* differing stamp counts: a missing current stamp
-      // already reads ABSENT in the combination and names nothing new here.
-      linkedRepos = fresh.components
-        .filter(component => normalizeRepository(component.repository) !== normalizeRepository(repositoryRoot)
-          && component.hostFaceHash !== null)
-        .filter((component) => {
-          const stamp = byRepository.get(normalizeRepository(component.repository))
-          return stamp !== undefined && stamp.host !== component.hostFaceHash
-        })
-        .map(component => component.repository)
+      listener(judgment)
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      process.stderr.write(`ui-settings-general: restart-signal stamp gathering failed: ${message}\n`)
-      currentHostFace = undefined
-      currentClientFace = undefined
-      ownFaceMoved = undefined
-      linkedRepos = undefined
+      process.stderr.write(`ui-settings-general: restart-signal refresh listener failed: ${error instanceof Error ? error.message : String(error)}\n`)
     }
-  } else {
-    currentHostFace = undefined
-    currentClientFace = undefined
-  }
-  return publishJudgment(
-    judgeRestartSignal({
-      runtime, fresh, configStamp, building, buildingStartedAt, failed,
-      currentHostFace, currentClientFace, ownFaceMoved, linkedRepos,
-    }),
-    { currentHostFace, configStamp, ownFaceMoved },
-  )
-}
-
-/** The cheap own-tree build-marker state both sides of the cache decision probe:
- * the same two reads the compute makes (the liveness probe may journal-and-clear an
- * orphan, which the compute then simply observes as absent). Linked trees are out of
- * scope here — their marker transitions ride the push sensor's in-scope signature
- * (stamp-poll-host, ≤ one 30s tick). */
-function ownMarkerState(repositoryRoot: string): { readonly building: boolean; readonly failed: boolean } {
-  return {
-    building: readBuildingCapture(repositoryRoot),
-    failed: existsSync(join(repositoryRoot, STAMP_DIR, FAILURE_FILE)),
   }
 }
 
 /**
- * Recompute the restart signal; concurrent callers coalesce into the one
- * in-flight computation, so repeated call paths (visibility, reconnect,
- * polling) stay idempotent per design (设计 §三: 各路只喊重查).
+ * Read the collector's state file and answer the freshest servable judgment.
+ * Concurrent callers coalesce into one read (the 单飞合并 contract survives
+ * the move: repeated call paths stay idempotent per design 设计 §三).
  *
- * A repeat collect inside the result cache answers the stored judgment
- * without spawning the stamp CLI, keyed on the repository root, bounded by
- * the TTL and the own-tree marker state the fill probed (see the module doc).
- * A hit returns the stored object verbatim — display fields such as the
- * BUILDING `startedAt` ride along untouched — and never publishes to the
- * observer roster, because it is not a fresh computation (one publish per
- * compute keeps the "单飞合并" contract exact).
- * @param options - Injection seams; production uses this process's tree and the stamp CLI.
- * @returns The fresh (or, within the TTL, the stored) judgment.
+ * A changed `mtime+size` is a new collection: it is parsed, published to the
+ * observer roster (and the refresh listeners — the push bell), and, while
+ * fresh, becomes the served judgment. An unchanged key answers the stored
+ * judgment verbatim without touching the file again. A stale file never
+ * adopts: the last fresh judgment serves, and without one the read rejects
+ * with {@link RestartSignalStateUnavailableError} — never a hang, never a
+ * silently stale answer.
+ * @param options - State-file seams; production resolves the DSH home.
+ * @returns The fresh (or stale-fallback) judgment.
+ * @throws {@link RestartSignalStateUnavailableError} when nothing servable exists;
+ *   a malformed or unreadable file rejects with a plain error (route → 500).
  */
 export function collectRestartSignal(options: RestartSignalOptions = {}): Promise<RestartSignalJudgment> {
-  // The async wrapper keeps the original failure contract: a degenerate root
-  // resolution rejects the returned promise (as the compute always has), never
-  // throws synchronously at the caller — while the body still runs its cache
-  // check synchronously, so concurrent callers join one promise as before.
-  inFlight ??= (async () => {
-    const repositoryRoot = options.repositoryRoot ?? defaultRepositoryRoot()
-    const key = normalizeRepository(repositoryRoot)
-    // Probed on every collect — once — so the fill labels its judgment with the
-    // marker state the compute starts from, and a flip during or after the run
-    // surfaces as a hit-path mismatch (a recompute) instead of a stale serve.
-    const probed = ownMarkerState(repositoryRoot)
-    const entry = cache
-    if (entry !== undefined
-      && entry.repositoryRoot === key
-      && entry.building === probed.building
-      && entry.failed === probed.failed
-      && Date.now() - entry.at < CACHE_TTL_MS) {
-      return entry.judgment
-    }
-    const judgment = await computeRestartSignal(options)
-    cache = { judgment, repositoryRoot: key, at: Date.now(), building: probed.building, failed: probed.failed }
-    return judgment
-  })().finally(() => { inFlight = undefined })
+  inFlight ??= readState(options).finally(() => { inFlight = undefined })
   return inFlight
 }
 
+async function readState(options: RestartSignalOptions): Promise<RestartSignalJudgment> {
+  const path = statePathOf(options)
+  if (readPath !== path) {
+    readPath = path
+    readKey = undefined
+    lastJudgment = undefined
+    publishedKey = undefined
+  }
+  let mtimeMs: number
+  let size: number
+  try {
+    const info = await stat(path)
+    mtimeMs = info.mtimeMs
+    size = info.size
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'ENOENT') {
+      throw new RestartSignalStateUnavailableError(`restart-signal state file absent: ${path} (collector not written yet?)`)
+    }
+    throw error
+  }
+  const key = `${String(mtimeMs)}|${String(size)}`
+  if (key === readKey) {
+    if (lastJudgment !== undefined) return lastJudgment
+    throw new RestartSignalStateUnavailableError(`restart-signal state file still stale: ${path}`)
+  }
+  const entry = parseStateEntry(await readFile(path, 'utf8'), path)
+  readKey = key
+  const fresh = Date.now() - mtimeMs <= STATE_FRESH_MS
+  if (!fresh) {
+    // 过期回上次值: a stale collection never publishes and never adopts.
+    if (lastJudgment !== undefined) return lastJudgment
+    throw new RestartSignalStateUnavailableError(
+      `restart-signal state file stale (age ${String(Math.round((Date.now() - mtimeMs) / 1000))}s > ${String(STATE_FRESH_MS)}ms) and no previous judgment: ${path}`,
+    )
+  }
+  const identity = judgmentKey(entry.judgment)
+  if (publishedKey !== identity) {
+    publishedKey = identity
+    publishJudgment(entry.judgment)
+  }
+  lastJudgment = entry.judgment
+  return entry.judgment
+}
+
 /**
- * Drop the result cache so the next collect recomputes. The push sensor calls
- * this when its fingerprint or build-marker delta proved a move
- * (stamp-poll-host): that delta already knows the stored judgment is stale, so
- * the recheck it triggers — and every page pull `restart-signal/changed` pokes
- * after it — must recompute rather than answer from the pre-move result.
+ * Drop the state-file mtime key so the next collect re-reads the file
+ * instead of answering from the pre-move read. The push sensor calls this
+ * when its fingerprint or build-marker delta proved a move
+ * (restart-signal-poll-host): the file the collector writes after that move
+ * — and every page pull `restart-signal/changed` pokes — must be read anew.
+ * The last fresh judgment stays (it is the stale-file fallback, not an answer
+ * the move discredited: the move is about freshness, which the mtime key
+ * now carries).
  */
 export function invalidateRestartSignalCache(): void {
-  cache = undefined
+  readKey = undefined
 }
 
 /**
- * The most recent judgment this process computed, however old — the recheck
- * route's timeout answers from it so a hung gather can never hang the request
- * (an old truth beats a hang, never a fresher-than-truth guess).
- * @returns The stored judgment; `undefined` before the first computation.
+ * The most recent FRESH judgment this process served, however old — the
+ * recheck route's timeout answers from it so a hung read can never hang the
+ * request (an old truth beats a hang, never a fresher-than-truth guess).
+ * @returns The stored judgment; `undefined` before the first fresh read.
  */
 export function lastRestartSignalJudgment(): RestartSignalJudgment | undefined {
-  return cache?.judgment
+  return lastJudgment
 }
 
-/** Drop the coalescing slot, the result cache, and the observer roster; tests only. */
+/**
+ * Persist this process's runtime capture (R) where the external collector can
+ * read it: one atomic write at route registration, never per request. R is a
+ * process-start fact — the host face this process loaded plus the S_cfg of its
+ * capture moment — and without this file the collector could only ever compare
+ * a fresh baseline against itself, erasing the NEED_RESTART branch entirely.
+ *
+ * Failures are loud on stderr and never take the registration down (the route
+ * serves whatever the collector manages to write; a collector that finds no
+ * runtime capture fails loudly on its own side).
+ * @param dshHome - DSH home to write into; defaults to `resolveDshHome()`.
+ */
+export function persistRestartSignalRuntime(dshHome?: string): void {
+  // Test workers inherit the real home unless a spec sandboxes it (the
+  // DSH_HOME override pattern restart-stamp specs use): never let a suite
+  // clobber the production capture — a sandboxed run opts back in. Same
+  // guard as session-controller's fork-ledger write (commands.ts).
+  if (process.env.VITEST !== undefined && process.env.DSH_HOME === undefined) return
+  try {
+    const stamp = restartStamp(dshHome === undefined ? {} : { dshHome })
+    const target = join(dshHome ?? resolveDshHome(), RESTART_SIGNAL_RUNTIME_FILE)
+    mkdirSync(dirname(target), { recursive: true })
+    const tempPath = `${target}.tmp-${String(process.pid)}`
+    writeFileSync(tempPath, JSON.stringify({ schema: RESTART_SIGNAL_RUNTIME_SCHEMA, ...stamp }))
+    renameSync(tempPath, target)
+  } catch (error) {
+    process.stderr.write(`ui-settings-general: restart-signal runtime capture persist failed: ${error instanceof Error ? error.message : String(error)}\n`)
+  }
+}
+
+/** Drop the read state, both rosters, and the coalescing slot; tests only. */
 export function resetRestartSignalForTest(): void {
   inFlight = undefined
-  cache = undefined
+  readPath = undefined
+  readKey = undefined
+  lastJudgment = undefined
+  publishedKey = undefined
   judgmentListeners.clear()
+  refreshListeners.clear()
 }

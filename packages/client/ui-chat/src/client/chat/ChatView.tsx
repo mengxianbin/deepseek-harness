@@ -13,8 +13,8 @@ import {
 import { isAtOrOutside } from '../contract/group-tree.ts'
 import type { ChatFlowHookContext, ChatViewSlotProps, OpenFileOptions } from '../contract/slots.ts'
 import type { ChatSnapshot } from '../contract/snapshot.ts'
-import { TurnNavigator } from './TurnNavigator.tsx'
-import { mergeTurnRailItems } from './turn-rail-items.ts'
+import { TurnNavigator, type TurnNavigatorHandle } from './TurnNavigator.tsx'
+import { mergeTurnRailItems, railMarks } from './turn-rail-items.ts'
 import { useTextInteraction } from './text-interaction.ts'
 import { useChatScroll } from './use-chat-scroll.ts'
 import { fileMediaUrl, resolveWorkspacePath, sessionFileAddress } from '@deepseek-ai/dsh-util-workspace-path'
@@ -62,6 +62,7 @@ export function ChatView({
   useSession, useChat, useConversation, useSessions, renderSlot,
   sessionId, openFile, openExternalLink, loadOlder, loadThrough, loadImage, inspectCall, chatScroll, forkAt, fileMentions,
   usePresentation, useProjection, useInteractionIds, dispatchInteraction, t, fileDrag,
+  registerRailStep,
 }: ChatViewSlotProps) {
   const order = useChat(s => s.order)
   const groupedEntries = useConversation(snapshot => snapshot.views.grouped('chat')?.entries)
@@ -81,6 +82,7 @@ export function ChatView({
     () => mergeTurnRailItems(turnNavigationItems, turnOutline),
     [turnNavigationItems, turnOutline],
   )
+  const marks = useMemo(() => railMarks(railItems), [railItems])
   const inbox = useProjection('inbox') as InboxState | undefined
   // Workspace root off the session list row: path summaries display relative to it.
   const cwd = useSessions(s => s.byId[sessionId]?.cwd)
@@ -200,15 +202,27 @@ export function ChatView({
   const interactionIds = useInteractionIds(ids => ids)
   const textInteraction = useTextInteraction(scroll.columnRef, interactionSurfaceRef, dispatchInteraction, interactionIds)
   const flowContext = useMemo<ChatFlowHookContext>(() => ({ motion: scroll.motion }), [scroll.motion])
+  const railRef = useRef<TurnNavigatorHandle>(null)
+  const stepRail = useCallback((delta: 1 | -1) => {
+    railRef.current?.stepIntervention(delta)
+  }, [])
+  const stepMarks = useCallback((delta: 1 | -1) => {
+    scroll.stepIntervention(marks, delta)
+  }, [scroll, marks])
+  // The chord is registered in the plugin body, which owns the shortcut
+  // service; this view publishes the single action it drives.
+  useEffect(() => registerRailStep(stepRail), [registerRailStep, stepRail])
 
   return (
     <div className={css.frame}>
       {scroll.initialized && (
         <TurnNavigator
-          items={railItems}
+          ref={railRef}
+          marks={marks}
           activeTurn={scroll.activeTurn}
           busyTurn={scroll.busyTurn}
-          onNavigate={scroll.navigateToTurn}
+          onNavigate={scroll.navigateTo}
+          onStep={stepMarks}
           t={t}
         />
       )}

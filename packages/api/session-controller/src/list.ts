@@ -42,7 +42,8 @@ const COLD_REPAIR_ATTEMPT_LIMIT = 3
  * Projection keys a `trimHeavyProjections` list omits: every reader of these
  * keys opens its Session first (an exact `session/projections` baseline then
  * carries them), so a thin listing never needs to pay their bytes. The trim
- * is opt-in (f5-contract-a2-1030): an untrimmed listing keeps them all.
+ * is the default column set (F′ default flip, session-list-full-slim-1110
+ * P2); an explicit `trimHeavyProjections: false` restores them all.
  * `title`, `subagentCatalog`, `goal`, `agentPreset`, `subagent`, and
  * `subagentTiming` are deliberately absent from this set — cold rows are
  * their only source.
@@ -290,33 +291,50 @@ export class ApiSessionList {
 
   /**
    * Read every visible attached and persisted Session without activating an Agent.
-   * @param request - row-scope request: the pre-f5 full corpus is the default
-   *   again (f5-contract-a2-1030) — omitted flags return archived rows,
-   *   subagent-origin rows, and untrimmed hints. An explicit
-   *   `includeArchived: false` excludes archived ids from the directory scan
-   *   before any header read, an explicit `includeSubagents: false` drops
-   *   subagent rows right after their header read, and
-   *   `trimHeavyProjections: true` trims the heavy hint columns; the flags are
-   *   independent and the thin main-page listing passes all three.
+   * @param request - row-scope request: since the F′ default flip the omitted
+   *   request is the thin first-party listing — no archived rows, no
+   *   subagent-origin rows, heavy hint columns trimmed. An explicit
+   *   `includeArchived: true` restores archived rows (excluded from the
+   *   directory scan before any header read otherwise), an explicit
+   *   `includeSubagents: true` restores subagent rows (the registry's
+   *   in-memory header index pre-excludes them otherwise, with a
+   *   post-header-read predicate as the correctness backstop), and an
+   *   explicit `trimHeavyProjections: false` restores the heavy hint
+   *   columns; the flags are independent and full-corpus consumers pass
+   *   all three explicitly.
    * @param signal - optional cancellation for persistence reads and summary generation.
    * @returns visible Session summaries ordered by activity.
    */
   async list(request?: SessionListRequest, signal?: AbortSignal): Promise<SessionSummary[]> {
     signal?.throwIfAborted()
-    // A2 contract (f5-contract-a2-1030): only an explicit `false` cuts rows
-    // and only an explicit `true` trims columns; omission is the full corpus.
-    const includeArchived = request?.includeArchived !== false
-    const includeSubagents = request?.includeSubagents !== false
-    const trimHeavyProjections = request?.trimHeavyProjections === true
-    // One consistent archived snapshot serves both the directory-level
-    // pre-exclusion and every record the listing merges.
-    const archivedSessionIds = includeArchived
-      ? undefined
-      : new Set<SessionId>(this.ctx.workspaceRegistry.archivedSessionIds)
+    // F′ default flip (session-list-full-slim-1110 P2): omission is the thin
+    // listing — rows cut and heavy columns trimmed by default; only an
+    // explicit `true` (row scope) or `false` (trim) widens back to the
+    // pre-f5 full corpus.
+    const includeArchived = request?.includeArchived === true
+    const includeSubagents = request?.includeSubagents === true
+    const trimHeavyProjections = request?.trimHeavyProjections !== false
+    // One consistent exclusion snapshot serves both the directory-level
+    // pre-exclusion and every record the listing merges. Subagent ids come
+    // from the registry's in-memory header index (built at startup, no I/O),
+    // so the common thin listing skips their directory reads entirely; the
+    // select predicate below stays as the correctness backstop for any id
+    // the index has not seen yet.
+    const excludeSessionIds = new Set<SessionId>()
+    if (!includeArchived) {
+      for (const id of this.ctx.workspaceRegistry.archivedSessionIds) excludeSessionIds.add(id)
+    }
+    if (!includeSubagents) {
+      for (const id of this.ctx.workspaceRegistry.subagentSessionIds) excludeSessionIds.add(id)
+    }
     const records = await this.ctx.sessionQuery.listSessions(signal, {
-      ...(archivedSessionIds === undefined ? {} : { excludeSessionIds: archivedSessionIds }),
+      // Any row cut — the omitted default, or an explicit `false` — engages
+      // the pre-exclusion set (even when both registry sets are empty),
+      // matching the flag-gated presence contract.
+      ...(!includeArchived || !includeSubagents ? { excludeSessionIds } : {}),
       // Origin lives only in the header: this predicate runs after the header
-      // read and before the stat, the earliest point it can decide.
+      // read and before the stat, the earliest point it can decide. Ids the
+      // registry index already knows never reach it (excluded above).
       ...(includeSubagents ? {} : { select: (header: SessionHeader) => header.origin !== 'subagent' }),
     })
     signal?.throwIfAborted()

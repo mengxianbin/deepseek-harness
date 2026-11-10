@@ -1650,9 +1650,10 @@ describe('Session summary projection replacement', () => {
   })
 })
 
-describe('list row scope (f5-contract-a2-1030)', () => {
-  // The server default is the full pre-f5 corpus, so every main-page pull
-  // states its scope explicitly: both row cuts plus the heavy-column trim.
+describe('list row scope (F′ flip, session-list-full-slim-1110)', () => {
+  // The server default is now the thin listing (F′ flip), and every
+  // main-page pull still states its scope explicitly: both row cuts plus
+  // the heavy-column trim, so a future default change cannot drift it.
   const THIN = { includeArchived: false, includeSubagents: false, trimHeavyProjections: true } as const
 
   it('pulls thin explicitly and hydrates subagent rows once a catalog lands', async ({ mock, remote }) => {

@@ -208,6 +208,8 @@ flowchart LR
   svc_agents["ctx.agents<br/>Agent service"]
   pkg_acp["acp"]
   svc_agentDefaultModel["ctx.agentDefaultModel<br/>Default Agent model selection"]
+  pkg_model_effort_memory["model-effort-memory"]
+  svc_modelEffortMemory["ctx.modelEffortMemory<br/>Model-level effort memory"]
   svc_agentLoop["ctx.agentLoop<br/>Concrete loop driver"]
   pkg_base["base"]
   pkg_sdk_minimal["sdk-minimal"]
@@ -406,6 +408,7 @@ flowchart LR
   pkg_mcp_client --> svc_mcpResources
   pkg_mcp_resources --> svc_mcpResources
   pkg_message_feedback --> svc_messageFeedback
+  pkg_model_effort_memory --> svc_modelEffortMemory
   pkg_office_to_pdf --> svc_officeToPdf
   pkg_otel --> svc_otel
   pkg_permission_presets --> svc_permissionPresets
@@ -540,6 +543,8 @@ flowchart LR
   svc_llm --> pkg_compaction_basic
   svc_lsp --> pkg_tool_lsp
   svc_mcpResources --> pkg_mcp_resources
+  svc_modelEffortMemory --> pkg_api_session_controller
+  svc_modelEffortMemory --> pkg_llm
   svc_officeToPdf --> pkg_client_ui_sidebar_documentpreview
   svc_otel --> pkg_host_product_telemetry_otel
   svc_otel --> pkg_session_telemetry_otel
@@ -726,6 +731,7 @@ flowchart LR
 | `ctx.skills` | `seam` | [`skill`](../packages/skill/skill) | [`sandbox-windows-acl`](../packages/sandbox/sandbox-windows-acl), [`skill-badge`](../packages/experimental/skill-badge), [`skill-filesystem`](../packages/skill/skill-filesystem), [`skill-office`](../packages/skill/skill-office) | [`tool-skill`](../packages/skill/tool-skill) | - | 合并提供方的 skill（技能）目录；tool-skill 渲染会话前缀目录，并加载完整的 skill 正文。 |
 | `ctx.agents` | `core` | [`agent`](../packages/core/agent) | - | [`agent-loop`](../packages/core/agent-loop), [`acp`](../packages/acp/acp), [`subagent`](../packages/subagent/subagent) | - | 拥有实时 Agent 句柄、创建／恢复工厂 seam，以及进程本地的发起方传播。 |
 | `ctx.agentDefaultModel` | `core` | [`agent-default-model`](../packages/core/agent-default-model) | - | [`api-session-controller`](../packages/api/session-controller), [`headless`](../packages/bundle/headless) | - | Reads the default ModelSelection from volatile Config and saves selections through the profile editor. |
+| `ctx.modelEffortMemory` | `core` | [`model-effort-memory`](../packages/core/model-effort-memory) | - | [`api-session-controller`](../packages/api/session-controller), [`llm`](../packages/llm/llm) | - | Stores the effort each model was last explicitly set to, keyed by model id; the effort pane is its only writer and llm folds it into the resolved default. |
 | `ctx.agentLoop` | `bundle` | [`agent-loop`](../packages/core/agent-loop) | - | [`base`](../packages/bundle/base), [`sdk-minimal`](../packages/bundle/sdk-minimal) | - | 唯一的具体循环插件；扩展包依赖 dsh-agent 的事件和服务，而不依赖此包。 |
 | `ctx.schedule` | `core` | [`schedule`](../packages/schedule/schedule) | - | - | - | 独立于 Session 的加载状态存储任务，并将到期消息排入原 Session。 |
 | `ctx.goals` | `core` | [`goal`](../packages/goal/goal) | - | - | - | 从会话日志折叠带修订版本的目标状态，并将实时延续激活保留在进程本地。 |

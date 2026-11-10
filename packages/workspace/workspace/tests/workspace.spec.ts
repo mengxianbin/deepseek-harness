@@ -1566,3 +1566,30 @@ declare module '@deepseek-ai/dsh-workspace/types' {
     'probe-items': true
   }
 }
+
+describe('subagent origin header index', () => {
+  it('reports stored subagent-origin ids and skips main-session ids', async () => {
+    const main = header('main-1', undefined, 100)
+    const sub = { ...header('sub-1', undefined, 200), origin: 'subagent' as const, parentSession: SessionId('main-1') }
+    const result = await harness({ sessions: [main, sub] })
+    onTestFinished(() => result.ctx.fiber.dispose())
+
+    expect([...result.registry.subagentSessionIds]).toEqual([SessionId('sub-1')])
+  })
+
+  it('includes live subagent sessions indexed at boot', async () => {
+    const liveSub = { ...header('live-sub', undefined, 300), origin: 'subagent' as const }
+    const result = await harness({ sessions: [], liveSessions: [liveSub] })
+    onTestFinished(() => result.ctx.fiber.dispose())
+
+    expect(result.registry.subagentSessionIds.has(SessionId('live-sub'))).toBe(true)
+    expect(result.registry.subagentSessionIds.size).toBe(1)
+  })
+
+  it('stays empty when no header carries the subagent origin', async () => {
+    const result = await harness({ sessions: [header('plain-1', undefined, 100)] })
+    onTestFinished(() => result.ctx.fiber.dispose())
+
+    expect(result.registry.subagentSessionIds.size).toBe(0)
+  })
+})

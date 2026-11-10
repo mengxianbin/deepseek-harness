@@ -385,7 +385,10 @@ describe('Web session model selection', () => {
     expect(describe).toHaveBeenCalledWith('CUSTOM_API_KEY')
     expect(ctx.agentDefaultModel.currentSelection()).toEqual(configuredKey
       ? { provider: 'removed', model: 'saved' }
-      : { provider: 'deepseek-account', model: 'first-model', reasoningEffort: 'high' })
+      // The deployment default carries direction only: effort retired from #R,
+      // so a freshly resolved default arrives bare and the Host fold supplies
+      // whatever the route resolves.
+      : { provider: 'deepseek-account', model: 'first-model' })
     await ctx.fiber.dispose()
   })
 

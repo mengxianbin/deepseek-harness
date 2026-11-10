@@ -23,8 +23,11 @@ export function resolveRestartCapability(value: unknown): boolean {
   return Reflect.get(value, 'configured') === true
 }
 
-/** Browser fetch route asking the Host to recompute the restart signal and return it. */
-export const RECHECK_PATH = '/api/stamp-recheck'
+/** Browser fetch route serving the Host's externally-collected restart-signal
+ * state (intent naming, offhost-1110): the answer is the latest
+ * judgment the off-host collector wrote to the DSH-home state file — the route
+ * itself recomputes nothing. */
+export const RESTART_SIGNAL_STATE_PATH = '/api/restart-signal/state'
 
 /**
  * The seven-state restart signal plus its informational twin, judged by the
@@ -64,7 +67,7 @@ export const RESTART_SIGNAL_STATES: readonly RestartSignalState[] = [
 /**
  * Validate a recheck response; an absent or malformed body leaves the
  * previous badge state in place instead of failing the page.
- * @param value - raw JSON body of a `POST /api/stamp-recheck` response.
+ * @param value - raw JSON body of a `POST /api/restart-signal/state` response.
  * @returns the validated view, or `undefined` when malformed.
  */
 export function resolveRestartSignal(value: unknown): RestartSignalView | undefined {

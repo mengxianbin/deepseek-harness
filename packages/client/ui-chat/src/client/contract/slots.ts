@@ -344,6 +344,12 @@ export interface ChatViewInjected {
     read: () => ChatScrollPosition | null
   }
   forkAt: (seq: number) => void
+  /**
+   * Publish this mounted view's intervention stepping for the rail's fixed
+   * chord; the plugin body owns the shortcut service, this view owns the
+   * action. Returns the disposer releasing the registration.
+   */
+  registerRailStep: (step: (delta: 1 | -1) => void) => () => void
   fileMentions: (owner: TurnTailOwnerProps) => MarkdownFileMentions | undefined
 }
 

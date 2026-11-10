@@ -120,7 +120,9 @@ export interface ISessions {
    *   archived view (archived rows in both directions), `includeSubagents`
    *   widens to subagent rows for this page generation. Every refresh states
    *   the row scope and the heavy-column trim explicitly on the wire
-   *   (f5-contract-a2-1030: the server default is the full pre-f5 corpus).
+   *   (session-list-full-slim-1110 P2: the server default is now the thin
+   *   listing, so an explicit wire scope is what keeps each view's rows
+   *   stable).
    * @returns completion of the current or newly started Session-list refresh.
    */
   refresh(options?: SessionListScopeOptions): Promise<void>

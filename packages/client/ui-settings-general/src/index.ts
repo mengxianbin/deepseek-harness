@@ -9,8 +9,8 @@ import { registerAutoBuild } from './auto-build-dispatch.ts'
 import { registerRestart } from './restart-host.ts'
 import { registerRestartDisposition } from './restart-disposition-host.ts'
 import { registerRestartSignal } from './restart-signal-host.ts'
+import { registerRestartSignalPoll } from './restart-signal-poll-host.ts'
 import { restartStamp } from './restart-stamp.ts'
-import { registerStampPoll } from './stamp-poll-host.ts'
 
 /** Runtime preferences projected to the browser. */
 export interface Config {
@@ -34,7 +34,7 @@ export function apply(ctx: Context): void {
   // The polling sensor (design triggers ① and ②) needs neither route
   // service: it captures source and configuration fingerprints on its own
   // interval and fires the state machine's recheck when they move.
-  registerStampPoll(ctx)
+  registerRestartSignalPoll(ctx)
   // The disposition layer (P3, design §四): a throttled auto-build rides the
   // same judgment stream, and the automatic-restart fork stays dark until
   // DSH_AUTO_RESTART=1 opts in (T2 handover point). Neither needs a route

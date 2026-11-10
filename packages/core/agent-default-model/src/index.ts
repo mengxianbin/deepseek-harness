@@ -10,7 +10,6 @@ import type { Volatile } from '@deepseek-ai/cordis'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { ModelSelection } from '@deepseek-ai/dsh-agent'
-import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-config-editor'
 
 declare module '@deepseek-ai/cordis' {
@@ -26,19 +25,18 @@ export interface Config {
   provider: Volatile<string>
   /** Provider-owned model id. */
   model: Volatile<string>
-  /** Adapter-owned reasoning effort; omission follows the provider default. */
-  reasoningEffort: Volatile<string | undefined>
 }
 
-/** Project stored settings onto the Agent-facing selection type. */
-function selection(settings: { provider: string; model: string; reasoningEffort?: string }): ModelSelection {
-  return {
-    provider: settings.provider,
-    model: settings.model,
-    ...settings.reasoningEffort === undefined
-      ? {}
-      : { reasoningEffort: ReasoningEffortId(settings.reasoningEffort) },
-  }
+/**
+ * Project stored settings onto the Agent-facing selection type.
+ *
+ * The stored default carries the direction only. Effort is not part of it:
+ * a fresh selection stays bare and the resolution fold supplies whatever the
+ * model's memory or route default says, so the deployment default can never
+ * pin a level the effort pane did not choose.
+ */
+function selection(settings: { provider: string; model: string }): ModelSelection {
+  return { provider: settings.provider, model: settings.model }
 }
 
 /**
@@ -51,7 +49,6 @@ export class AgentDefaultModelConfig extends Service {
   static Config = z.object({
     provider: z.string().required().volatile(),
     model: z.string().required().volatile(),
-    reasoningEffort: z.string().volatile(),
   })
 
   constructor(private readonly ownerContext: Context, private config: Config) {
@@ -62,20 +59,19 @@ export class AgentDefaultModelConfig extends Service {
 
   /**
    * Read the current default model selection.
-   * @returns a detached provider, model, and optional reasoning selection.
+   * @returns a detached provider and model; effort is never stored here.
    */
   currentSelection(): ModelSelection {
-    const reasoningEffort = this.config.reasoningEffort.get()
-    return selection({
-      provider: this.config.provider.get(), model: this.config.model.get(),
-      ...reasoningEffort === undefined ? {} : { reasoningEffort },
-    })
+    return selection({ provider: this.config.provider.get(), model: this.config.model.get() })
   }
 
   /**
-   * Save the complete default model selection. A deployment without a configuration
-   * editor keeps its composition entry. Saves commit in submission order; a failed
-   * save rejects its caller without blocking later saves.
+   * Save the direction of the default model selection. A deployment without a
+   * configuration editor keeps its composition entry. Any effort on `next` is
+   * dropped rather than persisted: effort lives in the model-level memory, and
+   * writing it here would let a model switch repin a level. Saves commit in
+   * submission order; a failed save rejects its caller without blocking later
+   * saves.
    * @param next - resolved selection accepted by an entry point.
    * @returns fulfillment after the optional profile write settles.
    */
@@ -84,10 +80,7 @@ export class AgentDefaultModelConfig extends Service {
     if (entry === undefined) return
     const editor = this.ctx.get('configEditor')
     if (editor === undefined) return
-    const config = {
-      provider: next.provider, model: next.model,
-      ...next.reasoningEffort === undefined ? {} : { reasoningEffort: String(next.reasoningEffort) },
-    }
+    const config = { provider: next.provider, model: next.model }
     const saved = this.saves.then(() => editor.edit(entry, () => config))
     this.saves = saved.catch(() => {})
     await saved

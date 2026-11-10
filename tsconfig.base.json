@@ -481,6 +481,7 @@
       "@deepseek-ai/dsh-mcp-resources": ["./packages/mcp/mcp-resources/src"],
       "@deepseek-ai/dsh-message-feedback": ["./packages/feedback/message-feedback/src"],
       "@deepseek-ai/dsh-message-quotes": ["./packages/session/message-quotes/src"],
+      "@deepseek-ai/dsh-model-effort-memory": ["./packages/core/model-effort-memory/src"],
       "@deepseek-ai/dsh-native-command": ["./packages/util/native-command/src"],
       "@deepseek-ai/dsh-office-to-pdf": ["./packages/document/office-to-pdf/src"],
       "@deepseek-ai/dsh-official-bundles": ["./packages/util/official-bundles/src"],

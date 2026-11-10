@@ -244,7 +244,7 @@ packages/client/ui-settings-general/tests/restart-signal.host.spec.ts
 packages/client/ui-settings-general/tests/restart.host.spec.ts
 packages/client/ui-settings-general/tests/settings-root.client.spec.tsx
 packages/client/ui-settings-general/tests/shell.client.spec.ts
-packages/client/ui-settings-general/tests/stamp-poll.host.spec.ts
+packages/client/ui-settings-general/tests/restart-signal-poll.host.spec.ts
 packages/client/ui-settings-models/tests/components.client.spec.tsx
 packages/client/ui-settings-models/tests/model-input-types.client.spec.tsx
 packages/client/ui-settings-models/tests/model-list-catalog.client.spec.tsx

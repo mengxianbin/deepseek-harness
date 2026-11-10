@@ -85,9 +85,11 @@ async function harness(rows: readonly Row[], summaryMs = 8, workSliceMs = 8) {
   })
   const listSessions = vi.fn(async (_signal?: AbortSignal, _options?: SessionListQueryOptions) => records)
   ctx.provide('sessionQuery', { listSessions } as never)
-  // An explicit row-cut list pre-excludes this registry set before any
-  // header read; the scheduling fixture archives nothing.
-  ctx.provide('workspaceRegistry', { archivedSessionIds: [] } as never)
+  // An explicit row-cut list pre-excludes these registry sets before any
+  // header read; the scheduling fixture archives nothing and lists no
+  // subagent-origin sessions (the empty index leaves the header predicate
+  // as the only subagent cut).
+  ctx.provide('workspaceRegistry', { archivedSessionIds: [], subagentSessionIds: new Set() } as never)
   ctx.provide('sessionProjectionCache', {
     cachedSnapshot: (header: SessionRecord['header']) => {
       recordSummary('cold', header.id)
@@ -240,7 +242,8 @@ describe('Session-list work slices', () => {
       if (id === abortAt) betweenRows(() => { controller.abort(reason) })
     }
 
-    // Explicit row cuts (f5-contract-a2-1030) ride beside the signal.
+    // Explicit row cuts ride beside the signal (F′ flip: omission would cut
+    // the same way now; these stay explicit on the wire).
     await expect(h.list.list({ includeArchived: false, includeSubagents: false }, controller.signal)).rejects.toBe(reason)
     expect(h.trace).toEqual(abortAt === 'first'
       ? [`${phase}:first`]

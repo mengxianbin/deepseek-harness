@@ -31,6 +31,8 @@ import { freezeMessage } from './message.ts'
 import { resolveRetryPolicy } from './retry-policy.ts'
 import type { ResolvedRetryPolicy } from './retry-policy.ts'
 import type { ProviderRequestId } from './brand.ts'
+import { ReasoningEffortId } from './brand.ts'
+import type {} from '@deepseek-ai/dsh-model-effort-memory'
 import { callConfigEquals } from './call-config.ts'
 import type { ConfigureCall, LlmCallConfig, LlmCallConfigAdapterDefaults } from './call-config.ts'
 import { HarnessError, INVALID_CREDENTIAL_CODE } from './error.ts'
@@ -876,11 +878,22 @@ export class LlmRuntime extends TypertRemoteService {
         'INVALID_MODEL_REASONING',
       )
     }
+    // The resolution fold, computed once here so every consumer of this
+    // resolved info — catalog display, request materialization, and attach —
+    // reads the same answer. A remembered level outside this route's
+    // vocabulary counts as absent, so one route's memory can never break a
+    // model whose efforts do not offer it.
+    const remembered = this.ctx.get('modelEffortMemory')?.effortFor(model)
+    const effortMemory = remembered === undefined || !seen.has(remembered)
+      ? undefined
+      : ReasoningEffortId(remembered)
+    const defaultEffort = effortMemory ?? reasoning.defaultEffort
     return {
       ...info,
       reasoning: {
         efforts,
-        ...reasoning.defaultEffort === undefined ? {} : { defaultEffort: reasoning.defaultEffort },
+        ...defaultEffort === undefined ? {} : { defaultEffort },
+        ...effortMemory === undefined ? {} : { effortMemory },
       },
     }
   }

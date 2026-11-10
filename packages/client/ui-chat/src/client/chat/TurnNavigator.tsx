@@ -1,28 +1,38 @@
-/** Fixed-pitch virtual turn rail with independent activation and scroll controls. */
+/**
+ * Fixed-pitch virtual rail of every known mark — Turn boundaries and the
+ * human interventions inside them — with independent activation, stepping,
+ * and scroll controls.
+ */
 import {
   forwardRef, memo, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState,
   type CSSProperties, type ForwardedRef,
 } from 'react'
 import { defaultRangeExtractor, elementScroll, observeElementOffset, useVirtualizer, type Range } from '@tanstack/react-virtual'
+import { IconChevronDownOutlineRegular, IconChevronUpOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatViewSlotProps } from '../contract/slots.ts'
-import type { TurnRailItem } from './turn-rail-items.ts'
+import type { RailMark, TurnRailIntervention } from './turn-rail-items.ts'
 import css from './TurnNavigator.module.css'
 
 interface TurnNavigatorProps {
-  readonly items: readonly TurnRailItem[]
+  /** Every mark in reading order: each Turn first, then its interventions. */
+  readonly marks: readonly RailMark[]
   readonly activeTurn: number | null
   /** Turn whose jump is still paging history in; its mark pulses. */
   readonly busyTurn: number | null
-  readonly onNavigate: (item: TurnRailItem) => void
+  readonly onNavigate: (mark: RailMark) => void
+  /** Step to the neighbouring human-intervention mark. */
+  readonly onStep: (delta: 1 | -1) => void
   readonly t: ChatViewSlotProps['t']
 }
 
-/** Imperative controls for known turns; unknown turn numbers are ignored. */
+/** Imperative controls for known marks; unknown turn numbers are ignored. */
 export interface TurnNavigatorHandle {
   /** @param turn - turn to activate through the navigation callback. */
   activateTurn(turn: number): void
   /** @param turn - turn to center in the rail without navigating the transcript. */
   scrollToTurn(turn: number): void
+  /** @param delta - `1` for the next intervention, `-1` for the previous one. */
+  stepIntervention(delta: 1 | -1): void
 }
 
 /** Fixed pitch between neighbouring marks; overflow scrolls inside the frame. */
@@ -38,52 +48,71 @@ function preferredScrollBehavior(): 'auto' | 'smooth' {
     : 'smooth'
 }
 
+/** The localized name of one intervention, numbered within its Turn and kind. */
+function interventionLabel(intervention: TurnRailIntervention, t: ChatViewSlotProps['t']): string {
+  return t(
+    intervention.kind === 'question'
+      ? 'chat.turnNavigation.interventionQuestion'
+      : 'chat.turnNavigation.interventionInput',
+    { ordinal: intervention.ordinal },
+  )
+}
+
 interface TurnMarkProps extends Pick<TurnNavigatorProps, 'onNavigate' | 't'> {
-  readonly item: TurnRailItem
+  readonly mark: RailMark
   readonly index: number
   readonly active: boolean
   readonly busy: boolean
   readonly previewId: string | undefined
   readonly registerElement: (element: HTMLButtonElement | null) => void
-  readonly onPreview: (turn: number | null) => void
-  readonly onFocusChange: (turn: number | null) => void
+  readonly onPreview: (key: string) => void
+  readonly onFocusChange: (key: string | null) => void
 }
 
 const TurnMark = memo(function TurnMark({
-  item, index, active, busy, previewId, registerElement, onNavigate, onPreview, onFocusChange, t,
+  mark, index, active, busy, previewId, registerElement, onNavigate, onPreview, onFocusChange, t,
 }: TurnMarkProps) {
   const classes = [css.mark]
-  if (item.anchor.kind === 'unloaded') classes.push(css.markUnloaded)
+  // An intervention is a sub-mark of its Turn: a shorter tick indented from
+  // the rail edge, so the ladder reads as Turns with decisions inside them.
+  if (mark.kind === 'intervention') classes.push(css.markIntervention)
+  else if (mark.item.anchor.kind === 'unloaded') classes.push(css.markUnloaded)
   if (active) classes.push(css.markActive)
   else if (previewId !== undefined) classes.push(css.markPreview)
   if (busy) classes.push(css.markBusy)
+  const label = mark.kind === 'turn'
+    ? t(
+      mark.item.anchor.kind === 'loaded' ? 'chat.turnNavigation.jump' : 'chat.turnNavigation.jumpLoad',
+      { turn: mark.item.turn },
+    )
+    : t('chat.turnNavigation.jumpIntervention', {
+      turn: mark.item.turn,
+      label: interventionLabel(mark.item, t),
+    })
   return (
     <button
       ref={registerElement}
       data-index={index}
       type="button"
       className={classes.join(' ')}
-      aria-label={t(
-        item.anchor.kind === 'loaded' ? 'chat.turnNavigation.jump' : 'chat.turnNavigation.jumpLoad',
-        { turn: item.turn },
-      )}
+      aria-label={label}
       aria-current={active ? 'true' : undefined}
       aria-busy={busy ? 'true' : undefined}
       aria-describedby={previewId}
-      onPointerMove={() => { onPreview(item.turn) }}
-      onClick={() => { onNavigate(item) }}
-      onFocus={() => { onFocusChange(item.turn) }}
+      onPointerMove={() => { onPreview(mark.key) }}
+      onClick={() => { onNavigate(mark) }}
+      onFocus={() => { onFocusChange(mark.key) }}
       onBlur={() => { onFocusChange(null) }}
     />
   )
 })
 
 function TurnNavigatorRail(
-  { items, activeTurn, busyTurn, onNavigate, t }: TurnNavigatorProps,
+  { marks, activeTurn, busyTurn, onNavigate, onStep, t }: TurnNavigatorProps,
   ref: ForwardedRef<TurnNavigatorHandle>,
 ) {
-  const [previewTurn, setPreviewTurn] = useState<number | null>(null)
-  const [focusedTurn, setFocusedTurn] = useState<number | null>(null)
+  const [previewKey, setPreviewKey] = useState<string | null>(null)
+  const [focusedKey, setFocusedKey] = useState<string | null>(null)
   const scrollerRef = useRef<HTMLDivElement | null>(null)
   const initialization = useRef({
     placed: false,
@@ -94,27 +123,31 @@ function TurnNavigatorRail(
   /** While the pointer works the rail, follow must not move it under the hand. */
   const pointerInsideRef = useRef(false)
   const previewId = useId()
-  const turnIndexes = useMemo(() => {
-    const indexes = new Map<number, number>()
-    items.forEach((item, index) => { indexes.set(item.turn, index) })
+  const markIndexes = useMemo(() => {
+    const indexes = new Map<string, number>()
+    marks.forEach((mark, index) => { indexes.set(mark.key, index) })
     return indexes
-  }, [items])
-  const activeIndex = activeTurn === null ? undefined : turnIndexes.get(activeTurn)
+  }, [marks])
+  const turnIndex = useCallback(
+    (turn: number | null) => turn === null ? undefined : markIndexes.get(`turn:${String(turn)}`),
+    [markIndexes],
+  )
+  const activeIndex = turnIndex(activeTurn)
   useLayoutEffect(() => { initialization.current.index = activeIndex ?? 0 }, [activeIndex])
-  const focusedIndex = focusedTurn === null ? undefined : turnIndexes.get(focusedTurn)
-  const previewIndex = previewTurn === null ? undefined : turnIndexes.get(previewTurn)
-  const onFocusChange = useCallback((turn: number | null) => {
-    setFocusedTurn(turn)
-    setPreviewTurn(turn)
+  const focusedIndex = focusedKey === null ? undefined : markIndexes.get(focusedKey)
+  const previewIndex = previewKey === null ? undefined : markIndexes.get(previewKey)
+  const onFocusChange = useCallback((key: string | null) => {
+    setFocusedKey(key)
+    setPreviewKey(key)
   }, [])
   const virtualizer = useVirtualizer<HTMLDivElement, HTMLButtonElement>({
-    count: items.length,
-    enabled: items.length >= 2,
+    count: marks.length,
+    enabled: marks.length >= 2,
     directDomUpdates: true,
     directDomUpdatesMode: 'transform',
     useScrollendEvent: true,
     getScrollElement: useCallback(() => scrollerRef.current, []),
-    getItemKey: useCallback((index: number) => items[index]?.turn ?? index, [items]),
+    getItemKey: useCallback((index: number) => marks[index]?.key ?? index, [marks]),
     estimateSize: () => TURN_SPACING_PX,
     measureElement: () => TURN_SPACING_PX,
     initialRect: { width: 0, height: 0 },
@@ -199,15 +232,16 @@ function TurnNavigatorRail(
 
   useImperativeHandle(ref, (): TurnNavigatorHandle => ({
     activateTurn(turn) {
-      const index = turnIndexes.get(turn)
-      const item = index === undefined ? undefined : items[index]
-      if (item !== undefined) onNavigate(item)
+      const index = turnIndex(turn)
+      const mark = index === undefined ? undefined : marks[index]
+      if (mark !== undefined) onNavigate(mark)
     },
     scrollToTurn(turn) {
-      const index = turnIndexes.get(turn)
+      const index = turnIndex(turn)
       if (index !== undefined) scrollToIndex(index, 'always')
     },
-  }), [items, turnIndexes, onNavigate, scrollToIndex])
+    stepIntervention(delta) { onStep(delta) },
+  }), [marks, turnIndex, onNavigate, onStep, scrollToIndex])
 
   useEffect(() => {
     if (viewHeight <= 0) {
@@ -216,80 +250,113 @@ function TurnNavigatorRail(
     }
     if (activeIndex === undefined || pointerInsideRef.current) return
     const previous = initialization.current.follow
-    if (previous?.index === activeIndex && previous.count === items.length && previous.height === viewHeight) return
-    initialization.current.follow = { index: activeIndex, count: items.length, height: viewHeight }
-    const behavior = previous?.count === items.length && previous.height === viewHeight
+    if (previous?.index === activeIndex && previous.count === marks.length && previous.height === viewHeight) return
+    initialization.current.follow = { index: activeIndex, count: marks.length, height: viewHeight }
+    const behavior = previous?.count === marks.length && previous.height === viewHeight
       ? preferredScrollBehavior()
       : 'instant'
     scrollToIndex(activeIndex, 'if-needed', behavior)
-  }, [activeIndex, items.length, viewHeight, scrollToIndex])
+  }, [activeIndex, marks.length, viewHeight, scrollToIndex])
 
-  if (items.length < 2) return null
-  const preview = previewIndex === undefined ? undefined : items[previewIndex]
+  if (marks.length < 2) return null
+  const preview = previewIndex === undefined ? undefined : marks[previewIndex]
   const previewPosition = virtualItems.find(item => item.index === previewIndex)
   const fadeClasses = [css.scroller]
   if (scrollTop > 1) fadeClasses.push(css.fadeTop)
   if (scrollTop < virtualizer.getTotalSize() - viewHeight - 1) fadeClasses.push(css.fadeBottom)
+  const stepDisabled = !marks.some(mark => mark.kind === 'intervention')
   return (
     <div className={css.slot}>
-      <nav
-        className={css.frame}
-        aria-label={t('chat.turnNavigation.label')}
-        onPointerEnter={() => { pointerInsideRef.current = true }}
-        onPointerLeave={() => {
-          pointerInsideRef.current = false
-          setPreviewTurn(null)
-        }}
-      >
-        <div ref={scrollerRef} className={fadeClasses.join(' ')}>
-          <div ref={virtualizer.containerRef} className={css.marks}>
-            {virtualItems.map(({ index, key }) => {
-              const item = items[index]
-              if (item === undefined) return null
-              return (
-                <TurnMark
-                  key={key}
-                  item={item}
-                  index={index}
-                  active={item.turn === activeTurn}
-                  busy={item.turn === busyTurn}
-                  previewId={item.turn === previewTurn ? previewId : undefined}
-                  registerElement={virtualizer.measureElement}
-                  onNavigate={onNavigate}
-                  onPreview={setPreviewTurn}
-                  onFocusChange={onFocusChange}
-                  t={t}
-                />
-              )
-            })}
-          </div>
-        </div>
-        {preview !== undefined && previewPosition !== undefined && (
-          <div
-            id={previewId}
-            role="tooltip"
-            className={css.preview}
-            style={{
-              '--turn-preview-center': `${String(previewPosition.start + previewPosition.size / 2 - scrollTop)}px`,
-            } as CSSProperties}
-          >
-            <div className={css.previewPrompt}>
-              {preview.prompt || t('chat.turnNavigation.turn', { turn: preview.turn })}
+      <div className={css.rail}>
+        <button
+          type="button"
+          className={css.step}
+          aria-label={t('chat.turnNavigation.previous')}
+          disabled={stepDisabled}
+          onClick={() => { onStep(-1) }}
+        >
+          <IconChevronUpOutlineRegular size={14} />
+        </button>
+        <nav
+          className={css.frame}
+          aria-label={t('chat.turnNavigation.label')}
+          onPointerEnter={() => { pointerInsideRef.current = true }}
+          onPointerLeave={() => {
+            pointerInsideRef.current = false
+            setPreviewKey(null)
+          }}
+        >
+          <div ref={scrollerRef} className={fadeClasses.join(' ')}>
+            <div ref={virtualizer.containerRef} className={css.marks}>
+              {virtualItems.map(({ index, key }) => {
+                const mark = marks[index]
+                if (mark === undefined) return null
+                return (
+                  <TurnMark
+                    key={key}
+                    mark={mark}
+                    index={index}
+                    active={mark.kind === 'turn' && mark.item.turn === activeTurn}
+                    busy={mark.kind === 'turn' && mark.item.turn === busyTurn}
+                    previewId={previewKey === mark.key ? previewId : undefined}
+                    registerElement={virtualizer.measureElement}
+                    onNavigate={onNavigate}
+                    onPreview={setPreviewKey}
+                    onFocusChange={onFocusChange}
+                    t={t}
+                  />
+                )
+              })}
             </div>
-            {preview.response !== '' && <div className={css.previewResponse}>{preview.response}</div>}
           </div>
-        )}
-      </nav>
+          {preview !== undefined && previewPosition !== undefined && (
+            <div
+              id={previewId}
+              role="tooltip"
+              className={css.preview}
+              style={{
+                '--turn-preview-center': `${String(previewPosition.start + previewPosition.size / 2 - scrollTop)}px`,
+              } as CSSProperties}
+            >
+              {preview.kind === 'turn' ? (
+                <>
+                  <div className={css.previewPrompt}>
+                    {preview.item.prompt || t('chat.turnNavigation.turn', { turn: preview.item.turn })}
+                  </div>
+                  {preview.item.response !== ''
+                    && <div className={css.previewResponse}>{preview.item.response}</div>}
+                </>
+              ) : (
+                <>
+                  <div className={css.previewPrompt}>{interventionLabel(preview.item, t)}</div>
+                  {preview.item.preview !== ''
+                    && <div className={css.previewResponse}>{preview.item.preview}</div>}
+                </>
+              )}
+            </div>
+          )}
+        </nav>
+        <button
+          type="button"
+          className={css.step}
+          aria-label={t('chat.turnNavigation.next')}
+          disabled={stepDisabled}
+          onClick={() => { onStep(1) }}
+        >
+          <IconChevronDownOutlineRegular size={14} />
+        </button>
+      </div>
     </div>
   )
 }
 
 /**
- * Fixed-pitch rail of every known Turn — loaded marks scroll, unloaded marks
- * page history in first — with hover and focus previews. Overflow scrolls
- * inside the frame, gradient fades marking each scrollable end, and the
- * active mark centers only outside the fade-free band while the pointer is
- * elsewhere. Previews follow pointer movement or focus, not scrolling under
- * a stationary pointer.
+ * Fixed-pitch rail of every known mark — a Turn boundary scrolls to its row,
+ * an unloaded one pages history in first, an intervention aligns the row that
+ * recorded it — with hover and focus previews and prev/next stepping through
+ * the human decisions. Overflow scrolls inside the frame, gradient fades
+ * marking each scrollable end, and the active mark centers only outside the
+ * fade-free band while the pointer is elsewhere. Previews follow pointer
+ * movement or focus, not scrolling under a stationary pointer.
  */
 export const TurnNavigator = memo(forwardRef(TurnNavigatorRail))

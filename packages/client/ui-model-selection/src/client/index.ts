@@ -24,7 +24,6 @@ import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import { IconDataOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ModelDirectoryState } from './directory.ts'
-import { modelEffortFor } from './effort-memory.ts'
 import { ModelDirectoryResolver } from './service.ts'
 import type { ModelSelectInjected } from './slots.ts'
 import { ModelSelect } from './ModelSelect.tsx'
@@ -88,12 +87,13 @@ function selectionOf(state: ModelDirectoryState, id: string): ModelSelection | u
     for (const model of group.models) {
       if (rowId(group.id, model.id) !== id) continue
       const sameRoute = state.current?.provider === group.id && state.current.model === model.id
-      // Per-model effort memory (shared with the composer seat): a different
-      // route restores its own remembered level when its vocabulary still
-      // offers it, and only otherwise falls to the model default.
+      // Attaching a remembered level restores the one this model was last
+      // explicitly set to, read from the Host's own memory rather than the
+      // browser's: a model without one stays bare so the Host resolves its
+      // default, and a level this route no longer offers never rides along.
       const reasoningEffort = sameRoute
         ? state.current?.reasoningEffort ?? model.reasoning?.defaultEffort
-        : modelEffortFor(group.id, model.id, model.reasoning) ?? model.reasoning?.defaultEffort
+        : model.reasoning?.effortMemory
       return {
         provider: group.id,
         model: model.id,
@@ -189,8 +189,11 @@ export function apply(ctx: ClientContext): void {
             if (available) directory.load().catch(() => { /* surfaced on the store */ })
           },
           resolveText: text => ctx.locale.resolveText(text),
-          select: (selection: ModelSelection) => available
-            ? directory.select(selection)
+          // The effort pane is the only caller that passes a memory change, so
+          // a model switch can never write one: forgetting and remembering
+          // both ride this argument and default to leaving memory alone.
+          select: (selection: ModelSelection, effortMemory?: string | null) => available
+            ? directory.select(selection, effortMemory)
             : Promise.resolve(undefined),
         }
       },

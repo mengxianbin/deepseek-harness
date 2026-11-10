@@ -4,25 +4,32 @@ import { expect, it, onTestFinished, vi } from 'vitest'
 import DefaultModel from '../src/index.ts'
 import { liveConfig } from '../../../settings/settings/tests/live-config.ts'
 
-it('reads complete selections from volatile config and clears omitted reasoning effort', async () => {
+it('reads live direction from volatile config and never carries an effort', async () => {
   const ctx = new Context()
   onTestFinished(() => ctx.fiber.dispose())
   const live = await liveConfig(ctx, DefaultModel, { provider: 'p', model: 'm' })
   const consumer = ctx.agentDefaultModel
-  await live.update({ provider: 'q', model: 'n', reasoningEffort: 'high' })
-  expect(consumer.currentSelection()).toEqual({ provider: 'q', model: 'n', reasoningEffort: 'high' })
+  await live.update({ provider: 'q', model: 'n' })
+  expect(consumer.currentSelection()).toEqual({ provider: 'q', model: 'n' })
   await live.replace({ provider: 'p', model: 'm' })
   expect(consumer.currentSelection()).toEqual({ provider: 'p', model: 'm' })
+  // A selection that does carry an effort still resolves bare: the stored
+  // default holds the direction only, so a deployment default can never pin
+  // a level the effort pane did not choose.
+  expect(consumer.currentSelection().reasoningEffort).toBeUndefined()
   await consumer.saveSelection({ provider: 'unsaved', model: 'unsaved' })
   expect(consumer.currentSelection()).toEqual({ provider: 'p', model: 'm' })
 })
 
-it('persists complete selections through its owning profile entry', async () => {
+it('persists the direction through its owning profile entry and drops any effort', async () => {
   const { configurationFixture } = await import('../../../settings/settings/tests/configuration-fixture.ts')
   const { ReasoningEffortId } = await import('@deepseek-ai/dsh-llm')
   const { ctx } = await configurationFixture({ hmr: false })
+  // An effort rides along and is written away rather than stored: effort
+  // belongs to the model-level memory, not to the deployment default.
   await ctx.agentDefaultModel.saveSelection({ provider: 'test', model: 'next', reasoningEffort: ReasoningEffortId('high') })
-  expect(ctx.agentDefaultModel.currentSelection()).toEqual({ provider: 'test', model: 'next', reasoningEffort: 'high' })
+  expect(ctx.agentDefaultModel.currentSelection()).toEqual({ provider: 'test', model: 'next' })
+  expect(ctx.agentDefaultModel.currentSelection().reasoningEffort).toBeUndefined()
   await ctx.agentDefaultModel.saveSelection({ provider: 'test', model: 'final' })
   expect(ctx.agentDefaultModel.currentSelection()).toEqual({ provider: 'test', model: 'final' })
   const standalone = new Context()

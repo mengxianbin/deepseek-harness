@@ -250,10 +250,11 @@ async function installControllers(
     } as never)
   }
   if (ctx.get('workspaceRegistry') === undefined) {
-    // An explicit session/list row cut (includeArchived: false) pre-excludes
-    // this set before any header read (f5-contract-a2-1030); tests without a
-    // workspace registry mean "nothing is archived".
-    ctx.provide('workspaceRegistry', { archivedSessionIds: [] } as never)
+    // The default session/list request is the thin listing (F′ flip,
+    // session-list-full-slim-1110 P2): both row cuts pre-exclude these sets
+    // before any header read; tests without a workspace registry mean
+    // "nothing is archived and nothing is a subagent".
+    ctx.provide('workspaceRegistry', { archivedSessionIds: [], subagentSessionIds: new Set() } as never)
   }
   if (ctx.get('agentDefaultModel') === undefined) {
     ctx.provide('agentDefaultModel', {

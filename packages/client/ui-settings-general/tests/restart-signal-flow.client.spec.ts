@@ -113,7 +113,7 @@ describe('restart-signal recheck attestation (P3)', () => {
     const fetchImpl = fetchStub({ state: 'OK' })
     const flow = startRestartSignalFlow(vi.fn(), { fetch: fetchImpl, warn: vi.fn(), runningCount: () => 4 })
     await flush()
-    expect(fetchImpl).toHaveBeenCalledWith('/api/stamp-recheck', {
+    expect(fetchImpl).toHaveBeenCalledWith('/api/restart-signal/state', {
       method: 'POST',
       body: JSON.stringify({ runningCount: 4 }),
       headers: { 'content-type': 'application/json' },
@@ -125,7 +125,7 @@ describe('restart-signal recheck attestation (P3)', () => {
     const fetchImpl = fetchStub({ state: 'OK' })
     const flow = startRestartSignalFlow(vi.fn(), { fetch: fetchImpl, warn: vi.fn() })
     await flush()
-    expect(fetchImpl).toHaveBeenCalledWith('/api/stamp-recheck', { method: 'POST' })
+    expect(fetchImpl).toHaveBeenCalledWith('/api/restart-signal/state', { method: 'POST' })
     flow.dispose()
   })
 
@@ -207,7 +207,7 @@ describe('restart-signal recheck attestation (P3)', () => {
     flow.dispose()
   })
 
-  it('drops a fetch past its deadline into the failure path — previous badge kept (stamp-recheck-cache-timeout-1107)', async () => {
+  it('drops a fetch past its deadline into the failure path — previous badge kept (the 1107 cache/timeout fix)', async () => {
     const warn = vi.fn()
     const publish = vi.fn<(view: RestartSignalView) => void>()
     const hanging = vi.fn(() => new Promise<never>(() => {}))

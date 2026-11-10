@@ -38,15 +38,19 @@
  * allowlisted `restart-signal/changed` Host event, which the Remote carrier
  * forwards to every connected page; the browser half subscribes and answers
  * with its existing `recheck()` — the judgment itself keeps riding the
- * recheck route, so the push event carries no payload and cannot drift from
- * the state machine. Both triggers share one recheck and one emit per tick
- * (at most one push per interval, regardless of how many inputs moved), and
- * a failed recheck emits nothing (there is no fresh judgment to deliver) and
- * keeps the pre-P2 warn line. A move this tick proved also drops the result
- * cache before that recheck (stamp-recheck-cache-timeout-1107), so neither
- * the recheck itself nor the page pulls `restart-signal/changed` pokes can
- * answer from a pre-move judgment the sensor's own delta already discredited.
- * @module @deepseek-ai/dsh-client-ui-settings-general/stamp-poll-host
+ * `/api/restart-signal/state` route, so the push event carries no payload and
+ * cannot drift from the state machine. Both triggers share one recheck and
+ * one emit per tick (at most one push per interval, regardless of how many
+ * inputs moved), and a failed recheck emits nothing (there is no fresh
+ * judgment to deliver) and keeps the pre-P2 warn line. A move this tick
+ * proved also drops the state-file mtime key before that recheck
+ * (invalidateRestartSignalCache, off-host semantics: the next collect
+ * re-reads the collector's file instead of answering from the pre-move
+ * read), so neither the recheck itself nor the page pulls
+ * `restart-signal/changed` pokes can answer from a judgment the sensor's own
+ * delta already discredited — the freshest truth arrives when the collector
+ * writes the file after this move.
+ * @module @deepseek-ai/dsh-client-ui-settings-general/restart-signal-poll-host
  */
 
 import { execFile } from 'node:child_process'
@@ -64,8 +68,11 @@ import { defaultRepositoryRoot, linkedStampRepositories } from './restart-stamp.
 
 const execFileAsync = promisify(execFile)
 
-/** Environment variable tuning the poll interval; `0` disables polling. */
-export const STAMP_POLL_INTERVAL_ENV = 'DSH_STAMP_POLL_INTERVAL_MS'
+/** Environment variable tuning the poll interval; `0` disables polling.
+ * The variable's VALUE (`DSH_STAMP_POLL_INTERVAL_MS`) is a machine contract
+ * (env-key catalog + template layer) and deliberately keeps its pre-rename
+ * spelling — only the export identity follows the restart-signal naming. */
+export const RESTART_SIGNAL_POLL_INTERVAL_ENV = 'DSH_STAMP_POLL_INTERVAL_MS'
 
 /** Default poll interval: the low end of the design's 30–60s band. */
 const DEFAULT_INTERVAL_MS = 30_000
@@ -94,7 +101,7 @@ export interface FingerprintProbe {
 export type FingerprintRunner = (roots: readonly string[], dshHome: string) => Promise<FingerprintProbe>
 
 /** Injection seams for one poller; production defaults come from this process. */
-export interface StampPollInternals {
+export interface RestartSignalPollInternals {
   /** State-machine recheck to fire on a moved fingerprint; defaults to the production collect. */
   readonly recheck?: () => Promise<unknown>
   /** Fingerprint capture; defaults to the child-process probe. */
@@ -311,8 +318,8 @@ function errorLine(error: unknown): string {
  * @param ctx - Host context carrying the effect lifetime.
  * @param internals - Injectable seams; production uses this tree, the resolved DSH home, and the probe child.
  */
-export function registerStampPoll(ctx: Context, internals: StampPollInternals = {}): void {
-  const intervalMs = internals.intervalMs ?? resolvePollIntervalMs(process.env[STAMP_POLL_INTERVAL_ENV])
+export function registerRestartSignalPoll(ctx: Context, internals: RestartSignalPollInternals = {}): void {
+  const intervalMs = internals.intervalMs ?? resolvePollIntervalMs(process.env[RESTART_SIGNAL_POLL_INTERVAL_ENV])
   const repositoryRoot = internals.repositoryRoot ?? defaultRepositoryRoot()
   const dshHome = internals.dshHome ?? resolveDshHome()
   const recheck = internals.recheck ?? ((): Promise<unknown> => collectRestartSignal())
@@ -353,10 +360,11 @@ export function registerStampPoll(ctx: Context, internals: StampPollInternals = 
       if (!moved) return
       baseline = probe
       markerBaseline = markers
-      // This delta already proved the stored judgment stale: drop the result
-      // cache so the recheck below — and every page pull the emit below it
-      // pokes — recomputes instead of answering from the pre-move result
-      // (stamp-recheck-cache-timeout-1107).
+      // This delta already proved the served judgment pre-move: drop the
+      // state-file mtime key so the recheck below — and every page pull the
+      // emit below it pokes — re-reads the collector's file instead of
+      // answering from the pre-move read (off-host semantics of the 1107
+      // invalidation contract).
       invalidateRestartSignalCache()
       void recheck().then(() => {
         if (disposed) return

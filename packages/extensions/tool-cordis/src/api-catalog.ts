@@ -122,11 +122,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         signature: 'currentSelection(): ModelSelection',
         description: 'Read the current default model selection.',
         parameters: [],
-        returns: 'a detached provider, model, and optional reasoning selection.',
+        returns: 'a detached provider and model; effort is never stored here.',
       },
       {
         signature: 'async saveSelection(next: ModelSelection): Promise<void>',
-        description: 'Save the complete default model selection. A deployment without a configuration editor keeps its composition entry. Saves commit in submission order; a failed save rejects its caller without blocking later saves.',
+        description: 'Save the direction of the default model selection. A deployment without a configuration editor keeps its composition entry. Any effort on `next` is dropped rather than persisted: effort lives in the model-level memory, and writing it here would let a model switch repin a level. Saves commit in submission order; a failed save rejects its caller without blocking later saves.',
         parameters: [{ name: 'next', description: 'resolved selection accepted by an entry point.' }],
         returns: 'fulfillment after the optional profile write settles.',
       },
@@ -2082,6 +2082,31 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'modelEffortMemory',
+    summary: 'Owns the model-level effort memory independently of any Host or transport.',
+    description: 'Owns the model-level effort memory independently of any Host or transport. The dictionary root is volatile, so writes commit into the running reference and only the effort pane\'s calls ever change it.',
+    methods: [
+      {
+        signature: 'effortFor(model: string): string | undefined',
+        description: 'Read the effort remembered for one model id.',
+        parameters: [{ name: 'model', description: 'provider-owned model id to look up.' }],
+        returns: 'the remembered effort id, or undefined when this model has none.',
+      },
+      {
+        signature: 'async remember(model: string, effort: string): Promise<void>',
+        description: 'Remember an effort for one model id in the owning profile entry. A deployment without a configuration editor keeps its composition entry. Writes commit in submission order; a failed write rejects its caller without blocking later writes.',
+        parameters: [{ name: 'model', description: 'provider-owned model id to remember.' }, { name: 'effort', description: 'adapter-owned effort id to associate with it.' }],
+        returns: 'fulfillment after the optional profile write settles.',
+      },
+      {
+        signature: 'async forget(model: string): Promise<void>',
+        description: 'Drop the effort remembered for one model id, leaving other models untouched.',
+        parameters: [{ name: 'model', description: 'provider-owned model id to forget.' }],
+        returns: 'fulfillment after the optional profile write settles.',
+      },
+    ],
+  },
+  {
     key: 'officeToPdf',
     summary: 'A provider lifetime owns all converters, queued calls, and temporary files.',
     description: 'A provider lifetime owns all converters, queued calls, and temporary files.',
@@ -2614,7 +2639,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       {
         signature: '@Remote(\'list\') async list(_request: SessionListRequest, signal: AbortSignal): Promise<SessionListValue>',
         description: 'Read all visible Session rows without resuming an Agent.',
-        parameters: [{ name: '_request', description: 'row-scope request: omission keeps the pre-f5 full-corpus contract (archived rows, subagent rows, untrimmed hints); an explicit `includeArchived: false` / `includeSubagents: false` cuts those rows and `trimHeavyProjections: true` trims the heavy hint columns for the thin main-page listing.' }, { name: 'signal', description: 'cancellation for persistence reads and summary generation.' }],
+        parameters: [{ name: '_request', description: 'row-scope request (F′ default flip): omission is the thin first-party listing (no archived rows, no subagent rows, heavy hint columns trimmed); an explicit `includeArchived: true` / `includeSubagents: true` restores those rows and `trimHeavyProjections: false` restores the heavy hint columns for full-corpus consumers.' }, { name: 'signal', description: 'cancellation for persistence reads and summary generation.' }],
         returns: 'visible Session summaries ordered by activity.',
       },
       {
@@ -6905,7 +6930,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'LlmModelReasoningInfo',
-    declaration: 'export interface LlmModelReasoningInfo {\n    efforts: readonly LlmReasoningEffortInfo[];\n    defaultEffort?: ReasoningEffortId;\n}',
+    declaration: 'export interface LlmModelReasoningInfo {\n    efforts: readonly LlmReasoningEffortInfo[];\n    defaultEffort?: ReasoningEffortId;\n    effortMemory?: ReasoningEffortId;\n}',
   },
   {
     name: 'LlmNativeAuth',
@@ -7217,7 +7242,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ModelReasoning',
-    declaration: 'export interface ModelReasoning {\n    readonly efforts: readonly ModelReasoningEffort[];\n    readonly defaultEffort?: string;\n}',
+    declaration: 'export interface ModelReasoning {\n    readonly efforts: readonly ModelReasoningEffort[];\n    readonly defaultEffort?: string;\n    readonly effortMemory?: string;\n}',
   },
   {
     name: 'ModelReasoningEffort',
@@ -8601,7 +8626,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionSelectModelRequest',
-    declaration: 'export interface SessionSelectModelRequest extends ModelSelection {\n    readonly sessionId: SessionId;\n}',
+    declaration: 'export interface SessionSelectModelRequest extends ModelSelection {\n    readonly sessionId: SessionId;\n    readonly effortMemory?: string | null;\n}',
   },
   {
     name: 'SessionSelectModelValue',

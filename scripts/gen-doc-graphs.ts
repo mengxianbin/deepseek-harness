@@ -690,6 +690,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Reads the default ModelSelection from volatile Config and saves selections through the profile editor.',
   },
   {
+    key: 'modelEffortMemory',
+    pkg: 'model-effort-memory',
+    title: 'Model-level effort memory',
+    mode: 'core',
+    consumers: ['api-session-controller', 'llm'],
+    note: 'Stores the effort each model was last explicitly set to, keyed by model id; the effort pane is its only writer and llm folds it into the resolved default.',
+  },
+  {
     key: 'agentLoop',
     pkg: 'agent-loop',
     title: 'Concrete loop driver',

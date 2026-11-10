@@ -301,25 +301,26 @@ describe('ui-model-selection dual entry', () => {
     const options = await b.popup().options(projection('s1'), new AbortController().signal)
     const pro = options.find((o: SelectOption) => o.label === 'DeepSeek-V4-Pro')!
     await b.popup().onSelect(pro, projection('s1'))
+    // The picked model stores no effort, so the session stays bare and the
+    // Host resolves its default rather than being handed one.
     expect(seatFace.directory.getSnapshot().current).toEqual({
       provider: 'deepseek-official',
       model: 'deepseek-v4-pro',
-      reasoningEffort: 'high',
     })
   })
 
-  it('a popup model switch restores the target route\'s remembered effort, else its default', async () => {
-    // This lane has no jsdom window; the memory module reads a store stub.
-    const stored = new Map<string, string>()
-    vi.stubGlobal('localStorage', {
-      getItem: (key: string) => stored.get(key) ?? null,
-      setItem: (key: string, value: string) => { stored.set(key, value) },
-    })
+  it('a popup model switch attaches the target route\'s remembered effort, else submits bare', async () => {
+    const [official, ...rest] = GROUPS
+    const remembered = {
+      ...official!,
+      models: official!.models.map(model => 'reasoning' in model && model.reasoning !== undefined
+        ? { ...model, reasoning: { ...model.reasoning, effortMemory: model.id === 'deepseek-v4-pro' ? 'max' : undefined } }
+        : model),
+    }
+    const b = await bench()
     try {
-      stored.set('dsh.model-selection.effort-memory.v1', JSON.stringify({
-        '["deepseek-official","deepseek-v4-pro"]': 'max',
-      }))
-      const b = await bench()
+      b.setGroups([remembered, ...rest])
+      b.remote.emit('llm/adapters-updated', [])
       b.mint('s1')
       const options = await b.popup().options(projection('s1'), new AbortController().signal)
       const pro = options.find((o: SelectOption) => o.label === 'DeepSeek-V4-Pro')!
@@ -329,16 +330,15 @@ describe('ui-model-selection dual entry', () => {
         model: 'deepseek-v4-pro',
         reasoningEffort: 'max',
       })
-      // A route the memory never saw keeps the model default.
+      // A route the Host stores nothing for stays bare.
       const flash = options.find((o: SelectOption) => o.label === 'DeepSeek-V4-Flash')!
       await b.popup().onSelect(flash, projection('s1'))
       expect(b.hostCurrent()).toEqual({
         provider: 'deepseek-official',
         model: 'deepseek-v4-flash',
-        reasoningEffort: 'high',
       })
     } finally {
-      vi.unstubAllGlobals()
+      await b.ctx.fiber.dispose()
     }
   })
 
