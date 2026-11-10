@@ -10,7 +10,7 @@ import type {
   SessionSummary,
   UseProjection,
 } from '@deepseek-ai/dsh-api-session-controller/client'
-import type { SessionHealthReport } from '@deepseek-ai/dsh-api-session-controller/types'
+import type { SessionHealthReport, SessionSealState } from '@deepseek-ai/dsh-api-session-controller/types'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { IJobs, JobView } from '@deepseek-ai/dsh-api-job-controller/client'
 import type { ConnectionHandle, ConnectionStateSource } from '@deepseek-ai/dsh-client-connection/client'
@@ -146,6 +146,15 @@ export interface SessionStatus {
    * authority layer. Carried with its 判据自证 for the hover card.
    */
   readonly deliverableReceipt?: SessionDeliverableReceipt
+  /**
+   * The Host's latest archive-seal verdict for this Session
+   * (seal-light-host-state-1109 裁点2A/3A): pushed on `api-session/status`
+   * frames, reconciled against `SessionSummary.projections.seal` on every
+   * list read, and re-sent by the Host's 15s sweep — the status icon's three
+   * insurances applied to the row lamp's channel. Absent while the Host holds
+   * no verdict (registering unit absent or no record folded yet).
+   */
+  readonly seal?: SessionSealState
 }
 
 /** One Session's latest done receipt as the UI status carries it (collab step2 §二). */
@@ -444,6 +453,14 @@ export class UiSession extends Service {
   private readonly attention = new Map<SessionId, string>()
   private readonly running = new Map<SessionId, boolean>()
   /**
+   * The Host's latest archive-seal verdict per Session
+   * (seal-light-host-state-1109): filled by status-frame arg4 (推 + sweep
+   * 重播) and reconciled from `SessionSummary.projections.seal` on list reads
+   * (对账腿) — the same three-insurance shape `running`/`attention` ride.
+   * A frame without the arg clears the row: the Host then holds no verdict.
+   */
+  private readonly seals = new Map<SessionId, SessionSealState>()
+  /**
    * Wall-clock of the most recent Host status frame for each Session — an
    * `api-session/status` event, or a list-pull divergence read off Host truth.
    * Drives the per-Session heartbeat staleness flag (collab step2 §4.2): past
@@ -536,9 +553,10 @@ export class UiSession extends Service {
     ctx.effect(() => {
       const disposeList = sessions.list.subscribe(() => { this.publishMain() })
       const disposeStatus = sessions.list.subscribe(() => { this.reconcileStatus() })
-      const disposeRemoteStatus = ctx.remote.$on('api-session/status', (sessionId, running, attention) => {
+      const disposeRemoteStatus = ctx.remote.$on('api-session/status', (sessionId, running, attention, seal) => {
         this.observeRunning(sessionId, running)
         this.observeAttention(sessionId, attention)
+        this.observeSeal(sessionId, seal)
       })
       const disposeRemoteError = ctx.remote.$on('api-session/error', (sessionId) => {
         this.observeFailure(sessionId)
@@ -807,15 +825,50 @@ export class UiSession extends Service {
    * @param sessionId - Session whose host-reported attention kind refreshed.
    * @param attention - the objective kind while one is active; absent otherwise.
    */
-  private observeAttention(sessionId: SessionId, attention: string | undefined): void {
+  private observeAttention(sessionId: SessionId, attention: string | null | undefined): void {
     // A heartbeat repeats the current truth, so an unchanged frame still proves
     // the Host is alive for this Session: record before the equality shortcut.
     this.lastStatusAt.set(sessionId, Date.now())
+    // `null` is the positional placeholder a seal-bearing frame fills into
+    // arg3 (seal-light-host-state-1109): fold it to absent here so the map
+    // never stores a null "attention kind" from a frame that simply has none.
+    const kind = attention ?? undefined
     const previous = this.attention.get(sessionId)
-    if (previous === attention) return
-    if (attention === undefined) this.attention.delete(sessionId)
-    else this.attention.set(sessionId, attention)
+    if (previous === kind) return
+    if (kind === undefined) this.attention.delete(sessionId)
+    else this.attention.set(sessionId, kind)
     this.publishPendingInteractions()
+  }
+
+  /**
+   * Fold the Host's archive-seal verdict into the status
+   * (seal-light-host-state-1109 裁点2A): content-equal frames repeat the
+   * truth without republishing, and an absent arg clears the row — the Host
+   * then holds no verdict for it (key absent / no record), which the lamp
+   * renders fail-visible rather than as a sealed state.
+   * @param sessionId - Session whose seal verdict refreshed.
+   * @param seal - the verdict the frame carried; absent when the Host holds none.
+   */
+  private observeSeal(sessionId: SessionId, seal: SessionSealState | undefined): void {
+    this.lastStatusAt.set(sessionId, Date.now())
+    const previous = this.seals.get(sessionId)
+    if (sameSeal(previous, seal)) return
+    if (seal === undefined) this.seals.delete(sessionId)
+    else this.seals.set(sessionId, seal)
+    this.publishStatus()
+  }
+
+  /**
+   * The list-pull half of the seal channel (裁点3A 对账腿): same map, no
+   * heartbeat arming — see the call site in `reconcileStatus`.
+   * @param sessionId - Session whose summary block carried the seal key.
+   * @param seal - the summary's verdict; absent when the block held `null`.
+   */
+  private foldSealFromList(sessionId: SessionId, seal: SessionSealState | undefined): void {
+    const previous = this.seals.get(sessionId)
+    if (sameSeal(previous, seal)) return
+    if (seal === undefined) this.seals.delete(sessionId)
+    else this.seals.set(sessionId, seal)
   }
 
   private observeRunning(sessionId: SessionId, running: boolean): void {
@@ -896,6 +949,17 @@ export class UiSession extends Service {
       // first frame; until then the baseline stands ring-free.
       if (previous === undefined) this.running.set(id, row.running)
       else if (previous !== row.running) this.observeRunning(id, row.running)
+      // 对账腿 (seal-light-host-state-1109 裁点3A): a summary block that
+      // carries the `seal` key (including `null` = no verdict yet) is the
+      // Host's truth and folds in; a row whose block omits it leaves the
+      // pushed value alone. Deliberately NOT `observeSeal`: a list read is
+      // not a status frame, and arming the heartbeat clock here would mask
+      // the running frame-stale ring the baseline carve-out protects
+      // (collab step4b 件E).
+      const sealBlock = row.projectionValues
+      if (sealBlock !== undefined && 'seal' in sealBlock) {
+        this.foldSealFromList(id, sealBlock.seal ?? undefined)
+      }
     }
     // 点名不改态 (collab step3 §四): becoming the main view arms a read mark
     // and clears no signal — the row keeps its lit facts and gains only the
@@ -913,6 +977,7 @@ export class UiSession extends Service {
         this.unreadStops.delete(id)
         this.observedFailures.delete(id)
         this.attention.delete(id)
+        this.seals.delete(id)
         this.lastStatusAt.delete(id)
         this.readMarks.delete(id)
         this.pendingReadMarks.delete(id)
@@ -934,6 +999,7 @@ export class UiSession extends Service {
       ...this.pendingSnapshot.keys(),
       ...this.unreadStops.keys(),
       ...this.attention.keys(),
+      ...this.seals.keys(),
     ])
     const statusStale: true | undefined = this.connectionState !== undefined
       && isConnectionStale(this.connectionState.getSnapshot())
@@ -1047,6 +1113,7 @@ export class UiSession extends Service {
         const marked = this.readMarks.get(id)
         if (marked !== undefined && marked !== signature) this.readMarks.delete(id)
       }
+      const seal = this.seals.get(id)
       next.set(id, {
         running: this.running.get(id),
         pendingInteraction: this.pendingSnapshot.get(id),
@@ -1061,6 +1128,7 @@ export class UiSession extends Service {
           : { heartbeatStaleSeconds: Math.round((now - lastStatusAt) / 1000) }),
         ...(this.readMarks.has(id) ? { readMarked: true as const } : {}),
         ...(deliverableReceipt === undefined ? {} : { deliverableReceipt }),
+        ...(seal === undefined ? {} : { seal }),
       })
     }
     if (sameSessionStatus(this.statusSnapshot, next)) return
@@ -1287,9 +1355,19 @@ function sameSessionStatus(left: SessionStatusSnapshot, right: SessionStatusSnap
       || candidate.heartbeatStaleSeconds !== status.heartbeatStaleSeconds
       || candidate.readMarked !== status.readMarked
       || candidate.deliverableReceipt?.verdict !== status.deliverableReceipt?.verdict
-      || candidate.deliverableReceipt?.summary !== status.deliverableReceipt?.summary) return false
+      || candidate.deliverableReceipt?.summary !== status.deliverableReceipt?.summary
+      || !sameSeal(candidate.seal, status.seal)) return false
   }
   return true
+}
+
+/** Content equality for the seal verdict: frames repeat objects, so `Object.is` would republish every heartbeat. */
+function sameSeal(left: SessionSealState | undefined, right: SessionSealState | undefined): boolean {
+  if (left === right) return true
+  if (left === undefined || right === undefined) return false
+  return left.verdict === right.verdict
+    && left.detail === right.detail
+    && left.followUpCount === right.followUpCount
 }
 
 function samePendingInteractions(
