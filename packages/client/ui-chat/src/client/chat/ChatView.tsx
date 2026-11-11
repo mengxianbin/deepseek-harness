@@ -207,7 +207,8 @@ export function ChatView({
     railRef.current?.stepIntervention(delta)
   }, [])
   const stepMarks = useCallback((delta: 1 | -1) => {
-    scroll.stepIntervention(marks, delta)
+    const landed = scroll.stepIntervention(marks, delta)
+    if (landed !== undefined) railRef.current?.highlightMark(landed.key)
   }, [scroll, marks])
   // The chord is registered in the plugin body, which owns the shortcut
   // service; this view publishes the single action it drives.

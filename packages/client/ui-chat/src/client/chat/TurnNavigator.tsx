@@ -31,8 +31,10 @@ export interface TurnNavigatorHandle {
   activateTurn(turn: number): void
   /** @param turn - turn to center in the rail without navigating the transcript. */
   scrollToTurn(turn: number): void
-  /** @param delta - `1` for the next intervention, `-1` for the previous one. */
+  /** @param delta - `1` for the next mark, `-1` for the previous one. */
   stepIntervention(delta: 1 | -1): void
+  /** Keep the last explicit navigation target lit until the next landing. */
+  highlightMark(key: string): void
 }
 
 /** Fixed pitch between neighbouring marks; overflow scrolls inside the frame. */
@@ -63,6 +65,8 @@ interface TurnMarkProps extends Pick<TurnNavigatorProps, 'onNavigate' | 't'> {
   readonly index: number
   readonly active: boolean
   readonly busy: boolean
+  /** Last explicit navigation target: keeps the ring until the next landing. */
+  readonly landed: boolean
   readonly previewId: string | undefined
   readonly registerElement: (element: HTMLButtonElement | null) => void
   readonly onPreview: (key: string) => void
@@ -70,7 +74,7 @@ interface TurnMarkProps extends Pick<TurnNavigatorProps, 'onNavigate' | 't'> {
 }
 
 const TurnMark = memo(function TurnMark({
-  mark, index, active, busy, previewId, registerElement, onNavigate, onPreview, onFocusChange, t,
+  mark, index, active, busy, landed, previewId, registerElement, onNavigate, onPreview, onFocusChange, t,
 }: TurnMarkProps) {
   const classes = [css.mark]
   // An intervention is a sub-mark of its Turn: a shorter tick indented from
@@ -80,6 +84,7 @@ const TurnMark = memo(function TurnMark({
   if (active) classes.push(css.markActive)
   else if (previewId !== undefined) classes.push(css.markPreview)
   if (busy) classes.push(css.markBusy)
+  if (landed) classes.push(css.markLanded)
   const label = mark.kind === 'turn'
     ? t(
       mark.item.anchor.kind === 'loaded' ? 'chat.turnNavigation.jump' : 'chat.turnNavigation.jumpLoad',
@@ -113,6 +118,8 @@ function TurnNavigatorRail(
 ) {
   const [previewKey, setPreviewKey] = useState<string | null>(null)
   const [focusedKey, setFocusedKey] = useState<string | null>(null)
+  /** Last explicit navigation target: click or step, lit until the next one. */
+  const [landedKey, setLandedKey] = useState<string | null>(null)
   const scrollerRef = useRef<HTMLDivElement | null>(null)
   const initialization = useRef({
     placed: false,
@@ -212,6 +219,10 @@ function TurnNavigatorRail(
   const viewHeight = virtualizer.scrollRect?.height ?? 0
   const virtualItems = virtualizer.getVirtualItems()
 
+  const handleNavigate = useCallback((mark: RailMark) => {
+    setLandedKey(mark.key)
+    onNavigate(mark)
+  }, [onNavigate])
   const scrollToIndex = useCallback((
     index: number, reveal: 'if-needed' | 'always', behavior: 'auto' | 'smooth' | 'instant' = preferredScrollBehavior(),
   ): void => {
@@ -241,7 +252,12 @@ function TurnNavigatorRail(
       if (index !== undefined) scrollToIndex(index, 'always')
     },
     stepIntervention(delta) { onStep(delta) },
-  }), [marks, turnIndex, onNavigate, onStep, scrollToIndex])
+    highlightMark(key) {
+      setLandedKey(key)
+      const index = markIndexes.get(key)
+      if (index !== undefined) scrollToIndex(index, 'if-needed')
+    },
+  }), [marks, turnIndex, markIndexes, onNavigate, onStep, scrollToIndex])
 
   useEffect(() => {
     if (viewHeight <= 0) {
@@ -264,7 +280,7 @@ function TurnNavigatorRail(
   const fadeClasses = [css.scroller]
   if (scrollTop > 1) fadeClasses.push(css.fadeTop)
   if (scrollTop < virtualizer.getTotalSize() - viewHeight - 1) fadeClasses.push(css.fadeBottom)
-  const stepDisabled = !marks.some(mark => mark.kind === 'intervention')
+  const stepDisabled = marks.length < 2
   return (
     <div className={css.slot}>
       <div className={css.rail}>
@@ -298,9 +314,10 @@ function TurnNavigatorRail(
                     index={index}
                     active={mark.kind === 'turn' && mark.item.turn === activeTurn}
                     busy={mark.kind === 'turn' && mark.item.turn === busyTurn}
+                    landed={mark.key === landedKey}
                     previewId={previewKey === mark.key ? previewId : undefined}
                     registerElement={virtualizer.measureElement}
-                    onNavigate={onNavigate}
+                    onNavigate={handleNavigate}
                     onPreview={setPreviewKey}
                     onFocusChange={onFocusChange}
                     t={t}

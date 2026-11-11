@@ -96,31 +96,39 @@ export class ChatNavigation {
   }
 
   /**
-   * Step to the neighbouring human-intervention mark in reading order, which
-   * is how a Turn holding several decisions becomes walkable without hunting
-   * for each row. The current position is the newest intervention at or above
-   * the reading line; with none loaded there, the reading line's own Turn
-   * decides whether the neighbour is an older, still-unloaded mark.
+   * Step to the neighbouring mark on the rail's flat ladder — Turn marks and
+   * human-intervention marks alike — so every node stays walkable without
+   * hunting for each row and the step carries no sense of mark kind. The
+   * current position is the newest mark at or above the reading line: the
+   * visible intervention when one is loaded, otherwise the reading line's own
+   * Turn's mark; with neither on screen a downward step starts at the ladder's
+   * top and an upward step has nowhere to go.
    * @param marks - the rail's flattened marks, ascending by Turn and seq.
-   * @param delta - `1` for the next intervention, `-1` for the previous one.
+   * @param delta - `1` for the next mark, `-1` for the previous one.
+   * @returns the mark the step landed on, or undefined when it walked off an edge.
    */
-  readonly stepIntervention = (marks: readonly RailMark[], delta: 1 | -1): void => {
-    const interventions = marks.filter((mark): mark is Extract<RailMark, { kind: 'intervention' }> =>
-      mark.kind === 'intervention')
-    if (interventions.length === 0) return
-    const loaded = this.viewport.readVisibleIntervention()
-    let target: Extract<RailMark, { kind: 'intervention' }> | undefined
-    if (loaded === null) {
-      const turn = this.viewport.readVisibleTurn()
-      target = delta > 0
-        ? interventions.find(mark => turn === null || mark.item.turn >= turn)
-        : interventions.findLast(mark => turn !== null && mark.item.turn < turn)
-    } else {
-      target = delta > 0
-        ? interventions.find(mark => mark.item.seq > loaded)
-        : interventions.findLast(mark => mark.item.seq < loaded)
+  readonly stepIntervention = (marks: readonly RailMark[], delta: 1 | -1): RailMark | undefined => {
+    if (marks.length < 2) return undefined
+    const intervention = this.viewport.readVisibleIntervention()
+    const turn = this.viewport.readVisibleTurn()
+    let position: number | null = null
+    if (intervention !== null) {
+      const current = marks.findIndex(mark => mark.kind === 'intervention' && mark.item.seq === intervention)
+      if (current >= 0) position = current
     }
-    if (target !== undefined) this.navigateTo(target)
+    if (position === null) {
+      if (turn === null) {
+        if (delta < 0) return undefined
+        position = -1
+      } else {
+        const own = marks.findIndex(mark => mark.kind === 'turn' && mark.item.turn === turn)
+        position = own >= 0 ? own : marks.findLastIndex(mark => mark.item.turn < turn)
+      }
+    }
+    const target = marks[position + delta]
+    if (target === undefined) return undefined
+    this.navigateTo(target)
+    return target
   }
 
   /** Accept a landing that needs no history request; @returns whether it landed. */

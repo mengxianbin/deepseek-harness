@@ -212,14 +212,14 @@ describe('TurnNavigator', () => {
       item: { turn: 1, seq: 3, kind: 'question', ordinal: 1, preview: 'ship it?' },
     })
 
-    const next = view.getByRole('button', { name: '下一个介入点' })
-    const previous = view.getByRole('button', { name: '上一个介入点' })
+    const next = view.getByRole('button', { name: '下一处' })
+    const previous = view.getByRole('button', { name: '上一处' })
     fireEvent.click(next)
     fireEvent.click(previous)
     expect(step.mock.calls).toEqual([[1], [-1]])
   })
 
-  it('steps through the rail handle and disables the controls when no intervention exists', async () => {
+  it('steps through the rail handle and keeps a turn-only ladder walkable', async () => {
     installTurnNavigatorObserver()
     const ref = createRef<TurnNavigatorHandle>()
     const step = vi.fn()
@@ -227,8 +227,8 @@ describe('TurnNavigator', () => {
       <TurnNavigator ref={ref} marks={marks} activeTurn={1} busyTurn={null} onNavigate={vi.fn()} onStep={step} t={t} />,
     )
     await view.findByRole('button', { name: '跳转到第 1 轮' })
-    expect(view.getByRole('button', { name: '下一个介入点' }).hasAttribute('disabled')).toBe(true)
-    expect(view.getByRole('button', { name: '上一个介入点' }).hasAttribute('disabled')).toBe(true)
+    expect(view.getByRole('button', { name: '下一处' }).hasAttribute('disabled')).toBe(false)
+    expect(view.getByRole('button', { name: '上一处' }).hasAttribute('disabled')).toBe(false)
 
     act(() => { ref.current?.stepIntervention(1) })
     expect(step).toHaveBeenCalledExactlyOnceWith(1)

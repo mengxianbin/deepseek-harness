@@ -177,10 +177,10 @@
   background: var(--dsw-alias-label-primary);
 }
 
-/* Keyboard focus outranks both resting states: the tick takes the brand color
-   the rest of the rail never uses, and a hairline ring keeps it legible
-   against a busy transcript. */
-.mark:focus-visible::before {
+/* Keyboard focus and the last explicit landing (click or step) share the
+   brand-colored tick and hairline ring — the two moments the rail speaks
+   for itself — and both outrank the resting states. */
+.mark:focus-visible::before, .markLanded::before {
   transform: translateY(-50%) scaleX(1);
   background: var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
 }
@@ -189,7 +189,7 @@
   outline: none;
 }
 
-.mark:focus-visible::after {
+.mark:focus-visible::after, .markLanded::after {
   position: absolute;
   inset: 0 0 0 auto;
   width: 20px;
