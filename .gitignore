@@ -80,3 +80,7 @@ packages/test-support/loader-smoke/src/*.d.ts*
 packages/test-support/session-snapshot/src/*.js
 packages/test-support/session-snapshot/src/*.js.map
 packages/test-support/session-snapshot/src/*.d.ts*
+
+# 运行态快照与 fork 临时审计（2026-11-12 用户裁 ignore）
+/fork-audit/
+/restart-signal-runtime.json
