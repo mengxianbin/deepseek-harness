@@ -46,6 +46,59 @@ export interface RestartInternals {
  */
 export const spawnDetached: RestartLauncher = (commandLine, options) => spawn(commandLine, options)
 
+/** Caller-supplied reason bound: the audit field clips to this many characters. */
+const RESTART_REASON_MAX_CHARS = 200
+
+/**
+ * Read the optional restart reason the caller rode on the request: query string
+ * first (`?reason=`), then the buffered body (a JSON object's `reason` string,
+ * or the plain body as the value). Every failure path — malformed URL, an
+ * unreadable body, an absent field — degrades to `-`, and an over-long value
+ * clips to {@link RESTART_REASON_MAX_CHARS}: the audit field is fail-open and
+ * can never delay or block the dispatch (restart-reason-audit-1111 ①; restart
+ * semantics unchanged).
+ * @param request - the `POST /api/restart` request.
+ * @returns the reason to log; `-` when absent or unreadable.
+ */
+export async function readRestartReason(request: Request): Promise<string> {
+  try {
+    const clip = (value: string): string => (value.length > RESTART_REASON_MAX_CHARS ? value.slice(0, RESTART_REASON_MAX_CHARS) : value)
+    const query = new URL(request.url).searchParams.get('reason')
+    if (query !== null && query !== '') return clip(query)
+    const text = (await request.text()).trim()
+    if (text === '') return '-'
+    try {
+      const parsed: unknown = JSON.parse(text)
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        const value: unknown = Reflect.get(parsed, 'reason')
+        return typeof value === 'string' && value !== '' ? clip(value) : '-'
+      }
+    } catch { /* not JSON — the plain body itself is the reason */ }
+    return clip(text)
+  } catch {
+    return '-'
+  }
+}
+
+/**
+ * Best-effort caller identity for the dispatch line: the proxy's first
+ * `x-forwarded-for` hop when present, else the caller's user-agent, else `-`
+ * (fault-audit §2.4 B shape `remote=<ip/ua>`). The fetch carrier hands this
+ * route only client headers — no socket face — so the authoritative socket IP
+ * keeps riding the webserver's access line (`access POST /api/restart 202 <ip>`);
+ * this field is the line-local echo of who called.
+ * @param request - the `POST /api/restart` request.
+ * @returns a non-empty identity token, `-` when nothing is readable.
+ */
+function requestRemote(request: Request): string {
+  const forwarded = request.headers.get('x-forwarded-for')
+  const first = forwarded?.split(',')[0]?.trim()
+  if (first !== undefined && first !== '') return first
+  const userAgent = request.headers.get('user-agent')
+  if (userAgent !== null && userAgent !== '') return userAgent
+  return '-'
+}
+
 /**
  * Run the restart command in the background: the response never waits
  * for it, the child outlives this process, and an asynchronous spawn failure
@@ -97,13 +150,21 @@ export function registerRestart(ctx: Context, internals: RestartInternals = {}):
     // reason:'in-flight'}——旧实现恒 202 导致「点了没反应还显示已发送」的假成功
     // （12:57 事故：派发未起内层 + 后续4次点击全被 in-flight 静默吞掉仍报 202）。
     // claim 带 DISPATCH_CLAIM_TTL_MS 自动释放（restart-disposition），锁只防抖不锁死。
-    fetch: () => {
+    fetch: async (request) => {
       if (!claimRestartDispatch()) {
         process.stderr.write('ui-settings-general: restart dispatch skipped: already in flight\n')
-        return Promise.resolve(Response.json({ dispatched: false, reason: 'in-flight' }, { status: 409 }))
+        return Response.json({ dispatched: false, reason: 'in-flight' }, { status: 409 })
       }
+      // Spawn first, audit second: the reason read happens after the dispatch,
+      // so a hostile or broken body can never stand between the claim and the
+      // restart — the audit field degrades, the 202 stays (fail-open, ①).
       dispatchRestart(commandLine, launch)
-      return Promise.resolve(Response.json({ dispatched: true }, { status: 202 }))
+      const reason = await readRestartReason(request)
+      // Two channels, one shape: this manual-route line mirrors auto-restart's
+      // `auto-restart dispatched (…, reason=…)` so both dispatch paths carry
+      // their motive (fault-audit §2.4 B extended, restart-reason-audit-1111 ①).
+      process.stderr.write(`ui-settings-general: restart dispatched (manual route, reason=${reason}, remote=${requestRemote(request)})\n`)
+      return Response.json({ dispatched: true }, { status: 202 })
     },
   })
 }

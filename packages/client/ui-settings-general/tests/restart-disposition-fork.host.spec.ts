@@ -17,7 +17,7 @@ import {
 } from '../src/restart-disposition.ts'
 import { RESTART_COMMAND_ENV } from '../src/restart-host.ts'
 import type { RestartChild } from '../src/restart-host.ts'
-import type { RestartSignalState } from '../src/restart.ts'
+import type { RestartSignalReason, RestartSignalState } from '../src/restart.ts'
 
 const COMMAND = 'pwsh -NoProfile -File D:\\dsh\\restart.ps1 -NoBrowser'
 
@@ -42,7 +42,9 @@ function driver(options: { running?: () => number | undefined; env?: Record<stri
     now: () => now,
     env: options.env ?? { [AUTO_RESTART_ENV]: '1', [RESTART_COMMAND_ENV]: COMMAND },
   })
-  const emit = (state: RestartSignalState): void => { listener?.({ state }) }
+  const emit = (state: RestartSignalState, reason?: RestartSignalReason): void => {
+    listener?.(reason === undefined ? { state } : { state, reason })
+  }
   const advance = (ms: number): void => { now += ms }
   return { emit, advance, launch, warn }
 }
@@ -64,7 +66,7 @@ describe('restart disposition driver', () => {
   it('dispatches once on entering NEED_RESTART when the flag is on and every fact agrees at zero', () => {
     const { emit, launch, warn } = driver({ running: () => 0 })
     recordClientRunningCount(0)
-    emit('NEED_RESTART')
+    emit('NEED_RESTART', 'config')
     expect(launch).toHaveBeenCalledOnce()
     const [commandLine, spawnOptions] = launch.mock.calls[0]!
     expect(commandLine).toBe(COMMAND)
@@ -72,6 +74,17 @@ describe('restart disposition driver', () => {
     // Non-detached since 2026-11-06 popup fix: no new console, no focus-stealing window.
     expect(spawnOptions).not.toHaveProperty('detached')
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('auto-restart dispatched'))
+    // 机检锚（restart-reason-audit-1111 ②）：dispatched 行带 judgment.reason。
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('attestation agreed, reason=config)'))
+  })
+
+  it('logs reason=- on the dispatched line when the judgment carries no reason', () => {
+    const { emit, warn } = driver({ running: () => 0 })
+    recordClientRunningCount(0)
+    emit('NEED_RESTART')
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(
+      'auto-restart dispatched (0 running sessions, attestation agreed, reason=-)',
+    ))
   })
 
   it('judges only the entry tick — a repeated NEED_RESTART does not re-dispatch', () => {

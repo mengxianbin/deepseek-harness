@@ -22,7 +22,7 @@ import {
 } from './restart-disposition.ts'
 import { dispatchRestart, spawnDetached, RESTART_COMMAND_ENV, type RestartLauncher } from './restart-host.ts'
 import { onRestartSignalJudgment } from './restart-signal.ts'
-import type { RestartSignalState } from './restart.ts'
+import type { RestartSignalReason, RestartSignalState } from './restart.ts'
 
 /** Minimal host agents face the count reads (mirrors core-agent's
  * `AgentRegistry.list()` and `Agent.status === 'running'` — the exact host
@@ -34,6 +34,11 @@ export interface RunningAgentsFace {
 /** Minimal judgment shape the entry detector consumes. */
 export interface DispositionJudgment {
   readonly state: RestartSignalState
+  /** Present only on `NEED_RESTART`: which restart branch fired (config vs
+   * built) — surfaced on the dispatched line so the automatic route's motive
+   * is auditable (restart-reason-audit-1111 ②; judgment producer unchanged —
+   * `judgeRestartSignal` already carries this field). */
+  readonly reason?: RestartSignalReason
 }
 
 /** Injection seams for one registration; production defaults come from this process. */
@@ -107,7 +112,9 @@ export function registerRestartDisposition(ctx: Context, internals: RestartDispo
       return
     }
     dispatchRestart(commandLine, internals.launch ?? spawnDetached)
-    warn('ui-settings-general: auto-restart dispatched (0 running sessions, attestation agreed)')
+    // reason rides the line (`config` | `built` | `-` when the judgment carried
+    // none): the motive joins the existing who/when account (restart-reason-audit-1111 ②).
+    warn(`ui-settings-general: auto-restart dispatched (0 running sessions, attestation agreed, reason=${judgment.reason ?? '-'})`)
   })
 
   ctx.effect(() => () => { unsubscribe() }, 'ui-settings-general: restart disposition')

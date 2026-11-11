@@ -5,7 +5,7 @@ import { HostConnectionService } from '@deepseek-ai/dsh-client-connection'
 import type { BrowserAuth } from '@deepseek-ai/dsh-client-connection/src/browser-auth.ts'
 import type { IndexInjection } from '@deepseek-ai/dsh-host-webserver'
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
-import { RESTART_COMMAND_ENV, registerRestart, type RestartChild } from '../src/restart-host.ts'
+import { RESTART_COMMAND_ENV, readRestartReason, registerRestart, type RestartChild } from '../src/restart-host.ts'
 import { DISPATCH_CLAIM_TTL_MS, resetDispositionStateForTest } from '../src/restart-disposition.ts'
 import { RESTART_GLOBAL, RESTART_PATH } from '../src/restart.ts'
 import * as HostPlugin from '../src/index.ts'
@@ -44,8 +44,11 @@ function fixture() {
   onTestFinished(() => ctx.fiber.dispose())
   const connection = new HostConnectionService(ctx, [], {} as BrowserAuth)
   const handler = connection.createSharedFetchHandler('/api')
-  const post = () => handler.fetch(new Request(`http://localhost${RESTART_PATH}`, { method: 'POST' }),
-    connection.browserPeer)
+  // `target` accepts a query string; `init` carries body/headers for reason rides.
+  const post = (target: string = RESTART_PATH, init: RequestInit = {}) =>
+    handler.fetch(new Request(`http://localhost${target}`, { method: 'POST', ...init }),
+      connection.browserPeer)
+  const send = (request: Request) => handler.fetch(request, connection.browserPeer)
   const get = () => handler.fetch(new Request(`http://localhost${RESTART_PATH}`, { method: 'GET' }),
     connection.browserPeer)
   const emitIndex = (): IndexInjection[] => {
@@ -54,7 +57,7 @@ function fixture() {
     ctx.emit('webserver/index-inject', table, connection.browserPeer)
     return table
   }
-  return { ctx, post, get, emitIndex }
+  return { ctx, post, send, get, emitIndex }
 }
 
 describe('restart dispatch', () => {
@@ -161,7 +164,11 @@ describe('restart dispatch', () => {
     expect(second.status).toBe(409)
     expect(await second.json()).toEqual({ dispatched: false, reason: 'in-flight' })
     expect(spawnMock).toHaveBeenCalledOnce()
-    expect(write).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('already in flight'))
+    // One spy, two distinct lines: the manual-route dispatch line (reason audit,
+    // `reason=-` — this request carries none) and the skipped line.
+    expect(write).toHaveBeenCalledTimes(2)
+    expect(write).toHaveBeenCalledWith(expect.stringContaining('already in flight'))
+    expect(write).toHaveBeenCalledWith(expect.stringContaining('manual route, reason=-, remote='))
   })
 
   it('lets a retry dispatch again once the claim TTL expires', async () => {
@@ -176,5 +183,72 @@ describe('restart dispatch', () => {
     vi.advanceTimersByTime(DISPATCH_CLAIM_TTL_MS + 1)
     expect((await post()).status).toBe(202)
     expect(spawnMock).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('restart reason audit (restart-reason-audit-1111 ①, fail-open)', () => {
+  it('answers 202 and logs the caller reason from a JSON body on the dispatch line', async () => {
+    vi.stubEnv(RESTART_COMMAND_ENV, 'exit 0')
+    const { ctx, post } = fixture()
+    spawnMock.mockImplementation(() => stubChild().child)
+    registerRestart(ctx)
+    const write = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    const response = await post(RESTART_PATH, { body: JSON.stringify({ reason: 'manual: user pressed the button' }) })
+    expect(response.status).toBe(202)
+    expect(await response.json()).toEqual({ dispatched: true })
+    // 机检锚：行含 `manual route, reason=` 与调用方 reason 本体。
+    expect(write).toHaveBeenCalledWith(expect.stringContaining(
+      'restart dispatched (manual route, reason=manual: user pressed the button, remote=',
+    ))
+  })
+
+  it('answers 202 with reason=- when the request carries no reason (缺省回落现状)', async () => {
+    vi.stubEnv(RESTART_COMMAND_ENV, 'exit 0')
+    const { ctx, post } = fixture()
+    spawnMock.mockImplementation(() => stubChild().child)
+    registerRestart(ctx)
+    const write = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    const response = await post()
+    expect(response.status).toBe(202)
+    expect(write).toHaveBeenCalledWith(expect.stringContaining('manual route, reason=-, remote='))
+  })
+
+  it('reads query first, then body JSON/plain text, clips to 200, and degrades unreadable bodies to -', async () => {
+    const url = `http://localhost${RESTART_PATH}`
+    // Query wins over the body.
+    expect(await readRestartReason(new Request(`${url}?reason=via-query`))).toBe('via-query')
+    expect(await readRestartReason(new Request(url, { method: 'POST', body: JSON.stringify({ reason: 'via-body' }) }))).toBe('via-body')
+    // Plain (non-JSON) body rides as the reason itself; empty and field-less bodies degrade.
+    expect(await readRestartReason(new Request(url, { method: 'POST', body: 'plain-text' }))).toBe('plain-text')
+    expect(await readRestartReason(new Request(url, { method: 'POST' }))).toBe('-')
+    expect(await readRestartReason(new Request(url, { method: 'POST', body: JSON.stringify({ other: 1 }) }))).toBe('-')
+    // Over-long clips to the 200-char bound — degrade, never reject.
+    expect(await readRestartReason(new Request(url, { method: 'POST', body: JSON.stringify({ reason: 'x'.repeat(250) }) }))).toHaveLength(200)
+    // An unreadable body degrades to `-` instead of throwing (fail-open).
+    const broken = new Request(url, {
+      method: 'POST',
+      body: new ReadableStream<Uint8Array>({ start(controller) { controller.error(new Error('body exploded')) } }),
+      duplex: 'half',
+    } as RequestInit & { duplex: 'half' })
+    await expect(readRestartReason(broken)).resolves.toBe('-')
+  })
+
+  it('still answers 202 with reason=- when the body cannot be read — the spawn precedes the audit read', async () => {
+    vi.stubEnv(RESTART_COMMAND_ENV, 'exit 0')
+    const { ctx, send } = fixture()
+    spawnMock.mockImplementation(() => stubChild().child)
+    registerRestart(ctx)
+    const write = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    const broken = new Request(`http://localhost${RESTART_PATH}`, {
+      method: 'POST',
+      body: new ReadableStream<Uint8Array>({ start(controller) { controller.error(new Error('body exploded')) } }),
+      duplex: 'half',
+    } as RequestInit & { duplex: 'half' })
+    const response = await send(broken)
+    // Fail-open: the dispatch already happened and the 202 is on the wire.
+    expect(response.status).toBe(202)
+    expect(await response.json()).toEqual({ dispatched: true })
+    expect(spawnMock).toHaveBeenCalledOnce()
+    expect(write).toHaveBeenCalledWith(expect.stringContaining('manual route, reason=-, remote='))
   })
 })
