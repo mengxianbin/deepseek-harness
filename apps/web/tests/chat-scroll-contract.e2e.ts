@@ -1299,7 +1299,11 @@ describe('web e2e: long Chat scroll contract', () => {
               element.style.width = `${contentWidth + 2 * (clearance + 16)}px`
               element.style.setProperty('--dsh-composer-side-clearance', `${clearance}px`)
             }, { clearance, contentWidth })
-            await expect.poll(() => rail.isVisible()).toBe(contentWidth > 900)
+            // FORK dsh-local (rail-width-1022): the rail shows at every width —
+            // user ruling 2026-10-22, commit 1a3f13649a removed the @container
+            // threshold. Locking the local behaviour so an upstream merge cannot
+            // silently restore hidden-below-900px.
+            await expect.poll(() => rail.isVisible()).toBe(true)
           }
         }
       } finally {
