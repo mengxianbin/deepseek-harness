@@ -22,7 +22,7 @@ function derivedDocumentStore(remote: object) {
   const ctx = { remote } as never
   return new SettingsDocumentStore(ctx, new SettingsDescribeMirror(ctx))
 }
-import { en, zh } from '../src/client/locales.ts'
+import { de, en, es, fr, ja, pt, ru, zh } from '../src/client/locales.ts'
 import { CurrentVersionRow } from '../src/client/CurrentVersionRow.tsx'
 import { DesktopUpdateBadge } from '../src/client/DesktopUpdateIndicator.tsx'
 import { HostReleasePrompt, type HostReleasePromptProps } from '../src/client/HostReleasePrompt.tsx'
@@ -470,6 +470,22 @@ describe('Restart server button', () => {
     const button = screen.getByRole('button')
     expect(button.getAttribute('aria-label')).toBe(named)
     expect(button.getAttribute('data-restart-signal')).toBe('NEED_BUILD')
+  })
+
+  it('keeps the linked NEED_BUILD copy machine-voiced with a failure exit in all shipped languages (restart-lamp-copy-1111)', () => {
+    for (const dict of [zh, en, ja, es, fr, de, ru, pt]) {
+      const line = dict['restart.signal.needBuild.linked']
+      // The tree stays named — the drift is a per-tree fact.
+      expect(line).toContain('{repo}')
+      // No human-imperative build command survives the rewrite: the watchdog
+      // owns the rebuild, so sending the reader to run pnpm build is a lie.
+      expect(line).not.toMatch(/pnpm build/i)
+    }
+    // zh direction locks: 「树」 noun (not 「linked 仓」) and the failure exit
+    // that keeps the promise honest before the two-state lamp lands (T2).
+    expect(zh['restart.signal.needBuild.linked']).toContain('树')
+    expect(zh['restart.signal.needBuild.linked']).not.toContain('linked 仓')
+    expect(zh['restart.signal.needBuild.linked']).toContain('构建失败')
   })
 
   it.each([['INIT'], ['BUILDING'], ['BUILD_FAILED']] as const)('lights the %s button with its single next step', (state) => {
