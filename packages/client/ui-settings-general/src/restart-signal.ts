@@ -64,7 +64,7 @@ import { readFile, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { restartStamp, type RestartStamp } from './restart-stamp.ts'
-import { RESTART_SIGNAL_STATES, type RestartSignalReason, type RestartSignalState } from './restart.ts'
+import { RESTART_SIGNAL_STATES, resolveLinkedBuildSeat, type LinkedBuildState, type RestartSignalReason, type RestartSignalState } from './restart.ts'
 
 /** Gitignored directory holding the per-tree build markers (mirrors the scripts-side constant). */
 const STAMP_DIR = '.dsh-build'
@@ -172,6 +172,16 @@ export interface RestartSignalJudgment {
    * time: the build-start instant (ISO 8601) the browser renders as the
    * timer tooltip's start stamp and elapsed age (build-timer-tooltip-1101). */
   readonly startedAt?: string
+  /** Present only on a linked-only `NEED_BUILD` whose named tree carries a
+   * data-confirmed machine build state (linked-lamp-twostate-1111); display
+   * data attached by the collector AFTER the pure judgment (the same
+   * post-judge spread `facts` rides) — `judgeRestartSignal` never produces
+   * it, so the seven-state semantics are untouched. */
+  readonly linkedBuild?: LinkedBuildState
+  /** Present only beside `linkedBuild: 'failed'`: the per-tree failure count.
+   * Pair-sanitized by {@link resolveLinkedBuildSeat} (a `failed` without a
+   * readable count rides neither half). */
+  readonly linkedBuildFailures?: number
   /** Human-readable facts behind the judgment; log and test surface, never copy text. */
   readonly detail: string
   /** Machine facts this judgment consumed; attached by every production collect. */
@@ -365,6 +375,10 @@ function parseStateJudgment(value: unknown): RestartSignalJudgment | undefined {
   if (startedAt !== undefined && (typeof startedAt !== 'string' || !Number.isFinite(Date.parse(startedAt)))) return undefined
   const linkedRepo: unknown = Reflect.get(value, 'linkedRepo')
   if (linkedRepo !== undefined && (typeof linkedRepo !== 'string' || linkedRepo === '')) return undefined
+  // The linked-build pair is display-only: a malformed half fails OPEN to an
+  // absent seat (the plain linked copy keeps the lamp honest) instead of
+  // failing the whole judgment — one bad copy seat must never 500 the route.
+  const linkedBuild = resolveLinkedBuildSeat(Reflect.get(value, 'linkedBuild'), Reflect.get(value, 'linkedBuildFailures'))
   const facts = parseStateFacts(Reflect.get(value, 'facts'))
   if (facts === 'invalid') return undefined
   return {
@@ -373,6 +387,7 @@ function parseStateJudgment(value: unknown): RestartSignalJudgment | undefined {
     ...(reason === undefined ? {} : { reason }),
     ...(startedAt === undefined ? {} : { startedAt }),
     ...(linkedRepo === undefined ? {} : { linkedRepo }),
+    ...(linkedBuild === undefined ? {} : linkedBuild),
     ...(facts === undefined ? {} : { facts }),
   }
 }
@@ -403,6 +418,11 @@ function judgmentKey(judgment: RestartSignalJudgment): string {
     judgment.reason ?? null,
     judgment.startedAt ?? null,
     judgment.linkedRepo ?? null,
+    // linked-lamp-twostate-1111: the pair moves a listener's mind (plain
+    // linked line → building/failed), so it keys the change detection and the
+    // push bell rings on the transition.
+    judgment.linkedBuild ?? null,
+    judgment.linkedBuildFailures ?? null,
     judgment.detail,
     judgment.facts === undefined
       ? null

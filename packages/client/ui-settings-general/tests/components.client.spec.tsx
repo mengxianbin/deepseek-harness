@@ -488,6 +488,43 @@ describe('Restart server button', () => {
     expect(zh['restart.signal.needBuild.linked']).toContain('构建失败')
   })
 
+  it('branches the linked NEED_BUILD copy by the confirmed machine build state and falls back when unconfirmed (linked-lamp-twostate-1111)', () => {
+    const linkedRepo = 'D:/tech/dsh-web'
+    const building = en['restart.signal.needBuild.linked.building'].replace('{repo}', linkedRepo)
+    const failed = en['restart.signal.needBuild.linked.failed'].replace('{repo}', linkedRepo).replace('{n}', '9')
+    const plain = en['restart.signal.needBuild.linked'].replace('{repo}', linkedRepo)
+    // building: the machine is rebuilding that tree right now.
+    expect(restartSignalCopy(base.t, { state: 'NEED_BUILD', linkedRepo, linkedBuild: 'building' })).toBe(building)
+    // failed: the per-tree account names the failure count.
+    expect(restartSignalCopy(base.t, { state: 'NEED_BUILD', linkedRepo, linkedBuild: 'failed', linkedBuildFailures: 9 })).toBe(failed)
+    // Unconfirmed shapes keep the plain linked line — never a guessed state:
+    // absent pair (old host), failed without a readable count.
+    expect(restartSignalCopy(base.t, { state: 'NEED_BUILD', linkedRepo })).toBe(plain)
+    expect(restartSignalCopy(base.t, { state: 'NEED_BUILD', linkedRepo, linkedBuild: 'failed' })).toBe(plain)
+    // Render seat: the building line lands on the button's accessible name.
+    render(<RestartServerButton {...base} signal={{ state: 'NEED_BUILD', linkedRepo, linkedBuild: 'building' }} />)
+    expect(screen.getByRole('button').getAttribute('aria-label')).toBe(building)
+  })
+
+  it('keeps both new linked build copy seats machine-voiced in all shipped languages (linked-lamp-twostate-1111)', () => {
+    const keys = ['restart.signal.needBuild.linked.building', 'restart.signal.needBuild.linked.failed'] as const
+    for (const dict of [zh, en, ja, es, fr, de, ru, pt]) {
+      for (const key of keys) {
+        // The tree stays named; the failed seat also carries the count.
+        expect(dict[key]).toContain('{repo}')
+        if (key.endsWith('.failed')) expect(dict[key]).toContain('{n}')
+        // The machine owns the rebuild in every line — no imperative pnpm build.
+        expect(dict[key]).not.toMatch(/pnpm build/i)
+      }
+    }
+    // zh direction locks: 「树」 noun (not 「linked 仓」) on both seats.
+    for (const key of keys) {
+      expect(zh[key]).toContain('树')
+      expect(zh[key]).not.toContain('linked 仓')
+    }
+    expect(zh['restart.signal.needBuild.linked.failed']).toContain('失败')
+  })
+
   it.each([['INIT'], ['BUILDING'], ['BUILD_FAILED']] as const)('lights the %s button with its single next step', (state) => {
     render(<RestartServerButton {...base} signal={{ state }} />)
     const copy = {

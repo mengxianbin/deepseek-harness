@@ -65,6 +65,8 @@ export const zh = {
   'restart.signal.buildFailed': '构建失败：查看构建输出，修复后重新构建',
   'restart.signal.needBuild': '有改动未构建：先运行构建',
   'restart.signal.needBuild.linked': 'linked 树 {repo} 欠构建：机器将自动重建；持续未灭=构建失败待修',
+  'restart.signal.needBuild.linked.building': 'linked 树 {repo} 欠构建：机器正在自动重建，建完灯自灭',
+  'restart.signal.needBuild.linked.failed': 'linked 树 {repo} 自动重建失败（失败账 {n} 次）：机器将冷却重试，反复失败需修码',
   'restart.signal.needRestart.config': '配置已改动：重启服务器使其生效',
   'restart.signal.needRestart.built': '已构建：重启服务器使其生效',
 } satisfies Record<string, string>
@@ -137,6 +139,8 @@ export const en = {
   'restart.signal.buildFailed': 'Build failed: inspect the build output, fix, and rebuild',
   'restart.signal.needBuild': 'Changes are not built: run a build first',
   'restart.signal.needBuild.linked': 'Linked tree {repo} needs a build: the machine rebuilds it automatically; if this message persists, the build failed and needs a fix',
+  'restart.signal.needBuild.linked.building': 'Linked tree {repo} needs a build: the machine is rebuilding it now; the lamp clears when it finishes',
+  'restart.signal.needBuild.linked.failed': 'Linked tree {repo} failed to rebuild (failure count {n}): the machine retries after cooldown; repeated failures need a code fix',
   'restart.signal.needRestart.config': 'Configuration changed: restart the server to apply it',
   'restart.signal.needRestart.built': 'Built: restart the server to apply it',
 } satisfies Record<SettingsKey, string>
@@ -206,6 +210,8 @@ export const ja = {
   'restart.signal.init': 'ビルド基線がありません：まずビルドし、その後一度再起動して基線を確立してください',
   'restart.signal.needBuild': '変更がビルドされていません：先にビルドを実行してください',
   'restart.signal.needBuild.linked': 'リンク先ツリー {repo} が未ビルド：マシンが自動的に再ビルドします。この表示が消えない場合はビルド失敗＝修正が必要です',
+  'restart.signal.needBuild.linked.building': 'リンク先ツリー {repo} が未ビルド：マシンが現在再ビルド中、完了すれば表示が消えます',
+  'restart.signal.needBuild.linked.failed': 'リンク先ツリー {repo} の再ビルドに失敗（失敗 {n} 回）：マシンは冷却後に再試行します。失敗が続く場合は修正が必要です',
   'restart.signal.needRestart.built': 'ビルド済み：サーバーを再起動して反映してください',
   'restart.signal.needRestart.config': '設定が変更されました：サーバーを再起動して反映してください',
 } satisfies Record<keyof typeof en, string>
@@ -275,6 +281,8 @@ export const es = {
   'restart.signal.init': 'No hay línea base de compilación: compila y luego reinicia una vez para establecerla.',
   'restart.signal.needBuild': 'Los cambios no están compilados: ejecuta primero una compilación.',
   'restart.signal.needBuild.linked': 'El árbol vinculado {repo} necesita compilación: la máquina lo recompilará automáticamente; si este aviso persiste, la compilación falló y hay que corregirla.',
+  'restart.signal.needBuild.linked.building': 'El árbol vinculado {repo} necesita compilación: la máquina lo está recompilando ahora; el aviso se apaga al terminar.',
+  'restart.signal.needBuild.linked.failed': 'El árbol vinculado {repo} falló al recompilar (intentos fallidos: {n}): la máquina reintentará tras el enfriamiento; si el fallo persiste, hay que corregir el código.',
   'restart.signal.needRestart.built': 'Compilado: reinicia el servidor para aplicarlo.',
   'restart.signal.needRestart.config': 'La configuración ha cambiado: reinicia el servidor para aplicarla.',
 } satisfies Record<keyof typeof en, string>
@@ -344,6 +352,8 @@ export const fr = {
   'restart.signal.init': 'Aucune ligne de base de build ; construisez, puis redémarrez une fois pour l’établir.',
   'restart.signal.needBuild': 'Les modifications ne sont pas construites ; lancez d’abord une construction.',
   'restart.signal.needBuild.linked': 'L’arbre lié {repo} doit être compilé : la machine le recompilera automatiquement ; si ce message persiste, la construction a échoué et doit être réparée.',
+  'restart.signal.needBuild.linked.building': 'L’arbre lié {repo} doit être compilé : la machine le recompile en ce moment ; le message disparaît à la fin.',
+  'restart.signal.needBuild.linked.failed': 'L’arbre lié {repo} a échoué à la recompilation ({n} échecs) : la machine réessaiera après la temporisation ; si l’échec persiste, il faut réparer le code.',
   'restart.signal.needRestart.built': 'Construit ; redémarrez le serveur pour l’appliquer.',
   'restart.signal.needRestart.config': 'La configuration a changé ; redémarrez le serveur pour l’appliquer.',
 } satisfies Record<keyof typeof en, string>
@@ -413,6 +423,8 @@ export const de = {
   'restart.signal.init': 'Keine Build-Basislinie; bauen Sie und starten Sie dann einmal neu, um sie festzulegen.',
   'restart.signal.needBuild': 'Die Änderungen sind nicht gebaut; führen Sie zuerst einen Build aus.',
   'restart.signal.needBuild.linked': 'Verknüpfter Baum {repo} ist nicht gebaut: Die Maschine baut ihn automatisch neu; bleibt diese Meldung bestehen, ist der Build fehlgeschlagen und muss repariert werden.',
+  'restart.signal.needBuild.linked.building': 'Verknüpfter Baum {repo} ist nicht gebaut: Die Maschine baut ihn gerade neu; die Meldung verschwindet beim Fertigwerden.',
+  'restart.signal.needBuild.linked.failed': 'Verknüpfter Baum {repo} konnte nicht neu gebaut werden ({n} Fehlschläge): Die Maschine versucht es nach der Abkühlung erneut; bei anhaltenden Fehlschlägen muss der Code repariert werden.',
   'restart.signal.needRestart.built': 'Gebaut; starten Sie den Server neu, um es anzuwenden.',
   'restart.signal.needRestart.config': 'Konfiguration geändert; starten Sie den Server neu, um sie anzuwenden.',
 } satisfies Record<keyof typeof en, string>
@@ -482,6 +494,8 @@ export const ru = {
   'restart.signal.init': 'Нет базовой отметки сборки; соберите, затем один раз перезапустите, чтобы её установить.',
   'restart.signal.needBuild': 'Изменения не собраны; сначала выполните сборку.',
   'restart.signal.needBuild.linked': 'Связанное дерево {repo} не собрано: машина пересоберёт его автоматически; если это сообщение не исчезает, сборка не удалась и её нужно починить.',
+  'restart.signal.needBuild.linked.building': 'Связанное дерево {repo} не собрано: машина пересобирает его сейчас; сообщение исчезнет по завершении.',
+  'restart.signal.needBuild.linked.failed': 'Не удалось пересобрать связанное дерево {repo} (сбоев: {n}): машина повторит попытку после паузы; при повторных сбоях нужно починить код.',
   'restart.signal.needRestart.built': 'Собрано; перезапустите сервер, чтобы применить.',
   'restart.signal.needRestart.config': 'Конфигурация изменена; перезапустите сервер, чтобы применить.',
 } satisfies Record<keyof typeof en, string>
@@ -551,6 +565,8 @@ export const pt = {
   'restart.signal.init': 'Não há linha de base de compilação; compile e reinicie uma vez para a estabelecer.',
   'restart.signal.needBuild': 'As alterações não foram compiladas; execute primeiro uma compilação.',
   'restart.signal.needBuild.linked': 'A árvore vinculada {repo} precisa de build: a máquina a recompilará automaticamente; se este aviso persistir, o build falhou e precisa ser corrigido.',
+  'restart.signal.needBuild.linked.building': 'A árvore vinculada {repo} precisa de build: a máquina a está recompilando agora; o aviso some quando termina.',
+  'restart.signal.needBuild.linked.failed': 'A árvore vinculada {repo} falhou ao recompilar (falhas: {n}): a máquina tentará novamente após o intervalo; falhas repetidas exigem correção de código.',
   'restart.signal.needRestart.built': 'Compilado; reinicie o servidor para aplicar.',
   'restart.signal.needRestart.config': 'A configuração mudou; reinicie o servidor para aplicar.',
 } satisfies Record<keyof typeof en, string>
