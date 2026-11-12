@@ -54,6 +54,17 @@
       - listitem:
         - button "Edit shortcut for Close current page or window"
         - text: Close current page or window Ctrl + Alt + W
+      - listitem: Next stop Alt + ↓
+      - listitem: Previous stop Alt + ↑
+      - listitem:
+        - button "Edit shortcut for Focus input box"
+        - text: Focus input box Ctrl + Alt + 3
+      - listitem:
+        - button "Edit shortcut for Focus conversation"
+        - text: Focus conversation Ctrl + Alt + 2
+      - listitem:
+        - button "Edit shortcut for Focus session list"
+        - text: Focus session list Ctrl + Alt + 1
   - region "Message input":
     - heading "Message input" [level=3]
     - list:

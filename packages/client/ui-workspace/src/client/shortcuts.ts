@@ -10,6 +10,8 @@ import type { UiWorkspace } from './navigation.ts'
 /** Transient requests consumed by the existing workspace browser. */
 export interface WorkspaceShortcutState {
   readonly searchRequest: number
+  /** Monotonic focus request: the browser lands keyboard focus on the session row it selected. */
+  readonly focusListRequest: number
   readonly addRequested: boolean
   readonly directoryBusy: boolean
   readonly renameTarget: { readonly sessionId: SessionId; readonly currentTitle: string } | null
@@ -18,6 +20,7 @@ export interface WorkspaceShortcutState {
 interface WorkspaceShortcutControls {
   state: SnapshotStore<WorkspaceShortcutState>
   search: () => void
+  focusList: () => void
   add: () => void
   closeAdd: () => void
   directoryBusy: (busy: boolean) => void
@@ -31,11 +34,12 @@ interface WorkspaceShortcutControls {
  */
 export function createWorkspaceShortcutControls(): WorkspaceShortcutControls {
   const state = createSnapshotStore<WorkspaceShortcutState>({
-    searchRequest: 0, addRequested: false, directoryBusy: false, renameTarget: null,
+    searchRequest: 0, focusListRequest: 0, addRequested: false, directoryBusy: false, renameTarget: null,
   })
   return {
     state,
     search: () => { state.set({ ...state.getSnapshot(), searchRequest: state.getSnapshot().searchRequest + 1 }) },
+    focusList: () => { state.set({ ...state.getSnapshot(), focusListRequest: state.getSnapshot().focusListRequest + 1 }) },
     add: () => { state.set(state.getSnapshot().directoryBusy ? state.getSnapshot() : { ...state.getSnapshot(), addRequested: true }) },
     closeAdd: () => { state.set({ ...state.getSnapshot(), addRequested: false }) },
     directoryBusy: (busy: boolean) => { state.set({ ...state.getSnapshot(), directoryBusy: busy }) },
@@ -82,6 +86,8 @@ export function installWorkspaceShortcuts(
     () => ({ status: 'handled', run: () => { navigation.startSession() } }))
   register('session.search', () => t('search.sessions.aria'), ['search sessions'], 'KeyK', ['primary'], ['primary', 'alt'],
     () => ({ status: 'handled', run: controls.search }))
+  register('focus.sessionList', () => t('focus.sessionList'), ['focus session list', 'session list'], 'Digit1', ['primary'], ['primary', 'alt'],
+    () => ({ status: 'handled', run: controls.focusList }))
   register('workspace.add', () => t('workspace.add'), ['add workspace', 'open folder'], 'KeyO', ['primary'], ['primary', 'alt'],
     () => {
       const reason = addReason()
