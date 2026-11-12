@@ -25,6 +25,13 @@ import type { RowToast } from './contract/slots.ts'
 import { pinOrderAccounts, pinOrderSource } from './pin-order.ts'
 import type { WorkspaceViewStoreActions } from './stores.ts'
 
+/**
+ * FORK session-switch-warm-1111: replaced main views kept warm for instant
+ * switch-back. Two covers the common A↔B comparison plus one step of depth;
+ * each warm entry holds one Session scope in memory, so the cap matters.
+ */
+const KEEP_WARM_LIMIT = 2
+
 interface MainSelection {
   readonly sessionId?: SessionId
   readonly subagentAddress?: SubagentAddress
@@ -185,6 +192,12 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     {}, { persist: { name: 'dsh.sessions.current' } },
   )
   private mainReference: SessionReference | undefined
+  /**
+   * FORK session-switch-warm-1111: replaced main views kept retained so
+   * switching back skips the cold reopen. Bounded LRU in switch order; the
+   * `mainViewWarm` key keeps `retainedBy.mainView` exclusive to the real main.
+   */
+  private readonly warmReferences: SessionReference[] = []
   private restorationNavigation: AbortSignal | undefined
 
   /**
@@ -212,6 +225,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
         const reference = this.mainReference
         this.mainReference = undefined
         reference?.release()
+        for (const warm of this.warmReferences.splice(0)) warm.release()
       }
     }, 'ui-workspace: Workspace navigation policy')
   }
@@ -408,6 +422,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
 
   async archiveSession(sessionId: SessionId, options: { readonly stopActivity?: boolean } = {}): Promise<void> {
     await this.workspaces.archiveSession(sessionId, options)
+    this.dropWarm(sessionId)
     if (this.mainReference?.sessionId === sessionId) this.clearMain()
   }
 
@@ -592,6 +607,46 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     this.ctx.layout.selectPanel(null)
   }
 
+  /**
+   * Keep the replaced main view warm instead of releasing it: its scope stays
+   * retained (history page and follow stream stay live), so switching back
+   * re-attaches instantly instead of re-opening cold (FORK
+   * session-switch-warm-1111). The prior reference carries the `mainView`
+   * key that consumers read as the current-session predicate, so the transfer
+   * retains the same identity under `mainViewWarm` first and only then drops
+   * `mainView` — exactly one session ever reports mainView. The list is a
+   * bounded LRU in switch order; a retain failure falls back to plain release
+   * because warm is an optimization only.
+   */
+  private warmMain(prior: SessionReference | undefined, replacedBy: SessionId): void {
+    this.dropWarm(replacedBy)
+    if (prior === undefined) return
+    if (prior.sessionId === replacedBy) {
+      // Re-revealing the same Session: the fresh main reference already owns it.
+      prior.release()
+      return
+    }
+    let warm: SessionReference
+    try {
+      warm = this.sessions.retain(prior.sessionId, { source: 'mainViewWarm' })
+    } catch {
+      prior.release()
+      return
+    }
+    prior.release()
+    this.warmReferences.push(warm)
+    while (this.warmReferences.length > KEEP_WARM_LIMIT) {
+      this.warmReferences.shift()?.release()
+    }
+  }
+
+  /** Release the warm entry for one Session, if it holds one. */
+  private dropWarm(sessionId: SessionId): void {
+    const index = this.warmReferences.findIndex(reference => reference.sessionId === sessionId)
+    if (index < 0) return
+    this.warmReferences.splice(index, 1)[0]?.release()
+  }
+
   private replaceMain(
     target: SessionTarget,
     signal: AbortSignal,
@@ -636,7 +691,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     }
     const prior = this.mainReference
     this.mainReference = reference
-    prior?.release()
+    this.warmMain(prior, reference.sessionId)
     if (panel === 'reveal') this.ctx.layout.selectPanel(null)
   }
 
