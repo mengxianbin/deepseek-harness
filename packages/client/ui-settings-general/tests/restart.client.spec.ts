@@ -66,6 +66,34 @@ describe('resolveRestartSignal', () => {
     expect(resolveRestartSignal({ state: 'NEED_BUILD' })).toEqual({ state: 'NEED_BUILD' })
   })
 
+  it('passes the data-confirmed linked build pair through as one seat (linked-lamp-twostate-1111)', () => {
+    expect(resolveRestartSignal({ state: 'NEED_BUILD', linkedRepo: 'D:/tech/dsh-web', linkedBuild: 'building' }))
+      .toEqual({ state: 'NEED_BUILD', linkedRepo: 'D:/tech/dsh-web', linkedBuild: 'building' })
+    expect(resolveRestartSignal({ state: 'NEED_BUILD', linkedRepo: 'D:/tech/dsh-web', linkedBuild: 'failed', linkedBuildFailures: 9 }))
+      .toEqual({ state: 'NEED_BUILD', linkedRepo: 'D:/tech/dsh-web', linkedBuild: 'failed', linkedBuildFailures: 9 })
+    // A count is meaningless beside `building`: the stray half is dropped, never rendered.
+    expect(resolveRestartSignal({ state: 'NEED_BUILD', linkedRepo: 'D:/tech/dsh-web', linkedBuild: 'building', linkedBuildFailures: 3 }))
+      .toEqual({ state: 'NEED_BUILD', linkedRepo: 'D:/tech/dsh-web', linkedBuild: 'building' })
+  })
+
+  it('fails the linked build pair open to the plain linked line (old host, malformed half)', () => {
+    // Old-host serialization sample: the seats simply do not exist — the view
+    // stays valid and the copy shows the plain linked line, never a crash.
+    expect(resolveRestartSignal({ state: 'NEED_BUILD', linkedRepo: 'D:/tech/dsh-web' }))
+      .toEqual({ state: 'NEED_BUILD', linkedRepo: 'D:/tech/dsh-web' })
+    const plain = { state: 'NEED_BUILD', linkedRepo: 'D:/tech/dsh-web' }
+    for (const value of [
+      { state: 'NEED_BUILD', linkedRepo: 'D:/tech/dsh-web', linkedBuild: 'maybe' },
+      { state: 'NEED_BUILD', linkedRepo: 'D:/tech/dsh-web', linkedBuild: 7 },
+      { state: 'NEED_BUILD', linkedRepo: 'D:/tech/dsh-web', linkedBuild: null },
+      { state: 'NEED_BUILD', linkedRepo: 'D:/tech/dsh-web', linkedBuild: 'failed' },
+      { state: 'NEED_BUILD', linkedRepo: 'D:/tech/dsh-web', linkedBuild: 'failed', linkedBuildFailures: -1 },
+      { state: 'NEED_BUILD', linkedRepo: 'D:/tech/dsh-web', linkedBuild: 'failed', linkedBuildFailures: 2.5 },
+      { state: 'NEED_BUILD', linkedRepo: 'D:/tech/dsh-web', linkedBuild: 'failed', linkedBuildFailures: '9' },
+      { state: 'NEED_BUILD', linkedRepo: 'D:/tech/dsh-web', linkedBuildFailures: 9 },
+    ]) expect(resolveRestartSignal(value)).toEqual(plain)
+  })
+
   it.each([
     ['absent', undefined],
     ['null', null],

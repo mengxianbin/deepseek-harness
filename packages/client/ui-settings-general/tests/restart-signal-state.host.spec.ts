@@ -82,6 +82,19 @@ describe('state route over the collector state file', () => {
     expect(await response.json()).toEqual({ state: 'BUILDING', startedAt })
   })
 
+  it('passes the linked build pair through the wire body, and omits an unconfirmed seat (linked-lamp-twostate-1111)', async () => {
+    const dshHome = fixtureHome()
+    writeState(dshHome, { state: 'NEED_BUILD', linkedRepo: 'D:/tech/dsh-web', linkedBuild: 'failed', linkedBuildFailures: 9 })
+    const { post } = routeFixture(() => collectRestartSignal({ dshHome }))
+    expect(await (await post()).json())
+      .toEqual({ state: 'NEED_BUILD', linkedRepo: 'D:/tech/dsh-web', linkedBuild: 'failed', linkedBuildFailures: 9 })
+    // An unconfirmed judgment serves without the seats — the browser copy
+    // falls back to the plain linked line rather than guessing.
+    resetRestartSignalForTest()
+    writeState(dshHome, { state: 'NEED_BUILD', linkedRepo: 'D:/tech/dsh-web' })
+    expect(await (await post()).json()).toEqual({ state: 'NEED_BUILD', linkedRepo: 'D:/tech/dsh-web' })
+  })
+
   it('answers200 with the LAST fresh judgment once the file is stale — the stale half (过期回上次值)', async () => {
     const dshHome = fixtureHome()
     writeState(dshHome, { state: 'NEED_RESTART', reason: 'config' })

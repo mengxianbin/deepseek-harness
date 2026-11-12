@@ -9,7 +9,7 @@
  * journal/registration faces.
  */
 import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -21,6 +21,7 @@ import {
   STATE_FRESH_MS,
   collectRestartSignal,
   combineHostFace,
+  onRestartSignalStateRefresh,
   resetRestartSignalForTest,
 } from '../../packages/client/ui-settings-general/src/restart-signal.ts'
 import { computeConfigStamp, resetRestartStampForTest } from '../../packages/client/ui-settings-general/src/restart-stamp.ts'
@@ -29,6 +30,7 @@ import {
   COLLECT_TASK_MINUTES,
   COLLECT_TASK_NAME,
   computeJudgment,
+  readLinkedBuild,
   readRuntimeCapture,
   writeRunJournal,
   writeStateFile,
@@ -123,6 +125,26 @@ function linkedTree(): string {
   return repository
 }
 
+/** A bare harness-tree stand-in holding only `.dsh-build` (account/journal fixtures). */
+function stampTree(): string {
+  const repository = mkdtempSync(join(tmpdir(), 'signal-collect-stamp-'))
+  temporary.push(repository)
+  mkdirSync(join(repository, '.dsh-build'), { recursive: true })
+  return repository
+}
+
+/** Write the watchdog's per-tree account (any body, including malformed ones). */
+function writeLinkedAccount(repositoryRoot: string, body: unknown): void {
+  mkdirSync(join(repositoryRoot, '.dsh-build'), { recursive: true })
+  writeFileSync(join(repositoryRoot, '.dsh-build', 'linked-build-state.json'), typeof body === 'string' ? body : JSON.stringify(body))
+}
+
+/** Append watchdog journal lines exactly as `write_journal` formats them. */
+function writeLinkedJournal(repositoryRoot: string, lines: readonly string[]): void {
+  mkdirSync(join(repositoryRoot, '.dsh-build'), { recursive: true })
+  appendFileSync(join(repositoryRoot, '.dsh-build', 'auto-build.log'), `${lines.join('\n')}\n`)
+}
+
 afterEach(() => {
   resetRestartSignalForTest()
   resetRestartStampForTest()
@@ -156,6 +178,92 @@ describe('readRuntimeCapture', () => {
     temporary.push(dshHome)
     writeFileSync(join(dshHome, RESTART_SIGNAL_RUNTIME_FILE), JSON.stringify({ schema: 'something-else' }))
     expect(() => readRuntimeCapture(join(dshHome, RESTART_SIGNAL_RUNTIME_FILE))).toThrow('schema mismatch')
+  })
+})
+
+describe('readLinkedBuild (per-tree account + journal witness, fail-open)', () => {
+  const repo = 'D:\\tech\\dsh-web'
+  const account = (failures: unknown, outcome: unknown = 'failed'): unknown => ({
+    version: 1,
+    repos: { [repo]: { failures, lastAttemptAt: '2026-11-11T05:31:04.785Z', outcome, stall: null, driftLogged: null } },
+  })
+  const dispatch = `2026-11-11T05:31:04.785Z [watchdog] linked-build repo=${repo} reason=linked-drift`
+  const terminalFailed = `2026-11-11T05:32:55.740Z [watchdog] linked-build-failed repo=${repo} exit=1 output-tail=tsc boom`
+  const terminalDone = `2026-11-11T04:00:00.000Z [watchdog] linked-build-done repo=${repo} manifestTime=2026-11-11T04:00:00.000Z`
+
+  it('fails open to no seat when the account file is missing or unreadable', () => {
+    const bare = stampTree()
+    expect(readLinkedBuild(bare, repo)).toBeUndefined()
+    writeLinkedAccount(bare, '{ not json')
+    expect(readLinkedBuild(bare, repo)).toBeUndefined()
+    writeLinkedAccount(bare, JSON.stringify({ version: 1, repos: [] }))
+    expect(readLinkedBuild(bare, repo)).toBeUndefined()
+    writeLinkedAccount(bare, JSON.stringify({ version: 1, repos: { [repo]: 'corrupt' } }))
+    expect(readLinkedBuild(bare, repo)).toBeUndefined()
+  })
+
+  it('stays silent unless the account records a failed attempt for that exact tree', () => {
+    const tree = stampTree()
+    writeLinkedAccount(tree, account(3, 'ok'))
+    expect(readLinkedBuild(tree, repo)).toBeUndefined()
+    writeLinkedAccount(tree, account(3, null))
+    expect(readLinkedBuild(tree, repo)).toBeUndefined()
+    writeLinkedAccount(tree, account(3, 'failed'))
+    // Another tree's account never speaks for the tree the lamp names.
+    expect(readLinkedBuild(tree, 'D:\\tech\\other')).toBeUndefined()
+    // No journal witness: the account alone stands as the failed reading.
+    expect(readLinkedBuild(tree, repo)).toEqual({ linkedBuild: 'failed', linkedBuildFailures: 3 })
+  })
+
+  it('upgrades the pre-claimed account to building only while the journal shows the attempt open', () => {
+    const tree = stampTree()
+    writeLinkedAccount(tree, account(4))
+    writeLinkedJournal(tree, [dispatch])
+    expect(readLinkedBuild(tree, repo)).toEqual({ linkedBuild: 'building' })
+    // The terminal failure line closes the attempt: failed, count from the account.
+    writeLinkedJournal(tree, [terminalFailed])
+    expect(readLinkedBuild(tree, repo)).toEqual({ linkedBuild: 'failed', linkedBuildFailures: 4 })
+    // A done terminal contradicts a stale failed account — fail open, no seat.
+    writeLinkedJournal(tree, [terminalDone])
+    expect(readLinkedBuild(tree, repo)).toBeUndefined()
+  })
+
+  it('matches the account key and journal repo separator-insensitively', () => {
+    const tree = stampTree()
+    writeLinkedAccount(tree, { version: 1, repos: { 'd:/tech/dsh-web': { failures: 2, outcome: 'failed' } } })
+    writeLinkedJournal(tree, ['2026-11-11T05:31:04.785Z [watchdog] linked-build repo=D:/tech/dsh-web reason=linked-drift'])
+    expect(readLinkedBuild(tree, repo)).toEqual({ linkedBuild: 'building' })
+  })
+
+  it('never reads a longer tree path as this tree (prefix safety)', () => {
+    const tree = stampTree()
+    writeLinkedAccount(tree, account(1))
+    // Only a dispatch for the LONGER path exists; a substring match would
+    // wrongly call this tree building — the account's failed reading stands.
+    writeLinkedJournal(tree, [`2026-11-11T05:31:04.785Z [watchdog] linked-build repo=${repo}-worktrees\\auto-route-1024 reason=linked-drift`])
+    expect(readLinkedBuild(tree, repo)).toEqual({ linkedBuild: 'failed', linkedBuildFailures: 1 })
+    expect(readLinkedBuild(tree, `${repo}-worktrees\\auto-route-1024`)).toBeUndefined()
+  })
+
+  it('drops the failed seat when the count itself is unusable, but keeps building', () => {
+    const tree = stampTree()
+    writeLinkedAccount(tree, account('nine'))
+    expect(readLinkedBuild(tree, repo)).toBeUndefined()
+    writeLinkedJournal(tree, [dispatch])
+    expect(readLinkedBuild(tree, repo)).toEqual({ linkedBuild: 'building' })
+  })
+
+  it('keeps recognizing events behind a future journal prefix (format drift fails open, not loud)', () => {
+    const tree = stampTree()
+    writeLinkedAccount(tree, account(2))
+    writeLinkedJournal(tree, ['42 2026-11-11T05:31:04.785Z [executor] linked-build repo=' + repo + ' reason=linked-drift'])
+    expect(readLinkedBuild(tree, repo)).toEqual({ linkedBuild: 'building' })
+    // A journal whose lines this reader cannot parse at all: no events for the
+    // tree — the account stands as the failed reading rather than crashing.
+    const alien = stampTree()
+    writeLinkedAccount(alien, account(2))
+    writeLinkedJournal(alien, ['42 2026-11-11T05:31:04.785Z [executor] a format this reader cannot parse'])
+    expect(readLinkedBuild(alien, repo)).toEqual({ linkedBuild: 'failed', linkedBuildFailures: 2 })
   })
 })
 
@@ -295,6 +403,38 @@ describe('computeJudgment (the gather chain, off the host)', () => {
     expect(state.judgment.detail).toContain(`drifted: ${linked}`)
   })
 
+  it('attaches the confirmed linked build state post-judge, staying bare when unconfirmed (linked-lamp-twostate-1111)', async () => {
+    const { repositoryRoot, dshHome } = fixtureTree()
+    const linked = linkedTree()
+    linkStampCapableRepository(dshHome, linked)
+    writeBaseline(repositoryRoot, { host: HOST_HASH, client: null })
+    writeBaseline(linked, { host: 'b'.repeat(64), client: null })
+    const runStampCli = vi.fn(async (): Promise<readonly CurrentStamp[]> => [
+      { repository: repositoryRoot, kind: 'harness', host: HOST_HASH, client: CLIENT_HASH },
+      { repository: linked, kind: 'harness', host: 'c'.repeat(64), client: CLIENT_HASH },
+    ])
+    const options = { repositoryRoot, dshHome, registryQuery: () => '', runStampCli }
+
+    // No account at all: the judgment carries no guessed seat (plain linked copy).
+    const bare = await computeJudgment(options)
+    expect(bare.judgment.state).toBe('NEED_BUILD')
+    expect(bare.judgment.linkedBuild).toBeUndefined()
+    expect(bare.judgment.linkedBuildFailures).toBeUndefined()
+
+    // Account pre-claims the attempt; the open dispatch line proves it in flight.
+    writeLinkedAccount(repositoryRoot, { version: 1, repos: { [linked]: { failures: 1, outcome: 'failed' } } })
+    writeLinkedJournal(repositoryRoot, [`2026-11-11T05:31:04.785Z [watchdog] linked-build repo=${linked} reason=linked-drift`])
+    const building = await computeJudgment(options)
+    expect(building.judgment.linkedBuild).toBe('building')
+    expect(building.judgment.linkedBuildFailures).toBeUndefined()
+
+    // The terminal failure line closes the attempt: failed with the account count.
+    writeLinkedJournal(repositoryRoot, [`2026-11-11T05:32:55.740Z [watchdog] linked-build-failed repo=${linked} exit=1 output-tail=tsc boom`])
+    const failed = await computeJudgment(options)
+    expect(failed.judgment.linkedBuild).toBe('failed')
+    expect(failed.judgment.linkedBuildFailures).toBe(1)
+  })
+
   it('recovers from a killed build process in the very next run — no permanent BUILDING (O-1103)', async () => {
     const { repositoryRoot, dshHome } = fixtureTree()
     writeBaseline(repositoryRoot, { host: HOST_HASH, client: CLIENT_HASH })
@@ -362,6 +502,55 @@ describe('state write the host consumes', () => {
     expect(served.state).toBe(collected.judgment.state)
     expect(served.detail).toBe(collected.judgment.detail)
     expect(served.facts?.configStamp).toBe(collected.judgment.facts?.configStamp)
+    resetRestartSignalForTest()
+  })
+
+  it('carries the linked build pair through the round trip, dropping a malformed pair instead of failing the read (linked-lamp-twostate-1111)', async () => {
+    const { repositoryRoot, dshHome } = fixtureTree()
+    const path = join(dshHome, RESTART_SIGNAL_STATE_FILE)
+    writeStateFile(path, {
+      collectedAt: new Date().toISOString(),
+      repositoryRoot,
+      judgment: { state: 'NEED_BUILD', linkedRepo: 'D:/tech/dsh-web', linkedBuild: 'failed', linkedBuildFailures: 9, detail: 'linked drift' },
+    })
+    const served = await collectRestartSignal({ dshHome })
+    expect(served.linkedBuild).toBe('failed')
+    expect(served.linkedBuildFailures).toBe(9)
+    resetRestartSignalForTest()
+
+    // Malformed pair (failed without a count): the seat drops fail-open, the
+    // judgment itself still serves — one bad copy seat never 500s the route.
+    writeStateFile(path, {
+      collectedAt: new Date().toISOString(),
+      repositoryRoot,
+      judgment: { state: 'NEED_BUILD', linkedRepo: 'D:/tech/dsh-web', linkedBuild: 'failed', detail: 'linked drift' },
+    })
+    const degraded = await collectRestartSignal({ dshHome })
+    expect(degraded.state).toBe('NEED_BUILD')
+    expect(degraded.linkedBuild).toBeUndefined()
+    expect(degraded.linkedBuildFailures).toBeUndefined()
+    resetRestartSignalForTest()
+  })
+
+  it('rings the refresh listeners when only the linked build seat moves (the push bell keys on it)', async () => {
+    const { repositoryRoot, dshHome } = fixtureTree()
+    const path = join(dshHome, RESTART_SIGNAL_STATE_FILE)
+    const seen: string[] = []
+    const off = onRestartSignalStateRefresh((judgment) => { seen.push(judgment.linkedBuild ?? 'none') })
+    writeStateFile(path, {
+      collectedAt: new Date().toISOString(),
+      repositoryRoot,
+      judgment: { state: 'NEED_BUILD', linkedRepo: 'D:/tech/dsh-web', detail: 'linked drift' },
+    })
+    await collectRestartSignal({ dshHome })
+    writeStateFile(path, {
+      collectedAt: new Date().toISOString(),
+      repositoryRoot,
+      judgment: { state: 'NEED_BUILD', linkedRepo: 'D:/tech/dsh-web', linkedBuild: 'building', detail: 'linked drift' },
+    })
+    await collectRestartSignal({ dshHome })
+    off()
+    expect(seen).toEqual(['none', 'building'])
     resetRestartSignalForTest()
   })
 
