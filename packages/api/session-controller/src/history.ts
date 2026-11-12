@@ -24,6 +24,16 @@ import type {
 
 /** Message budget applied when a history request omits `maxMessages`. */
 export const DEFAULT_MAX_MESSAGES = 50
+/**
+ * Serialized-byte budget for one history page (FORK session-switch-warm-1111):
+ * a sparse-Turn session whose messages carry large tool payloads used to walk
+ * its first page back to seq 0 — shipping the whole transcript (measured
+ * 6–27MB wire JSON on switch-open) as the open page. The cut stays
+ * message-aligned (see paginate) and may overshoot by at most one message
+ * group; clients page the remainder through the existing loadOlder/hasMore
+ * flow, so no wire contract changes.
+ */
+export const PAGE_BYTE_BUDGET = 4 * 1024 * 1024
 const MESSAGE_TYPES = new Set(['user/message', 'assistant/message'])
 
 /**
@@ -127,6 +137,7 @@ export function rejectNotFound(address: SessionAddress): never {
  * @param maxMessages - message budget.
  * @param throughSeq - inclusive log cut.
  * @param turnWindow - optional turn-boundary stop rule.
+ * @param maxBytes - serialized-byte budget; defaults to PAGE_BYTE_BUDGET.
  * @returns the page events and whether older events remain.
  */
 export function paginate(
@@ -135,13 +146,17 @@ export function paginate(
   maxMessages: number,
   throughSeq: SessionSeqCursor,
   turnWindow?: SessionPageRequest['turnWindow'],
+  maxBytes: number = PAGE_BYTE_BUDGET,
 ): { readonly events: SessionEvent[]; readonly hasMore: boolean } {
   const end = SessionLogOffset(Math.min(throughSeq + 1, beforeSeq ?? throughSeq + 1))
   let count = 0
   let turns = 0
+  let bytes = 0
   let cut = SessionLogOffset(0)
   for (let index = end - 1; index >= 0; index--) {
     const event = events[index] as SessionEvent
+    // Every walked event ships inside the slice, so each counts toward the budget.
+    bytes += Buffer.byteLength(JSON.stringify(event), 'utf8')
     if (turnWindow !== undefined && event.type === 'turn/start') {
       turns++
       if (count >= turnWindow.minMessages && turns >= turnWindow.minTurns) {
@@ -158,7 +173,10 @@ export function paginate(
         if (source < groupStart) groupStart = source
       }
     }
-    if (count >= maxMessages) {
+    // Both stops are message-aligned. count >= 1 here, so the newest message
+    // always renders even when it alone overflows the budget; the page may
+    // overshoot by at most this message's group.
+    if (bytes > maxBytes || count >= maxMessages) {
       cut = SessionLogOffset(groupStart)
       break
     }
