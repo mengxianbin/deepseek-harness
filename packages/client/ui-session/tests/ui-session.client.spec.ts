@@ -1324,6 +1324,58 @@ describe('UiSession pending interactions', () => {
     await ctx.fiber.dispose()
   })
 
+  it('folds the objective question out of list rows with no status frame at all (attention 对账腿)', () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
+    try {
+      const ctx = new Context()
+      const bench = createSessionsBench(ctx)
+      const id = sessionId('s-list')
+      // A listed Session the Host has never pushed status for — cold after a
+      // restart, client freshly loaded: no frame can reach it, so the
+      // summary's userQuestions block is the only source that can light amber.
+      bench.list.update((draft) => {
+        draft.byId[id] = { id, displayTitle: id, running: false, retainedBy: {}, blank: false, updatedAt: 0 }
+        draft.ids.push(id)
+      })
+      const service = createUiSession(ctx, bench)
+
+      // Baseline refill: the list read alone carries the amber state.
+      bench.list.update((draft) => {
+        // Test data casts: only the fold's read shape (active.length) is under test.
+        draft.byId[id]!.projectionValues = {
+          userQuestions: { active: [{ callId: 'c1', questions: [], state: 'continued' }], settled: [] },
+        } as never
+      })
+      expect(service.sessionStatus.getSnapshot().get(id)?.pendingInteraction).toMatchObject({
+        kind: 'question', sessionId: id,
+      })
+
+      // The list leg never arms the heartbeat clock (step4b 件E): past the
+      // stale interval a list-folded row stays ring-free while a frame would
+      // have rung it.
+      vi.advanceTimersByTime(SESSION_HEARTBEAT_STALE_MS + 5_000)
+      expect(service.sessionStatus.getSnapshot().get(id)?.heartbeatStale).toBeUndefined()
+
+      // Settled: the next list read with an empty active set clears the fact —
+      // the list leg owns both directions off one Host truth.
+      bench.list.update((draft) => {
+        draft.byId[id]!.projectionValues = { userQuestions: { active: [], settled: [] } }
+      })
+      expect(service.sessionStatus.getSnapshot().get(id)?.pendingInteraction).toBeUndefined()
+
+      // 未知不吞已知: a summary row without the key leaves a frame-set value
+      // standing instead of folding absence into a clear.
+      bench.emitStatus(id, false, 'question')
+      expect(service.sessionStatus.getSnapshot().get(id)?.pendingInteraction).toMatchObject({ kind: 'question' })
+      bench.list.update((draft) => {
+        draft.byId[id]!.projectionValues = { lastTurnOutcome: { kind: 'completed', at: 1 } }
+      })
+      expect(service.sessionStatus.getSnapshot().get(id)?.pendingInteraction).toMatchObject({ kind: 'question' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('rejects duplicate keys and contains a failing aggregate subscriber', () => {
     const ctx = new Context()
     const bench = createSessionsBench(ctx)
