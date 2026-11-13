@@ -3176,4 +3176,117 @@ describe('Workspace tree grouping', () => {
     expect(shield.closest('[class*="headerActions"]')).toBeNull()
     expect(shield.closest('[class*="sectionHeader"]')).not.toBeNull()
   })
+
+  // FORK queue-collapse-1112 (2026-11-12 ruling): the count bar is the one
+  // line of segment furniture the cut headers left room for — folding returns
+  // the queued rows to their groups behind it, unfolding restores the hard top
+  // seat, and the count reads either way.
+  it('folds the queue segment into its groups behind the count bar (FORK queue-collapse-1112)', () => {
+    const items = [summary('session-7', 12), summary('session-8', 11)]
+    const b = mount({
+      useSessions: hook(sessionState(items)),
+      useWorkspaces: hook(workspaceState([workspace('alpha', items.map(item => item.id))])),
+      useSessionStatus: hook<SessionStatusSnapshot>(new Map([[sid('session-7'), {
+        running: false,
+        pendingInteraction: { key: 'question:1', kind: 'question', sessionId: sid('session-7') } as SessionPendingInteraction,
+        completionUnread: false,
+      }]])),
+    })
+    const titles = () => screen.getAllByRole('treeitem')
+      .map(row => row.querySelector('[class*="title"]')?.textContent)
+    const bar = () => screen.getByRole('button', { name: '要我拿主意 · 1' })
+    // Expanded (the default seat): the row leads the list, the bar carries the count.
+    expect(bar().getAttribute('aria-expanded')).toBe('true')
+    expect(within(screen.getByRole('tree', { name: '要我拿主意' })).getByText('session-7')).toBeTruthy()
+    fireEvent.click(groupHeaderTitle('alpha'))
+    expect(titles()).toEqual(['session-7', 'alpha', 'session-8'])
+    // Fold: the row goes home to its group; the bar keeps the count mounted.
+    fireEvent.click(bar())
+    expect(screen.queryByRole('tree', { name: '要我拿主意' })).toBeNull()
+    expect(bar().getAttribute('aria-expanded')).toBe('false')
+    expect(titles()).toEqual(['alpha', 'session-7', 'session-8'])
+    expect(b.store.getSnapshot().queueCollapsed).toBe(true)
+    // Unfold restores the hard top seat (step3 判据①).
+    fireEvent.click(bar())
+    expect(titles()).toEqual(['session-7', 'alpha', 'session-8'])
+    expect(b.store.getSnapshot().queueCollapsed).toBe(false)
+  })
+
+  it('restores a persisted queue fold across mounts (FORK queue-collapse-1112)', () => {
+    localStorage.clear()
+    const preferences = createWorkspaceViewStore().create()
+    preferences.actions.setQueueCollapsed(true)
+    localStorage.setItem('dsh.workspace.view.v5', JSON.stringify(preferences.getSnapshot()))
+    mount({
+      useSessions: hook(sessionState([summary('session-7', 12)])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['session-7'])])),
+      useSessionStatus: hook<SessionStatusSnapshot>(new Map([[sid('session-7'), {
+        running: false,
+        pendingInteraction: { key: 'question:1', kind: 'question', sessionId: sid('session-7') } as SessionPendingInteraction,
+        completionUnread: false,
+      }]])),
+    })
+    fireEvent.click(groupHeaderTitle('alpha'))
+    expect(screen.queryByRole('tree', { name: '要我拿主意' })).toBeNull()
+    expect(screen.getByRole('button', { name: '要我拿主意 · 1' }).getAttribute('aria-expanded')).toBe('false')
+    expect(screen.getAllByRole('treeitem').map(row => row.querySelector('[class*="title"]')?.textContent))
+      .toEqual(['alpha', 'session-7'])
+  })
+
+  it('folds the flat view segment back into the flow (FORK queue-collapse-1112)', () => {
+    localStorage.clear()
+    const preferences = createWorkspaceViewStore().create()
+    preferences.actions.setGroupBy('flat')
+    localStorage.setItem('dsh.workspace.view.v5', JSON.stringify(preferences.getSnapshot()))
+    mount({
+      useSessions: hook(sessionState([summary('session-7', 12), summary('session-8', 11)])),
+      useWorkspaces: hook(workspaceState([])),
+      useSessionStatus: hook<SessionStatusSnapshot>(new Map([[sid('session-7'), {
+        running: false,
+        pendingInteraction: { key: 'question:1', kind: 'question', sessionId: sid('session-7') } as SessionPendingInteraction,
+        completionUnread: false,
+      }]])),
+    })
+    const queueTree = () => screen.queryByRole('tree', { name: '要我拿主意' })
+    const listTree = () => screen.getByRole('tree', { name: '会话' })
+    // Expanded: the queued row leads the segment, out of the flat flow.
+    expect(within(queueTree() as HTMLElement).getByText('session-7')).toBeTruthy()
+    expect(within(listTree()).queryByText('session-7')).toBeNull()
+    expect(within(listTree()).getByText('session-8')).toBeTruthy()
+    // Fold: it rejoins the flow; the bar keeps the count.
+    fireEvent.click(screen.getByRole('button', { name: '要我拿主意 · 1' }))
+    expect(queueTree()).toBeNull()
+    expect(within(listTree()).getByText('session-7')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '要我拿主意 · 1' }).getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('keeps the 无待办 line as the segment seat with nothing queued (step3 判据①.4)', () => {
+    mount()
+    expect(screen.getByText('无待办')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /要我拿主意/ })).toBeNull()
+    expect(screen.queryByRole('tree', { name: '要我拿主意' })).toBeNull()
+  })
+
+  it('keeps the 安康位 alarm mounted while the segment is folded (FORK queue-collapse-1112)', () => {
+    const brokenReport: SessionHealthReport = {
+      ok: false,
+      total: 2,
+      counts: { running: 1, awaiting: 0, failed: 0, rest: 0 },
+      issues: [{ invariant: 'unreadable', sessionIds: [sid('ghost')] }],
+    }
+    mount({
+      useSessionHealth: hook({ report: brokenReport }),
+      useSessions: hook(sessionState([summary('session-7', 12)])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['session-7'])])),
+      useSessionStatus: hook<SessionStatusSnapshot>(new Map([[sid('session-7'), {
+        running: false,
+        pendingInteraction: { key: 'question:1', kind: 'question', sessionId: sid('session-7') } as SessionPendingInteraction,
+        completionUnread: false,
+      }]])),
+    })
+    fireEvent.click(screen.getByRole('button', { name: '要我拿主意 · 1' }))
+    // The alarm is not a queued row: the fold moves rows, never the alarm.
+    expect(document.querySelector('[data-row-key="queue-health"]')).toBeTruthy()
+    expect(screen.queryByRole('tree', { name: '要我拿主意' })).toBeNull()
+  })
 })

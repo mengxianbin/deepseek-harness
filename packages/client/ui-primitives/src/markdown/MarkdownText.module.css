@@ -254,24 +254,29 @@
   max-width: none;
 }
 
+/* Column width follows content: 10px horizontal padding and a 40px floor
+   keep a stub column readable while letting content-poor columns (serial
+   numbers, short hashes) shrink to their own width. The floor's earlier
+   100px inflated such columns regardless of information and pushed the
+   trailing columns of a natural-width table out of the visible area. */
 .tableScroll th {
   text-align: start;
-  padding: 10px 16px;
+  padding: 10px;
   border-bottom: 0.5px solid var(--dsw-alias-border-l3);
   border-top: none;
   font: var(--dsw-font-markdown-table-head);
   max-width: 320px;
   max-width: min(30vw, 320px);
-  min-width: 100px;
+  min-width: 40px;
 }
 
 .tableScroll td {
-  padding: 10px 16px;
+  padding: 10px;
   border-bottom: 0.5px solid var(--dsw-alias-border-l2);
   font: var(--dsw-font-markdown-table);
   max-width: 320px;
   max-width: min(30vw, 320px);
-  min-width: 100px;
+  min-width: 40px;
 }
 
 .tableScroll th:first-child,

@@ -661,6 +661,16 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
       data-question-key={pending.key}
       data-composer-card=""
       data-question-folded={autoFolded ? '' : undefined}
+      // Focus containment (FORK occlusion-fold focus-escape, 2026-10-26
+      // sensor / found 2026-11-12): the frame takes click-focus (tabindex -1,
+      // the same pattern the InputBar card uses) so a press on the card's
+      // non-focusable copy — question title, option prose, markdown detail —
+      // keeps focus HERE. Without it Chrome hands that focus to the nearest
+      // focusable ancestor, the transcript scrollport (tabIndex 0), and the
+      // sensor's focusin leg below reads it as reaching for the conversation:
+      // pressing the long text to read/select it folded the tall card under
+      // the reader's cursor (observed as "the long text toggles itself").
+      tabIndex={-1}
       // Any engagement inside the card lifts an auto-fold; the manually
       // minimized card ignores it (the strip press below agrees — only the
       // toggle lifts a pinned choice).

@@ -3,6 +3,7 @@ import { availableParallelism } from 'node:os'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defaultParallelism } from './parallelism.ts'
+import { enterHeavyIoGate } from './heavy-io-gate.ts'
 
 const oxlintCli = fileURLToPath(new URL('../node_modules/oxlint/bin/oxlint', import.meta.url))
 const MAX_CAPTURED_OUTPUT_BYTES = 64 * 1024 * 1024
@@ -157,27 +158,36 @@ function completeFrom(result: { readonly signal: NodeJS.Signals | null; readonly
 
 async function main(): Promise<void> {
   const invocation = resolveOxlintInvocation(process.argv.slice(2), process.env)
-  if (!isFixInvocation(invocation.args)) {
-    const result = await runOxlint(invocation.args, invocation.env)
-    completeFrom(result)
-    return
-  }
+  // 纯排队 sink（2026-11-12 定稿）：oxlint+tsgolint 在最内层入口进机器级锁——
+  // `lint:contracts-ready` 直调、裸 `run-oxlint.ts .`、外层包装三种形态一并
+  // 拦截（会话裸调是 2026-11-12 五代 respawn 的根因）。pre-commit staged
+  // 检查经 lefthook 的 DSH_HEAVY_IO=0 显式透传，交互提交不排队。
+  const lease = await enterHeavyIoGate(`run-oxlint.ts${process.argv.slice(2).map(arg => ` ${arg}`).join('')}`, process.env)
+  try {
+    if (!isFixInvocation(invocation.args)) {
+      const result = await runOxlint(invocation.args, invocation.env)
+      completeFrom(result)
+      return
+    }
 
-  const first = await runOxlint(invocation.args, invocation.env, MAX_CAPTURED_OUTPUT_BYTES)
-  if (first.signal !== null) {
-    completeFrom(first)
-    return
-  }
-  if (first.status === 0) {
-    process.stdout.write(first.stdout ?? '')
-    process.stderr.write(first.stderr ?? '')
-    process.exitCode = 0
-    return
-  }
+    const first = await runOxlint(invocation.args, invocation.env, MAX_CAPTURED_OUTPUT_BYTES)
+    if (first.signal !== null) {
+      completeFrom(first)
+      return
+    }
+    if (first.status === 0) {
+      process.stdout.write(first.stdout ?? '')
+      process.stderr.write(first.stderr ?? '')
+      process.exitCode = 0
+      return
+    }
 
-  // Overlapping JS-plugin fixes can expose one more fixable diagnostic after the first pass.
-  const second = await runOxlint(invocation.args, invocation.env)
-  completeFrom(second)
+    // Overlapping JS-plugin fixes can expose one more fixable diagnostic after the first pass.
+    const second = await runOxlint(invocation.args, invocation.env)
+    completeFrom(second)
+  } finally {
+    await lease?.release()
+  }
 }
 
 const entrypoint = process.argv[1]

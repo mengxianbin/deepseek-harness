@@ -783,6 +783,32 @@ describe('occlusion fold', () => {
     expect(screen.getByRole('radiogroup')).toBeTruthy()
   })
 
+  it('keeps focus inside the card on a text press: the frame takes focus itself, so the scrollport never reads as transcript reach', () => {
+    const { carrier } = wait()
+    const { frame } = renderInSeatView(carrier)
+
+    // The browser contract behind the sensor: pressing non-focusable copy
+    // (question title, option prose, markdown detail) moves focus to the
+    // nearest focusable ancestor. The frame must be it — the alternative is
+    // the transcript scrollport (tabIndex 0), whose focusin this sensor
+    // reads as reaching for the conversation and folds the tall card under
+    // the reader's cursor. jsdom never moves focus on click, so the escape
+    // itself is browser-only (real-Chromium probe, 2026-11-12); this pins
+    // the containment — focus arriving on the frame is card engagement: no
+    // fold, and it lifts an auto-fold.
+    expect(frame.getAttribute('tabindex')).toBe('-1')
+
+    fireEvent.focusIn(frame, { bubbles: true })
+    expect(screen.getByRole('radiogroup')).toBeTruthy()
+    expect(frame.hasAttribute('data-question-folded')).toBe(false)
+
+    fireEvent.pointerDown(document.querySelector('[data-conversation-scroll]')!, { bubbles: true })
+    expect(screen.queryByRole('radiogroup')).toBeNull()
+
+    fireEvent.focusIn(frame, { bubbles: true })
+    expect(screen.getByRole('radiogroup')).toBeTruthy()
+  })
+
   it('keeps a manual minimize pinned: transcript presses and strip presses do not lift it, only the toggle does', () => {
     const { carrier } = wait()
     const { frame } = renderInSeatView(carrier)

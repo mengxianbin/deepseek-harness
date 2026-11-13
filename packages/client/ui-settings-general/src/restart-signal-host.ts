@@ -64,13 +64,19 @@ export interface RestartSignalInternals {
  * elapsed age (build-timer-tooltip-1101) — a cached or timeout-served answer
  * carries the same absolute instant, so the client's own 30s refresh keeps the
  * elapsed age walking. `linkedRepo` rides only on a linked-only NEED_BUILD:
- * the drifted tree the copy names (build-scope-rework-1105 A). */
+ * the drifted tree the copy names (build-scope-rework-1105 A). The
+ * `linkedBuild`/`linkedBuildFailures` pair rides only when the collector
+ * confirmed it (linked-lamp-twostate-1111) — an absent pair reaches the
+ * browser as an absent pair, so the copy falls back to the plain linked line.
+ * Pass-through only: this route never recomputes anything. */
 function judgmentBody(judgment: RestartSignalJudgment): Record<string, unknown> {
   return {
     state: judgment.state,
     ...(judgment.reason === undefined ? {} : { reason: judgment.reason }),
     ...(judgment.startedAt === undefined ? {} : { startedAt: judgment.startedAt }),
     ...(judgment.linkedRepo === undefined ? {} : { linkedRepo: judgment.linkedRepo }),
+    ...(judgment.linkedBuild === undefined ? {} : { linkedBuild: judgment.linkedBuild }),
+    ...(judgment.linkedBuildFailures === undefined ? {} : { linkedBuildFailures: judgment.linkedBuildFailures }),
   }
 }
 

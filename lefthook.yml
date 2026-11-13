@@ -18,6 +18,8 @@ pre-commit:
       glob: '*.{ts,tsx,mts,cts,mjs}'
       exclude:
         - 'vendor/*/src/**'
+      env:
+        DSH_HEAVY_IO: "0"
       run: node_modules/.bin/tsx scripts/run-oxlint.ts --config .oxlintrc.staged.json --fix --no-error-on-unmatched-pattern {staged_files}
       stage_fixed: true
 

@@ -70,15 +70,34 @@ export function restartSignalCopy(t: PropsLocale<'settings'>['t'], signal: Resta
     // copy points at the tree that owes a build instead of sending the user
     // to a main-tree build that cannot clear it. R-1026 unchanged: this line
     // rides tooltip / aria-label / confirm Modal first sentence only.
-    case 'NEED_BUILD': return signal.linkedRepo === undefined
-      ? t('restart.signal.needBuild')
-      : t('restart.signal.needBuild.linked', { repo: signal.linkedRepo })
+    case 'NEED_BUILD': return linkedBuildSignalCopy(t, signal)
     case 'NEED_RESTART': return signal.reason === 'config'
       ? t('restart.signal.needRestart.config')
       : t('restart.signal.needRestart.built')
     /* v8 ignore next -- OK and CLIENT_UPDATED are filtered before the copy seat; the switch needs its total form. */
     default: return ''
   }
+}
+
+/**
+ * The NEED_BUILD line: the plain line for a main-tree gap, otherwise the
+ * named-tree line refined by the data-confirmed machine build state
+ * (linked-lamp-twostate-1111) — `building` says the machine is rebuilding
+ * that tree now, `failed` names the per-tree failure account. Every
+ * unconfirmed shape (absent pair from an older host, missing/malformed
+ * account, `failed` without a readable count) falls back to the plain linked
+ * line, so a degraded wire can never render a guessed state (不撒谎).
+ * @param t - localized copy seat of the `settings` namespace.
+ * @param signal - the NEED_BUILD judgment.
+ * @returns the single next-step line for this judgment.
+ */
+function linkedBuildSignalCopy(t: PropsLocale<'settings'>['t'], signal: RestartSignalView): string {
+  if (signal.linkedRepo === undefined) return t('restart.signal.needBuild')
+  if (signal.linkedBuild === 'building') return t('restart.signal.needBuild.linked.building', { repo: signal.linkedRepo })
+  if (signal.linkedBuild === 'failed' && signal.linkedBuildFailures !== undefined) {
+    return t('restart.signal.needBuild.linked.failed', { repo: signal.linkedRepo, n: signal.linkedBuildFailures })
+  }
+  return t('restart.signal.needBuild.linked', { repo: signal.linkedRepo })
 }
 
 /**
