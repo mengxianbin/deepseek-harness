@@ -11,7 +11,7 @@
 - button "More"
 - banner:
   - button "Open right sidebar"
-- text: Into the Unknown Preview
+- text: What can I do for you?
 - button "Choose workspace": workspace
 - button "Standard mode"
 - textbox "Describe what you want to build, / commands, @ files or sessions"
