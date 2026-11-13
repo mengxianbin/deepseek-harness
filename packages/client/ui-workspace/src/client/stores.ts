@@ -28,6 +28,12 @@ type WorkspaceViewState = {
   sessionOrderByAccount: Record<string, string[]>
   /** Archived-row visibility; omitted in pre-filter v5 snapshots and read as 'default'. */
   archivedFilter?: ArchivedFilter
+  /**
+   * The 「要我拿主意」 queue segment's collapsed bit (FORK queue-collapse-1112);
+   * omitted in pre-collapse snapshots and read as false (expanded — the segment
+   * stays the hard top seat the placement ruling guarantees).
+   */
+  queueCollapsed?: boolean
 }
 
 type SessionOrderSource = {
@@ -66,6 +72,8 @@ type WorkspaceViewActions = {
     source: SessionOrderSource,
   ) => void
   setArchivedFilter: (draft: WorkspaceViewState, filter: ArchivedFilter) => void
+  /** Collapse/expand the hard-top 「要我拿主意」 segment; the bit persists across reloads. */
+  setQueueCollapsed: (draft: WorkspaceViewState, collapsed: boolean) => void
 }
 
 /** Copy read-only projections into the persisted mutable store representation. */
@@ -87,6 +95,7 @@ export function createWorkspaceViewStore(): EngineStoreHandle<WorkspaceViewState
       groupExpansion: {},
       sessionOrderByAccount: {},
       archivedFilter: 'default',
+      queueCollapsed: false,
     }),
     persist: 'dsh.workspace.view.v5',
     actions: {
@@ -125,6 +134,7 @@ export function createWorkspaceViewStore(): EngineStoreHandle<WorkspaceViewState
         }))
       },
       setArchivedFilter: (d, filter: ArchivedFilter) => { d.archivedFilter = filter },
+      setQueueCollapsed: (d, collapsed: boolean) => { d.queueCollapsed = collapsed },
     },
   })
 }
