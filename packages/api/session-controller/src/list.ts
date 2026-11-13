@@ -664,7 +664,7 @@ function hintsOf(
   if (!trimHeavyProjections) {
     // Listing hints contain every wire value the source currently holds but
     // remain partial: missing cells and cache rows are never materialized here.
-    return { kind, asOfSeq: block.asOfSeq, values: block.values as SessionProjectionValues }
+    return { kind, asOfSeq: block.asOfSeq, values: block.values }
   }
   // Listing hints remain partial: missing cells and cache rows are never
   // materialized here. The display-heavy keys are filtered into a fresh
