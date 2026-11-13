@@ -113,7 +113,8 @@ describe('repository build steps', () => {
       'host-src': ['host-typert'],
       'client-src': ['host-src'],
       'host-check': ['host-src'],
-      'client-check': ['client-src'],
+      // 双 -b tsc（各 8 GiB 堆）同闸并发曾打穿 16GB 机器（2026-11-13）→ 两聚合串行。
+      'client-check': ['client-src', 'host-check'],
     })
     expect(gates.find(gate => gate.id === 'host-typert')?.args.at(-1)).toBe(resolve(root, 'scripts/generate-typert.ts'))
     expect(gates.filter(gate => gate.id.endsWith('-check')).map(gate => gate.args.slice(-2))).toEqual([
