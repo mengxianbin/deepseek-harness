@@ -332,7 +332,7 @@ describe('heavy-io gate history log', () => {
       let stderr = ''
       child.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8') })
       child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8') })
-      const exited = new Promise<number | null>(finish => child?.on('close', code => finish(code)))
+      const exited = new Promise<number | null>(finish => child?.on('close', (code) => { finish(code) }))
 
       await new Promise(done => setTimeout(done, 1_500))
       // Still queued well past any former 400 ms wait bound: alive and waiting.
