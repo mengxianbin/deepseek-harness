@@ -327,6 +327,49 @@ export function apply(ctx: Context, config: Config = Config({})): void {
   const inputHub = new InputHub(ctx, t)
   const composerBlocks = new ComposerBlockRegistry()
 
+  // Focus commands address the main Conversation: the renderer publishes the
+  // Session occupying the main view, and the transcript plus composer are its
+  // two keyboard destinations (the third, the session list, is the sidebar's).
+  const mainSessionId = (): SessionId | undefined =>
+    ctx.uiSession.adapter.current.getSnapshot().key as SessionId | undefined
+  const focusConversation = (): void => {
+    const id = mainSessionId()
+    if (id === undefined) return
+    for (const occurrence of document.querySelectorAll<HTMLElement>('[data-conversation-session]')) {
+      if (occurrence.dataset.conversationSession !== id) continue
+      occurrence.querySelector<HTMLElement>('[data-conversation-scroll]')?.focus()
+      return
+    }
+  }
+  const focusComposer = (): void => {
+    const id = mainSessionId()
+    if (id === undefined) return
+    const binding = sessions.binding(id)
+    if (binding === undefined) return
+    inputHub.for(binding.ctx).focus()
+  }
+  ctx.inject(['shortcuts'], (scope) => {
+    const register = (id: string, label: () => string, aliases: readonly string[],
+      code: 'Digit2' | 'Digit3', run: () => void): void => {
+      scope.effect(() => scope.shortcuts.register({
+        id: id as ShortcutCommandId, label, aliases,
+        defaults: {
+          'desktop:macos': { code, modifiers: ['primary'] },
+          'desktop:windows': { code, modifiers: ['primary'] },
+          'desktop:linux': { code, modifiers: ['primary'] },
+          'web:macos': { code, modifiers: ['primary', 'alt'] },
+          'web:windows': { code, modifiers: ['primary', 'alt'] },
+        },
+        regions: ['page', 'editable'], modals: [],
+        resolve: () => ({ status: 'handled', run }),
+      }), `ui-conversation: ${id}`)
+    }
+    register('focus.conversation', () => t('focus.conversation'), ['focus conversation', 'transcript'],
+      'Digit2', focusConversation)
+    register('focus.composer', () => t('focus.composer'), ['focus composer', 'input box', 'prompt'],
+      'Digit3', focusComposer)
+  })
+
   ctx.inject(['commandUi'], (scope) => {
     const commands = scope.get('commandUi') as FileCommandRegistry
     scope.effect(() => commands.register({

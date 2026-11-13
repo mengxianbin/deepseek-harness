@@ -1605,6 +1605,33 @@ export function WorkspaceBrowser({
     searchInput.current?.focus({ preventScroll: true })
   }, [wide, searchExpanded, searchOnExpand])
 
+  // Focus request: land on the selected session row so the arrow keys walk the
+  // list. The rail renders no rows, so a collapsed sidebar expands first and
+  // the row takes focus once the wide layout has mounted it.
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const [focusListPending, setFocusListPending] = useState(false)
+  const focusSessionRow = (): void => {
+    const root = rootRef.current
+    if (root === null) return
+    const row = root.querySelector<HTMLElement>('[data-row-key^="session:"][aria-selected="true"]')
+      ?? root.querySelector<HTMLElement>('[data-row-key^="session:"]')
+    row?.focus()
+  }
+  useEffect(() => {
+    if (shortcutState.focusListRequest === 0) return
+    if (!wide) {
+      expandSidebar()
+      setFocusListPending(true)
+      return
+    }
+    focusSessionRow()
+  }, [shortcutState.focusListRequest])
+  useEffect(() => {
+    if (!focusListPending || !wide) return
+    setFocusListPending(false)
+    focusSessionRow()
+  }, [focusListPending, wide])
+
   // Outside-click dismissal stays off while the rail gesture is in flight
   // (searchOnExpand): the rail click flips the shell wide and mounts this
   // listener during its own dispatch, then keeps bubbling to document with
@@ -1737,7 +1764,7 @@ export function WorkspaceBrowser({
   }
 
   return (
-    <div className={clsx(css.root, !wide && css.rail)}>
+    <div ref={rootRef} className={clsx(css.root, !wide && css.rail)}>
       <div className={clsx(css.sectionHeader, wide && searchSpacingMotionEnabled && css.searchSpacingMotion)}>
         {wide && (
           <span className={clsx(css.sectionLabel, css.wide, searchExpanded && css.sectionLabelHidden)}>

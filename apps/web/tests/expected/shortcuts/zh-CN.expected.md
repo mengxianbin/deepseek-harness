@@ -54,6 +54,17 @@
       - listitem:
         - button "修改关闭当前页面／窗口快捷键"
         - text: 关闭当前页面／窗口 ⌥ ⌘ W
+      - listitem: 下一处 ⌥ ↓
+      - listitem: 上一处 ⌥ ↑
+      - listitem:
+        - button "修改聚焦输入框快捷键"
+        - text: 聚焦输入框 ⌥ ⌘ 3
+      - listitem:
+        - button "修改聚焦对话内容快捷键"
+        - text: 聚焦对话内容 ⌥ ⌘ 2
+      - listitem:
+        - button "修改聚焦会话列表快捷键"
+        - text: 聚焦会话列表 ⌥ ⌘ 1
   - region "消息输入":
     - heading "消息输入" [level=3]
     - list:

@@ -195,7 +195,10 @@ export function ConversationContent(props: ConversationContentProps) {
       data-conversation-region="chat"
       data-content-phase={phase}
     >
-      <div className={css.scrollBody} data-conversation-scroll="">
+      {/* Focusable scrollport: the focus.conversation target, and the
+          keyboard's way to page the transcript (arrows / PageUp / PageDown
+          scroll the focused scroller natively). */}
+      <div className={css.scrollBody} data-conversation-scroll="" tabIndex={0}>
         {sessionId === undefined ? null : <Views />}
         {composerSeat}
       </div>
