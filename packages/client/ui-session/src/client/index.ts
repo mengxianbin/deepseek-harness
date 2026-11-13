@@ -77,6 +77,26 @@ function isConnectionStale(state: string | undefined): boolean {
 }
 
 /**
+ * Whether a list-pull divergence's own snapshot says the stop it observed
+ * ended failed: a passive read carries the durable verdict a dead Host never
+ * got to frame — an open turn nothing closed (被打断未重开红点, ruling
+ * 2026-11-02) or a failed `lastTurnOutcome` (任务已停止红点 2026-11-01 /
+ * 中止统一红 2026-11-04). Absent both, the row shows a clean end and the stop
+ * records green like any other observation. Deliberately NOT consulted for a
+ * status-frame stop: there the in-memory observation outranks an older durable
+ * interruption (绿点耐久, ruling 2026-11-01).
+ * @param row - the fresh list row the divergence read the running flip from.
+ * @returns whether the snapshot itself judges the stop failed.
+ */
+function listRowStopFailed(row: SessionSummary | undefined): boolean {
+  const values = row?.projectionValues
+  if (values === undefined) return false
+  const kind = values.lastTurnOutcome?.kind
+  return values.turnBoundary?.openTurnStartSeq != null
+    || kind === 'error' || kind === 'interrupted' || kind === 'aborted'
+}
+
+/**
  * Silence after which one Session's status is flagged unconfirmable: twice the
  * Host's heartbeat cadence (collab step2 §4.2), so a dropped frame heals within
  * one interval and only a missed sweep shows a ring.
@@ -462,14 +482,18 @@ export class UiSession extends Service {
   private readonly seals = new Map<SessionId, SessionSealState>()
   /**
    * Wall-clock of the most recent Host status frame for each Session — an
-   * `api-session/status` event, or a list-pull divergence read off Host truth.
-   * Drives the per-Session heartbeat staleness flag (collab step2 §4.2): past
+   * `api-session/status` event and nothing else (collab step2 §4.2
+   * 「last-帧时刻」). Drives the per-Session heartbeat staleness flag: past
    * the interval the shown status is the last one heard and can no longer be
-   * confirmed. A never-run idle row's baseline adoption deliberately does NOT
-   * arm this clock (collab step4b 件E, A案): the Host sweep only re-sends
-   * status for Sessions it has already published status for, so arming at
-   * baseline would ring idle rows 30s after every load while nothing is
-   * unread — noise that reads "unconfirmable" over "nothing to confirm".
+   * confirmed. List reads never arm it (collab step4b 件E, A案): the Host
+   * sweep only re-sends status for Sessions it has already published status
+   * for, so arming off a list row would ring idle rows 30s after every load
+   * while nothing is unread — noise that reads "unconfirmable" over "nothing
+   * to confirm". The clock belongs to one connection epoch: an outage clears
+   * the whole map (see the connection subscription), because a timestamp
+   * heard on the dead transport cannot confirm status on the new one and,
+   * after a Host restart, the memory-only sweep set may never re-send for an
+   * idle row — carrying it across the outage would ring that row forever.
    */
   private readonly lastStatusAt = new Map<SessionId, number>()
   private readonly unreadStops = new Map<SessionId, SessionCompletionOutcome>()
@@ -554,6 +578,13 @@ export class UiSession extends Service {
       const disposeList = sessions.list.subscribe(() => { this.publishMain() })
       const disposeStatus = sessions.list.subscribe(() => { this.reconcileStatus() })
       const disposeRemoteStatus = ctx.remote.$on('api-session/status', (sessionId, running, attention, seal) => {
+        // One frame is one heartbeat for the row (collab step2 §4.2
+        // 「last-帧时刻」): the clock arms here, at the frame's receipt and
+        // before any fold, so an unchanged frame still proves the Host is
+        // alive for this Session. This is the ONLY arming site — the
+        // list-pull legs never arm (collab step4b 件E) and an outage resets
+        // the whole epoch (connection subscription below).
+        this.lastStatusAt.set(sessionId, Date.now())
         this.observeRunning(sessionId, running)
         this.observeAttention(sessionId, attention)
         this.observeSeal(sessionId, seal)
@@ -570,7 +601,21 @@ export class UiSession extends Service {
       // facts that read them (job counts, the stale flag). The jobs side arms
       // through `attachJobs` — in an assembled composition the service can
       // resolve after this effect has already run.
-      const disposeConnection = this.connectionState?.subscribe(() => { this.publishStatus() })
+      // An outage ends the status-frame epoch (`lastStatusAt`): a timestamp
+      // heard on the dead transport cannot confirm status on the new one, and
+      // after a Host restart the memory-only sweep set may never re-send for
+      // an idle row (attention-dot-reverify-1031 候选①) — carrying the old
+      // clocks over would ring every armed row forever (the long-lived tab's
+      // phantom rings). Clear on the way into an outage and on the way out:
+      // every row re-baselines exactly like a fresh load (collab step4b 件E,
+      // A案) and re-arms on its first frame of the new epoch.
+      let epochState = this.connectionState?.getSnapshot()
+      const disposeConnection = this.connectionState?.subscribe(() => {
+        const state = this.connectionState?.getSnapshot()
+        if (isConnectionStale(state) || isConnectionStale(epochState)) this.lastStatusAt.clear()
+        epochState = state
+        this.publishStatus()
+      })
       // Heartbeat staleness is a function of elapsed time, so it needs a tick
       // of its own: without one a quiet Host would only surface on the next
       // unrelated event. publishStatus de-duplicates, so an idle tick costs a
@@ -826,9 +871,6 @@ export class UiSession extends Service {
    * @param attention - the objective kind while one is active; absent otherwise.
    */
   private observeAttention(sessionId: SessionId, attention: string | null | undefined): void {
-    // A heartbeat repeats the current truth, so an unchanged frame still proves
-    // the Host is alive for this Session: record before the equality shortcut.
-    this.lastStatusAt.set(sessionId, Date.now())
     // `null` is the positional placeholder a seal-bearing frame fills into
     // arg3 (seal-light-host-state-1109): fold it to absent here so the map
     // never stores a null "attention kind" from a frame that simply has none.
@@ -850,7 +892,6 @@ export class UiSession extends Service {
    * @param seal - the verdict the frame carried; absent when the Host holds none.
    */
   private observeSeal(sessionId: SessionId, seal: SessionSealState | undefined): void {
-    this.lastStatusAt.set(sessionId, Date.now())
     const previous = this.seals.get(sessionId)
     if (sameSeal(previous, seal)) return
     if (seal === undefined) this.seals.delete(sessionId)
@@ -897,8 +938,19 @@ export class UiSession extends Service {
     return true
   }
 
-  private observeRunning(sessionId: SessionId, running: boolean): void {
-    this.lastStatusAt.set(sessionId, Date.now())
+  /**
+   * Fold one running-state truth into the status and record the stop it may end.
+   * @param sessionId - Session whose running state was observed.
+   * @param running - the observed state.
+   * @param listRow - the fresh list row when the observation is a list-pull
+   *   divergence rather than a status frame. A divergence is a passive read:
+   *   the Host died before any `api-session/error` could ride the frame that
+   *   would have carried the failure (崩溃中断), so its stop records what the
+   *   same snapshot says — see {@link listRowStopFailed}. A frame stop keeps
+   *   the live-observation rank: the in-memory clean stop still wins over an
+   *   older durable interruption (绿点耐久, ruling 2026-11-01).
+   */
+  private observeRunning(sessionId: SessionId, running: boolean, listRow?: SessionSummary): void {
     const previous = this.running.get(sessionId)
     const beforeBaseline = this.sessions.list.getSnapshot().phase === 'pending'
     this.running.set(sessionId, running)
@@ -908,7 +960,7 @@ export class UiSession extends Service {
     } else {
       const stopped = previous === true || (previous === undefined && beforeBaseline)
       // The failure report arrives before the stop it ends, so the stop reads it here.
-      const failed = this.observedFailures.delete(sessionId)
+      const failed = this.observedFailures.delete(sessionId) || listRowStopFailed(listRow)
       // The stop fact records for every view, the main one included (collab
       // step3 §四 点名不改态): opening a Session never was a legal signal
       // clearer, so the acknowledgment it used to suppress now lights there too.
@@ -973,9 +1025,13 @@ export class UiSession extends Service {
       // re-sends status for Sessions it has already published status for, so
       // a never-run idle row baselined here would go permanently
       // "unconfirmable" 30s after every load. The clock arms on the row's
-      // first frame; until then the baseline stands ring-free.
+      // first frame; until then the baseline stands ring-free — a divergence
+      // carries no frame either, so it does not arm either (step2 §4.2
+      // 「last-帧时刻」). What a divergence does carry is the fresh row: its
+      // stop records that snapshot's durable verdict (崩溃中断 — the frame
+      // that would have carried the failure died with the Host).
       if (previous === undefined) this.running.set(id, row.running)
-      else if (previous !== row.running) this.observeRunning(id, row.running)
+      else if (previous !== row.running) this.observeRunning(id, row.running, row)
       // 对账腿 (seal-light-host-state-1109 裁点3A): a summary block that
       // carries the `seal` key (including `null` = no verdict yet) is the
       // Host's truth and folds in; a row whose block omits it leaves the
