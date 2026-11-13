@@ -499,6 +499,18 @@ export class UiSession extends Service {
   private readonly unreadStops = new Map<SessionId, SessionCompletionOutcome>()
   private readonly observedFailures = new Set<SessionId>()
   /**
+   * Stops remembered before the catalog baseline (幽灵停记): the frame leg
+   * `previous === undefined && beforeBaseline` (see {@link observeRunning})
+   * inferred a stop this page never watched happen — no turn ran under it,
+   * so the memory carries none of 绿点耐久's live-observation rank (ruling
+   * 2026-11-01, whose premise is "the in-memory stop is the live fact").
+   * Membership is consumed by the landing leg in `reconcileStatus` (落地
+   * 对账): the moment the row lands present, its durable verdict owns the
+   * outcome, and a phantom 'completed' must not outrank a durable red
+   * (幽灵停记压红, row-status-ghost-1114).
+   */
+  private readonly phantomStops = new Set<SessionId>()
+  /**
    * Read marks (已阅勾标): set when a row becomes the main view while showing
    * signals — the pure-observation receipt of collab step3 §四's read-mark
    * ruling (点名不改态; the check is a secondary row-end glyph, never a signal
@@ -948,7 +960,12 @@ export class UiSession extends Service {
    *   would have carried the failure (崩溃中断), so its stop records what the
    *   same snapshot says — see {@link listRowStopFailed}. A frame stop keeps
    *   the live-observation rank: the in-memory clean stop still wins over an
-   *   older durable interruption (绿点耐久, ruling 2026-11-01).
+   *   older durable interruption (绿点耐久, ruling 2026-11-01). The one frame
+   *   stop that rank does not cover is the pre-baseline phantom
+   *   (`previous === undefined` while the catalog is still pending): it
+   *   watched no turn, so it is merely remembered — {@link phantomStops}
+   *   marks it and the landing leg of `reconcileStatus` re-adjudicates it
+   *   against the row's durable verdict (幽灵停记压红, row-status-ghost-1114).
    */
   private observeRunning(sessionId: SessionId, running: boolean, listRow?: SessionSummary): void {
     const previous = this.running.get(sessionId)
@@ -957,8 +974,14 @@ export class UiSession extends Service {
     if (running) {
       this.unreadStops.delete(sessionId)
       this.observedFailures.delete(sessionId)
+      this.phantomStops.delete(sessionId)
     } else {
-      const stopped = previous === true || (previous === undefined && beforeBaseline)
+      // A pre-baseline idle frame observed no turn: the fact still records so
+      // the row lights before the catalog lands, but it is marked phantom —
+      // the landing leg re-adjudicates it against the durable verdict instead
+      // of letting it outrank one (幽灵停记压红).
+      const phantom = previous === undefined && beforeBaseline
+      const stopped = previous === true || phantom
       // The failure report arrives before the stop it ends, so the stop reads it here.
       const failed = this.observedFailures.delete(sessionId) || listRowStopFailed(listRow)
       // The stop fact records for every view, the main one included (collab
@@ -966,6 +989,7 @@ export class UiSession extends Service {
       // clearer, so the acknowledgment it used to suppress now lights there too.
       if (stopped) {
         this.unreadStops.set(sessionId, failed ? 'failed' : 'completed')
+        if (phantom) this.phantomStops.add(sessionId)
       }
     }
     this.publishStatus()
@@ -1019,6 +1043,15 @@ export class UiSession extends Service {
     // Subagent catalog rows and retained subagent fallback rows do not establish Host running state.
     for (const id of list.ids) {
       const row = list.byId[id] as SessionSummary
+      // 落地对账 (幽灵停记压红, row-status-ghost-1114): a stop remembered
+      // before this page ever saw the catalog observed no turn, so the row's
+      // durable verdict owns the outcome — the phantom memory dies the moment
+      // its row lands, and the fold below reads the durable red instead of a
+      // green that masked it. It runs before the baseline/divergence legs so
+      // a fresh divergence stop (which already carries the durable verdict
+      // via listRowStopFailed) is never consumed. Absent rows never reach
+      // here; the purge retires them.
+      if (this.phantomStops.delete(id)) this.unreadStops.delete(id)
       const previous = this.running.get(id)
       // The list pull establishes the shown running state but does NOT arm
       // the heartbeat clock (collab step4b 件E, A案): the Host sweep only
@@ -1075,6 +1108,7 @@ export class UiSession extends Service {
         this.running.delete(id)
         this.unreadStops.delete(id)
         this.observedFailures.delete(id)
+        this.phantomStops.delete(id)
         this.attention.delete(id)
         this.seals.delete(id)
         this.lastStatusAt.delete(id)

@@ -1207,6 +1207,64 @@ describe('UiSession status', () => {
     bench.list.update((draft) => { draft.phase = 'ready' })
     expect(service.sessionStatus.getSnapshot().has(id)).toBe(false)
   })
+
+  it('drops a pre-baseline phantom stop when its row lands, so the durable verdict shows (幽灵停记落地对账)', () => {
+    const ctx = new Context()
+    const bench = createSessionsBench(ctx)
+    const id = sessionId('ghost')
+    const control = sessionId('ghost-control')
+    const clean = sessionId('ghost-clean')
+    // Fresh boot: the catalog has not landed yet, so no row establishes the
+    // baseline for the frames below.
+    bench.list.update((draft) => { draft.phase = 'pending' })
+    const service = createUiSession(ctx, bench)
+
+    // An idle status frame arrives before the baseline: `previous === undefined
+    // && beforeBaseline` records a stop the Host never completed (index.ts:978),
+    // and with no `api-session/error` riding this frame it reads 'completed' —
+    // pre-landing green is by design: the row is not in the catalog yet.
+    bench.emitStatus(id, false)
+    expect(service.sessionStatus.getSnapshot().get(id)).toEqual({
+      running: false,
+      pendingInteraction: undefined,
+      completionUnread: true,
+      completionOutcome: 'completed',
+    })
+    bench.emitStatus(clean, false)
+
+    // The catalog lands WITH all three rows present, each carrying the
+    // durable verdict the frames could not see: two turns failed (TRANSPORT,
+    // 2026-11-13 06:30:45), one ended clean. The control row got no phantom
+    // frame — only the baseline.
+    const verdict = (kind: 'error' | 'completed', at: number) => ({
+      displayTitle: '',
+      running: false,
+      retainedBy: {},
+      blank: false,
+      updatedAt: 1,
+      projectionValues: { lastTurnOutcome: { kind, at } },
+    })
+    bench.list.update((draft) => {
+      draft.phase = 'ready'
+      draft.ids.push(id, control, clean)
+      draft.byId[id] = { ...verdict('error', 1794522645082), id, displayTitle: id }
+      draft.byId[control] = { ...verdict('error', 1794522645082), id: control, displayTitle: control }
+      draft.byId[clean] = { ...verdict('completed', 1794522999999), id: clean, displayTitle: clean }
+    })
+
+    // 落地对账: the phantom memory dies with the landing row, so the fold
+    // reads the durable verdict — the ghost row turns red like its control
+    // instead of masking the durable red green (幽灵停记压红 was exactly this
+    // line reading 'completed' while the durable verdict said 'failed').
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('failed')
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(true)
+    // Control: the same durable error with no phantom frame — both rows must
+    // agree; the pre-fix divergence between them was the bug.
+    expect(service.sessionStatus.getSnapshot().get(control)?.completionOutcome).toBe('failed')
+    // And consuming the phantom must not paint a false red over a clean
+    // durable end: the clean ghost still reads green.
+    expect(service.sessionStatus.getSnapshot().get(clean)?.completionOutcome).toBe('completed')
+  })
 })
 
 describe('UiSession wake-up, job-count, and stale status sources', () => {
