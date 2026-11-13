@@ -602,6 +602,53 @@
   color: var(--dsw-alias-state-warn-primary);
 }
 
+/* Group-header attention counts (queue-zone-1113): the removed global queue
+   segment's cross-workspace counts, now a badge beside the group title. Red
+   (failed stops awaiting a ruling) leads with the failed-stop bang glyph;
+   yellow (rows awaiting the user's reply) follows with the solid state dot —
+   shape, not just colour, separates the tiers; the separator is tertiary so
+   the counts keep the weight. */
+.attentionBadges {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  margin-inline-start: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.attentionCount {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.attentionCount[data-attention='failed'] {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.attentionCount[data-attention='pending'] {
+  color: var(--dsw-alias-state-warn-primary);
+}
+
+.attentionGlyph {
+  font-weight: 700;
+}
+
+.attentionDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.attentionSeparator {
+  color: var(--dsw-alias-label-tertiary);
+}
+
 /* 未知不吞已知 (collab step3 §5.1, q5-failclosed): the last-known state's dot
    stays painted inside an amber dashed ring — the unreadable overlays, never
    replaces, the known. */

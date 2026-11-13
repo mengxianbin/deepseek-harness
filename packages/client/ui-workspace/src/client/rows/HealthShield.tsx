@@ -16,8 +16,10 @@
  * amber dashed stale ring the session rows use (step3 §5.1 vocabulary, 自指
  * fail-closed) — the last known verdict stays painted under it (未知不吞已知)
  * while the tooltip counts the interruption up. The 安康位 alarm additionally
- * cuts into the 「要我拿主意」 queue segment at P0/P1 level (the queue health
- * alert below); this badge is the always-on global seat.
+ * renders as a conditional line at the head of the session list (the queue
+ * health alert — since queue-zone-1113 there is no 「要我拿主意」 segment to cut
+ * into; it mounts only while its trigger holds); this badge is the always-on
+ * global seat.
  *
  * 批2 duty-shield-b2-1103 (ruling `shield-entry-ruling` A案 淡绿常驻可点,
  * 2026-11-03): the faint-green平态 is now CLICKABLE — one badge, one detail
@@ -26,7 +28,7 @@
  * is green, without a second badge (一个入口两段内容). `broken` widens to the
  * duty fold: a failed or untrusted 值守总账 paints the shield red exactly like
  * a broken Session reconciliation (三态纪律: healthy quiet / 有意停用 grey /
- * failed red + 逐项明细 + 插队 P0/P1).
+ * failed red + 逐项明细 + 列表头条件行).
  *
  * 2026-11-04 ruling (controller-poll availability): `broken` widens once more
  * to the auto-route plane's SUSTAINED verdict — a meter-poll failure streak
