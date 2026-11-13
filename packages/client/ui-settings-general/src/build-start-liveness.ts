@@ -118,12 +118,15 @@ export function probeBuildStartCapture(repositoryRoot: string, now: number = Dat
  * the same pass judges BUILDING false instead of staying stuck forever
  * (one poll, no rerun needed — acceptance ① of `#orphan-start-marker-1101`).
  * @param repositoryRoot - Harness tree whose `.dsh-build` holds the capture.
- * @param journal - Line sink; defaults to this tree's auto-build journal.
+ * @param journal - Line sink; defaults to this tree's auto-build journal
+ *   tagged `[collect]` — since offhost-1110 the orphan clear runs in the
+ *   external collector (its only production caller), and build-dispatch ⑤
+ *   seats every writer's line in the same seq stream under its own tag.
  * @returns Whether a live build is in flight after any orphan recovery.
  */
 export function readBuildingCapture(
   repositoryRoot: string,
-  journal: (line: string) => void = defaultAutoBuildJournalLine(repositoryRoot),
+  journal: (line: string) => void = defaultAutoBuildJournalLine(repositoryRoot, { writer: 'collect' }),
 ): boolean {
   const probe = probeBuildStartCapture(repositoryRoot)
   if (probe.state === 'absent') return false

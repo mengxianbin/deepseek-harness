@@ -16,6 +16,7 @@
     "src/restart-disposition.ts",
     "src/restart-disposition-host.ts",
     "src/auto-build-dispatch.ts",
+    "src/dir-lock.ts",
     "src/auto-build-journal.ts",
     "src/build-start-liveness.ts",
     "src/restart-signal-poll-host.ts"

@@ -961,6 +961,149 @@ describe('UiSession status', () => {
     }
   })
 
+  it('re-baselines every row’s heartbeat epoch across a connection outage (重启后闲置行不亮圈)', () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
+    try {
+      const ctx = new Context()
+      const bench = createSessionsBench(ctx)
+      const id = sessionId('epoch')
+      bench.list.update((draft) => {
+        draft.byId[id] = { id, displayTitle: id, running: true, retainedBy: {}, blank: false, updatedAt: 0 }
+        draft.ids.push(id)
+      })
+      const connection = createConnectionBench()
+      ctx.provide('slots', { bindStoreScope: vi.fn() } as never)
+      const service = new UiSession(ctx, bench.sessions, undefined, connection.source)
+
+      // A real frame arms the row's clock; baseline alone never does (件E).
+      bench.emitStatus(id, true)
+      vi.advanceTimersByTime(10_000)
+      expect(service.sessionStatus.getSnapshot().get(id)?.heartbeatStale).toBeUndefined()
+
+      // The outage withholds confirmation for every row (statusStale) and
+      // ends the frame epoch: the old timestamps are dropped, because after a
+      // Host restart the memory-only sweep set may never re-send for this row
+      // and carrying them across the outage would ring it forever.
+      connection.set('disconnected')
+      expect(service.sessionStatus.getSnapshot().get(id)?.statusStale).toBe(true)
+      expect(service.sessionStatus.getSnapshot().get(id)?.heartbeatStale).toBeUndefined()
+      connection.set('connecting')
+      connection.set('connected')
+      expect(service.sessionStatus.getSnapshot().get(id)?.statusStale).toBeUndefined()
+
+      // No frame arrives after the reconnect — an idle row under a fresh
+      // Host sweep set — and time runs well past the stale interval: the row
+      // stands exactly where a fresh load stands, ring-free.
+      vi.advanceTimersByTime(SESSION_HEARTBEAT_STALE_MS + 5_000)
+      expect(service.sessionStatus.getSnapshot().get(id)?.heartbeatStale).toBeUndefined()
+
+      // The first frame of the new epoch re-arms it: genuine silence after
+      // that still rings, and the next heartbeat clears again.
+      bench.emitStatus(id, true)
+      vi.advanceTimersByTime(SESSION_HEARTBEAT_STALE_MS + 5_000)
+      expect(service.sessionStatus.getSnapshot().get(id)?.heartbeatStale).toBe(true)
+      bench.emitStatus(id, true)
+      expect(service.sessionStatus.getSnapshot().get(id)?.heartbeatStale).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('arms the heartbeat clock from status frames only, never from a list-pull divergence (last-帧时刻)', () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
+    try {
+      const ctx = new Context()
+      const bench = createSessionsBench(ctx)
+      const id = sessionId('divergence')
+      bench.list.update((draft) => {
+        draft.byId[id] = { id, displayTitle: id, running: true, retainedBy: {}, blank: false, updatedAt: 0 }
+        draft.ids.push(id)
+      })
+      const service = createUiSession(ctx, bench)
+
+      // Baseline adopts the running state without arming (件E)…
+      expect(service.sessionStatus.getSnapshot().get(id)?.running).toBe(true)
+
+      // …and the list-pull divergence that records its stop does not arm it
+      // either: the list leg is not a status frame (step2 §4.2「last-帧时刻」).
+      bench.list.update((draft) => { draft.byId[id]!.running = false })
+      expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(true)
+      vi.advanceTimersByTime(SESSION_HEARTBEAT_STALE_MS + 5_000)
+      expect(service.sessionStatus.getSnapshot().get(id)?.heartbeatStale).toBeUndefined()
+
+      // A frame is the heartbeat: it arms, silence rings, the next clears.
+      bench.emitStatus(id, false)
+      vi.advanceTimersByTime(SESSION_HEARTBEAT_STALE_MS + 5_000)
+      expect(service.sessionStatus.getSnapshot().get(id)?.heartbeatStale).toBe(true)
+      bench.emitStatus(id, false)
+      expect(service.sessionStatus.getSnapshot().get(id)?.heartbeatStale).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('records a crash-orphaned list divergence stop as failed (崩溃行绿转红)', () => {
+    const ctx = new Context()
+    const bench = createSessionsBench(ctx)
+    const id = sessionId('crash-divergence')
+    const openTurn = {
+      turnBoundary: {
+        openTurnStartSeq: SessionSeq(757),
+        lastStepStartSeq: SessionSeq(760),
+        lastStepBoundary: { kind: 'start' as const, seq: SessionSeq(760) },
+        lastTurn: 7,
+      },
+    }
+    bench.list.update((draft) => {
+      draft.byId[id] = { id, displayTitle: id, running: true, retainedBy: {}, blank: false, updatedAt: 0 }
+      draft.ids.push(id)
+    })
+    const service = createUiSession(ctx, bench)
+
+    // Pre-crash the durable value was clean; the crashed turn never closed,
+    // so the transcript still holds its open start seq (被打断未重开红点).
+    bench.list.update((draft) => {
+      draft.byId[id]!.projectionValues = { ...openTurn, lastTurnOutcome: { kind: 'completed', at: 3 } }
+    })
+
+    // The Host died mid-turn: the first list pull after the reconnect flips
+    // running true→false. No `api-session/error` frame ever arrived (the
+    // process died with it), so this passive read must record what the same
+    // snapshot says — an inferred「completed」would outrank the durable red
+    // forever (绿点耐久) and paint the crashed row green.
+    bench.list.update((draft) => { draft.byId[id]!.running = false })
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionUnread).toBe(true)
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('failed')
+
+    // A rerun clears the in-memory record — the discriminating read is the
+    // outcome: a surviving「failed」memory would outrank the durable clean end.
+    // The mark itself stays lit either way: the pre-crash durable `completed`
+    // still counts until a later turn/end supersedes it (绿点耐久, the same
+    // shape L820 pins for the durable red), so unread alone proves nothing.
+    bench.list.update((draft) => { draft.byId[id]!.running = true })
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('completed')
+    bench.list.update((draft) => {
+      draft.byId[id]!.projectionValues = {
+        turnBoundary: { ...openTurn.turnBoundary, openTurnStartSeq: null },
+        lastTurnOutcome: { kind: 'completed', at: 9 },
+      }
+    })
+    bench.list.update((draft) => { draft.byId[id]!.running = false })
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('completed')
+
+    // The Session gets reopened: the Host writes the `interrupted` closer —
+    // a divergence after that records the durable verdict too.
+    bench.list.update((draft) => { draft.byId[id]!.running = true })
+    bench.list.update((draft) => {
+      draft.byId[id]!.projectionValues = {
+        turnBoundary: { ...openTurn.turnBoundary, openTurnStartSeq: null },
+        lastTurnOutcome: { kind: 'interrupted', at: 11 },
+      }
+    })
+    bench.list.update((draft) => { draft.byId[id]!.running = false })
+    expect(service.sessionStatus.getSnapshot().get(id)?.completionOutcome).toBe('failed')
+  })
+
   it('folds 安康位 frames, rings the shield itself after 2× sweep cadence silence, and keeps the last verdict (件C5)', () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
     try {
