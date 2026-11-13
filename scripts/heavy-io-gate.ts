@@ -6,9 +6,11 @@
  * This gate serializes them through one advisory lock directory. Serialization is
  * strict: waiters queue without a bound and never proceed alongside a live holder
  * (2026-11-12 定稿 · 纯排队——内存余量永远优先留给活会话周转，不给 build 让路).
- * The only automatic break is a dead owner (crash recovery); a live holder is
- * trusted indefinitely, so a wedged-but-alive holder blocks the queue until a
- * human kills it (watchdog alarms at 45 min of hold time).
+ * The only automatic breaks are a dead owner (crash recovery) and a directory
+ * that stays ownerless past a short read backoff (acquirer crashed between
+ * mkdir and owner.json — never a live claimant mid-write, 2026-11-13 竞态修复);
+ * a live holder is trusted indefinitely, so a wedged-but-alive holder blocks
+ * the queue until a human kills it (watchdog alarms at 45 min of hold time).
  *
  * Usage: `tsx scripts/heavy-io-gate.ts "<shell command>"`.
  * CI (`CI=true`), `DSH_HEAVY_IO=0`, and nested calls that already hold the gate
@@ -23,7 +25,7 @@
 import { spawn, spawnSync } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
 import { appendFileSync, mkdirSync } from 'node:fs'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -68,6 +70,19 @@ function historyFile(env: NodeJS.ProcessEnv): string {
 
 /** Repeat `waiting` lines are rate-limited so a 2s poll cannot flood the log. */
 const HISTORY_WAITING_INTERVAL_MS = 60_000
+
+/**
+ * Backoff for an ownerless lock directory. `mkdir` is the claim primitive but
+ * the winner writes owner.json only afterwards, so between the two there is a
+ * window where the directory exists with no (or a half-written) owner record.
+ * A reader that treated "owner unreadable" as stale would break a live holder
+ * mid-acquire (observed 2026-11-13 12:39:55Z: stale-break on a 2.5 s-old live
+ * holder, three trees inside the gate concurrently). Re-reading across this
+ * backoff lets the winner finish its write; only a directory still ownerless
+ * after all retries is an orphan (winner crashed inside the window).
+ */
+const OWNERLESS_READ_RETRIES = 3
+const OWNERLESS_READ_BACKOFF_MS = 100
 
 /**
  * Append one observation line to the history log (fail-soft).
@@ -118,6 +133,12 @@ function isOwnerRecord(value: unknown): value is HeavyIoLockOwner {
 
 /**
  * Try to take the lock directory; `mkdir` is atomic, so exactly one caller wins.
+ * The owner record is written immediately after the claim to keep the ownerless
+ * window between the two calls as small as possible (readers back off across
+ * it, see OWNERLESS_READ_RETRIES). If even that write fails (the claim was
+ * broken underneath us during a stall, or the disk refused it), the claim is
+ * not usable: drop it and report contention so the caller requeues instead of
+ * running without an owner record.
  * @param directory - Lock directory path.
  * @param command - The gated command, recorded for waiters to report.
  * @returns the owner record on success, or undefined when another job holds the lock.
@@ -129,7 +150,11 @@ export async function acquireHeavyIoLock(directory: string, command: string): Pr
   } catch {
     return undefined
   }
-  await writeFile(join(directory, 'owner.json'), JSON.stringify(owner))
+  try {
+    await writeFile(join(directory, 'owner.json'), JSON.stringify(owner))
+  } catch {
+    return undefined
+  }
   return owner
 }
 
@@ -162,18 +187,47 @@ export function isProcessAlive(pid: number): boolean {
 }
 
 /**
- * Remove the lock directory when its owner is dead (or the record is unreadable).
- * A live owner is never broken, no matter how long it has held the lock — the
- * queue waits (纯排队); the 45 min watchdog alarm escalates a wedged holder to a
- * human instead of racing it.
+ * Remove the lock directory when its owner is dead, or when an ownerless
+ * directory stays ownerless across the backoff (acquirer crashed inside the
+ * mkdir → owner.json window). A live owner is never broken, no matter how long
+ * it has held the lock — the queue waits (纯排队); the 45 min watchdog alarm
+ * escalates a wedged holder to a human instead of racing it. A directory that
+ * vanishes while we inspect it (a holder released, or a rival broke it) is not
+ * ours to remove: report "nothing broken" and let the caller retry the acquire.
  * @param directory - Lock directory path.
  * @returns true when a stale lock was removed and the caller may retry the acquire.
  */
 export async function breakStaleHeavyIoLock(directory: string): Promise<boolean> {
-  const owner = await readHeavyIoLock(directory)
-  if (owner !== undefined && isProcessAlive(owner.pid)) return false
-  await rm(directory, { recursive: true, force: true })
-  return true
+  for (let attempt = 0; ; attempt++) {
+    const owner = await readHeavyIoLock(directory)
+    if (owner !== undefined) {
+      if (isProcessAlive(owner.pid)) return false
+      await rm(directory, { recursive: true, force: true })
+      return true
+    }
+    // Owner unreadable: either the directory is gone (nothing to break) or a
+    // winner is still inside the mkdir → writeFile window (do not break it).
+    if (!(await directoryExists(directory))) return false
+    if (attempt >= OWNERLESS_READ_RETRIES) {
+      await rm(directory, { recursive: true, force: true })
+      return true
+    }
+    await new Promise(done => setTimeout(done, OWNERLESS_READ_BACKOFF_MS))
+  }
+}
+
+/**
+ * Check whether the lock directory currently exists.
+ * @param directory - Lock directory path.
+ * @returns true when the path exists as a directory-like entry.
+ */
+async function directoryExists(directory: string): Promise<boolean> {
+  try {
+    await stat(directory)
+    return true
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -293,8 +347,9 @@ async function waitForHeavyIoLock(directory: string, command: string, env: NodeJ
       recordHistory(history, 'acquire', command)
       return startedAt
     }
-    // Observation pre-read: breakStaleHeavyIoLock re-reads internally and only
-    // answers yes/no, so the owner record about to be judged is captured here.
+    // Observation pre-read: breakStaleHeavyIoLock answers only yes/no (its
+    // internal reads may already be past this point), so the owner record about
+    // to be judged is captured here for the log.
     const heldForLog = await readHeavyIoLock(directory)
     if (await breakStaleHeavyIoLock(directory)) {
       if (heldForLog !== undefined) {
@@ -302,6 +357,15 @@ async function waitForHeavyIoLock(directory: string, command: string, env: NodeJ
           holderPid: heldForLog.pid,
           holderAgeMs: Date.now() - Date.parse(heldForLog.startedAt),
           holderAlive: isProcessAlive(heldForLog.pid),
+        })
+      } else {
+        // An ownerless orphan directory was broken (crash inside the
+        // mkdir → owner.json window): record the break anyway, so history can
+        // answer for every removal of the lock directory.
+        recordHistory(history, 'stale-break', command, {
+          holderPid: 'none',
+          holderAgeMs: 0,
+          holderAlive: 'unknown',
         })
       }
       continue
