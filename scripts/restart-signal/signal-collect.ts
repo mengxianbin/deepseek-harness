@@ -53,6 +53,7 @@ import {
   type RestartStamp,
 } from '../../packages/client/ui-settings-general/src/restart-stamp.ts'
 import { readBuildingCapture } from '../../packages/client/ui-settings-general/src/build-start-liveness.ts'
+import { type LinkedBuildSeat } from '../../packages/client/ui-settings-general/src/restart.ts'
 import type { CurrentStamp } from './signal-cli.ts'
 
 const execFileAsync = promisify(execFile)
@@ -62,6 +63,15 @@ const STAMP_DIR = '.dsh-build'
 
 /** Build-failure record file name inside the stamp directory (mirrors the package-side constant). */
 const FAILURE_FILE = 'restart-stamp.failed.json'
+
+/** Per-tree linked build account the watchdog writes (build-dispatch read face;
+ * this collector only ever reads it — the writer stays the single source). */
+const LINKED_STATE_FILE = 'linked-build-state.json'
+
+/** The harness tree's build journal: the linked dispatch/terminal event lines
+ * (`linked-build repo=…` → `linked-build-failed|done|stall repo=…`) that prove
+ * whether a claimed attempt is still in flight. Read-only, best-effort. */
+const LINKED_JOURNAL_FILE = 'auto-build.log'
 
 /** Journal beside the collector's state file: one line per run (ok or FAIL),
  * rotated past this size — the loud half of "崩了要响亮失败不静默", since a
@@ -270,6 +280,106 @@ export async function runStampCli(
   return parseCliStamps(stdout)
 }
 
+/** Separator- and case-insensitive repository key for account/journal matching
+ * (Windows trees; the account keys and journal `repo=` values come from the
+ * same manifest components the judgment names, but matching stays forgiving). */
+function normalizeLinkedRepo(repository: string): string {
+  return repository.replace(/\\/g, '/').toLowerCase()
+}
+
+/** The watchdog's linked-build event vocabulary as seen on one journal line
+ * (`-failed` / `-done` / `-stall` / bare dispatch), or `undefined` when the
+ * line names no linked-build event. Regex-scanned anywhere in the line so a
+ * future seq prefix (build-dispatch-single-source-1109 audit five) does not
+ * break recognition — an unrecognized format simply yields no events and the
+ * derivation fails open. */
+function linkedEventOf(line: string): { readonly kind: 'dispatch' | 'failed' | 'closed'; readonly repo: string } | undefined {
+  const match = /linked-build(-failed|-done|-stall)? repo=(\S+)/.exec(line)
+  if (match === null) return undefined
+  const suffix = match[1]
+  return {
+    kind: suffix === '-failed' ? 'failed' : suffix === undefined ? 'dispatch' : 'closed',
+    repo: match[2] ?? '',
+  }
+}
+
+/** Last linked-build event for one tree in the journal, oldest line first —
+ * `dispatch` with no terminal line after it is the only honest in-flight bit
+ * the machine produces (the account pre-claims `outcome=failed` BEFORE the
+ * build runs, so the account alone cannot tell building from finished-failed).
+ * @param repositoryRoot - Harness tree whose `.dsh-build` holds the journal.
+ * @param linkedRepo - The tree the lamp names.
+ * @returns the last event kind; `'none'` when the journal is absent/unreadable or names no event for the tree.
+ */
+function lastLinkedEvent(repositoryRoot: string, linkedRepo: string): 'dispatch' | 'failed' | 'closed' | 'none' {
+  let journal: string
+  try {
+    journal = readFileSync(join(repositoryRoot, STAMP_DIR, LINKED_JOURNAL_FILE), 'utf8')
+  } catch {
+    return 'none'
+  }
+  const target = normalizeLinkedRepo(linkedRepo)
+  let last: 'dispatch' | 'failed' | 'closed' | 'none' = 'none'
+  for (const line of journal.split('\n')) {
+    const event = linkedEventOf(line)
+    if (event === undefined || normalizeLinkedRepo(event.repo) !== target) continue
+    last = event.kind
+  }
+  return last
+}
+
+/** One tree's failure account as this collector needs it: `undefined` when the
+ * account file is missing, unreadable, or records no failed attempt (fail-open
+ * — the plain linked copy keeps the lamp); `failures: undefined` when the
+ * count itself is malformed (blocks the `failed` copy but not `building`). */
+function readLinkedAccount(repositoryRoot: string, linkedRepo: string): { readonly failures: number | undefined } | undefined {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(readFileSync(join(repositoryRoot, STAMP_DIR, LINKED_STATE_FILE), 'utf8'))
+  } catch {
+    return undefined
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined
+  const repos: unknown = Reflect.get(parsed, 'repos')
+  if (typeof repos !== 'object' || repos === null || Array.isArray(repos)) return undefined
+  const target = normalizeLinkedRepo(linkedRepo)
+  const key = Object.keys(repos).find(candidate => normalizeLinkedRepo(candidate) === target)
+  if (key === undefined) return undefined
+  const entry: unknown = Reflect.get(repos, key)
+  if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return undefined
+  if (Reflect.get(entry, 'outcome') !== 'failed') return undefined
+  const failures: unknown = Reflect.get(entry, 'failures')
+  return {
+    failures: typeof failures === 'number' && Number.isInteger(failures) && failures >= 0 && Number.isSafeInteger(failures)
+      ? failures
+      : undefined,
+  }
+}
+
+/**
+ * The data-confirmed machine build state for the tree the lamp names
+ * (linked-lamp-twostate-1111), fail-open to `undefined` at every step:
+ * missing/malformed account → no seat; the account's pre-claimed
+ * `outcome=failed` is upgraded to `building` only when the journal proves the
+ * attempt still open (dispatch with no terminal line), downgraded past a
+ * terminal `done`/`stall` (contradiction = stale account = no seat), and
+ * reported as `failed` (with the account count) once a terminal failure or an
+ * unreadable journal leaves the account as the only witness. Never guesses —
+ * an unconfirmed state falls back to the plain linked copy.
+ * @param repositoryRoot - Harness tree whose `.dsh-build` holds both files.
+ * @param linkedRepo - The tree the lamp names (first drifted component).
+ * @returns the confirmed pair, or `undefined` when nothing is confirmed.
+ */
+export function readLinkedBuild(repositoryRoot: string, linkedRepo: string): LinkedBuildSeat | undefined {
+  const account = readLinkedAccount(repositoryRoot, linkedRepo)
+  if (account === undefined) return undefined
+  const event = lastLinkedEvent(repositoryRoot, linkedRepo)
+  if (event === 'dispatch') return { linkedBuild: 'building' }
+  if (event === 'closed') return undefined
+  // 'failed' terminal, or no journal witness at all: the account stands.
+  return account.failures === undefined ? undefined : { linkedBuild: 'failed', linkedBuildFailures: account.failures }
+}
+
 /**
  * Compute one judgment — the host-side gather chain, moved out of the host
  * wholesale (manifest read, markers + orphan liveness, stamp-CLI combination,
@@ -356,10 +466,10 @@ export async function computeJudgment(options: CollectRunOptions = {}): Promise<
   return {
     collectedAt: nowIso,
     repositoryRoot,
-    judgment: attachFacts(judgeRestartSignal({
+    judgment: attachLinkedBuild(attachFacts(judgeRestartSignal({
       runtime, fresh, configStamp, building, buildingStartedAt, failed,
       currentHostFace, currentClientFace, ownFaceMoved, linkedRepos,
-    }), { currentHostFace, configStamp, ownFaceMoved }),
+    }), { currentHostFace, configStamp, ownFaceMoved }), repositoryRoot),
   }
 }
 
@@ -371,6 +481,23 @@ function attachFacts(
   facts: { readonly currentHostFace: string | undefined; readonly configStamp: string; readonly ownFaceMoved?: boolean | undefined },
 ): ReturnType<typeof judgeRestartSignal> {
   return { ...judgment, facts }
+}
+
+/**
+ * Attach the data-confirmed linked build state AFTER the pure judgment
+ * (linked-lamp-twostate-1111) — the same post-judge spread `facts` rides, so
+ * `judgeRestartSignal` and every seven-state input stay untouched. Only a
+ * linked-only NEED_BUILD that names a tree consults the account/journal; any
+ * unreadable/contradictory/unconfirmed reading leaves the judgment verbatim
+ * (the plain linked copy), never a guessed seat.
+ * @param judgment - The judged output.
+ * @param repositoryRoot - Harness tree holding `.dsh-build`.
+ * @returns The judgment, optionally carrying the confirmed pair.
+ */
+function attachLinkedBuild(judgment: RestartSignalJudgment, repositoryRoot: string): RestartSignalJudgment {
+  if (judgment.state !== 'NEED_BUILD' || judgment.linkedRepo === undefined) return judgment
+  const seat = readLinkedBuild(repositoryRoot, judgment.linkedRepo)
+  return seat === undefined ? judgment : { ...judgment, ...seat }
 }
 
 /** Separator-insensitive repository comparison (moved with the compute chain). */

@@ -871,6 +871,32 @@ export class UiSession extends Service {
     else this.seals.set(sessionId, seal)
   }
 
+  /**
+   * The list-pull half of the attention channel: reconcile one Session's
+   * objective blocked-on-the-user kind from its summary's `userQuestions`
+   * block (attention 对账腿, closing attention-dot-reverify-1031 候选① — the
+   * frame leg only reaches Sessions the Host has published status for since
+   * boot, and the map is empty on every load). Live rows read the live fold
+   * and cold rows the checkpoint, so the list leg and the frame leg converge
+   * on one source; a row whose block omits the key must not fold at all
+   * (callers guard with `in`, 未知不吞已知). Deliberately NOT
+   * `observeAttention`: a list read is not a status frame, so this never arms
+   * the heartbeat clock (collab step4b 件E) and never touches `lastStatusAt`.
+   * @param sessionId - Session whose summary block carried the projection.
+   * @param hasQuestion - whether the block still holds an active question.
+   * @returns whether the map changed, so the caller refolds the pending snapshot.
+   */
+  private foldAttentionFromList(sessionId: SessionId, hasQuestion: boolean): boolean {
+    if (hasQuestion) {
+      if (this.attention.get(sessionId) === 'question') return false
+      this.attention.set(sessionId, 'question')
+      return true
+    }
+    if (this.attention.get(sessionId) === undefined) return false
+    this.attention.delete(sessionId)
+    return true
+  }
+
   private observeRunning(sessionId: SessionId, running: boolean): void {
     this.lastStatusAt.set(sessionId, Date.now())
     const previous = this.running.get(sessionId)
@@ -937,6 +963,7 @@ export class UiSession extends Service {
   private reconcileStatus(): void {
     const list = this.sessions.list.getSnapshot()
     const present = new Set(Object.keys(list.byId) as SessionId[])
+    let attentionChanged = false
     // Subagent catalog rows and retained subagent fallback rows do not establish Host running state.
     for (const id of list.ids) {
       const row = list.byId[id] as SessionSummary
@@ -959,6 +986,22 @@ export class UiSession extends Service {
       const sealBlock = row.projectionValues
       if (sealBlock !== undefined && 'seal' in sealBlock) {
         this.foldSealFromList(id, sealBlock.seal ?? undefined)
+      }
+      // attention 对账腿 — the baseline refill the status frames alone never
+      // deliver (attention-dot-reverify-1031 候选①): frames only reach Sessions
+      // the Host has published status for since boot (`sweepSessions` is a
+      // memory-only set), while this `attention` map starts empty on every
+      // load, so a cold Session holding a pending question showed no amber
+      // until the row was opened (card domain). The `userQuestions` projection
+      // rides every Session summary (summaryKeys default, not trim-cut), so
+      // the list itself carries the objective fact — fold it exactly like the
+      // seal leg above; a row whose block omits the key leaves the frame-set
+      // value standing (未知不吞已知).
+      const questionBlock = row.projectionValues
+      if (questionBlock !== undefined && 'userQuestions' in questionBlock) {
+        if (this.foldAttentionFromList(id, questionBlock.userQuestions.active.length > 0)) {
+          attentionChanged = true
+        }
       }
     }
     // 点名不改态 (collab step3 §四): becoming the main view arms a read mark
@@ -984,6 +1027,10 @@ export class UiSession extends Service {
         this.knownMainIds.delete(id)
       }
     }
+    // The pending snapshot only rebuilds here, so a list-folded attention
+    // change must refold it before the snapshot publish below — the amber row
+    // and the P0 queue entry both read that snapshot.
+    if (attentionChanged) this.publishPendingInteractions()
     this.publishStatus()
   }
 

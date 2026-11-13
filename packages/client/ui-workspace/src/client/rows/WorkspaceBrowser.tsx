@@ -21,7 +21,7 @@ import {
   IconChevronsUpDownOutlineRegular, IconClockOutlineRegular, IconCloseFillRegular,
   IconFlatListOutlineRegular, IconFolderCloseRegular, IconProjectAddOutlineRegular,
   IconQueueOutlineRegular, IconSearchOutlineRegular, IconSlidersTwoOutlineRegular,
-  IconWorkspaceTreeOutlineRegular, Menu, Modal, Tooltip,
+  IconTriangleRightFillRegular, IconWorkspaceTreeOutlineRegular, Menu, Modal, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
   SessionListState, SessionSearchResultItem,
@@ -64,6 +64,13 @@ const SESSION_WATERMARK_AUTO_MAX = 50
 const SESSION_ROW_HEIGHT_PX = 32
 /** Vertical chrome the fitted watermark cannot cover (group header + overflow button + breathing room), in rows. */
 const SESSION_FIT_CHROME_RESERVE_ROWS = 2
+/**
+ * FORK dsh-local (queue-collapse-1112, marker: queueSegmentCollapse): the
+ * queued-id set handed to the group/flat derivations while the segment is
+ * collapsed — a stable empty set so the collapse only flips membership, never
+ * the memo identity of everything downstream.
+ */
+const COLLAPSED_QUEUE: ReadonlySet<SessionId> = new Set()
 
 /** Show the blank row plus the first `watermark` non-blank rows, in list order. */
 function watermarkRows(sessions: readonly SessionNode[], watermark: number): {
@@ -327,6 +334,14 @@ type SessionTreeProps = Pick<
   groupExpansion: Readonly<Record<string, boolean>>
   /** Persist one Workspace group's expansion. */
   setGroupExpanded: (key: string, expanded: boolean) => void
+  /**
+   * FORK dsh-local (queue-collapse-1112): the 「要我拿主意」 segment's
+   * persisted fold — while set, the queued rows stay in their Workspace
+   * groups (or the flat flow) and only the count bar keeps the seat.
+   */
+  queueCollapsed: boolean
+  /** Persist the 「要我拿主意」 segment's collapsed bit. */
+  setQueueCollapsed: (collapsed: boolean) => void
   /** Save a drag order and select Manual. */
   setSessionOrder: (accountKey: string, order: readonly string[]) => void
   /** Registry-global pin and archive sets plus the archived-visibility choice. */
@@ -366,6 +381,15 @@ type SessionTreeProps = Pick<
  * expansion renders the shared HealthDetail (会话对账 + 值守清单). 2026-11-04
  * ruling: a SUSTAINED auto-route poll failure joins the row with its own
  * text (never borrowed from 对账), and the detail gains the 自动路由 section.
+ * FORK dsh-local (queue-collapse-1112, marker: queueSegmentCollapse): the
+ * segment gains a persistent one-line count bar 「要我拿主意 · N」 at its very
+ * top (2026-11-12 ruling). Folding it returns every queued row to its
+ * Workspace group / the flat flow — the workspace list floats back up — while
+ * the bar and the 安康位 alarm stay mounted, so neither the count nor an alarm
+ * is ever one click from hidden. Expanded keeps the hard top seat the placement
+ * ruling guarantees (step3 判据①), with no row cap: the rows area is its own
+ * scroll clip, so a restart flood scrolls inside the segment instead of
+ * pushing unreachable rows past the region's clip edge.
  */
 /** The 安康位 alarm's row in the hard top segment (collab step3 §5.2 插队 P0/P1). */
 function HealthQueueAlert({ health, t }: { health: SessionHealthState; t: SessionTreeProps['t'] }) {
@@ -413,6 +437,15 @@ function HealthQueueAlert({ health, t }: { health: SessionHealthState; t: Sessio
 /** Props of the hard 「要我拿主意」 top segment, shared by the grouped and flat bodies. */
 type QueueSectionProps = {
   queue: QueueSegment
+  /**
+   * FORK queue-collapse-1112: the persisted fold. Collapsed keeps the count
+   * bar (and the 安康位 alarm) mounted and moves the queued rows out — the
+   * caller derives them back into their groups, so this component only stops
+   * rendering them here.
+   */
+  collapsed: boolean
+  /** Toggle the persisted fold of the segment. */
+  onQueueToggle: () => void
   currentId: string | undefined
   onOpen: (id: SessionId) => void
   onSessionRenameRequest: SessionTreeProps['onSessionRenameRequest']
@@ -434,39 +467,72 @@ type QueueSectionProps = {
   onSessionRevealed: SessionTreeProps['onSessionRevealed']
 } & Pick<WorkspaceBrowserProps, 'useSessionAccess'>
 
-function QueueSection({ queue, currentId, onOpen, onSessionRenameRequest, renderSlot, home, t, watchSessionJobs,
-  useSessionHealth, seals, sealRows, revealSessionId, onSessionRevealed, useSessionAccess }: QueueSectionProps) {
+function QueueSection({ queue, collapsed, onQueueToggle, currentId, onOpen, onSessionRenameRequest, renderSlot, home, t,
+  watchSessionJobs, useSessionHealth, seals, sealRows, revealSessionId, onSessionRevealed, useSessionAccess,
+}: QueueSectionProps) {
   const now = Date.now()
   const health = useSessionHealth?.(state => state)
+  // The count bar replaces the cut segment header (queue-headers-cut-1101
+  // stays: one line, never two) and carries the fold affordance; 「无待办」
+  // keeps its seat while nothing is queued (step3 判据①.4 空段可见不藏).
+  const count = queue.queued.size
+  const rowsExpanded = count > 0 && !collapsed
   return (
-    <div className={css.queueSection} data-row-key="queue" role="tree" aria-label={t('queue.title')}>
+    <div
+      className={css.queueSection}
+      data-row-key="queue"
+      data-queue-scroll={rowsExpanded ? '' : undefined}
+    >
+      {count > 0 && (
+        <button
+          type="button"
+          className={css.queueToggle}
+          data-row-key="queue-toggle"
+          aria-expanded={!collapsed}
+          onClick={onQueueToggle}
+        >
+          <IconTriangleRightFillRegular
+            size={12}
+            className={clsx(css.queueChevron, !collapsed && css.queueChevronOpen)}
+          />
+          {t('queue.count', { n: count })}
+        </button>
+      )}
       {health !== undefined
         && (health.stale === true || health.report?.ok === false || health.report?.duty?.ok === false
           || health.report?.autoRoute?.sustained === true) && (
         <HealthQueueAlert health={health} t={t} />
       )}
-      {queue.tiers.length === 0
-        ? <div className={css.queueEmpty}>{t('queue.empty')}</div>
-        : queue.tiers.flatMap(tier => tier.sessions).map(node => (
-          <SessionNodeItem
-            key={node.id}
-            node={node}
-            currentId={currentId}
-            now={now}
-            onOpen={onOpen}
-            onRenameRequest={onSessionRenameRequest}
-            onReveal={node.id === revealSessionId
-              ? () => { onSessionRevealed(node.id) }
-              : undefined}
-            renderSlot={renderSlot}
-            home={home}
-            t={t}
-            watchSessionJobs={watchSessionJobs}
-            seals={seals}
-            sealRows={sealRows}
-            useSessionAccess={useSessionAccess}
-          />
-        ))}
+      {/* The alarm stays the rows' head (step3 §5.2 插队); the empty line
+          keeps the seat it had below it (判据①.4). */}
+      {count === 0 && <div className={css.queueEmpty}>{t('queue.empty')}</div>}
+      {rowsExpanded && (
+        // The rows clip owns the tree role: rows nest under it (ARIA owned
+        // elements stay direct), and folding removes the tree entirely —
+        // the count bar alone still names the segment.
+        <div className={css.queueRows} role="tree" aria-label={t('queue.title')}>
+          {queue.tiers.flatMap(tier => tier.sessions).map(node => (
+            <SessionNodeItem
+              key={node.id}
+              node={node}
+              currentId={currentId}
+              now={now}
+              onOpen={onOpen}
+              onRenameRequest={onSessionRenameRequest}
+              onReveal={node.id === revealSessionId
+                ? () => { onSessionRevealed(node.id) }
+                : undefined}
+              renderSlot={renderSlot}
+              home={home}
+              t={t}
+              watchSessionJobs={watchSessionJobs}
+              seals={seals}
+              sealRows={sealRows}
+              useSessionAccess={useSessionAccess}
+            />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -545,6 +611,7 @@ function SessionTree({
   renderSlot,
   insertWorkspaceBefore,
   nestWorkspaces, groupExpansion, setGroupExpanded,
+  queueCollapsed, setQueueCollapsed,
   setSessionOrder, home, t,
   revealSessionId, onSessionRevealed, shortcuts, watchSessionJobs, seals, sealRows,
 }: SessionTreeProps) {
@@ -621,8 +688,10 @@ function SessionTree({
     () => deriveGroups(list, workspaces, rowState, statuses, {
       expandedGroups,
       ungroupedOrder: ungroupedSessionIds,
-    }, queue.queued),
-    [list, workspaces, rowState, statuses, expandedGroups, ungroupedSessionIds, queue.queued],
+    // FORK queue-collapse-1112: folded, the queued rows stop deferring to
+    // the segment and read as ordinary members of their groups again.
+    }, queueCollapsed ? COLLAPSED_QUEUE : queue.queued),
+    [list, workspaces, rowState, statuses, expandedGroups, ungroupedSessionIds, queue.queued, queueCollapsed],
   )
   useEffect(() => {
     for (let key = revealGroup; key !== undefined; key = parents.get(key)) {
@@ -926,9 +995,13 @@ function SessionTree({
           「要我拿主意」 segment leads the list (队列段恒在置顶之前) and stays
           outside the animated list — its rows are state-owned, not reorderable.
           The list-start drop marker follows it: a workspace drop lands before
-          the first workspace, not before the queue. */}
+          the first workspace, not before the queue.
+          FORK queue-collapse-1112: the count bar keeps the seat when folded;
+          only the rows clip comes and goes. */}
       <QueueSection
         queue={queue}
+        collapsed={queueCollapsed}
+        onQueueToggle={() => { setQueueCollapsed(!queueCollapsed) }}
         currentId={current}
         onOpen={open}
         onSessionRenameRequest={onSessionRenameRequest}
@@ -967,6 +1040,7 @@ function FlatList({
   list, sessionIds, rowState, onLeaveArchivedOnly, useSessionStatus, useSessionHealth, useSessionAccess, open,
   onSessionRenameRequest, usePanelInfo, setSessionOrder, workspaceReady, animationResetKey,
   revealSessionId, onSessionRevealed, renderSlot, home, t, watchSessionJobs, seals, sealRows, workspaces,
+  queueCollapsed, setQueueCollapsed,
 }: Pick<
   SessionTreeProps,
   | 'useSessionStatus'
@@ -989,6 +1063,8 @@ function FlatList({
   | 'seals'
   | 'sealRows'
   | 'workspaces'
+  | 'queueCollapsed'
+  | 'setQueueCollapsed'
 > & {
   list: SessionListState
   sessionIds: readonly SessionId[]
@@ -1006,8 +1082,11 @@ function FlatList({
     [list, sessionIds, rowState, statuses, workspaces],
   )
   const rows = useMemo(
-    () => queue.queued.size === 0 ? allRows : allRows.filter(row => !queue.queued.has(row.id)),
-    [allRows, queue.queued],
+    // FORK queue-collapse-1112: folded, the queued rows stay in the flow.
+    () => queueCollapsed || queue.queued.size === 0
+      ? allRows
+      : allRows.filter(row => !queue.queued.has(row.id)),
+    [allRows, queue.queued, queueCollapsed],
   )
   const [drag, setDrag] = useState<DragState | null>(null)
   const dropCommitted = useRef(false)
@@ -1026,9 +1105,12 @@ function FlatList({
   return (
     <HoverCardGroup className={clsx(css.treeBody, css.wide)}>
       {/* FORK dsh-local (collab-step4b-c1, marker: queueSegment): the flat view
-          leads with the same hard segment; its rows leave the flow below. */}
+          leads with the same hard segment; its rows leave the flow below.
+          FORK queue-collapse-1112: folded, the rows never leave the flow. */}
       <QueueSection
         queue={queue}
+        collapsed={queueCollapsed}
+        onQueueToggle={() => { setQueueCollapsed(!queueCollapsed) }}
         currentId={currentId}
         onOpen={open}
         onSessionRenameRequest={onSessionRenameRequest}
@@ -1308,6 +1390,9 @@ export function WorkspaceBrowser({
   // Persisted view blobs written before the archived filter existed rehydrate
   // without the field; they read as the default hide-archived view.
   const archivedFilter = useStore(s => s.archivedFilter ?? 'default')
+  // FORK queue-collapse-1112: blobs written before the fold existed rehydrate
+  // without the field; they read expanded — the hard top seat stays.
+  const queueCollapsed = useStore(s => s.queueCollapsed ?? false)
   const groupExpansion = useStore(s => s.groupExpansion)
   const sessionOrderByAccount = useStore(s => s.sessionOrderByAccount)
   // Archived sessions are not openable: the row stays visible under the
@@ -1856,6 +1941,8 @@ export function WorkspaceBrowser({
                   seals={seals}
                   sealRows={sealRows}
                   workspaces={orderedWorkspaces}
+                  queueCollapsed={queueCollapsed}
+                  setQueueCollapsed={actions.setQueueCollapsed}
                   t={t}
                 />
               )
@@ -1878,6 +1965,8 @@ export function WorkspaceBrowser({
                   animationResetKey={`${groupBy}/${orderBy}/${archivedFilter}`}
                   groupExpansion={groupExpansion}
                   setGroupExpanded={actions.setGroupExpanded}
+                  queueCollapsed={queueCollapsed}
+                  setQueueCollapsed={actions.setQueueCollapsed}
                   setSessionOrder={saveSessionOrder}
                   rowState={rowState}
                   onLeaveArchivedOnly={leaveArchivedOnly}

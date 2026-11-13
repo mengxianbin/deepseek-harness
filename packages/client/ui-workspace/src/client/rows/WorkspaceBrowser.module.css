@@ -678,14 +678,86 @@
    queue-headers-cut-1101): the hard 「要我拿主意」 top segment — its rows sit
    directly at the list head with no segment or tier label lines (small-screen
    height budget), and an always-visible empty line, so "nothing needs me"
-   still reads as an answer, not an absence. */
+   still reads as an answer, not an absence.
+   FORK dsh-local (queue-collapse-1112, marker: queueSegmentCollapse): the
+   segment is a flex column with the same trailing seat as `.list` — 2px edge
+   offset plus the rows clip's padding and stable gutter put every row (and
+   both scrollbars) on the shell inset, where the segment's rows used to run
+   8px past the list's. Height is the flex column's to give: no row cap, the
+   rows clip scrolls its own overflow, and the list below keeps whatever the
+   segment leaves (a flood fills the seat; folding hands the seat back). */
 .queueSection {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin-right: var(--dsh-session-list-scrollbar-offset);
+  /* Nothing can scroll without rows: the empty line and the folded bar keep
+     the tight 4px gap to the list. */
   padding-bottom: 4px;
+}
+
+/* Rows present: at flood the segment's bottom meets the tree's fade exactly
+   where the list's does — the same 16px clearance keeps the last row above
+   the gradient at scroll end (mirrors `.list`). */
+.queueSection[data-queue-scroll] {
+  padding-bottom: 16px;
 }
 
 .queueSection + :global(*) {
   margin-top: 0;
+}
+
+/* The persistent count bar (segment head, always mounted while N > 0): the
+   fold affordance and the count in one line — the single line the cut headers
+   left room for. Its right edge matches the rows', behind the gutter column. */
+.queueToggle {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: calc(var(--dsh-session-list-edge-inset) - var(--dsh-session-list-scrollbar-offset));
+  padding: 4px 0 4px 12px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+@media (hover: hover) {
+  .queueToggle:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
+}
+
+/* Expand arrow (filled triangle): points right folded, rotates down open —
+   the ProjectRow vocabulary (Rows.module.css `.arrow`). */
+.queueChevron {
+  flex: none;
+  transition: transform 150ms var(--ds-ease-in-out);
+}
+
+.queueChevronOpen {
+  transform: rotate(90deg);
+}
+
+/* The rows clip: the segment's own scroll region, seat math mirrored from
+   `.list` (padding + stable 5px gutter = the remaining shell inset) so the
+   rows never move when its scrollbar comes or goes, and its bar lands in the
+   same column as the list's below. */
+.queueRows {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: calc(
+    var(--dsh-session-list-edge-inset)
+    - var(--dsh-session-list-scrollbar-width)
+    - var(--dsh-session-list-scrollbar-offset)
+  );
+  scrollbar-gutter: stable;
 }
 
 .queueEmpty {
@@ -699,8 +771,10 @@
    while the sweep books don't balance, amber with the shared dashed vocabulary
    when the health chain itself goes silent (自指 fail-closed). The click
    expands the same difference detail the top-strip shield shows. */
+/* The alarm box ends where the rows end (the segment's seat moved them onto
+   the shell inset with queue-collapse-1112; this keeps its old position). */
 .queueHealth {
-  margin: 0 8px 4px 12px;
+  margin: 0 calc(var(--dsh-session-list-edge-inset) - var(--dsh-session-list-scrollbar-offset)) 4px 12px;
   border-radius: var(--dsw-radius-sm);
   background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 12%, transparent);
 }

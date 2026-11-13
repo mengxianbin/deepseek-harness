@@ -21,6 +21,7 @@ import {
   writeClientBuildRecord,
 } from './client-build-environment.ts'
 import { aggregateBuildArgs, aggregateCheckArgs, contractSteps, libraryBuildSteps } from './compile-referenced-projects.ts'
+import { enterHeavyIoGate } from './heavy-io-gate.ts'
 import type { LibraryStep } from './compile-referenced-projects.ts'
 import { beginBuild, endBuild, STAMP_ACTIVE_ENV } from './restart-signal/build-stamp.ts'
 import { readStartStamp, writeFailedStamp } from './restart-signal/manifest.ts'
@@ -168,6 +169,18 @@ async function main(): Promise<number> {
   }
   const { scope, profile, serial } = parseBuildArguments(process.argv.slice(2))
   const root = resolve(import.meta.dirname, '..')
+  // 纯排队 sink（2026-11-12 定稿）：build 全 scope 在真实入口进机器级锁——包
+  // package.json 拦不住裸 `tsx scripts/build.ts --scope typecheck`（18:47 打穿
+  // 的洞），sink 才是入口级封堵。CI / DSH_HEAVY_IO=0 / 嵌套持锁照旧透传。
+  const lease = await enterHeavyIoGate(`scripts/build.ts${process.argv.slice(2).map(arg => ` ${arg}`).join('')}`, process.env)
+  try {
+    return await executeBuild(scope, profile, serial, root)
+  } finally {
+    await lease?.release()
+  }
+}
+
+async function executeBuild(scope: BuildScope, profile: string | undefined, serial: boolean, root: string): Promise<number> {
   const name = scope === 'complete' ? 'build' : scope === 'typecheck' ? 'typecheck' : `build:${scope}`
   const budget = defaultParallelism()
   const workers = (gates: readonly Gate[]) => ({

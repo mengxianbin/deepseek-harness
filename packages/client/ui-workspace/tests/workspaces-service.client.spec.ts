@@ -453,6 +453,74 @@ describe('UiWorkspaceService', () => {
     expect(b.selectPanel).not.toHaveBeenCalled()
   })
 
+  it('keeps the replaced main view warm under its own reference key', () => {
+    const b = bench()
+    b.uiWorkspace.openSession(sid('first'))
+    b.uiWorkspace.openSession(sid('second'))
+
+    // The swap transfers the prior main: its mainView key drops (consumers read
+    // it as the current-session predicate) while a mainViewWarm retain keeps the
+    // scope alive so switching back skips the cold reopen.
+    expect(b.sessions.retain.mock.calls.map(([target, options]) => [target, options?.source])).toEqual([
+      [sid('first'), 'mainView'],
+      [sid('second'), 'mainView'],
+      [sid('first'), 'mainViewWarm'],
+    ])
+    expect(b.sessions.retained[0]!.release).toHaveBeenCalledOnce()
+    expect(b.sessions.retained[2]!.release).not.toHaveBeenCalled()
+  })
+
+  it('drops the warm twin when the same Session becomes main again', () => {
+    const b = bench()
+    b.uiWorkspace.openSession(sid('first'))
+    b.uiWorkspace.openSession(sid('second'))
+    b.uiWorkspace.openSession(sid('first'))
+
+    expect(b.sessions.retain.mock.calls.map(([target, options]) => [target, options?.source])).toEqual([
+      [sid('first'), 'mainView'],
+      [sid('second'), 'mainView'],
+      [sid('first'), 'mainViewWarm'],
+      [sid('first'), 'mainView'],
+      [sid('second'), 'mainViewWarm'],
+    ])
+    expect(b.sessions.retained[2]!.release).toHaveBeenCalledOnce()
+    expect(b.sessions.retained[3]!.release).not.toHaveBeenCalled()
+  })
+
+  it('evicts the oldest warm entry past the keep-warm limit', () => {
+    const b = bench()
+    for (const id of ['a', 'b', 'c', 'd']) b.uiWorkspace.openSession(sid(id))
+
+    // Warm holds at most two: b and c. a's twin was evicted when d opened.
+    expect(b.sessions.retained[2]!.release).toHaveBeenCalledOnce()
+    expect(b.sessions.retained[4]!.release).not.toHaveBeenCalled()
+    expect(b.sessions.retained[6]!.release).not.toHaveBeenCalled()
+    expect(b.sessions.retained[5]!.release).not.toHaveBeenCalled()
+  })
+
+  it('drops the warm entry when that Session is archived', async () => {
+    const b = bench()
+    b.workspaces.onArchive = async () => {}
+    b.uiWorkspace.openSession(sid('first'))
+    b.uiWorkspace.openSession(sid('second'))
+    const warm = b.sessions.retained[2]!
+
+    await b.uiWorkspace.archiveSession(sid('first'))
+
+    expect(warm.release).toHaveBeenCalledOnce()
+  })
+
+  it('releases warm entries when the navigation policy is disposed', async () => {
+    const b = bench()
+    b.uiWorkspace.openSession(sid('first'))
+    b.uiWorkspace.openSession(sid('second'))
+    const warm = b.sessions.retained[2]!
+
+    await b.ctx.fiber.dispose()
+
+    expect(warm.release).toHaveBeenCalledOnce()
+  })
+
   it('releases a newly retained target when Workspace preparation throws', async () => {
     const b = bench({
       workspaces: workspaceState([workspace('a')]),
@@ -780,7 +848,8 @@ describe('UiWorkspaceService', () => {
     b.uiWorkspace.openSession(current.id)
     b.uiWorkspace.startSession()
     await vi.waitFor(() => {
-      expect(b.sessions.retain).toHaveBeenLastCalledWith(sid('created-current-home'), { source: 'mainView' })
+      // Not "last called": the swap then warms `current` with its own retain.
+      expect(b.sessions.retain).toHaveBeenCalledWith(sid('created-current-home'), { source: 'mainView' })
     })
     const recentOnly = bench({
       sessions: sessionState([current, recent]),

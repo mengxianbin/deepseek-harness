@@ -2,7 +2,7 @@
  * Process-spawning cases set Vitest's case timeout to 90 seconds. Configuration-only
  * cases keep the default.
  */
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -75,24 +75,25 @@ describe('heavy-io gate lock', () => {
     }
   })
 
-  it('keeps a fresh lock whose owner is alive', async () => {
+  it('keeps a lock whose owner is alive, no matter how long it has held', async () => {
     const directory = lockDir('fresh')
     try {
       await rm(directory, { recursive: true, force: true })
       await mkdir(directory, { recursive: true })
+      // 纯排队（2026-11-12 定稿）：live owner 永不被抢，年龄不再构成 stale。
       await writeFile(join(directory, 'owner.json'), JSON.stringify({
         pid: process.pid,
-        startedAt: new Date().toISOString(),
+        startedAt: new Date(Date.now() - 120 * 60_000).toISOString(),
         command: 'pnpm run lint',
       }))
-      expect(await breakStaleHeavyIoLock(directory, 60_000)).toBe(false)
+      expect(await breakStaleHeavyIoLock(directory)).toBe(false)
       expect(await readHeavyIoLock(directory)).toBeDefined()
     } finally {
       await rm(directory, { recursive: true, force: true })
     }
   })
 
-  it('breaks a lock whose owner died or whose age is past the bound', async () => {
+  it('breaks a lock whose owner died', async () => {
     const directory = lockDir('stale')
     try {
       await rm(directory, { recursive: true, force: true })
@@ -104,16 +105,7 @@ describe('heavy-io gate lock', () => {
         startedAt: new Date().toISOString(),
         command: 'pnpm run lint',
       }))
-      expect(await breakStaleHeavyIoLock(directory, 60_000)).toBe(true)
-      expect(await readHeavyIoLock(directory)).toBeUndefined()
-
-      await mkdir(directory, { recursive: true })
-      await writeFile(join(directory, 'owner.json'), JSON.stringify({
-        pid: process.pid,
-        startedAt: new Date(Date.now() - 120_000).toISOString(),
-        command: 'pnpm run lint',
-      }))
-      expect(await breakStaleHeavyIoLock(directory, 60_000)).toBe(true)
+      expect(await breakStaleHeavyIoLock(directory)).toBe(true)
       expect(await readHeavyIoLock(directory)).toBeUndefined()
     } finally {
       await rm(directory, { recursive: true, force: true })
@@ -125,8 +117,6 @@ describe('heavy-io gate lock', () => {
     const result = runGate(['node -e "process.exit(7)"'], {
       DSH_HEAVY_IO_LOCK_DIR: directory,
       DSH_HEAVY_IO_POLL_MS: '100',
-      DSH_HEAVY_IO_WAIT_MS: '2000',
-      DSH_HEAVY_IO_STALE_MS: '60000',
     })
 
     expect(result.error).toBeUndefined()
@@ -156,7 +146,7 @@ describe('heavy-io gate lock', () => {
 
 describe('heavy-io gate wiring', () => {
   it('routes every heavy entry script through the gate without touching load-bearing originals', () => {
-    for (const [entry, inner] of [
+    const wiring = [
       ['heavy:build:lib', 'pnpm run build:lib'],
       ['heavy:build:lib:host', 'pnpm run build:lib:host'],
       ['heavy:build:lib:client', 'pnpm run build:lib:client'],
@@ -197,8 +187,56 @@ describe('heavy-io gate wiring', () => {
       ['lint', 'tsx scripts/compile-referenced-projects.ts host-contracts && npm run lint:contracts-ready'],
       ['lint:fix', 'tsx scripts/compile-referenced-projects.ts host-contracts && npm run lint:fix:contracts-ready'],
       ['test:slowlane', 'tsx scripts/run-slow-lane.ts'],
-    ] as const) {
+      // FORK dsh-local (heavy-io-serial-1112): second wiring batch — 30 keys
+      // wrapped in package.json (e2e/web/snapshot/expected test families,
+      // doc-typecheck/docs, duplication, package:desktop*). Each `inner` is the
+      // pre-wrap original byte-for-byte, so the `toBe` above doubles as the
+      // reverse assertion that the inner command never drifted. The completeness
+      // check below fails if a future gated key skips this list.
+      ['test:e2e', 'vitest run --config vitest.e2e.config.ts'],
+      ['test:web', 'npm run build && npm run test:web:built'],
+      ['test:web:refresh', 'npm run build && DSH_SNAPSHOT=refresh vitest run --config vitest.web.config.ts'],
+      ['test:web:built', 'vitest run --config vitest.web.config.ts'],
+      ['test:web:ci', 'tsx scripts/run-web-snapshots.ts'],
+      ['test:web:perf', 'npm run build && npm run test:web:perf:built'],
+      ['test:web:perf:built', 'DSH_SNAPSHOT=replay vitest run --config vitest.web.perf.config.ts'],
+      ['test:web:stress', 'npm run build && vitest run --config vitest.web-stress.config.ts'],
+      ['test:snapshot', 'vitest run --config vitest.snapshot.config.ts'],
+      ['test:snapshot:record', 'DSH_SNAPSHOT=record vitest run --config vitest.snapshot.config.ts --update'],
+      ['test:snapshot:refresh', 'DSH_SNAPSHOT=refresh vitest run --config vitest.snapshot.config.ts'],
+      ['test:expected', 'vitest run --config vitest.expected.config.ts'],
+      ['test:expected:refresh', 'DSH_SNAPSHOT=refresh vitest run --config vitest.expected.config.ts'],
+      ['doc-typecheck', 'tsx scripts/compile-referenced-projects.ts host-contracts && npm run doc-typecheck:contracts-ready'],
+      ['doc-typecheck:contracts-ready', 'tsx scripts/doc-typecheck.ts'],
+      ['docs:build', 'tsx website/build.ts && pnpm run verify-doc-site-fragments'],
+      ['docs:build:mpa', 'tsx website/build.ts --mpa && pnpm run verify-doc-site-fragments'],
+      ['docs:check', 'pnpm exec vitest run scripts/project-doc-site.spec.ts scripts/verify-doc-site-fragments.spec.ts website/tests/mermaid-viewer.spec.ts website/tests/image-viewer.spec.ts website/tests/code-groups.spec.ts website/tests/page-markdown-actions.spec.ts website/tests/raw-markdown.spec.ts website/tests/table-filter.spec.ts && pnpm run docs:build'],
+      ['duplication', 'jscpd --config .jscpd.json packages scripts'],
+      ['package:desktop', 'pnpm --filter @deepseek-ai/dsh-desktop run package'],
+      ['package:desktop:dir', 'pnpm --filter @deepseek-ai/dsh-desktop run package:dir'],
+      ['package:desktop:mac:arm64', 'pnpm --filter @deepseek-ai/dsh-desktop run package:mac:arm64'],
+      ['package:desktop:mac:arm64:unsigned', 'pnpm --filter @deepseek-ai/dsh-desktop run package:mac:arm64:unsigned'],
+      ['package:desktop:mac:arm64:dir', 'pnpm --filter @deepseek-ai/dsh-desktop run package:mac:arm64:dir'],
+      ['package:desktop:mac:x64', 'pnpm --filter @deepseek-ai/dsh-desktop run package:mac:x64'],
+      ['package:desktop:mac:x64:unsigned', 'pnpm --filter @deepseek-ai/dsh-desktop run package:mac:x64:unsigned'],
+      ['package:desktop:mac:x64:dir', 'pnpm --filter @deepseek-ai/dsh-desktop run package:mac:x64:dir'],
+      ['package:desktop:win:x64', 'pnpm --filter @deepseek-ai/dsh-desktop run package:win:x64'],
+      ['package:desktop:win:x64:unsigned', 'pnpm --filter @deepseek-ai/dsh-desktop run package:win:x64:unsigned'],
+      ['package:desktop:win:x64:dir', 'pnpm --filter @deepseek-ai/dsh-desktop run package:win:x64:dir'],
+    ] as const
+    for (const [entry, inner] of wiring) {
       expect(packageScripts[entry], entry).toBe(`tsx scripts/heavy-io-gate.ts "${inner}"`)
+    }
+
+    // Reverse completeness: every gate-wrapped key in package.json must appear
+    // in the wiring list above. Without this, a newly gated key can sit
+    // unwired-in-spec silently — the exact gap that let 30 keys trail the list
+    // on 2026-11-12.
+    const wired = new Set<string>(wiring.map(([entry]) => entry))
+    for (const [key, value] of Object.entries(packageScripts)) {
+      if (value.startsWith('tsx scripts/heavy-io-gate.ts ')) {
+        expect(wired.has(key), `gated key missing from the wiring list: ${key}`).toBe(true)
+      }
     }
 
     // The CI gate graph consumes these originals verbatim (ci-workflow/run-gates
@@ -219,8 +257,6 @@ describe('heavy-io gate wiring', () => {
     const result = runGate(['echo', 'alpha', 'beta'], {
       DSH_HEAVY_IO_LOCK_DIR: directory,
       DSH_HEAVY_IO_POLL_MS: '100',
-      DSH_HEAVY_IO_WAIT_MS: '2000',
-      DSH_HEAVY_IO_STALE_MS: '60000',
     })
 
     expect(result.error).toBeUndefined()
@@ -266,9 +302,10 @@ describe('heavy-io gate history log', () => {
     }
   }, 90_000)
 
-  it('records waiting and fail-open lines while queued behind a live holder', async () => {
+  it('queues behind a live holder with no bound, then acquires after release (no fail-open)', async () => {
     const directory = lockDir('history-queue')
     const history = historyPath('queue')
+    let child: ReturnType<typeof spawn> | undefined
     try {
       await rm(directory, { recursive: true, force: true })
       await rm(history, { force: true })
@@ -278,25 +315,44 @@ describe('heavy-io gate history log', () => {
         startedAt: new Date().toISOString(),
         command: 'other heavy job',
       }))
-      const result = runGate(['node -e "process.stdout.write(\'queued\')"'], {
-        DSH_HEAVY_IO_LOCK_DIR: directory,
-        DSH_HEAVY_IO_HISTORY: history,
-        DSH_HEAVY_IO_POLL_MS: '50',
-        DSH_HEAVY_IO_WAIT_MS: '400',
-        DSH_HEAVY_IO_STALE_MS: '60000',
+      // 纯排队（2026-11-12 定稿）：waiter 没有等待上限，也不再 fail-open——
+      // 在活持有者释放前它必须一直 waiting。
+      child = spawn(process.execPath, [tsxCli, gateScript, 'node -e "process.stdout.write(\'queued\')"'], {
+        cwd: repositoryRoot,
+        env: {
+          ...process.env,
+          NO_COLOR: '1',
+          CI: 'false',
+          DSH_HEAVY_IO_LOCK_DIR: directory,
+          DSH_HEAVY_IO_HISTORY: history,
+          DSH_HEAVY_IO_POLL_MS: '50',
+        },
       })
+      let stdout = ''
+      let stderr = ''
+      child.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8') })
+      child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8') })
+      const exited = new Promise<number | null>(finish => child?.on('close', code => finish(code)))
 
-      expect(result.error).toBeUndefined()
-      expect(result.status).toBe(0)
-      expect(result.stdout).toBe('queued')
-      expect(result.stderr).toContain('wait bound reached, proceeding anyway (fail-open)')
-      const text = readFileSync(history, 'utf8')
-      expect(text).toMatch(new RegExp(`waiting pid=\\d+ waitedMs=\\d+ holderPid=${process.pid} holderCmd=other heavy job cmd=`))
-      expect(text).toMatch(/ fail-open pid=\d+ waitedMs=\d+ cmd=/)
-      // Fail-open proceeds WITHOUT the lock: no acquire and no release line.
-      expect(text).not.toContain(' acquire ')
-      expect(text).not.toContain(' release ')
+      await new Promise(done => setTimeout(done, 1_500))
+      // Still queued well past any former 400 ms wait bound: alive and waiting.
+      expect(child.exitCode).toBeNull()
+      expect(stderr).toContain('waiting for other heavy job')
+      const during = readFileSync(history, 'utf8')
+      expect(during).toMatch(new RegExp(`waiting pid=\\d+ waitedMs=\\d+ holderPid=${process.pid} holderCmd=other heavy job cmd=`))
+      expect(during).not.toContain(' fail-open ')
+      expect(during).not.toContain(' acquire ')
+
+      // Simulate the holder releasing; the waiter must then acquire and run.
+      await rm(directory, { recursive: true, force: true })
+      expect(await exited).toBe(0)
+      expect(stdout).toBe('queued')
+      const after = readFileSync(history, 'utf8')
+      expect(after).toMatch(/ acquire pid=\d+ cmd=node -e /)
+      expect(after).toMatch(/ release pid=\d+ heldMs=\d+ cmd=node -e /)
+      expect(after).not.toContain(' fail-open ')
     } finally {
+      child?.kill()
       await rm(directory, { recursive: true, force: true })
       await rm(history, { force: true })
     }

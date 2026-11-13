@@ -96,6 +96,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 declare module '@deepseek-ai/dsh-api-session-controller/client' {
   interface SessionReferenceSourceMap {
     workspaceOperation: unknown
+    /** FORK session-switch-warm-1111: a replaced main view kept warm for instant switch-back. */
+    mainViewWarm: unknown
   }
 }
 

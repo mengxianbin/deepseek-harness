@@ -3,22 +3,25 @@
  *
  * Workstation runs share one disk and one memory pool, so concurrent heavy jobs
  * (lint, typecheck, …) from separate sessions pile up and starve interactive work.
- * This gate serializes them through one advisory lock directory. It is fail-open by
- * design: a stale lock (dead owner or past the age bound) is broken, and a waiter
- * past its bound proceeds anyway — the gate trades strict mutual exclusion for never
- * becoming its own outage.
+ * This gate serializes them through one advisory lock directory. Serialization is
+ * strict: waiters queue without a bound and never proceed alongside a live holder
+ * (2026-11-12 定稿 · 纯排队——内存余量永远优先留给活会话周转，不给 build 让路).
+ * The only automatic break is a dead owner (crash recovery); a live holder is
+ * trusted indefinitely, so a wedged-but-alive holder blocks the queue until a
+ * human kills it (watchdog alarms at 45 min of hold time).
  *
  * Usage: `tsx scripts/heavy-io-gate.ts "<shell command>"`.
  * CI (`CI=true`), `DSH_HEAVY_IO=0`, and nested calls that already hold the gate
  * (`DSH_HEAVY_IO_HELD=1`) pass the command straight through.
  *
  * Every transition also appends one observation line to a history.log kept
- * outside the lock directory (acquire / waiting / fail-open / stale-break /
- * release / passthrough, each with ISO time, pid and command). Pure observation:
- * no gate decision reads it and every write failure is swallowed, so a full disk
- * costs at most the log line, never the gate.
+ * outside the lock directory (acquire / waiting / stale-break / release /
+ * passthrough, each with ISO time, pid and command). Pure observation: no gate
+ * decision reads it and every write failure is swallowed, so a full disk costs
+ * at most the log line, never the gate.
  */
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
@@ -26,18 +29,12 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const DEFAULT_POLL_INTERVAL_MS = 2_000
-// A full-repo `pnpm run test` runs ~38 min on this host (m-note
-// worktree-governance §5.7 cost anchor), so a 15 min wait bound let the second
-// job fail-open and race it — the gate only ever saw one heavy job at a time by
-// luck. 45 min puts a whole full test inside one waiter's bound.
-const DEFAULT_WAIT_BOUND_MS = 45 * 60 * 1000
-// Stale-after must outlive the longest job the gate ever holds, or a waiter
-// breaks a live owner's lock mid-run and the two jobs race anyway. 30 min was
-// shorter than a full test; 90 min clears the 45 min wait bound with headroom.
-// A dead owner is still broken immediately via `isProcessAlive`, so crash
-// recovery is unaffected — this bound only governs how long a live owner is
-// trusted.
-const DEFAULT_STALE_AFTER_MS = 90 * 60 * 1000
+// 纯排队（2026-11-12 定稿）：waiters queue without a bound. The former 45 min
+// wait bound + fail-open let a waiter race a live holder (observed 2026-11-12
+// 09:57Z); memory headroom belongs to interactive sessions, never to a build
+// that lost the queue. A dead owner still breaks immediately (crash recovery);
+// a live owner is trusted indefinitely — the 45 min watchdog alarm, not the
+// gate, decides when a wedged holder needs a human.
 
 /**
  * Resolve the default lock directory.
@@ -79,7 +76,7 @@ const HISTORY_WAITING_INTERVAL_MS = 60_000
  * Every failure path (full disk, missing permission, bad override path) is
  * swallowed here: history is pure observation and must never affect the gate.
  * @param file - History file path.
- * @param event - Event name (acquire / waiting / fail-open / stale-break / release / passthrough).
+ * @param event - Event name (acquire / waiting / stale-break / release / passthrough).
  * @param command - The gated command.
  * @param fields - Extra key=value fields, rendered before `cmd`.
  */
@@ -165,17 +162,16 @@ export function isProcessAlive(pid: number): boolean {
 }
 
 /**
- * Remove the lock directory when its owner is dead or the lock is older than the bound.
+ * Remove the lock directory when its owner is dead (or the record is unreadable).
+ * A live owner is never broken, no matter how long it has held the lock — the
+ * queue waits (纯排队); the 45 min watchdog alarm escalates a wedged holder to a
+ * human instead of racing it.
  * @param directory - Lock directory path.
- * @param staleAfterMs - Age bound after which any lock counts as stale.
  * @returns true when a stale lock was removed and the caller may retry the acquire.
  */
-export async function breakStaleHeavyIoLock(directory: string, staleAfterMs: number): Promise<boolean> {
+export async function breakStaleHeavyIoLock(directory: string): Promise<boolean> {
   const owner = await readHeavyIoLock(directory)
-  if (owner !== undefined) {
-    const ageMs = Date.now() - Date.parse(owner.startedAt)
-    if (isProcessAlive(owner.pid) && ageMs < staleAfterMs) return false
-  }
+  if (owner !== undefined && isProcessAlive(owner.pid)) return false
   await rm(directory, { recursive: true, force: true })
   return true
 }
@@ -188,9 +184,14 @@ export async function releaseHeavyIoLock(directory: string): Promise<void> {
   await rm(directory, { recursive: true, force: true })
 }
 
-function runCommand(command: string, env: NodeJS.ProcessEnv): Promise<number> {
+function runCommand(
+  command: string,
+  env: NodeJS.ProcessEnv,
+  onSpawn?: (child: ChildProcess) => void,
+): Promise<number> {
   return new Promise((finish, fail) => {
     const child = spawn(command, { shell: true, stdio: 'inherit', env: { ...env, DSH_HEAVY_IO_HELD: '1' } })
+    onSpawn?.(child)
     child.on('error', fail)
     child.on('close', (code) => {
       finish(code ?? 1)
@@ -202,29 +203,100 @@ function sleep(ms: number): Promise<void> {
   return new Promise(done => setTimeout(done, ms))
 }
 
-async function runGated(command: string, env: NodeJS.ProcessEnv): Promise<number> {
+/**
+ * Kill a still-running gated command's process tree (best effort).
+ * Windows: `taskkill /T` walks the attached descendants of the shell the gate
+ * spawned. The pid must belong to a child this gate spawned and still be alive
+ * (callers check first) — killing after `close` would risk a recycled pid.
+ * Detached grandchildren that already reparented are unreachable here; the
+ * machine watchdog owns those stragglers.
+ * @param pid - Process id of the spawned shell root.
+ */
+function killChildTree(pid: number): void {
+  if (process.platform === 'win32') {
+    try {
+      spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
+    } catch {
+      // Best effort: a vanished tree already satisfies the goal.
+    }
+    return
+  }
+  try {
+    process.kill(-pid, 'SIGKILL')
+  } catch {
+    try {
+      process.kill(pid, 'SIGKILL')
+    } catch {
+      // Best effort: a vanished tree already satisfies the goal.
+    }
+  }
+}
+
+/** Which bypass path skips the gate; undefined means the command must queue. */
+function passthroughReason(env: NodeJS.ProcessEnv): 'ci' | 'off' | 'held' | undefined {
+  if (env.CI === 'true') return 'ci'
+  if (env.DSH_HEAVY_IO === '0') return 'off'
+  if (env.DSH_HEAVY_IO_HELD === '1') return 'held'
+  return undefined
+}
+
+/**
+ * Queue for the machine-wide heavy lock and hold it until the lease is released.
+ * Pure queue (2026-11-12 定稿): no wait bound, no fail-open — a waiter polls
+ * until every live holder has released; only a dead owner breaks early.
+ * When the lease is taken on `process.env` (the in-process sink default), the
+ * holder marks `DSH_HEAVY_IO_HELD=1` so nested gate wrappers pass through.
+ * @param command - Description recorded in owner.json and history.log.
+ * @param env - Environment to read gate settings from; defaults to this process.
+ * @returns an idempotent release handle, or undefined when the call passes through.
+ */
+export async function enterHeavyIoGate(
+  command: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<{ release: () => Promise<void> } | undefined> {
+  const reason = passthroughReason(env)
+  if (reason !== undefined) {
+    recordHistory(historyFile(env), 'passthrough', command, { reason })
+    return undefined
+  }
   const directory = env.DSH_HEAVY_IO_LOCK_DIR ?? defaultLockDirectory(env)
   const history = historyFile(env)
+  await waitForHeavyIoLock(directory, command, env)
+  if (env === process.env) process.env.DSH_HEAVY_IO_HELD = '1'
+  const acquiredAt = Date.now()
+  let released = false
+  return {
+    release: async (): Promise<void> => {
+      if (released) return
+      released = true
+      await releaseHeavyIoLock(directory)
+      recordHistory(history, 'release', command, { heldMs: Date.now() - acquiredAt })
+    },
+  }
+}
+
+/**
+ * Wait until the lock directory is free (or its owner is dead), then take it.
+ * Records acquire / waiting / stale-break transitions to the history log.
+ * @param directory - Lock directory path.
+ * @param command - The gated command, reported to waiters and the log.
+ * @param env - Environment supplying poll interval and history overrides.
+ * @returns the acquire timestamp (ms).
+ */
+async function waitForHeavyIoLock(directory: string, command: string, env: NodeJS.ProcessEnv): Promise<number> {
+  const history = historyFile(env)
   const pollMs = Number(env.DSH_HEAVY_IO_POLL_MS ?? DEFAULT_POLL_INTERVAL_MS)
-  const waitBoundMs = Number(env.DSH_HEAVY_IO_WAIT_MS ?? DEFAULT_WAIT_BOUND_MS)
-  const staleAfterMs = Number(env.DSH_HEAVY_IO_STALE_MS ?? DEFAULT_STALE_AFTER_MS)
-  const deadline = Date.now() + waitBoundMs
   const startedAt = Date.now()
-  let acquired = false
-  let acquiredAt = 0
   let waitingLoggedAt = 0
   for (;;) {
     if (await acquireHeavyIoLock(directory, command) !== undefined) {
-      acquired = true
-      acquiredAt = Date.now()
       recordHistory(history, 'acquire', command)
-      break
+      return startedAt
     }
     // Observation pre-read: breakStaleHeavyIoLock re-reads internally and only
-    // answers yes/no, so the owner record about to be judged is captured here
-    // (the helper's exported contract stays byte-identical).
+    // answers yes/no, so the owner record about to be judged is captured here.
     const heldForLog = await readHeavyIoLock(directory)
-    if (await breakStaleHeavyIoLock(directory, staleAfterMs)) {
+    if (await breakStaleHeavyIoLock(directory)) {
       if (heldForLog !== undefined) {
         recordHistory(history, 'stale-break', command, {
           holderPid: heldForLog.pid,
@@ -238,10 +310,6 @@ async function runGated(command: string, env: NodeJS.ProcessEnv): Promise<number
     process.stderr.write(
       `heavy-io-gate: waiting for ${holder?.command ?? 'another heavy job'} (pid ${holder?.pid ?? 'unknown'})\n`,
     )
-    // Captured at the original position (right after the waiting line, exactly
-    // where the previous code evaluated it) so the history write below cannot
-    // nudge the fail-open decision.
-    const boundReached = Date.now() + pollMs > deadline
     if (Date.now() - waitingLoggedAt >= HISTORY_WAITING_INTERVAL_MS) {
       waitingLoggedAt = Date.now()
       recordHistory(history, 'waiting', command, {
@@ -250,37 +318,42 @@ async function runGated(command: string, env: NodeJS.ProcessEnv): Promise<number
         ...(holder !== undefined ? { holderCmd: holder.command } : {}),
       })
     }
-    if (boundReached) {
-      process.stderr.write('heavy-io-gate: wait bound reached, proceeding anyway (fail-open).\n')
-      recordHistory(history, 'fail-open', command, { waitedMs: Date.now() - startedAt })
-      break
-    }
     await sleep(pollMs + Math.floor(Math.random() * 500))
-  }
-  try {
-    return await runCommand(command, env)
-  } finally {
-    if (acquired) {
-      await releaseHeavyIoLock(directory)
-      recordHistory(history, 'release', command, { heldMs: Date.now() - acquiredAt })
-    }
   }
 }
 
 async function main(): Promise<void> {
   const command = process.argv.slice(2).join(' ')
   if (command === '') throw new Error('heavy-io-gate: expected a shell command argument after --.')
-  const passthrough = process.env.CI === 'true'
-    || process.env.DSH_HEAVY_IO === '0'
-    || process.env.DSH_HEAVY_IO_HELD === '1'
-  if (passthrough) {
-    // Which bypass path fired is exactly the "was this gated?" question the
-    // history exists to answer — record it, then proceed unchanged.
-    recordHistory(historyFile(process.env), 'passthrough', command, {
-      reason: process.env.CI === 'true' ? 'ci' : process.env.DSH_HEAVY_IO === '0' ? 'off' : 'held',
+  const lease = await enterHeavyIoGate(command, process.env)
+  if (lease === undefined) {
+    // Passthrough was recorded by enterHeavyIoGate — the "was this gated?"
+    // question the history exists to answer.
+    process.exitCode = await runCommand(command, process.env)
+    return
+  }
+  let child: ChildProcess | undefined
+  // Abnormal exit only: a signal means the gate is going down while the
+  // command may still be attached — kill the tree before releasing so the
+  // next queued job never overlaps surviving descendants (tsgolint respawn).
+  // On normal `close` the tree is done; killing then would risk a recycled pid.
+  const onSignal = (signal: NodeJS.Signals): void => {
+    if (child?.pid !== undefined && child.exitCode === null && child.signalCode === null) {
+      killChildTree(child.pid)
+    }
+    void lease.release().finally(() => {
+      process.exit(signal === 'SIGINT' ? 130 : 143)
     })
   }
-  process.exitCode = passthrough ? await runCommand(command, process.env) : await runGated(command, process.env)
+  process.once('SIGINT', onSignal)
+  process.once('SIGTERM', onSignal)
+  try {
+    process.exitCode = await runCommand(command, process.env, (spawned) => { child = spawned })
+  } finally {
+    process.off('SIGINT', onSignal)
+    process.off('SIGTERM', onSignal)
+    await lease.release()
+  }
 }
 
 const entrypoint = process.argv[1]

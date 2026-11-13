@@ -1000,6 +1000,21 @@ describe('createWorkspaceViewStore', () => {
     expect(snapshot.groupExpansion).toEqual({ '': true, alpha: true })
     expect(snapshot.sessionOrderByAccount).toEqual({ alpha: ['alpha-session'] })
   })
+
+  it('persists the queue segment fold (FORK queue-collapse-1112)', () => {
+    // The default seat is expanded — the segment stays the hard top seat the
+    // placement ruling guarantees; blobs written before the fold existed read
+    // the same way (the field is optional and defaults false).
+    const store = createWorkspaceViewStore().create()
+    expect(store.getSnapshot().queueCollapsed).toBe(false)
+    store.actions.setQueueCollapsed(true)
+    expect(store.getSnapshot().queueCollapsed).toBe(true)
+    store.actions.setQueueCollapsed(false)
+    expect(store.getSnapshot().queueCollapsed).toBe(false)
+    // The fold is view state, not a Workspace key: retention leaves it alone.
+    store.actions.retainAccountKeys(['alpha'])
+    expect(store.getSnapshot().queueCollapsed).toBe(false)
+  })
 })
 
 describe('workspaceLabel', () => {
