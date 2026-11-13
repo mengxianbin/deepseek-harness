@@ -77,9 +77,12 @@ export function parseBuildArguments(args: readonly string[]): BuildArguments {
  * Artifact steps generate Typert from source before Host compilation, then bundle Host,
  * Desktop, and Client artifacts before Web. Native output also precedes Host compilation.
  * The typecheck scope generates Typert before compiling Host and Client packages; it writes no
- * bundle. In complete and typecheck scopes each aggregate check waits only for its own face's
- * package compilation; alone, the
+ * bundle. In complete scope each aggregate check waits only for its own face's package
+ * compilation; alone, the
  * checks have no predecessors and read whatever declarations already exist. The typecheck scope
+ * serializes its two aggregate checks (`client-check` waits for `host-check`): both run `tsc -b`
+ * with an 8 GiB heap, and overlapping them inside one machine-gate hold broke a 16 GB machine
+ * (2026-11-13 incident, user-directed fix — source compiles stay chained as before). The typecheck scope
  * checks aggregates in build mode, which skips a program whose tsbuildinfo is current; the other
  * scopes use project mode, which compiles no reference.
  * @param root - Repository root containing the compiler and bundle configurations.
@@ -115,7 +118,7 @@ export function buildGates(
         displayCommand: `tsc ${scope === 'typecheck' ? '-b' : '-p'} tsconfig.${face}.json`,
         command: process.execPath,
         args: scope === 'typecheck' ? aggregateBuildArgs(face) : aggregateCheckArgs(face),
-        needs: scope === 'check' ? [] : [`${face}-src`],
+        needs: scope === 'check' ? [] : scope === 'typecheck' && face === 'client' ? [`${face}-src`, 'host-check'] : [`${face}-src`],
         env,
       })
     }

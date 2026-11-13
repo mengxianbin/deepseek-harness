@@ -178,8 +178,10 @@ describe('pickWin32Directory', () => {
 
   // Hosts with the dialog run the true COM smoke instead: a real dialog opens
   // briefly and the abort service closes it (the same lever a disconnecting
-  // client pulls).
-  it.skipIf(!opensRealDialog)('opens and abort-closes a real dialog', async () => {
+  // client pulls). The real window is opt-in (`DSH_TEST_REAL_DIALOG=1`): with
+  // the variable unset the case skips in every lane, so ordinary test runs
+  // never flash this window on the developer's desktop.
+  it.skipIf(!opensRealDialog || process.env.DSH_TEST_REAL_DIALOG !== '1')('opens and abort-closes a real dialog', async () => {
     const controller = new AbortController()
     setTimeout(() => {
       controller.abort()
