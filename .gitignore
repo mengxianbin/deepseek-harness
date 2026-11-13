@@ -84,3 +84,6 @@ packages/test-support/session-snapshot/src/*.d.ts*
 # 运行态快照与 fork 临时审计（2026-11-12 用户裁 ignore）
 /fork-audit/
 /restart-signal-runtime.json
+
+# dsh 数据根本机覆盖（键同入库 data-root.json，机器相关取值；dsh-home-configfile-1113）
+data-root.local.json
