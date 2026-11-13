@@ -2162,6 +2162,50 @@ describe('WorkspaceBrowser', () => {
     expect(screen.getByRole('button', { name: '搜索会话' }).getAttribute('aria-expanded')).toBe('true')
   })
 
+  it('lands keyboard focus on the selected session row when the focus shortcut fires', () => {
+    localStorage.clear()
+    const preferences = createWorkspaceViewStore().create()
+    preferences.actions.setGroupExpanded('alpha', true)
+    localStorage.setItem('dsh.workspace.view.v5', JSON.stringify(preferences.getSnapshot()))
+    const b = mount({
+      useSessions: hook(sessionState([summary('a', 30), summary('b', 20)], { main: sid('b') })),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['a', 'b'])])),
+    })
+    const selected = document.querySelector('[data-row-key="session:b"]') as HTMLElement
+    expect(selected).not.toBeNull()
+    expect(document.activeElement).not.toBe(selected)
+    act(() => { b.controls.focusList() })
+    expect(document.activeElement).toBe(selected)
+    b.view.unmount()
+    // Without a selected row the list still takes the keyboard: first row wins.
+    const idle = mount({
+      useSessions: hook(sessionState([summary('a', 30), summary('b', 20)])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['a', 'b'])])),
+    })
+    act(() => { idle.controls.focusList() })
+    expect(document.activeElement).toBe(document.querySelector('[data-row-key="session:a"]'))
+    idle.view.unmount()
+  })
+
+  it('expands a collapsed sidebar before the focus request lands on its session row', () => {
+    localStorage.clear()
+    const preferences = createWorkspaceViewStore().create()
+    preferences.actions.setGroupExpanded('alpha', true)
+    localStorage.setItem('dsh.workspace.view.v5', JSON.stringify(preferences.getSnapshot()))
+    const b = mount({
+      wide: false,
+      expandSidebar: vi.fn(),
+      useSessions: hook(sessionState([summary('a', 30)], { main: sid('a') })),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['a'])])),
+    })
+    act(() => { b.controls.focusList() })
+    expect(b.props.expandSidebar).toHaveBeenCalledTimes(1)
+    expect(document.activeElement).not.toBe(document.querySelector('[data-row-key="session:a"]'))
+    rerender(b, { wide: true })
+    expect(document.activeElement).toBe(document.querySelector('[data-row-key="session:a"]'))
+    b.view.unmount()
+  })
+
   it('rail state renders icon controls that request expansion', () => {
     vi.useFakeTimers()
     try {

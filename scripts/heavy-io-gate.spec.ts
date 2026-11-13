@@ -112,6 +112,53 @@ describe('heavy-io gate lock', () => {
     }
   })
 
+  it('keeps an ownerless directory while the winner is still writing its record', async () => {
+    const directory = lockDir('ownerless-window')
+    try {
+      await rm(directory, { recursive: true, force: true })
+      // Claim taken (mkdir won) but owner.json not yet written — the exact
+      // window in which 2026-11-13 12:39:55Z a waiter broke a live holder.
+      await mkdir(directory)
+      const breaking = breakStaleHeavyIoLock(directory)
+      // The winner finishes its write inside the read backoff.
+      await new Promise(done => setTimeout(done, 50))
+      await writeFile(join(directory, 'owner.json'), JSON.stringify({
+        pid: process.pid,
+        startedAt: new Date().toISOString(),
+        command: 'pnpm run lint',
+      }))
+      expect(await breaking).toBe(false)
+      expect((await readHeavyIoLock(directory))?.pid).toBe(process.pid)
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('breaks an ownerless directory only after the read backoff, not immediately', async () => {
+    const directory = lockDir('ownerless-orphan')
+    try {
+      await rm(directory, { recursive: true, force: true })
+      await mkdir(directory)
+      const startedAt = Date.now()
+      // Nobody ever writes owner.json: the claimant died inside the window, so
+      // the directory is an orphan and must still be broken — but only after
+      // the backoff has given a live winner time to finish its write.
+      expect(await breakStaleHeavyIoLock(directory)).toBe(true)
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(100)
+      expect(await readHeavyIoLock(directory)).toBeUndefined()
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('reports nothing broken when the lock directory vanished under inspection', async () => {
+    const directory = lockDir('vanished')
+    await rm(directory, { recursive: true, force: true })
+    // A holder released (or a rival broke the lock) between our read and our
+    // rm: removing here could delete a fresh successor's claim.
+    expect(await breakStaleHeavyIoLock(directory)).toBe(false)
+  })
+
   it('runs the command under the lock and propagates its exit code', () => {
     const directory = lockDir('e2e')
     const result = runGate(['node -e "process.exit(7)"'], {
@@ -353,6 +400,64 @@ describe('heavy-io gate history log', () => {
       expect(after).not.toContain(' fail-open ')
     } finally {
       child?.kill()
+      await rm(directory, { recursive: true, force: true })
+      await rm(history, { force: true })
+    }
+  }, 90_000)
+
+  it('never stale-breaks a live holder under concurrent waiters', async () => {
+    const directory = lockDir('two-waiters')
+    const history = historyPath('two-waiters')
+    const children: ReturnType<typeof spawn>[] = []
+    const spawnWaiter = (): ReturnType<typeof spawn> => {
+      const child = spawn(process.execPath, [tsxCli, gateScript, 'node -e "process.stdout.write(\'w\')"'], {
+        cwd: repositoryRoot,
+        env: {
+          ...process.env,
+          NO_COLOR: '1',
+          CI: 'false',
+          DSH_HEAVY_IO_LOCK_DIR: directory,
+          DSH_HEAVY_IO_HISTORY: history,
+          DSH_HEAVY_IO_POLL_MS: '50',
+        },
+      })
+      children.push(child)
+      return child
+    }
+    try {
+      await rm(directory, { recursive: true, force: true })
+      await rm(history, { force: true })
+      await mkdir(directory)
+      await writeFile(join(directory, 'owner.json'), JSON.stringify({
+        pid: process.pid,
+        startedAt: new Date().toISOString(),
+        command: 'live holder',
+      }))
+
+      // 2026-11-13 12:39:55Z 事故重演：一个活持有者 + 两个并发等待者。
+      // 任何一方对活持有者 stale-break 都会让第二方在其 owner.json 写入前
+      // mkdir 成功，两张锁并发进入闸内。
+      const waiters = [spawnWaiter(), spawnWaiter()]
+      await new Promise(done => setTimeout(done, 1_500))
+      for (const child of waiters) expect(child.exitCode).toBeNull()
+      const during = readFileSync(history, 'utf8')
+      expect(during).toMatch(/ waiting pid=\d+ waitedMs=\d+ holderPid=\d+ holderCmd=live holder cmd=/)
+      expect((during.match(/ waiting /g) ?? []).length).toBe(2)
+      expect(during).not.toContain(' stale-break ')
+      expect(during).not.toContain(' acquire ')
+
+      // 持有者释放后，两个等待者必须串行拿到锁（后到者读到前者的活 owner）。
+      await rm(directory, { recursive: true, force: true })
+      const codes = await Promise.all(waiters.map(child => new Promise<number | null>(
+        finish => child.on('close', code => finish(code)),
+      )))
+      expect(codes).toEqual([0, 0])
+      const after = readFileSync(history, 'utf8')
+      expect(after).not.toContain(' stale-break ')
+      expect((after.match(/ acquire /g) ?? []).length).toBe(2)
+      expect((after.match(/ release /g) ?? []).length).toBe(2)
+    } finally {
+      for (const child of children) child.kill()
       await rm(directory, { recursive: true, force: true })
       await rm(history, { force: true })
     }

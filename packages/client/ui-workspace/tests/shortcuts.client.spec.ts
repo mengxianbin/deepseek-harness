@@ -79,18 +79,34 @@ describe('workspace shortcut ownership', () => {
     b.controls.add()
     expect(b.controls.state.getSnapshot().addRequested).toBe(false)
   })
-  it('registers six commands with Desktop and Web defaults and removes registrations with the plugin', async () => {
+  it('registers seven commands with Desktop and Web defaults and removes registrations with the plugin', async () => {
     const b = await bench()
     expect(b.registry.catalog.getSnapshot().map(row => row.id)).toEqual([
-      'session.new', 'session.search', 'workspace.add', 'session.rename', 'session.fork', 'session.archive',
+      'session.new', 'session.search', 'focus.sessionList', 'workspace.add', 'session.rename', 'session.fork', 'session.archive',
     ])
     expect(b.registry.catalog.getSnapshot().every(row => row.keys.length > 0)).toBe(true)
     const web = await bench('web')
     expect(web.registry.catalog.getSnapshot().map(row => row.aria)).toEqual([
-      'Alt+Meta+N', 'Alt+Meta+K', 'Alt+Meta+O', 'Alt+Meta+G', 'Shift+Meta+F', 'Alt+Meta+A',
+      'Alt+Meta+N', 'Alt+Meta+K', 'Alt+Meta+1', 'Alt+Meta+O', 'Alt+Meta+G', 'Shift+Meta+F', 'Alt+Meta+A',
     ])
     await b.fiber.dispose()
     expect(b.registry.catalog.getSnapshot()).toEqual([])
+  })
+
+  it.each([
+    { runtime: 'web', platform: 'macos' }, { runtime: 'web', platform: 'windows' },
+    { runtime: 'desktop', platform: 'macos' }, { runtime: 'desktop', platform: 'windows' },
+  ] as const)('focuses the session list with one Digit1 binding on $runtime/$platform', async ({ runtime, platform }) => {
+    const b = await bench(runtime, platform)
+    const gesture = key('Digit1', { meta: platform === 'macos', control: platform === 'windows', alt: runtime === 'web' })
+    expect(b.registry.dispatch(gesture, context, vi.fn())).toEqual({ status: 'handled', commandId: 'focus.sessionList' })
+    expect(b.controls.state.getSnapshot().focusListRequest).toBe(1)
+    // The editable region carries the same command: a caret in the composer
+    // still jumps back to the list.
+    b.registry.dispatch(gesture, { ...context, region: 'editable' }, vi.fn())
+    expect(b.controls.state.getSnapshot().focusListRequest).toBe(2)
+    b.registry.dispatch(key('Digit1', { meta: platform === 'macos', control: platform === 'windows' }), context, vi.fn())
+    expect(b.controls.state.getSnapshot().focusListRequest).toBe(runtime === 'desktop' ? 3 : 2)
   })
 
   it.each([

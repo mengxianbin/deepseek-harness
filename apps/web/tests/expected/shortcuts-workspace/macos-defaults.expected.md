@@ -54,6 +54,17 @@
       - listitem:
         - button "Edit shortcut for Close current page or window"
         - text: Close current page or window ⌥ ⌘ W
+      - listitem: Next stop ⌥ ↓
+      - listitem: Previous stop ⌥ ↑
+      - listitem:
+        - button "Edit shortcut for Focus input box"
+        - text: Focus input box ⌥ ⌘ 3
+      - listitem:
+        - button "Edit shortcut for Focus conversation"
+        - text: Focus conversation ⌥ ⌘ 2
+      - listitem:
+        - button "Edit shortcut for Focus session list"
+        - text: Focus session list ⌥ ⌘ 1
   - region "Message input":
     - heading "Message input" [level=3]
     - list:
