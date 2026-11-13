@@ -449,7 +449,7 @@ describe('heavy-io gate history log', () => {
       // 持有者释放后，两个等待者必须串行拿到锁（后到者读到前者的活 owner）。
       await rm(directory, { recursive: true, force: true })
       const codes = await Promise.all(waiters.map(child => new Promise<number | null>(
-        finish => child.on('close', code => finish(code)),
+        finish => child.on('close', (code) => { finish(code) }),
       )))
       expect(codes).toEqual([0, 0])
       const after = readFileSync(history, 'utf8')
