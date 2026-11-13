@@ -329,6 +329,12 @@ export interface RestartSignalOptions {
 /** Resolve the state file one collect reads. */
 function statePathOf(options: RestartSignalOptions): string {
   if (options.statePath !== undefined) return options.statePath
+  // Cross-process isolation seam (build-dispatch E2E 机检⑦): a shell-exported
+  // absolute path wins over the data root, so a subprocess judge (the executor
+  // kicked through the watchdog) reads exactly the isolated state the E2E
+  // wrote — production never sets it and falls through to the data root.
+  const override = process.env.DSH_RESTART_SIGNAL_STATE
+  if (override !== undefined && override !== '') return override
   return join(resolveDshHome(options.dshHome), RESTART_SIGNAL_STATE_FILE)
 }
 
