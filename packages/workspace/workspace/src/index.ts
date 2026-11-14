@@ -391,33 +391,119 @@ export class WorkspaceRegistry extends Service {
    * moment into `archivedAtById` in that same write, so a resolved archive
    * always carries its time (archive-at-host-time-1114). An already archived id
    * resolves without writing, asking, or stopping.
+   *
+   * A parent archive cascades to its subagent descendants in the same
+   * operation (archive-cascade-reap-1114): the header index is refreshed so
+   * children created after boot stay visible, then every descendant reached
+   * through `origin === 'subagent'` parent links is archived through the same
+   * core write. Children are archived without `stopActivity` — running
+   * subagent work is refused and reported, never killed on the user's
+   * behalf — and a child that refuses or fails is logged loudly while the
+   * parent's completed archive stands; the idle reaper picks such a child up
+   * once it goes quiet. A repeat call on an already archived parent keeps
+   * its documented no-op and does not rescan (historical orphans are the
+   * reaper's job, not a replay's).
    * @param sessionId - The session to archive.
    * @param options - Whether running work is stopped instead of refusing.
    * @returns resolution after durability and, with `stopActivity`, after every stop request was issued.
    */
   archiveSession(sessionId: SessionId, options: ArchiveSessionOptions = {}): Promise<void> {
     return this.enqueueOperation(async () => {
-      // The chain slot serializes against every other registry write, so this
-      // check-then-write pair cannot interleave with another archive.
-      if (this.requireState().archivedSessionIds.includes(sessionId)) return
-      if (!(await this.sessionKnown(sessionId))) {
-        throw new WorkspaceUnknownSessionError(sessionId, 'archive')
-      }
-      if (options.stopActivity !== true) {
-        const activity = await this.ctx.waterfall(
-          'workspace/session-activity', { sessionId }, () => Promise.resolve([]),
-        )
-        if (activity.length > 0) throw new WorkspaceActiveSessionError(sessionId, activity)
-      }
-      const state = this.requireState()
-      await this.setState({
-        ...state,
-        archivedSessionIds: [...state.archivedSessionIds, sessionId],
-        archivedAtById: { ...state.archivedAtById, [sessionId]: Date.now() },
-        pinnedSessionIds: state.pinnedSessionIds.filter(id => id !== sessionId),
-      })
-      if (options.stopActivity === true) await this.stopSessionActivity(sessionId)
+      const archived = this.requireState().archivedSessionIds.includes(sessionId)
+      await this.archiveOne(sessionId, options)
+      // Cascade only when this call actually archived the parent: an unknown
+      // or active parent throws inside archiveOne before any child is
+      // touched, and a repeat call must stay the documented no-op.
+      if (!archived) await this.cascadeSubagentDescendants(sessionId)
     })
+  }
+
+  /**
+   * The single-id archive write behind {@link archiveSession} and its
+   * cascade: existence and activity checks, then one durable state write.
+   * Runs only inside an already-queued operation and never enqueues itself
+   * (re-entering the serial chain from within would deadlock). An id already
+   * in the archive set resolves without writing.
+   * @param sessionId - The session to archive.
+   * @param options - Whether running work is stopped instead of refusing.
+   * @returns resolution after durability and, with `stopActivity`, after every stop request was issued.
+   */
+  private async archiveOne(sessionId: SessionId, options: ArchiveSessionOptions): Promise<void> {
+    // The chain slot serializes against every other registry write, so this
+    // check-then-write pair cannot interleave with another archive.
+    if (this.requireState().archivedSessionIds.includes(sessionId)) return
+    if (!(await this.sessionKnown(sessionId))) {
+      throw new WorkspaceUnknownSessionError(sessionId, 'archive')
+    }
+    if (options.stopActivity !== true) {
+      const activity = await this.ctx.waterfall(
+        'workspace/session-activity', { sessionId }, () => Promise.resolve([]),
+      )
+      if (activity.length > 0) throw new WorkspaceActiveSessionError(sessionId, activity)
+    }
+    const state = this.requireState()
+    await this.setState({
+      ...state,
+      archivedSessionIds: [...state.archivedSessionIds, sessionId],
+      archivedAtById: { ...state.archivedAtById, [sessionId]: Date.now() },
+      pinnedSessionIds: state.pinnedSessionIds.filter(id => id !== sessionId),
+    })
+    if (options.stopActivity === true) await this.stopSessionActivity(sessionId)
+  }
+
+  /**
+   * Archive every subagent descendant of a freshly archived session,
+   * breadth-first over `parentSession` links (archive-cascade-reap-1114).
+   * The header index is refreshed first so a child created after boot is
+   * still found — a missed child is exactly the leak this cascade closes —
+   * and a refresh failure skips the cascade loudly instead of flipping the
+   * parent's completed archive (the idle reaper backstops whatever the skip
+   * leaves behind). Each child is archived individually without
+   * `stopActivity`; a child that refuses or fails is logged and leaves the
+   * rest of the batch archived.
+   * @param rootId - The session whose subagent descendants cascade.
+   */
+  private async cascadeSubagentDescendants(rootId: SessionId): Promise<void> {
+    try {
+      await this.indexHeaders(await this.listStoredHeaders())
+      await this.indexLiveSessions()
+    } catch (error) {
+      this.ctx.logger.error(`workspace: cascade archive of session '${rootId}' skipped, header refresh failed: ${String(error)}`)
+      return
+    }
+    const childrenByParent = new Map<SessionId, SessionId[]>()
+    for (const header of this.headers.values()) {
+      if (header.origin !== 'subagent' || header.parentSession === undefined) continue
+      const siblings = childrenByParent.get(header.parentSession)
+      if (siblings === undefined) childrenByParent.set(header.parentSession, [header.id])
+      else siblings.push(header.id)
+    }
+    // Level-order walk with a visited set: lineage cycles fail soft instead
+    // of looping, and each descendant is archived at most once.
+    const visited = new Set<SessionId>([rootId])
+    const descendants: SessionId[] = []
+    let frontier: SessionId[] = [rootId]
+    while (frontier.length > 0) {
+      const next: SessionId[] = []
+      for (const parentId of frontier) {
+        for (const childId of childrenByParent.get(parentId) ?? []) {
+          if (visited.has(childId)) continue
+          visited.add(childId)
+          descendants.push(childId)
+          next.push(childId)
+        }
+      }
+      frontier = next
+    }
+    for (const childId of descendants) {
+      try {
+        await this.archiveOne(childId, {})
+      } catch (error) {
+        // The parent's archive already stands; a child that refuses (active)
+        // or fails is reported loudly and left for the idle reaper.
+        this.ctx.logger.error(`workspace: cascade archive of session '${childId}' failed: ${String(error)}`)
+      }
+    }
   }
 
   /**

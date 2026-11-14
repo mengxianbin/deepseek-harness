@@ -1331,6 +1331,143 @@ describe('registry-global session unarchive', () => {
   })
 })
 
+describe('subagent cascade archive', () => {
+  const sub = (id: string, parent: string, dir: string, createdAt: number): SessionHeader => ({
+    ...header(id, dir, createdAt),
+    origin: 'subagent' as const,
+    parentSession: SessionId(parent),
+  })
+
+  it('archives the whole subagent lineage with the parent in one durable batch', async () => {
+    const dir = await makeDir('cascade-lineage')
+    const result = await harness({
+      sessions: [
+        header('root', dir, 100),
+        sub('kid', 'root', dir, 200),
+        sub('grandkid', 'kid', dir, 300),
+        header('bystander', dir, 400),
+      ],
+    })
+    onTestFinished(() => result.ctx.fiber.dispose())
+
+    await result.registry.archiveSession(SessionId('root'))
+    expect(result.registry.archivedSessionIds).toEqual(['root', 'kid', 'grandkid'])
+    expect(storedState(result.pool).archivedSessionIds).toEqual(['root', 'kid', 'grandkid'])
+    for (const id of ['root', 'kid', 'grandkid']) {
+      const stamped = result.registry.archivedAtById[id]
+      expect(typeof stamped).toBe('number')
+      expect(stamped!).toBeGreaterThan(0)
+      expect(storedState(result.pool).archivedAtById[id]).toBe(stamped)
+    }
+    // A top-level sibling stays out of the cascade net.
+    expect(result.registry.archivedSessionIds).not.toContain('bystander')
+  })
+
+  it('skips an already archived child and tolerates the explicit follow-up without duplication', async () => {
+    const dir = await makeDir('cascade-batch')
+    // Child archived first: the parent's cascade finds it archived and skips it.
+    const first = await harness({ sessions: [header('p1', dir, 100), sub('c1', 'p1', dir, 200)] })
+    onTestFinished(() => first.ctx.fiber.dispose())
+    await first.registry.archiveSession(SessionId('c1'))
+    await first.registry.archiveSession(SessionId('p1'))
+    expect(first.registry.archivedSessionIds).toEqual(['c1', 'p1'])
+
+    // Parent archived first: the cascade archives the child, and the
+    // explicit child id afterwards resolves as the documented no-op.
+    const second = await harness({ sessions: [header('p2', dir, 100), sub('c2', 'p2', dir, 200)] })
+    onTestFinished(() => second.ctx.fiber.dispose())
+    await second.registry.archiveSession(SessionId('p2'))
+    await second.registry.archiveSession(SessionId('c2'))
+    expect(second.registry.archivedSessionIds).toEqual(['p2', 'c2'])
+    expect(storedState(second.pool).archivedSessionIds).toEqual(['p2', 'c2'])
+  })
+
+  it('keeps children archived when the parent is unarchived (unarchive never cascades)', async () => {
+    const dir = await makeDir('cascade-unarchive')
+    const result = await harness({ sessions: [header('up', dir, 100), sub('uch', 'up', dir, 200)] })
+    onTestFinished(() => result.ctx.fiber.dispose())
+
+    await result.registry.archiveSession(SessionId('up'))
+    expect(result.registry.archivedSessionIds).toEqual(['up', 'uch'])
+
+    await result.registry.unarchiveSession(SessionId('up'))
+    expect(result.registry.archivedSessionIds).toEqual(['uch'])
+    expect(result.registry.archivedAtById['uch']).toBeGreaterThan(0)
+    expect(storedState(result.pool).archivedSessionIds).toEqual(['uch'])
+  })
+
+  it('does not cascade to an ordinary fork that only carries the parent pointer', async () => {
+    const dir = await makeDir('cascade-fork')
+    const fork = { ...header('forked', dir, 200), parentSession: SessionId('src') }
+    const result = await harness({ sessions: [header('src', dir, 100), fork] })
+    onTestFinished(() => result.ctx.fiber.dispose())
+
+    await result.registry.archiveSession(SessionId('src'))
+    // Presence of parentSession alone never classifies a child (types.ts):
+    // only origin === 'subagent' edges cascade.
+    expect(result.registry.archivedSessionIds).toEqual(['src'])
+  })
+
+  it('keeps the parent archive when a child refuses as active, and reports the child loudly', async () => {
+    const dir = await makeDir('cascade-active')
+    const result = await harness({ sessions: [header('ap', dir, 100), sub('ac', 'ap', dir, 200)] })
+    onTestFinished(() => result.ctx.fiber.dispose())
+    const report = vi.spyOn(result.ctx.logger, 'error').mockImplementation(() => undefined)
+    result.ctx.on('workspace/session-activity', async ({ sessionId }, next) => {
+      const rest = await next()
+      return sessionId === 'ac' ? [{ kind: 'probe' }, ...rest] : rest
+    })
+
+    await expect(result.registry.archiveSession(SessionId('ap'))).resolves.toBeUndefined()
+    // The parent's completed archive stands; the refused child is left for
+    // the idle reaper and its refusal is a loud receipt, not a rollback.
+    expect(result.registry.archivedSessionIds).toEqual(['ap'])
+    expect(storedState(result.pool).archivedSessionIds).toEqual(['ap'])
+    expect(report).toHaveBeenCalledWith(expect.stringContaining("cascade archive of session 'ac' failed"))
+  })
+
+  it('does not rescan for new children on a repeat archive of an already archived parent', async () => {
+    const dir = await makeDir('cascade-repeat')
+    const result = await harness({ sessions: [header('rp', dir, 100)] })
+    onTestFinished(() => result.ctx.fiber.dispose())
+
+    await result.registry.archiveSession(SessionId('rp'))
+    expect(result.registry.archivedSessionIds).toEqual(['rp'])
+
+    // A child that appears after the parent's archive belongs to the reaper,
+    // not to a replay of the parent's archive (design §三: the repeat keeps
+    // its documented no-op and never rescans).
+    result.setSessions([header('rp', dir, 100), sub('late', 'rp', dir, 200)])
+    await result.registry.archiveSession(SessionId('rp'))
+    expect(result.registry.archivedSessionIds).toEqual(['rp'])
+  })
+
+  it('skips the cascade loudly when the header refresh fails, keeping the parent archive', async () => {
+    const dir = await makeDir('cascade-refresh-fault')
+    const result = await harness({ sessions: [header('fp', dir, 100), sub('fc', 'fp', dir, 200)] })
+    onTestFinished(() => result.ctx.fiber.dispose())
+    const report = vi.spyOn(result.ctx.logger, 'error').mockImplementation(() => undefined)
+    result.list.mockRejectedValueOnce(new Error('persistence backend down'))
+
+    await expect(result.registry.archiveSession(SessionId('fp'))).resolves.toBeUndefined()
+    expect(result.registry.archivedSessionIds).toEqual(['fp'])
+    expect(report).toHaveBeenCalledWith(expect.stringContaining('header refresh failed'))
+  })
+
+  it('cascades to a child that exists only in the live session store', async () => {
+    const dir = await makeDir('cascade-live')
+    const result = await harness({
+      sessions: [header('lp', dir, 100)],
+      liveSessions: [sub('lc', 'lp', dir, 200)],
+    })
+    onTestFinished(() => result.ctx.fiber.dispose())
+
+    await result.registry.archiveSession(SessionId('lp'))
+    expect(result.registry.archivedSessionIds).toEqual(['lp', 'lc'])
+    expect(result.registry.archivedAtById['lc']).toBeGreaterThan(0)
+  })
+})
+
 describe('registry-global session pin', () => {
   it('pins durably in prepend order, idempotently skips repeats, and leaves accounting untouched', async () => {
     const dir = await makeDir('pin-home')
