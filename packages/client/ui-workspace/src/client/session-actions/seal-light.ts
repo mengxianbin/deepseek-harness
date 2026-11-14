@@ -82,8 +82,22 @@ function sealInfoOf(state: SessionSealState): SessionSealInfo {
  * Overlay the Host's status-carried seal verdicts (seal-light-host-state-1109
  * 裁点2A 推腿 + 裁点3A 对账腿, both folded into `SessionStatus.seal` by
  * ui-session) over the C1 pull snapshot the store holds. Host truth wins
- * whenever it carries a verdict; a row the Host holds nothing for keeps the
- * pull's value (the pull chain stays the coverage fallback — 拉取链退役未裁).
+ * whenever it carries a readable verdict; a row the Host holds nothing for
+ * keeps the pull's value (the pull chain stays the coverage fallback —
+ * 拉取链退役未裁).
+ *
+ * The one exception (seal-lamp-consistency-1114, brief §② A): a Host record
+ * that could not be read is not a reading. When `UNKNOWN` (a decode-fail
+ * record or any unreadable stamp) meets a pull snapshot that already holds a
+ * C1 `DONE`, the unreadable record loses its claim to press and the lamp
+ * paints the pull's green — the same C1 source the archive gate reads at
+ * click time, so lamp and gate answer alike instead of the amber-over-green
+ * split the user reported (2026-11-14). This extends the existing no-value
+ * rule ("Host 无值行留拉取值") to "no *readable* value" without touching
+ * Host-wins for real verdicts: every other Host verdict still presses, a
+ * failed pull still stamps UNKNOWN on both legs, and a row the pull holds
+ * nothing for still takes the Host stamp — fail-visible and fail-closed on
+ * all three paths, green reachable only from a real C1 DONE.
  * Returns the input snapshot identity when nothing changes, so React
  * subscribers see no spurious republish.
  * @param store - the C1 pull snapshot.
@@ -99,6 +113,11 @@ export function mergeHostSeals(
   for (const [id, status] of statuses) {
     if (status.seal === undefined) continue
     const info = sealInfoOf(status.seal)
+    // seal-lamp-consistency-1114: an unreadable record yields to a real C1
+    // DONE in the pull snapshot (brief §② A — non-reversal: this extends
+    // 「Host 无值行留拉取值」to "no readable value", Host-wins for real
+    // verdicts is untouched).
+    if (info.verdict === 'UNKNOWN' && store.get(id)?.verdict === 'DONE') continue
     if (sameSealInfo(store.get(id), info)) continue
     next ??= new Map(store)
     next.set(id, info)
