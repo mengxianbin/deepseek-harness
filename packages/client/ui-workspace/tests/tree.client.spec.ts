@@ -11,7 +11,7 @@ import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { SessionProjectionSnapshot } from '@deepseek-ai/dsh-api-session-controller/client'
 import {
   type ArchivedFilter, type RestingState,
-  compareRestingRows, deriveFlat, deriveGroups, deriveQueue, deriveSearchResults, orderByRecency,
+  compareRestingRows, deriveFlat, deriveGroups, deriveQueue, deriveSearchResults, liftQueuedRows, orderByRecency,
   orderByResting, owningGroupKey, owningParentFolder,
   pinCurrentBlank, reconcileManualOrder, restingStateOf, sessionMemberIds, visibleSessionIds, workspaceLabel,
   UNGROUPED_KEY,
@@ -1001,20 +1001,8 @@ describe('createWorkspaceViewStore', () => {
     expect(snapshot.sessionOrderByAccount).toEqual({ alpha: ['alpha-session'] })
   })
 
-  it('persists the queue segment fold (FORK queue-collapse-1112)', () => {
-    // The default seat is expanded — the segment stays the hard top seat the
-    // placement ruling guarantees; blobs written before the fold existed read
-    // the same way (the field is optional and defaults false).
-    const store = createWorkspaceViewStore().create()
-    expect(store.getSnapshot().queueCollapsed).toBe(false)
-    store.actions.setQueueCollapsed(true)
-    expect(store.getSnapshot().queueCollapsed).toBe(true)
-    store.actions.setQueueCollapsed(false)
-    expect(store.getSnapshot().queueCollapsed).toBe(false)
-    // The fold is view state, not a Workspace key: retention leaves it alone.
-    store.actions.retainAccountKeys(['alpha'])
-    expect(store.getSnapshot().queueCollapsed).toBe(false)
-  })
+  // queue-zone-1113: the queue segment's fold (FORK queue-collapse-1112) is
+  // gone with the segment — no `queueCollapsed` view state remains to persist.
 })
 
 describe('workspaceLabel', () => {
@@ -1053,7 +1041,7 @@ it('leaves unnamed history titles empty for locale-owned row labels', () => {
   expect(deriveFlat(sessions, [item.id], noRows, noAttention)[0]?.title).toBe('')
 })
 
-describe('deriveQueue (collab step3 §一, q1-placement)', () => {
+describe('deriveQueue (classification only since queue-zone-1113 — no segment renders these tiers)', () => {
   it('leads P0 awaiting-interaction over P1 unread failed stops, each by recency', () => {
     const sessions = list(
       summary('failed-old', 10), summary('failed-new', 20),
@@ -1071,7 +1059,9 @@ describe('deriveQueue (collab step3 §一, q1-placement)', () => {
     expect(queue.tiers.map(tier => tier.tier)).toEqual(['p0', 'p1'])
     expect(queue.tiers[0]!.sessions.map(node => node.id)).toEqual([sid('ask-new'), sid('ask-old')])
     expect(queue.tiers[1]!.sessions.map(node => node.id)).toEqual([sid('failed-new'), sid('failed-old')])
-    expect(queue.queued).toEqual(new Set([sid('ask-old'), sid('ask-new'), sid('failed-old'), sid('failed-new')]))
+    expect(queue.queued).toEqual(new Map([
+      [sid('ask-old'), 'p0'], [sid('ask-new'), 'p0'], [sid('failed-old'), 'p1'], [sid('failed-new'), 'p1'],
+    ]))
   })
 
   it('skips archived and blank rows, and a clean completion never queues', () => {
@@ -1087,7 +1077,7 @@ describe('deriveQueue (collab step3 §一, q1-placement)', () => {
     const queue = deriveQueue(sessions, statuses, [sid('archived-ask')])
     expect(queue.tiers.map(tier => tier.tier)).toEqual(['p0'])
     expect(queue.tiers[0]!.sessions.map(node => node.id)).toEqual([sid('ask')])
-    expect(queue.queued).toEqual(new Set([sid('ask')]))
+    expect(queue.queued).toEqual(new Map([[sid('ask'), 'p0']]))
   })
 
   it('skips subagent-origin rows in every tier while ordinary rows still queue', () => {
@@ -1111,7 +1101,7 @@ describe('deriveQueue (collab step3 §一, q1-placement)', () => {
     expect(queue.tiers.map(tier => tier.tier)).toEqual(['p0', 'p1'])
     expect(queue.tiers[0]!.sessions.map(node => node.id)).toEqual([sid('ask')])
     expect(queue.tiers[1]!.sessions.map(node => node.id)).toEqual([sid('failed')])
-    expect(queue.queued).toEqual(new Set([sid('ask'), sid('failed')]))
+    expect(queue.queued).toEqual(new Map([[sid('ask'), 'p0'], [sid('failed'), 'p1']]))
   })
 
   it('keeps a re-running failed row out of P1 while P0 keeps its awaiting row (2026-10-31 在跑出队裁定)', () => {
@@ -1130,22 +1120,78 @@ describe('deriveQueue (collab step3 §一, q1-placement)', () => {
     expect(queue.tiers.map(tier => tier.tier)).toEqual(['p0', 'p1'])
     expect(queue.tiers[0]!.sessions.map(node => node.id)).toEqual([sid('running-ask')])
     expect(queue.tiers[1]!.sessions.map(node => node.id)).toEqual([sid('stopped-failed')])
-    expect(queue.queued).toEqual(new Set([sid('running-ask'), sid('stopped-failed')]))
+    expect(queue.queued).toEqual(new Map([[sid('running-ask'), 'p0'], [sid('stopped-failed'), 'p1']]))
   })
 
-  it('drops queued rows from their groups and counts, leaving empty tiers unrendered', () => {
-    const sessions = list(summary('ask', 10), summary('resting', 5))
+  it('keeps queued rows inside their group, banded red first then yellow (queue-zone-1113)', () => {
+    const sessions = list(
+      summary('resting-new', 50), summary('pinned-old', 10),
+      summary('failed-old', 30), summary('ask-new', 40), summary('failed-new', 45), summary('ask-old', 20),
+    )
     const statuses: SessionStatusSnapshot = new Map([
-      [sid('ask'), status({ key: 'question:1', kind: 'question', sessionId: sid('ask') } as SessionPendingInteraction)],
-      [sid('resting'), status(undefined)],
+      [sid('failed-old'), status(undefined, { completionUnread: true, completionOutcome: 'failed' })],
+      [sid('failed-new'), status(undefined, { completionUnread: true, completionOutcome: 'failed' })],
+      [sid('ask-new'), status({ key: 'question:1', kind: 'question', sessionId: sid('ask-new') } as SessionPendingInteraction)],
+      [sid('ask-old'), status({ key: 'question:2', kind: 'question', sessionId: sid('ask-old') } as SessionPendingInteraction)],
+      [sid('resting-new'), status(undefined)],
+      [sid('pinned-old'), status(undefined)],
+    ])
+    const members = ['resting-new', 'pinned-old', 'failed-old', 'ask-new', 'failed-new', 'ask-old']
+    const queue = deriveQueue(sessions, statuses, [])
+    // failed-new is pinned AND queued: it must show once, in its red band
+    // (queued beats pinned), never in the pinned block below the bands.
+    const rows = rowState({ pinned: ['pinned-old', 'failed-new'] })
+    const group = deriveGroups(
+      sessions, [workspace('project', members)], rows, statuses, view(['project']), queue.queued,
+    )[0]!
+    // Nothing is extracted: the count still holds every visible member, and
+    // each band reports its own size for the header badge (red first).
+    expect(group.sessionCount).toBe(6)
+    expect([group.queuedRed, group.queuedYellow]).toEqual([2, 2])
+    expect(group.sessions.map(node => node.id)).toEqual([
+      sid('failed-new'), sid('failed-old'),
+      sid('ask-new'), sid('ask-old'),
+      sid('pinned-old'), sid('resting-new'),
+    ])
+    // A folded group keeps its counts for the badge while showing no rows.
+    const folded = deriveGroups(
+      sessions, [workspace('project', members)], rows, statuses, view([]), queue.queued,
+    )[0]!
+    expect([folded.queuedRed, folded.queuedYellow]).toEqual([2, 2])
+    expect(folded.sessions).toEqual([])
+  })
+
+  it('leaves a group without queued rows in its ordinary order and reports zero bands', () => {
+    const sessions = list(summary('b', 2), summary('a', 1))
+    const groups = deriveGroups(
+      sessions, [workspace('project', ['b', 'a'])], noRows, noAttention, view(['project']), new Map(),
+    )
+    expect([groups[0]!.queuedRed, groups[0]!.queuedYellow]).toEqual([0, 0])
+    expect(groups[0]!.sessions.map(node => node.id)).toEqual([sid('b'), sid('a')])
+  })
+})
+
+describe('liftQueuedRows (queue-zone-1113 flat lift)', () => {
+  it('leads the flat list with the red band then the yellow band, each newest first, keeping the rest in place', () => {
+    const sessions = list(
+      summary('rest-a', 9), summary('ask-old', 20), summary('failed-old', 30),
+      summary('rest-b', 1), summary('ask-new', 40), summary('failed-new', 45),
+    )
+    const statuses: SessionStatusSnapshot = new Map([
+      [sid('failed-old'), status(undefined, { completionUnread: true, completionOutcome: 'failed' })],
+      [sid('failed-new'), status(undefined, { completionUnread: true, completionOutcome: 'failed' })],
+      [sid('ask-new'), status({ key: 'question:1', kind: 'question', sessionId: sid('ask-new') } as SessionPendingInteraction)],
+      [sid('ask-old'), status({ key: 'question:2', kind: 'question', sessionId: sid('ask-old') } as SessionPendingInteraction)],
     ])
     const queue = deriveQueue(sessions, statuses, [])
-    expect(queue.tiers).toHaveLength(1)
-    const groups = deriveGroups(
-      sessions, [workspace('project', ['ask', 'resting'])], noRows, statuses, view(['project']), queue.queued,
-    )
-    expect(groups[0]!.sessionCount).toBe(1)
-    expect(groups[0]!.sessions.map(node => node.id)).toEqual([sid('resting')])
+    const rows = deriveFlat(sessions, sessions.ids, noRows, statuses)
+    expect(liftQueuedRows(rows, queue.queued).map(node => node.id)).toEqual([
+      sid('failed-new'), sid('failed-old'),
+      sid('ask-new'), sid('ask-old'),
+      sid('rest-a'), sid('rest-b'),
+    ])
+    // Nothing queued: the supplied order comes back untouched (memo identity).
+    expect(liftQueuedRows(rows, new Map())).toBe(rows)
   })
 })
 

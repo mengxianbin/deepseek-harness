@@ -960,11 +960,11 @@ describe('WorkspaceBrowser', () => {
     rerender(b, { useSessionStatus: status('session-7', {
       pendingInteraction: { key: 'question:1', kind: 'plan-review', sessionId: sid('session-7') } as SessionPendingInteraction,
     }) })
-    // FORK dsh-local (collab-step4b-c1): an awaiting-interaction row leaves
-    // its group for the hard top segment and leads the list there; the group
-    // keeps the rows the watermark shows (队列段恒在置顶之前).
+    // queue-zone-1113: the awaiting-interaction row stays inside its group
+    // and bands to its top (yellow ahead of the ordinary rows), so the list
+    // reads header → queued band → the rows the watermark shows.
     expect(screen.getAllByRole('treeitem').map(row => row.querySelector('[class*="title"]')?.textContent))
-      .toEqual(['session-7', 'alpha', ...items.slice(0, 5).map(item => item.displayTitle)])
+      .toEqual(['alpha', 'session-7', ...items.slice(0, 4).map(item => item.displayTitle)])
     rerender(b, { useSessionStatus: status('session-8', { completionUnread: true }) })
     expectVisible(8)
     fireEvent.click(screen.getByRole('button', { name: '展开其余 4 个会话' }))
@@ -1019,9 +1019,9 @@ describe('WorkspaceBrowser', () => {
     })
     expect(screen.queryByText('session-6')).toBeNull()
     for (const id of ['session-53', 'session-55', 'session-56']) expect(screen.queryByText(id)).toBeNull()
-    // FORK dsh-local (collab-step4b-c1): the awaiting-interaction row leaves
-    // the capped group and renders in the hard top segment instead — 要我拿主意
-    // stays reachable even past the automatic-raise ceiling.
+    // queue-zone-1113: the awaiting-interaction row stays in the capped group
+    // and bands to its top, so it stays reachable even past the
+    // automatic-raise ceiling (the cap bites the rows behind the band).
     expect(screen.getByText('session-57')).toBeTruthy()
     rerender(b, { useSessionStatus: running('session-50', 'session-55') })
     expect(screen.queryByText('session-57')).toBeNull()
@@ -3029,7 +3029,7 @@ describe('Workspace tree grouping', () => {
     expect(b.props.insertWorkspaceBefore).toHaveBeenCalledWith(wid('alpha'), wid('gamma'))
   })
 
-  it('cuts the 安康位 alarm into the queue segment head and expands the difference detail (件C5)', () => {
+  it('leads the list body with the 安康位 alarm and expands the difference detail (件C5)', () => {
     const brokenReport: SessionHealthReport = {
       ok: false,
       total: 2,
@@ -3037,7 +3037,7 @@ describe('Workspace tree grouping', () => {
       issues: [{ invariant: 'unreadable', sessionIds: [sid('ghost')] }],
     }
     mount({ useSessionHealth: hook({ report: brokenReport }) })
-    // The alarm row rides the segment head (插队 P0/P1), red-flagged broken.
+    // The alarm is the body's first line (queue-zone-1113), red-flagged broken.
     const alert = screen.getByText('安康位告警：对账对不上，点开看明细')
       .closest('[data-row-key="queue-health"]') as HTMLElement
     expect(alert.getAttribute('data-health-alert')).toBe('broken')
@@ -3177,116 +3177,171 @@ describe('Workspace tree grouping', () => {
     expect(shield.closest('[class*="sectionHeader"]')).not.toBeNull()
   })
 
-  // FORK queue-collapse-1112 (2026-11-12 ruling): the count bar is the one
-  // line of segment furniture the cut headers left room for — folding returns
-  // the queued rows to their groups behind it, unfolding restores the hard top
-  // seat, and the count reads either way.
-  it('folds the queue segment into its groups behind the count bar (FORK queue-collapse-1112)', () => {
-    const items = [summary('session-7', 12), summary('session-8', 11)]
-    const b = mount({
-      useSessions: hook(sessionState(items)),
-      useWorkspaces: hook(workspaceState([workspace('alpha', items.map(item => item.id))])),
+  // queue-zone-1113 (2026-11-13 ruling): the global 「要我拿主意」 segment is
+  // gone — no count bar, no fold, no 无待办 line, no segment tree. Queued
+  // rows live banded inside their Workspace group (red first, yellow after),
+  // the flat list lifts the same bands to its top, the cross-workspace counts
+  // ride the group header badge, and the 安康位 alarm survives as a
+  // conditional line at the head of both list bodies.
+  it('renders no global queue segment at all — the queued row lives in its group (queue-zone-1113)', () => {
+    mount({
+      useSessions: hook(sessionState([summary('session-7', 12), summary('session-8', 11)])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['session-7', 'session-8'])])),
       useSessionStatus: hook<SessionStatusSnapshot>(new Map([[sid('session-7'), {
         running: false,
         pendingInteraction: { key: 'question:1', kind: 'question', sessionId: sid('session-7') } as SessionPendingInteraction,
         completionUnread: false,
       }]])),
     })
+    expect(document.querySelector('[data-row-key="queue"]')).toBeNull()
+    expect(document.querySelector('[data-row-key="queue-toggle"]')).toBeNull()
+    expect(screen.queryByRole('tree', { name: '要我拿主意' })).toBeNull()
+    expect(screen.queryByText('要我拿主意')).toBeNull()
+    expect(screen.queryByText('无待办')).toBeNull()
+    // The queued row renders inside its Workspace group instead.
+    fireEvent.click(groupHeaderTitle('alpha'))
+    expect(screen.getAllByRole('treeitem').map(row => row.querySelector('[class*="title"]')?.textContent))
+      .toEqual(['alpha', 'session-7', 'session-8'])
+  })
+
+  it('bands queued rows to the top of their group: red then yellow, then pinned, then the rest (queue-zone-1113)', () => {
+    const items = [
+      summary('failed-new', 50), summary('failed-old', 45), summary('ask-new', 44), summary('ask-old', 40),
+      summary('pinned-mid', 30), summary('rest-b', 20), summary('rest-a', 10),
+    ]
+    mount({
+      useSessions: hook(sessionState(items)),
+      // failed-new is pinned AND queued: it must show once, in its red band.
+      useWorkspaces: hook(workspaceState(
+        [workspace('alpha', items.map(item => item.id))], [], ['failed-new', 'pinned-mid'].map(sid),
+      )),
+      useSessionStatus: hook<SessionStatusSnapshot>(new Map([
+        [sid('failed-new'), { running: false, pendingInteraction: undefined, completionUnread: true, completionOutcome: 'failed' }],
+        [sid('failed-old'), { running: false, pendingInteraction: undefined, completionUnread: true, completionOutcome: 'failed' }],
+        [sid('ask-new'), {
+          running: false, completionUnread: false,
+          pendingInteraction: { key: 'question:1', kind: 'question', sessionId: sid('ask-new') } as SessionPendingInteraction,
+        }],
+        [sid('ask-old'), {
+          running: false, completionUnread: false,
+          pendingInteraction: { key: 'question:2', kind: 'question', sessionId: sid('ask-old') } as SessionPendingInteraction,
+        }],
+      ])),
+    })
+    fireEvent.click(groupHeaderTitle('alpha'))
     const titles = () => screen.getAllByRole('treeitem')
       .map(row => row.querySelector('[class*="title"]')?.textContent)
-    const bar = () => screen.getByRole('button', { name: '要我拿主意 · 1' })
-    // Expanded (the default seat): the row leads the list, the bar carries the count.
-    expect(bar().getAttribute('aria-expanded')).toBe('true')
-    expect(within(screen.getByRole('tree', { name: '要我拿主意' })).getByText('session-7')).toBeTruthy()
-    fireEvent.click(groupHeaderTitle('alpha'))
-    expect(titles()).toEqual(['session-7', 'alpha', 'session-8'])
-    // Fold: the row goes home to its group; the bar keeps the count mounted.
-    fireEvent.click(bar())
-    expect(screen.queryByRole('tree', { name: '要我拿主意' })).toBeNull()
-    expect(bar().getAttribute('aria-expanded')).toBe('false')
-    expect(titles()).toEqual(['alpha', 'session-7', 'session-8'])
-    expect(b.store.getSnapshot().queueCollapsed).toBe(true)
-    // Unfold restores the hard top seat (step3 判据①).
-    fireEvent.click(bar())
-    expect(titles()).toEqual(['session-7', 'alpha', 'session-8'])
-    expect(b.store.getSnapshot().queueCollapsed).toBe(false)
+    // The bands lead; the watermark still caps the ordinary rows behind them.
+    expect(titles()).toEqual(['alpha', 'failed-new', 'failed-old', 'ask-new', 'ask-old', 'pinned-mid'])
+    fireEvent.click(screen.getByRole('button', { name: '展开其余 2 个会话' }))
+    expect(titles()).toEqual([
+      'alpha', 'failed-new', 'failed-old', 'ask-new', 'ask-old', 'pinned-mid', 'rest-b', 'rest-a',
+    ])
+    // A pinned+queued row appears exactly once, in its queued band.
+    expect(titles().filter(title => title === 'failed-new')).toHaveLength(1)
   })
 
-  it('restores a persisted queue fold across mounts (FORK queue-collapse-1112)', () => {
-    localStorage.clear()
-    const preferences = createWorkspaceViewStore().create()
-    preferences.actions.setQueueCollapsed(true)
-    localStorage.setItem('dsh.workspace.view.v5', JSON.stringify(preferences.getSnapshot()))
+  it('counts queued rows on the group header badge — red first, hidden at zero (queue-zone-1113)', () => {
+    const items = [summary('failed-new', 50), summary('ask-old', 40), summary('plain', 10), summary('other', 5)]
     mount({
-      useSessions: hook(sessionState([summary('session-7', 12)])),
-      useWorkspaces: hook(workspaceState([workspace('alpha', ['session-7'])])),
-      useSessionStatus: hook<SessionStatusSnapshot>(new Map([[sid('session-7'), {
-        running: false,
-        pendingInteraction: { key: 'question:1', kind: 'question', sessionId: sid('session-7') } as SessionPendingInteraction,
-        completionUnread: false,
-      }]])),
+      useSessions: hook(sessionState(items)),
+      useWorkspaces: hook(workspaceState([
+        workspace('alpha', ['failed-new', 'ask-old', 'plain']),
+        workspace('beta', ['other']),
+      ])),
+      useSessionStatus: hook<SessionStatusSnapshot>(new Map([
+        [sid('failed-new'), { running: false, pendingInteraction: undefined, completionUnread: true, completionOutcome: 'failed' }],
+        [sid('ask-old'), {
+          running: false, completionUnread: false,
+          pendingInteraction: { key: 'question:1', kind: 'question', sessionId: sid('ask-old') } as SessionPendingInteraction,
+        }],
+      ])),
     })
+    // The badge rides the folded header too — the count never hides behind a click.
+    const badge = () => screen.getByRole('img', { name: '待裁决 1 · 待回话 1' })
+    expect(badge()).toBeTruthy()
+    // Red leads, each count on its own shape channel (bang glyph vs solid dot).
+    expect([...badge().querySelectorAll('[data-attention]')].map(part => part.getAttribute('data-attention')))
+      .toEqual(['failed', 'pending'])
+    // beta has nothing queued: only the counted group carries a badge.
+    expect(screen.getAllByRole('img', { name: /待裁决/ })).toHaveLength(1)
     fireEvent.click(groupHeaderTitle('alpha'))
-    expect(screen.queryByRole('tree', { name: '要我拿主意' })).toBeNull()
-    expect(screen.getByRole('button', { name: '要我拿主意 · 1' }).getAttribute('aria-expanded')).toBe('false')
-    expect(screen.getAllByRole('treeitem').map(row => row.querySelector('[class*="title"]')?.textContent))
-      .toEqual(['alpha', 'session-7'])
+    expect(badge()).toBeTruthy()
   })
 
-  it('folds the flat view segment back into the flow (FORK queue-collapse-1112)', () => {
+  it('lifts queued rows to the top of the flat list: red band then yellow band (queue-zone-1113)', () => {
     localStorage.clear()
     const preferences = createWorkspaceViewStore().create()
     preferences.actions.setGroupBy('flat')
     localStorage.setItem('dsh.workspace.view.v5', JSON.stringify(preferences.getSnapshot()))
+    const items = [
+      summary('rest-b', 20), summary('ask-old', 40), summary('failed-old', 45),
+      summary('rest-a', 10), summary('ask-new', 55), summary('failed-new', 50),
+    ]
     mount({
-      useSessions: hook(sessionState([summary('session-7', 12), summary('session-8', 11)])),
+      useSessions: hook(sessionState(items)),
       useWorkspaces: hook(workspaceState([])),
-      useSessionStatus: hook<SessionStatusSnapshot>(new Map([[sid('session-7'), {
-        running: false,
-        pendingInteraction: { key: 'question:1', kind: 'question', sessionId: sid('session-7') } as SessionPendingInteraction,
-        completionUnread: false,
-      }]])),
+      useSessionStatus: hook<SessionStatusSnapshot>(new Map([
+        [sid('failed-new'), { running: false, pendingInteraction: undefined, completionUnread: true, completionOutcome: 'failed' }],
+        [sid('failed-old'), { running: false, pendingInteraction: undefined, completionUnread: true, completionOutcome: 'failed' }],
+        [sid('ask-new'), {
+          running: false, completionUnread: false,
+          pendingInteraction: { key: 'question:1', kind: 'question', sessionId: sid('ask-new') } as SessionPendingInteraction,
+        }],
+        [sid('ask-old'), {
+          running: false, completionUnread: false,
+          pendingInteraction: { key: 'question:2', kind: 'question', sessionId: sid('ask-old') } as SessionPendingInteraction,
+        }],
+      ])),
     })
-    const queueTree = () => screen.queryByRole('tree', { name: '要我拿主意' })
-    const listTree = () => screen.getByRole('tree', { name: '会话' })
-    // Expanded: the queued row leads the segment, out of the flat flow.
-    expect(within(queueTree() as HTMLElement).getByText('session-7')).toBeTruthy()
-    expect(within(listTree()).queryByText('session-7')).toBeNull()
-    expect(within(listTree()).getByText('session-8')).toBeTruthy()
-    // Fold: it rejoins the flow; the bar keeps the count.
-    fireEvent.click(screen.getByRole('button', { name: '要我拿主意 · 1' }))
-    expect(queueTree()).toBeNull()
-    expect(within(listTree()).getByText('session-7')).toBeTruthy()
-    expect(screen.getByRole('button', { name: '要我拿主意 · 1' }).getAttribute('aria-expanded')).toBe('false')
-  })
-
-  it('keeps the 无待办 line as the segment seat with nothing queued (step3 判据①.4)', () => {
-    mount()
-    expect(screen.getByText('无待办')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /要我拿主意/ })).toBeNull()
+    expect(document.querySelector('[data-row-key="queue"]')).toBeNull()
     expect(screen.queryByRole('tree', { name: '要我拿主意' })).toBeNull()
+    // Bands lift to the top (red first, recency inside each); the rest of the
+    // flow keeps the order the browser selected for it.
+    expect(screen.getAllByRole('treeitem').map(row => row.querySelector('[class*="title"]')?.textContent))
+      .toEqual(['failed-new', 'failed-old', 'ask-new', 'ask-old', 'rest-b', 'rest-a'])
   })
 
-  it('keeps the 安康位 alarm mounted while the segment is folded (FORK queue-collapse-1112)', () => {
+  it('keeps the 安康位 alarm as the conditional first line of both list bodies (queue-zone-1113)', () => {
     const brokenReport: SessionHealthReport = {
       ok: false,
       total: 2,
       counts: { running: 1, awaiting: 0, failed: 0, rest: 0 },
       issues: [{ invariant: 'unreadable', sessionIds: [sid('ghost')] }],
     }
-    mount({
+    const balanced: SessionHealthReport = {
+      ok: true, total: 1, counts: { running: 1, awaiting: 0, failed: 0, rest: 0 }, issues: [],
+    }
+    const grouped = mount({
       useSessionHealth: hook({ report: brokenReport }),
       useSessions: hook(sessionState([summary('session-7', 12)])),
       useWorkspaces: hook(workspaceState([workspace('alpha', ['session-7'])])),
-      useSessionStatus: hook<SessionStatusSnapshot>(new Map([[sid('session-7'), {
-        running: false,
-        pendingInteraction: { key: 'question:1', kind: 'question', sessionId: sid('session-7') } as SessionPendingInteraction,
-        completionUnread: false,
-      }]])),
     })
-    fireEvent.click(screen.getByRole('button', { name: '要我拿主意 · 1' }))
-    // The alarm is not a queued row: the fold moves rows, never the alarm.
-    expect(document.querySelector('[data-row-key="queue-health"]')).toBeTruthy()
-    expect(screen.queryByRole('tree', { name: '要我拿主意' })).toBeNull()
+    const alert = document.querySelector('[data-row-key="queue-health"]') as HTMLElement
+    expect(alert).toBeTruthy()
+    // It leads the body's rows with no segment furniture around it.
+    expect(alert.closest('[class*="treeBody"]')?.firstElementChild).toBe(alert)
+    expect(document.querySelector('[data-row-key="queue"]')).toBeNull()
+    // Idle: the same body renders no alarm at all.
+    rerender(grouped, { useSessionHealth: hook({ report: balanced }) })
+    expect(document.querySelector('[data-row-key="queue-health"]')).toBeNull()
+    grouped.view.unmount()
+
+    // The flat body mounts the same conditional line.
+    localStorage.clear()
+    const preferences = createWorkspaceViewStore().create()
+    preferences.actions.setGroupBy('flat')
+    localStorage.setItem('dsh.workspace.view.v5', JSON.stringify(preferences.getSnapshot()))
+    const flatBroken = mount({
+      useSessionHealth: hook({ report: brokenReport }),
+      useSessions: hook(sessionState([summary('session-7', 12)])),
+      useWorkspaces: hook(workspaceState([])),
+    })
+    const flatAlert = document.querySelector('[data-row-key="queue-health"]') as HTMLElement
+    expect(flatAlert).toBeTruthy()
+    expect(flatAlert.closest('[class*="treeBody"]')?.firstElementChild).toBe(flatAlert)
+    expect(document.querySelector('[data-row-key="queue"]')).toBeNull()
+    rerender(flatBroken, { useSessionHealth: hook({ report: balanced }) })
+    expect(document.querySelector('[data-row-key="queue-health"]')).toBeNull()
   })
 })
