@@ -118,6 +118,21 @@ describe('runHook — payload + env + stdin plumbing', () => {
     await runHook(bash, { command: 'h' }, { payload: {}, signal: controller.signal, defaultTimeoutMs: 1000, trailingNewline: true }, clock())
     expect(specs[0]!.signal).toBe(controller.signal)
   })
+
+  it('threads an explicit sandboxPolicy into the request', async () => {
+    const { bash, specs } = recordingBash(async () => result())
+    await runHook(bash, { command: 'h' }, {
+      payload: {}, signal: testSignal(), defaultTimeoutMs: 1000, trailingNewline: true,
+      sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: '/work' },
+    }, clock())
+    expect(specs[0]!.sandboxPolicy).toEqual({ mode: 'danger-full-access', workspaceRoot: '/work' })
+  })
+
+  it('omits sandboxPolicy when the bridge passes none (the executor default applies)', async () => {
+    const { bash, specs } = recordingBash(async () => result())
+    await runHook(bash, { command: 'h' }, { payload: {}, signal: testSignal(), defaultTimeoutMs: 1000, trailingNewline: true }, clock())
+    expect(specs[0]!.sandboxPolicy).toBeUndefined()
+  })
 })
 
 describe('runHook — outcome decoding + duration', () => {
@@ -141,10 +156,20 @@ describe('runHook — outcome decoding + duration', () => {
 
   it('an executor rejection (infra fault) becomes a non-blocking error, never throws', async () => {
     const { bash } = recordingBash(async () => { throw new Error('bad workdir: ENOENT') })
-    const { output } = await runHook(bash, { command: 'h' }, { payload: {}, signal: testSignal(), defaultTimeoutMs: 1000, trailingNewline: true }, clock())
+    const { output, timedOut } = await runHook(bash, { command: 'h' }, { payload: {}, signal: testSignal(), defaultTimeoutMs: 1000, trailingNewline: true }, clock())
     expect(output.exitCode).toBeUndefined()
     expect(output.stderr).toBe('bad workdir: ENOENT')
     expect(output.decision).toBeUndefined()
+    expect(timedOut).toBe(false) // an infra fault is not the deadline cutting the run short
+  })
+
+  it('surfaces the executor timeout flag — a killed check is not an error exit', async () => {
+    const { bash } = recordingBash(async () => result({ timedOut: true, exitCode: 1 }))
+    const { output, timedOut } = await runHook(bash, { command: 'h' }, { payload: {}, signal: testSignal(), defaultTimeoutMs: 1000, trailingNewline: true }, clock())
+    // A Windows kill can surface as exit 1 — a designed non-blocking outcome —
+    // so the flag, not the exit code, is what tells a timeout apart.
+    expect(timedOut).toBe(true)
+    expect(output.exitCode).toBe(1)
   })
 
   it('a non-Error rejection is stringified onto stderr', async () => {

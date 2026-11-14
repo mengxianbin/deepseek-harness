@@ -378,6 +378,75 @@ describe('hooks-claude-code bridge — SubagentStart / SubagentStop (observe)', 
     // The aborted run resolves as a non-blocking error (runHook never rejects),
     // so the drained continuation must NOT have logged a failure.
     expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('SubagentStart hook failed'))
+    // …nor the Phase-4 fail-open alarm: an aborted run is an intentional
+    // cancel, not a hook that failed to guard anything.
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('returned no usable verdict'))
+  })
+})
+
+describe('hooks-claude-code bridge — loud fail-open (Phase 4)', () => {
+  /** Drive one UserPromptSubmit prompt turn; returns the warn spy + request count. */
+  async function runPrompt(hooks: unknown): Promise<{ warn: ReturnType<typeof vi.fn>; requests: number }> {
+    const dir = writeConfig(hooks)
+    const adapter = new MockAdapter([textResponse('ok')])
+    const warn = vi.fn()
+    const ctx = await harness(dir, adapter, (c) => { c.logger.warn = warn as never })
+    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await waitForIdle(ctx, agent)
+    return { warn, requests: adapter.requests.length }
+  }
+
+  it('a hook killed by its timeout fails open AND says so on the host log', async () => {
+    // timeout:1 (s) kills `sleep 5` at 1s. A Windows kill can surface as exit 1
+    // — a *designed* non-blocking outcome — so only the timedOut flag tells
+    // "the check never completed" apart from "the hook reported an error".
+    const { warn, requests } = await runPrompt({ UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'sleep 5', timeout: 1 }] }] })
+    expect(requests).toBe(1) // fail-open: the turn still reached the model
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(
+      'hooks-claude-code: UserPromptSubmit hook returned no usable verdict (timed out; fail-open)'))
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('matcher=all'))
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('stderr=(none)'))
+  })
+
+  it('a hook whose request cannot run (bad timeout) fails open AND says so', async () => {
+    // timeout:0 → clampTimeout rejects → runHook's infra-rejection path: no
+    // exit code, the fault on stderr, the turn proceeds.
+    const { warn, requests } = await runPrompt({ UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'exit 0', timeout: 0 }] }] })
+    expect(requests).toBe(1)
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(
+      'hooks-claude-code: UserPromptSubmit hook returned no usable verdict (produced no exit code; fail-open)'))
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('positive finite'))
+  })
+
+  it('a hook exiting outside the protocol fails open AND says so (matcher on the line)', async () => {
+    const dir = writeConfig({ PreToolUse: [{ matcher: 'danger', hooks: [{ type: 'command', command: 'echo boom >&2; exit 42' }] }] })
+    const adapter = new MockAdapter([toolCallResponse('c1', 'danger', {}), textResponse('done')])
+    const warn = vi.fn()
+    const ctx = await harness(dir, adapter, (c) => { c.logger.warn = warn as never })
+    let ran = false
+    ctx.tools.register(defineContentToolFixture({ name: 'danger', description: 'd', parameters: {}, async execute() { ran = true; return [{ type: 'text', text: 'ok' }] } }))
+    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'use danger' }], source: { kind: 'user' } }))
+    await waitForIdle(ctx, agent)
+
+    expect(ran).toBe(true) // fail-open: 42 is a non-blocking error, the tool still ran
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(
+      'hooks-claude-code: PreToolUse hook returned no usable verdict (exited 42; fail-open)'))
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('matcher=danger'))
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('stderr=boom'))
+  })
+
+  it('a non-blocking error exit (1) is a designed outcome: turn proceeds, NO alarm', async () => {
+    const { warn, requests } = await runPrompt({ UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'echo soft >&2; exit 1' }] }] })
+    expect(requests).toBe(1)
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('returned no usable verdict'))
+  })
+
+  it('a clean exit 0 is silent', async () => {
+    const { warn, requests } = await runPrompt({ UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'exit 0' }] }] })
+    expect(requests).toBe(1)
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('returned no usable verdict'))
   })
 })
 
