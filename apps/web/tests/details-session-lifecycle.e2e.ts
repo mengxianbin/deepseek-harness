@@ -178,7 +178,7 @@ describe.skipIf(MODE === 'record')('web e2e: details panel follows the current S
     await blankColumn.locator('[data-sidebar-right-guide-entry="files"]').click()
     await blankColumn.locator('[data-files-entry="file"]').getByRole('button', { name: 'before-chat.md', exact: true }).click()
     await blankColumn.getByText('Workspace preview is available.', { exact: true }).waitFor()
-    await page.getByText('Into the Unknown', { exact: false }).waitFor()
+    await page.getByText('What can I do for you?', { exact: false }).waitFor()
     const blankPanes = await paneSnapshot(page)
     expect(blankPanes.map(pane => pane.tabs.map(tab => tab.title))).toEqual([['Files', 'before-chat.md']])
     await page.screenshot({ path: join(SHOT_DIR, `blank-preview-${MODE}-${process.pid}.png`), fullPage: true })
@@ -275,7 +275,7 @@ describe.skipIf(MODE === 'record')('web e2e: details panel follows the current S
     // FORK(replay-residual-1022): New session 按钮已随品牌行收整退役入页脚 ⋯ 菜单（question-composer 10-19 先例）
     await page.locator('[class*="footArea"]').getByRole('button', { name: 'More', exact: true }).click()
     await page.getByRole('menuitem', { name: 'New Session', exact: true }).click()
-    await page.getByText('Into the Unknown', { exact: false }).waitFor({ timeout: 15_000 })
+    await page.getByText('What can I do for you?', { exact: false }).waitFor({ timeout: 15_000 })
     await expect.poll(() => detailsTrack(page), { timeout: 5_000 }).toBe(0)
     expect(await page.getByText('Details', { exact: true }).isVisible()).toBe(false)
 
