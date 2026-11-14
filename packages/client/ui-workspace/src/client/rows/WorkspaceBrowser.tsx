@@ -21,7 +21,7 @@ import {
   IconChevronsUpDownOutlineRegular, IconClockOutlineRegular, IconCloseFillRegular,
   IconFlatListOutlineRegular, IconFolderCloseRegular, IconProjectAddOutlineRegular,
   IconQueueOutlineRegular, IconSearchOutlineRegular, IconSlidersTwoOutlineRegular,
-  IconTriangleRightFillRegular, IconWorkspaceTreeOutlineRegular, Menu, Modal, Tooltip,
+  IconWorkspaceTreeOutlineRegular, Menu, Modal, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
   SessionListState, SessionSearchResultItem,
@@ -35,10 +35,10 @@ import type {
   SealLightSnapshot, SealRowObserver, WorkspaceBrowserProps,
 } from '../contract/slots.ts'
 import { mergeHostSeals } from '../session-actions/seal-light.ts'
-import type { ArchivedFilter, GroupNode, QueueSegment, SessionNode, SessionOrderBy, SessionRowState } from '../tree.ts'
+import type { ArchivedFilter, GroupNode, SessionNode, SessionOrderBy, SessionRowState } from '../tree.ts'
 import {
-  deriveFlat, deriveGroups, deriveQueue, deriveSearchResults, orderByResting, owningGroupKey, owningParentFolder,
-  pinCurrentBlank, reconcileManualOrder, sessionMemberIds, UNGROUPED_KEY,
+  deriveFlat, deriveGroups, deriveQueue, deriveSearchResults, liftQueuedRows, orderByResting, owningGroupKey,
+  owningParentFolder, pinCurrentBlank, reconcileManualOrder, sessionMemberIds, UNGROUPED_KEY,
 } from '../tree.ts'
 import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
 import { HealthShield } from './HealthShield.tsx'
@@ -64,13 +64,6 @@ const SESSION_WATERMARK_AUTO_MAX = 50
 const SESSION_ROW_HEIGHT_PX = 32
 /** Vertical chrome the fitted watermark cannot cover (group header + overflow button + breathing room), in rows. */
 const SESSION_FIT_CHROME_RESERVE_ROWS = 2
-/**
- * FORK dsh-local (queue-collapse-1112, marker: queueSegmentCollapse): the
- * queued-id set handed to the group/flat derivations while the segment is
- * collapsed — a stable empty set so the collapse only flips membership, never
- * the memo identity of everything downstream.
- */
-const COLLAPSED_QUEUE: ReadonlySet<SessionId> = new Set()
 
 /** Show the blank row plus the first `watermark` non-blank rows, in list order. */
 function watermarkRows(sessions: readonly SessionNode[], watermark: number): {
@@ -293,8 +286,8 @@ type SessionTreeProps = Pick<
   watchSessionJobs: WorkspaceBrowserProps['watchSessionJobs']
   /**
    * The ui-session health hook (global standard prop), threaded the same
-   * way: required as a slot with `undefined` in it; the queue section owns
-   * absence (collab-step4-c5 安康位).
+   * way: required as a slot with `undefined` in it; the list body's
+   * `HealthAlertLine` owns absence (collab-step4-c5 安康位, queue-zone-1113).
    */
   useSessionHealth: WorkspaceBrowserProps['useSessionHealth']
   /**
@@ -334,14 +327,6 @@ type SessionTreeProps = Pick<
   groupExpansion: Readonly<Record<string, boolean>>
   /** Persist one Workspace group's expansion. */
   setGroupExpanded: (key: string, expanded: boolean) => void
-  /**
-   * FORK dsh-local (queue-collapse-1112): the 「要我拿主意」 segment's
-   * persisted fold — while set, the queued rows stay in their Workspace
-   * groups (or the flat flow) and only the count bar keeps the seat.
-   */
-  queueCollapsed: boolean
-  /** Persist the 「要我拿主意」 segment's collapsed bit. */
-  setQueueCollapsed: (collapsed: boolean) => void
   /** Save a drag order and select Manual. */
   setSessionOrder: (accountKey: string, order: readonly string[]) => void
   /** Registry-global pin and archive sets plus the archived-visibility choice. */
@@ -361,37 +346,27 @@ type SessionTreeProps = Pick<
 }
 
 /**
- * FORK dsh-local (collab-step4b-c1, marker: queueSegment): the hard
- * 「要我拿主意」 top segment (collab step3 §一, q1-placement). P0
- * awaiting-interaction rows lead P1 unread failed stops. The segment head and
- * the per-tier labels were cut (queue-headers-cut-1101, 2026-11-01): the rows
- * carry the state on their own, while two label lines per segment cost list
- * height that small screens need for rows. The empty segment keeps its
- * 「无待办」 line (step3 判据①.4 空段可见不藏), and queued rows render without
- * drag — the segment's order is the state's, not the user's. Tier order (P0
- * before P1) is unchanged; it just reads as one continuous run of rows now.
- * FORK dsh-local (collab-step4-c5, marker: healthShield): the 安康位 alarm auto
- * cuts into this segment at P0/P1 level (step3 §5.2 插队, step2 §4.3 机制自动
- * 巡检) — a red row when the Host sweep's books stop balancing, an amber dashed
- * row when the health chain itself goes silent; the click expands the same
- * detail the shield shows. 批2 duty-shield-b2-1103 (step2 §4.3 duty
+ * queue-zone-1113 (2026-11-13 ruling): the global 「要我拿主意」 segment is gone —
+ * no segment, no count bar, no fold, no 「无待办」 line. Queued red/yellow rows
+ * live inside their Workspace group (red band first, yellow band after —
+ * `deriveGroups`), and the flat list lifts the same bands to its top. What
+ * remains at the head of BOTH list bodies is the 安康位 alarm below: a
+ * conditional line with no chrome when idle, mounted only while the trigger
+ * holds (queue-zone-1113 removes the count bar it used to ride with).
+ *
+ * FORK dsh-local (collab-step4-c5, marker: healthShield): the 安康位 alarm is a
+ * conditional row at the top of the list body (step3 §5.2 插队, step2 §4.3 机制
+ * 自动巡检) — a red row when the Host sweep's books stop balancing, an amber
+ * dashed row when the health chain itself goes silent; the click expands the
+ * same detail the shield shows. 批2 duty-shield-b2-1103 (step2 §4.3 duty
  * extension): the duty fold rides the SAME row — a failed or untrusted 值守总账
- * cuts in exactly like a broken Session reconciliation (三态纪律: 有意停用
- * never sets the verdict, so it never queues — 灰不亮不插队), and the
- * expansion renders the shared HealthDetail (会话对账 + 值守清单). 2026-11-04
- * ruling: a SUSTAINED auto-route poll failure joins the row with its own
- * text (never borrowed from 对账), and the detail gains the 自动路由 section.
- * FORK dsh-local (queue-collapse-1112, marker: queueSegmentCollapse): the
- * segment gains a persistent one-line count bar 「要我拿主意 · N」 at its very
- * top (2026-11-12 ruling). Folding it returns every queued row to its
- * Workspace group / the flat flow — the workspace list floats back up — while
- * the bar and the 安康位 alarm stay mounted, so neither the count nor an alarm
- * is ever one click from hidden. Expanded keeps the hard top seat the placement
- * ruling guarantees (step3 判据①), with no row cap: the rows area is its own
- * scroll clip, so a restart flood scrolls inside the segment instead of
- * pushing unreachable rows past the region's clip edge.
+ * reads exactly like a broken Session reconciliation (三态纪律: 有意停用 never
+ * sets the verdict, so it never alarms — 灰不亮不报警), and the expansion
+ * renders the shared HealthDetail (会话对账 + 值守清单). 2026-11-04 ruling: a
+ * SUSTAINED auto-route poll failure joins the row with its own text (never
+ * borrowed from 对账), and the detail gains the 自动路由 section.
  */
-/** The 安康位 alarm's row in the hard top segment (collab step3 §5.2 插队 P0/P1). */
+/** The 安康位 alarm's conditional row at the top of a list body (collab step3 §5.2). */
 function HealthQueueAlert({ health, t }: { health: SessionHealthState; t: SessionTreeProps['t'] }) {
   const [expanded, setExpanded] = useState(false)
   const report = health.report
@@ -434,107 +409,23 @@ function HealthQueueAlert({ health, t }: { health: SessionHealthState; t: Sessio
   )
 }
 
-/** Props of the hard 「要我拿主意」 top segment, shared by the grouped and flat bodies. */
-type QueueSectionProps = {
-  queue: QueueSegment
-  /**
-   * FORK queue-collapse-1112: the persisted fold. Collapsed keeps the count
-   * bar (and the 安康位 alarm) mounted and moves the queued rows out — the
-   * caller derives them back into their groups, so this component only stops
-   * rendering them here.
-   */
-  collapsed: boolean
-  /** Toggle the persisted fold of the segment. */
-  onQueueToggle: () => void
-  currentId: string | undefined
-  onOpen: (id: SessionId) => void
-  onSessionRenameRequest: SessionTreeProps['onSessionRenameRequest']
-  renderSlot: SessionTreeProps['renderSlot']
-  home: string | undefined
-  t: SessionTreeProps['t']
-  watchSessionJobs: SessionTreeProps['watchSessionJobs']
-  /**
-   * The ui-session health hook (global standard prop), threaded like
-   * `watchSessionJobs`: required as a slot in the type (with `undefined` in
-   * it) because `exactOptionalPropertyTypes` rejects passing an
-   * explicitly-undefined optional down; the segment owns absence.
-   */
+/**
+ * The 安康位 alarm line at the head of a list body (queue-zone-1113): the
+ * health hook is read unconditionally (a hook must stay unconditional), but
+ * the row renders only while its trigger holds — stale readings, a broken
+ * session/duty reconciliation, or a sustained auto-route failure — so an idle
+ * body shows no chrome at all. The grouped and the flat body both mount this
+ * as their first child, above the rows.
+ */
+function HealthAlertLine({ useSessionHealth, t }: {
   useSessionHealth: WorkspaceBrowserProps['useSessionHealth']
-  /** FORK archive-seal-light-1101: the lamp snapshot and its observation channel (SessionTreeProps). */
-  seals: SessionTreeProps['seals']
-  sealRows: SessionTreeProps['sealRows']
-  revealSessionId?: SessionId | undefined
-  onSessionRevealed: SessionTreeProps['onSessionRevealed']
-} & Pick<WorkspaceBrowserProps, 'useSessionAccess'>
-
-function QueueSection({ queue, collapsed, onQueueToggle, currentId, onOpen, onSessionRenameRequest, renderSlot, home, t,
-  watchSessionJobs, useSessionHealth, seals, sealRows, revealSessionId, onSessionRevealed, useSessionAccess,
-}: QueueSectionProps) {
-  const now = Date.now()
+  t: SessionTreeProps['t']
+}) {
   const health = useSessionHealth?.(state => state)
-  // The count bar replaces the cut segment header (queue-headers-cut-1101
-  // stays: one line, never two) and carries the fold affordance; 「无待办」
-  // keeps its seat while nothing is queued (step3 判据①.4 空段可见不藏).
-  const count = queue.queued.size
-  const rowsExpanded = count > 0 && !collapsed
-  return (
-    <div
-      className={css.queueSection}
-      data-row-key="queue"
-      data-queue-scroll={rowsExpanded ? '' : undefined}
-    >
-      {count > 0 && (
-        <button
-          type="button"
-          className={css.queueToggle}
-          data-row-key="queue-toggle"
-          aria-expanded={!collapsed}
-          onClick={onQueueToggle}
-        >
-          <IconTriangleRightFillRegular
-            size={12}
-            className={clsx(css.queueChevron, !collapsed && css.queueChevronOpen)}
-          />
-          {t('queue.count', { n: count })}
-        </button>
-      )}
-      {health !== undefined
-        && (health.stale === true || health.report?.ok === false || health.report?.duty?.ok === false
-          || health.report?.autoRoute?.sustained === true) && (
-        <HealthQueueAlert health={health} t={t} />
-      )}
-      {/* The alarm stays the rows' head (step3 §5.2 插队); the empty line
-          keeps the seat it had below it (判据①.4). */}
-      {count === 0 && <div className={css.queueEmpty}>{t('queue.empty')}</div>}
-      {rowsExpanded && (
-        // The rows clip owns the tree role: rows nest under it (ARIA owned
-        // elements stay direct), and folding removes the tree entirely —
-        // the count bar alone still names the segment.
-        <div className={css.queueRows} role="tree" aria-label={t('queue.title')}>
-          {queue.tiers.flatMap(tier => tier.sessions).map(node => (
-            <SessionNodeItem
-              key={node.id}
-              node={node}
-              currentId={currentId}
-              now={now}
-              onOpen={onOpen}
-              onRenameRequest={onSessionRenameRequest}
-              onReveal={node.id === revealSessionId
-                ? () => { onSessionRevealed(node.id) }
-                : undefined}
-              renderSlot={renderSlot}
-              home={home}
-              t={t}
-              watchSessionJobs={watchSessionJobs}
-              seals={seals}
-              sealRows={sealRows}
-              useSessionAccess={useSessionAccess}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  )
+  if (health === undefined) return null
+  const triggered = health.stale === true || health.report?.ok === false || health.report?.duty?.ok === false
+    || health.report?.autoRoute?.sustained === true
+  return triggered ? <HealthQueueAlert health={health} t={t} /> : null
 }
 
 /** The list-empty placeholder — a glyph over the text; the archived-only view names its filter and offers the way back. */
@@ -611,7 +502,6 @@ function SessionTree({
   renderSlot,
   insertWorkspaceBefore,
   nestWorkspaces, groupExpansion, setGroupExpanded,
-  queueCollapsed, setQueueCollapsed,
   setSessionOrder, home, t,
   revealSessionId, onSessionRevealed, shortcuts, watchSessionJobs, seals, sealRows,
 }: SessionTreeProps) {
@@ -677,9 +567,9 @@ function SessionTree({
     return [...workspaces.map(workspace => workspace.workspaceId), UNGROUPED_KEY]
       .filter(key => groupExpansion[key] ?? ancestorKeys.has(key))
   }, [groupExpansion, parents, workspaces])
-  // FORK dsh-local (collab-step4b-c1, marker: queueSegment): the hard
-  // 「要我拿主意」 segment owns its rows; the groups below drop them (and their
-  // counts) so each queued Session shows once, at the top (step3 §一).
+  // queue-zone-1113: no global segment owns these rows — the queue is a pure
+  // classification, and `deriveGroups` keeps every queued row inside its
+  // Workspace group, banded to the top (red p1 first, yellow p0 after).
   const queue = useMemo(
     () => deriveQueue(list, statuses, rowState.archivedSessionIds, workspaces),
     [list, statuses, rowState.archivedSessionIds, workspaces],
@@ -688,10 +578,8 @@ function SessionTree({
     () => deriveGroups(list, workspaces, rowState, statuses, {
       expandedGroups,
       ungroupedOrder: ungroupedSessionIds,
-    // FORK queue-collapse-1112: folded, the queued rows stop deferring to
-    // the segment and read as ordinary members of their groups again.
-    }, queueCollapsed ? COLLAPSED_QUEUE : queue.queued),
-    [list, workspaces, rowState, statuses, expandedGroups, ungroupedSessionIds, queue.queued, queueCollapsed],
+    }, queue.queued),
+    [list, workspaces, rowState, statuses, expandedGroups, ungroupedSessionIds, queue.queued],
   )
   useEffect(() => {
     for (let key = revealGroup; key !== undefined; key = parents.get(key)) {
@@ -991,31 +879,12 @@ function SessionTree({
   const groupRows = rootGroups.map(group => renderGroup(group, 0))
   return (
     <HoverCardGroup className={clsx(css.treeBody, css.wide)} containerRef={treeBodyRef}>
-      {/* FORK dsh-local (collab-step4b-c1, marker: queueSegment): the hard
-          「要我拿主意」 segment leads the list (队列段恒在置顶之前) and stays
-          outside the animated list — its rows are state-owned, not reorderable.
+      {/* queue-zone-1113: no segment leads the list — queued rows live banded
+          inside their groups below. The 安康位 alarm is this body's conditional
+          first child: mounted only while its trigger holds, no chrome when idle.
           The list-start drop marker follows it: a workspace drop lands before
-          the first workspace, not before the queue.
-          FORK queue-collapse-1112: the count bar keeps the seat when folded;
-          only the rows clip comes and goes. */}
-      <QueueSection
-        queue={queue}
-        collapsed={queueCollapsed}
-        onQueueToggle={() => { setQueueCollapsed(!queueCollapsed) }}
-        currentId={current}
-        onOpen={open}
-        onSessionRenameRequest={onSessionRenameRequest}
-        renderSlot={renderSlot}
-        home={home}
-        t={t}
-        watchSessionJobs={watchSessionJobs}
-        useSessionHealth={useSessionHealth}
-        seals={seals}
-        sealRows={sealRows}
-        revealSessionId={revealSessionId}
-        onSessionRevealed={onSessionRevealed}
-        useSessionAccess={useSessionAccess}
-      />
+          the first workspace. */}
+      <HealthAlertLine useSessionHealth={useSessionHealth} t={t} />
       {workspaceDropAtListStart && <span className={css.listTopDropIndicator} aria-hidden="true" />}
       <AnimatedRows
         className={clsx(css.list, workspaceDropAtListStart && css.listTopDropActive)}
@@ -1040,7 +909,6 @@ function FlatList({
   list, sessionIds, rowState, onLeaveArchivedOnly, useSessionStatus, useSessionHealth, useSessionAccess, open,
   onSessionRenameRequest, usePanelInfo, setSessionOrder, workspaceReady, animationResetKey,
   revealSessionId, onSessionRevealed, renderSlot, home, t, watchSessionJobs, seals, sealRows, workspaces,
-  queueCollapsed, setQueueCollapsed,
 }: Pick<
   SessionTreeProps,
   | 'useSessionStatus'
@@ -1063,16 +931,14 @@ function FlatList({
   | 'seals'
   | 'sealRows'
   | 'workspaces'
-  | 'queueCollapsed'
-  | 'setQueueCollapsed'
 > & {
   list: SessionListState
   sessionIds: readonly SessionId[]
 }) {
   const panelActive = usePanelInfo(info => info.activePanelId !== null)
   const statuses = useSessionStatus(s => s)
-  // FORK dsh-local (collab-step4b-c1, marker: queueSegment): the flat view
-  // carries the same hard top segment; its rows leave the flat flow below.
+  // queue-zone-1113: the flat view carries no segment — the queue is a pure
+  // classification whose rows stay in the flow, lifted to its top below.
   const queue = useMemo(
     () => deriveQueue(list, statuses, rowState.archivedSessionIds, workspaces),
     [list, statuses, rowState.archivedSessionIds, workspaces],
@@ -1082,11 +948,11 @@ function FlatList({
     [list, sessionIds, rowState, statuses, workspaces],
   )
   const rows = useMemo(
-    // FORK queue-collapse-1112: folded, the queued rows stay in the flow.
-    () => queueCollapsed || queue.queued.size === 0
-      ? allRows
-      : allRows.filter(row => !queue.queued.has(row.id)),
-    [allRows, queue.queued, queueCollapsed],
+    // queue-zone-1113: queued rows never leave the flow — they lift to the
+    // list's top (red band first, yellow band after, recency inside each)
+    // while every other row keeps its selected order.
+    () => liftQueuedRows(allRows, queue.queued),
+    [allRows, queue.queued],
   )
   const [drag, setDrag] = useState<DragState | null>(null)
   const dropCommitted = useRef(false)
@@ -1104,27 +970,10 @@ function FlatList({
   const now = Date.now()
   return (
     <HoverCardGroup className={clsx(css.treeBody, css.wide)}>
-      {/* FORK dsh-local (collab-step4b-c1, marker: queueSegment): the flat view
-          leads with the same hard segment; its rows leave the flow below.
-          FORK queue-collapse-1112: folded, the rows never leave the flow. */}
-      <QueueSection
-        queue={queue}
-        collapsed={queueCollapsed}
-        onQueueToggle={() => { setQueueCollapsed(!queueCollapsed) }}
-        currentId={currentId}
-        onOpen={open}
-        onSessionRenameRequest={onSessionRenameRequest}
-        renderSlot={renderSlot}
-        home={home}
-        t={t}
-        watchSessionJobs={watchSessionJobs}
-        useSessionHealth={useSessionHealth}
-        seals={seals}
-        sealRows={sealRows}
-        revealSessionId={revealSessionId}
-        onSessionRevealed={onSessionRevealed}
-        useSessionAccess={useSessionAccess}
-      />
+      {/* queue-zone-1113: no segment leads the flat body — queued rows are
+          lifted to the top of the flow below. The 安康位 alarm is this body's
+          conditional first child, mounted only while its trigger holds. */}
+      <HealthAlertLine useSessionHealth={useSessionHealth} t={t} />
       <AnimatedRows
         className={clsx(css.list, css.flatList)}
         role="tree"
@@ -1133,8 +982,8 @@ function FlatList({
         ready={list.phase === 'ready' && workspaceReady && drag === null}
         resetKey={animationResetKey}
       >
-        {/* The empty placeholder names a list with nothing at all — a list
-            emptied into the queue segment is not empty. */}
+        {/* The empty placeholder names a list with nothing at all — queued
+            rows stay in the flow (queue-zone-1113), so they still count. */}
         {allRows.length === 0 && (
           <EmptySessions rowState={rowState} onLeaveArchivedOnly={onLeaveArchivedOnly} t={t} />
         )}
@@ -1390,9 +1239,6 @@ export function WorkspaceBrowser({
   // Persisted view blobs written before the archived filter existed rehydrate
   // without the field; they read as the default hide-archived view.
   const archivedFilter = useStore(s => s.archivedFilter ?? 'default')
-  // FORK queue-collapse-1112: blobs written before the fold existed rehydrate
-  // without the field; they read expanded — the hard top seat stays.
-  const queueCollapsed = useStore(s => s.queueCollapsed ?? false)
   const groupExpansion = useStore(s => s.groupExpansion)
   const sessionOrderByAccount = useStore(s => s.sessionOrderByAccount)
   // Archived sessions are not openable: the row stays visible under the
@@ -1968,8 +1814,6 @@ export function WorkspaceBrowser({
                   seals={seals}
                   sealRows={sealRows}
                   workspaces={orderedWorkspaces}
-                  queueCollapsed={queueCollapsed}
-                  setQueueCollapsed={actions.setQueueCollapsed}
                   t={t}
                 />
               )
@@ -1992,8 +1836,6 @@ export function WorkspaceBrowser({
                   animationResetKey={`${groupBy}/${orderBy}/${archivedFilter}`}
                   groupExpansion={groupExpansion}
                   setGroupExpanded={actions.setGroupExpanded}
-                  queueCollapsed={queueCollapsed}
-                  setQueueCollapsed={actions.setQueueCollapsed}
                   setSessionOrder={saveSessionOrder}
                   rowState={rowState}
                   onLeaveArchivedOnly={leaveArchivedOnly}

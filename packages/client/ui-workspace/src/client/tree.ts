@@ -105,8 +105,12 @@ export interface GroupNode {
   /** Workspace creation time (epoch ms); absent only for the ungrouped bucket. */
   createdAt: number | undefined
   label: string
-  /** Total visible sessions in the group. */
+  /** Total visible sessions in the group (queued rows included — nothing is extracted anymore). */
   sessionCount: number
+  /** Visible members queued red: tier p1, unread failed stops awaiting a ruling (queue-zone-1113). */
+  queuedRed: number
+  /** Visible members queued yellow: tier p0, rows awaiting the user's reply (queue-zone-1113). */
+  queuedYellow: number
   expanded: boolean
   /** The group contains the selected session (active folder tint; supplied here so the renderer never scans). */
   containsCurrent: boolean
@@ -334,6 +338,41 @@ function sectionMembers(
 }
 
 /**
+ * Group member order after the 2026-11-13 ruling (queue-zone-1113): no global
+ * segment exists, so queued rows stay inside their group and lead it — red
+ * (tier p1) band first, yellow (tier p0) band after, each band newest first —
+ * then the ordinary {@link sectionMembers} order (blank placeholder, pinned,
+ * state rank, recency). A pinned+queued row appears once, in its queued band
+ * (queued beats pinned, mirroring the old 队列段恒在置顶之前 placement).
+ * @param members - the group's visible members in caller order.
+ * @param queued - queued Session id → tier from {@link deriveQueue}.
+ * @param pinned - registry-global pin set.
+ * @param archived - registry-global archive set.
+ * @returns members in render order.
+ */
+function queueBandedMembers(
+  members: readonly SessionSummary[],
+  queued: ReadonlyMap<SessionId, QueueTierId>,
+  pinned: ReadonlySet<SessionId>,
+  archived: ReadonlySet<SessionId>,
+): SessionSummary[] {
+  if (queued.size === 0) return sectionMembers(members, pinned, archived)
+  const red: SessionSummary[] = []
+  const yellow: SessionSummary[] = []
+  const rest: SessionSummary[] = []
+  for (const member of members) {
+    const tier = queued.get(member.id)
+    if (tier === 'p1') red.push(member)
+    else if (tier === 'p0') yellow.push(member)
+    else rest.push(member)
+  }
+  const byRecency = (left: SessionSummary, right: SessionSummary): number => right.updatedAt - left.updatedAt
+  red.sort(byRecency)
+  yellow.sort(byRecency)
+  return [...red, ...yellow, ...sectionMembers(rest, pinned, archived)]
+}
+
+/**
  * A blank session is the selected Workspace's provisional New Session row;
  * its canonical title never enters search (blank rows are query-excluded)
  * and the renderer localizes its display label. Unnamed history also yields an
@@ -491,14 +530,20 @@ function sessionNode(
  * visible (the selected provisional New Session row leads its section);
  * archived sessions keep their slots and appear per the archived filter.
  * Content search lives outside this derivation (see {@link deriveSearchResults}).
+ *
+ * Queue bands (queue-zone-1113, 2026-11-13 ruling): there is no global
+ * 「要我拿主意」 segment anymore — queued rows never leave their group. Inside an
+ * expanded group they lead it, red (p1) first and yellow (p0) after, each band
+ * newest first, ahead of the ordinary section (blank placeholder, pinned, state
+ * rank, recency); a pinned+queued row shows once, in its queued band. Folded
+ * groups keep their `queuedRed`/`queuedYellow` counts for the header badge.
  * @param list - sessions list snapshot (`mainView` retention feeds containsCurrent).
  * @param workspaces - real Workspaces in Host group order with caller-projected Session order.
  * @param rowState - registry-global pin and archive sets plus the archived filter.
  * @param statuses - unified UI status by Session.
  * @param view - local expansion arrays.
- * @param queued - Sessions owned by the 「要我拿主意」 hard segment; their
- *   groups drop the rows and the counts (collab step3 §一, q1-placement), so
- *   each queued Session shows once, at the top.
+ * @param queued - every queued Session id → its tier (`'p1'` red / `'p0'` yellow),
+ *   from {@link deriveQueue}; empty in compositions that queue nothing.
  * @returns group sections in render order.
  */
 export function deriveGroups(
@@ -507,7 +552,7 @@ export function deriveGroups(
   rowState: SessionRowState,
   statuses: SessionStatuses,
   view: TreeView,
-  queued: ReadonlySet<SessionId> = new Set(),
+  queued: ReadonlyMap<SessionId, QueueTierId> = new Map(),
 ): GroupNode[] {
   const archived = new Set(rowState.archivedSessionIds)
   const pinned = new Set(rowState.pinnedSessionIds)
@@ -519,7 +564,14 @@ export function deriveGroups(
   const groups: GroupNode[] = []
   for (const g of groupByWorkspace(list, workspaces, archived, rowState.archivedFilter, view.ungroupedOrder)) {
     const expanded = expandedGroups.has(g.key)
-    const members = queued.size === 0 ? g.sessions : g.sessions.filter(s => !queued.has(s.id))
+    const members = g.sessions
+    let queuedRed = 0
+    let queuedYellow = 0
+    for (const member of members) {
+      const tier = queued.get(member.id)
+      if (tier === 'p1') queuedRed += 1
+      else if (tier === 'p0') queuedYellow += 1
+    }
     groups.push({
       key: g.key,
       workspaceId: g.workspaceId,
@@ -527,10 +579,12 @@ export function deriveGroups(
       createdAt: g.createdAt,
       label: g.label,
       sessionCount: members.length,
+      queuedRed,
+      queuedYellow,
       expanded,
       containsCurrent: g.key === currentGroup,
       sessions: expanded
-        ? sectionMembers(members, pinned, archived)
+        ? queueBandedMembers(members, queued, pinned, archived)
           .map(session => sessionNode(session, list, statuses, pinned, archived, g.label))
         : [],
     })
@@ -595,6 +649,37 @@ export function deriveFlat(
   })
   return sectionMembers(members, pinned, archived)
     .map(session => sessionNode(session, list, statuses, pinned, archived, homeLabels.get(session.id) ?? ''))
+}
+
+/**
+ * Flat-list queue lift (queue-zone-1113, 2026-11-13 ruling): queued rows leave
+ * their supplied position and lead the list — the red band (tier p1) first,
+ * the yellow band (tier p0) after, each band newest first — while every other
+ * row keeps its supplied order untouched. Returns `rows` itself when nothing
+ * queued is present, so memo identities stay stable.
+ * @param rows - flat rows in the browser's selected order.
+ * @param queued - queued Session id → tier from {@link deriveQueue}.
+ * @returns rows with the queued bands lifted to the top.
+ */
+export function liftQueuedRows(
+  rows: readonly SessionNode[],
+  queued: ReadonlyMap<SessionId, QueueTierId>,
+): readonly SessionNode[] {
+  if (queued.size === 0) return rows
+  const red: SessionNode[] = []
+  const yellow: SessionNode[] = []
+  const rest: SessionNode[] = []
+  for (const row of rows) {
+    const tier = queued.get(row.id)
+    if (tier === 'p1') red.push(row)
+    else if (tier === 'p0') yellow.push(row)
+    else rest.push(row)
+  }
+  if (red.length === 0 && yellow.length === 0) return rows
+  const byRecency = (left: SessionNode, right: SessionNode): number => right.updatedAt - left.updatedAt
+  red.sort(byRecency)
+  yellow.sort(byRecency)
+  return [...red, ...yellow, ...rest]
 }
 
 /**
@@ -725,28 +810,43 @@ export function owningParentFolder(path: string, parents: readonly string[]): st
   return owner
 }
 
-/** One tier of the 「要我拿主意」 hard top segment (collab step3 §一, q1-placement). */
+/** One queue tier (classification only since queue-zone-1113 — nothing renders a tier as a segment). */
 export interface QueueTier {
-  /** Human-queue tier label key: `'p0'` (等回话·被卡) or `'p1'` (死局/验收例外). */
-  tier: 'p0' | 'p1'
+  /** Human-queue tier label key: `'p0'` (等回话·被卡, yellow) or `'p1'` (死局/验收例外, red). */
+  tier: QueueTierId
   /** Tier rows ordered by recency; severity deliberately stays out of the order. */
   sessions: readonly SessionNode[]
 }
 
-/** The queue segment plus the ids it took out of the group sections. */
+/**
+ * Queue tier of one queued Session: `'p1'` red (unread failed stop awaiting a
+ * ruling) or `'p0'` yellow (awaiting the user's reply). Rendered order is
+ * always red first (queue-zone-1113), whatever the internal tier array order.
+ */
+export type QueueTierId = 'p0' | 'p1'
+
+/** The queue classification: populated tiers plus every queued id with its tier. */
 export interface QueueSegment {
-  /** Populated tiers in tier order (P0 before P1); absent tiers never render headers. */
+  /**
+   * Populated tiers in internal tier order (P0 before P1). Since
+   * queue-zone-1113 no surface renders them directly — the group bands and
+   * the flat lift read `queued` and always paint red before yellow.
+   */
   tiers: readonly QueueTier[]
-  /** Every queued Session id: their group rows defer to the segment. */
-  queued: ReadonlySet<SessionId>
+  /**
+   * Every queued Session id → its tier. Queued rows never leave their
+   * Workspace group (queue-zone-1113); this map is what orders them to the
+   * group's top and what the group header badge counts.
+   */
+  queued: ReadonlyMap<SessionId, QueueTierId>
 }
 
 /**
- * Derive the 「要我拿主意」 hard top segment (collab step3 §一 裁定 C · 混合):
- * P0 holds awaiting-interaction rows, P1 holds unread failed stops awaiting a
- * ruling. P1 skips rows currently running (2026-10-31 在跑出队裁定): a re-run
- * is already being handled, yet its previous failure's durable projection only
- * flips when the new turn ends, which used to strand a live run in the segment
+ * Classify the 「要我拿主意」 rows (collab step3 §一 裁定 C · 混合): P0 holds
+ * awaiting-interaction rows, P1 holds unread failed stops awaiting a ruling.
+ * P1 skips rows currently running (2026-10-31 在跑出队裁定): a re-run is
+ * already being handled, yet its previous failure's durable projection only
+ * flips when the new turn ends, which used to strand a live run in the queue
  * for its whole duration. P0 keeps its rows regardless — 等回话 outranks. P2
  * (泄漏) and P3 (没在跑) keep no mechanical carrier on this list yet (step3
  * §3.1 marks both 无现行), so they populate nothing rather than guess. Within a
@@ -754,12 +854,18 @@ export interface QueueSegment {
  * queue key (step1 §2.3 终态收敛). Archived and blank rows never queue.
  * Subagent rows never queue either — same rule as `sessionVisible`: they
  * surface through their parent's catalog, never as standalone rows.
+ *
+ * queue-zone-1113 (2026-11-13 ruling): this is a pure classifier, not a
+ * placement. There is no global segment, count bar, or fold — every queued
+ * row renders inside its Workspace group, red band first, yellow band after
+ * ({@link deriveGroups}), or lifted to the top of the flat list
+ * ({@link liftQueuedRows}).
  * @param list - sessions list snapshot.
  * @param statuses - unified UI status by Session.
  * @param archivedIds - registry-global archive set.
  * @param workspaces - Workspace membership for each queued row's home label
  *   (collab step3 §6.1 归宿短标); empty in compositions without the Workspace baseline.
- * @returns the populated tiers plus the queued id set.
+ * @returns the populated tiers plus the queued id → tier map.
  */
 export function deriveQueue(
   list: SessionListState,
@@ -785,14 +891,14 @@ export function deriveQueue(
   p0.sort(byRecency)
   p1.sort(byRecency)
   const tiers: QueueTier[] = []
-  const queued = new Set<SessionId>()
+  const queued = new Map<SessionId, QueueTierId>()
   if (p0.length > 0) {
     tiers.push({ tier: 'p0', sessions: p0 })
-    for (const node of p0) queued.add(node.id)
+    for (const node of p0) queued.set(node.id, 'p0')
   }
   if (p1.length > 0) {
     tiers.push({ tier: 'p1', sessions: p1 })
-    for (const node of p1) queued.add(node.id)
+    for (const node of p1) queued.set(node.id, 'p1')
   }
   return { tiers, queued }
 }
@@ -834,8 +940,11 @@ export function restingStateOf(
 }
 
 /**
- * Ordering of the non-queue rows (collab step3 §6.2 q6-attr, revised by
- * 拍板账⑧): `f(置顶过渡优先, 状态序[已完成 > 静默 > 运行中], 最后活跃时间)`.
+ * Ordering of the rows a group band does not lift (collab step3 §6.2 q6-attr,
+ * revised by 拍板账⑧): `f(置顶过渡优先, 状态序[已完成 > 静默 > 运行中], 最后活跃时间)`.
+ * Since queue-zone-1113 the queued red/yellow bands sit above whatever this
+ * comparator orders (see {@link queueBandedMembers}); the comparator still
+ * fixes the order of everything else, queued rows included upstream.
  * Pure: the caller feeds the row facts and holds no second state. The
  * attribute plane is out of the sort key as of 拍板账⑧ — 优先级 no longer
  * ranks anything here; the 属性缺省 hover hint in `rows/Rows.tsx` keeps naming

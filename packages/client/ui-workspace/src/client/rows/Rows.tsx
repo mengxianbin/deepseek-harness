@@ -219,6 +219,40 @@ function rowHalf(e: { clientY: number; currentTarget: HTMLElement }): 'before' |
   return e.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
 }
 
+/**
+ * Group-header attention counts (queue-zone-1113, 2026-11-13 ruling): the
+ * cross-workspace counts that used to live in the removed global segment's
+ * count bar now ride the group header — red = queued tier p1 rows (unread
+ * failed stops awaiting a ruling), yellow = queued tier p0 rows (awaiting the
+ * user's reply). Red always leads. Each count carries its own shape channel —
+ * red the failed-stop bang glyph, yellow the solid state dot — so the pair
+ * reads by shape, never by color alone (StatusGlyph vocabulary). Hidden
+ * entirely while no member is queued (N+M = 0), and a zero colour inside a
+ * non-empty pair renders no part at all.
+ */
+function AttentionBadges({ red, yellow, t }: { red: number; yellow: number; t: RowTranslate }) {
+  if (red + yellow === 0) return null
+  return (
+    <span className={css.attentionBadges} role="img" aria-label={t('group.attention', { red, yellow })}>
+      {red > 0 && (
+        <span className={css.attentionCount} data-attention="failed">
+          <span className={css.attentionGlyph} aria-hidden="true">!</span>
+          {red}
+        </span>
+      )}
+      {red > 0 && yellow > 0 && (
+        <span className={css.attentionSeparator} aria-hidden="true">·</span>
+      )}
+      {yellow > 0 && (
+        <span className={css.attentionCount} data-attention="pending">
+          <span className={css.attentionDot} aria-hidden="true" />
+          {yellow}
+        </span>
+      )}
+    </span>
+  )
+}
+
 /** Owner props of one Workspace header row; the access Hooks are the browser root's own standard seats. */
 type ProjectRowItemProps = {
   group: GroupNode
@@ -325,6 +359,7 @@ function ProjectRow({
       </span>
       <span className={css.projectText}>
         <span className={css.title}>{label}</span>
+        <AttentionBadges red={row.queuedRed} yellow={row.queuedYellow} t={t} />
       </span>
       <span className={css.rowActions}>
         {actions !== undefined && workspaceMenuItems.length > 0 && (

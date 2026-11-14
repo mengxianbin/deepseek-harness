@@ -181,36 +181,22 @@ describe('WorkspaceBrowser.module.css list', () => {
     expect(declarations('.rail .search')?.get('width')).toBe('36px')
   })
 
-  it('seats and self-scrolls the queue segment beside the list (FORK queue-collapse-1112)', () => {
-    const section = declarations('.queueSection')
-    const rows = declarations('.queueRows')
-    const toggle = declarations('.queueToggle')
-    // The segment is a flex column on the list's trailing seat: no row cap —
-    // the column bounds it, the rows clip scrolls its own overflow, and the
-    // list below keeps whatever the segment leaves.
-    expect(section?.get('display')).toBe('flex')
-    expect(section?.get('flex-direction')).toBe('column')
-    expect(section?.get('min-height')).toBe('0')
-    expect(section?.get('margin-right')).toBe('var(--dsh-session-list-scrollbar-offset)')
-    expect(rows?.get('overflow-y')).toBe('auto')
-    expect(rows?.get('min-height')).toBe('0')
-    expect(rows?.get('scrollbar-gutter')).toBe('stable')
-    // Same padding calc as `.list`: rows end on the shell inset, both
-    // scrollbars land in the same 5px column.
-    expect(rows?.get('padding-right')).toBe(list?.get('padding-right'))
-    // Rows present: the bottom fade clearance mirrors the list's 16px; the
-    // empty line and the folded bar keep the tight 4px gap.
-    expect(section?.get('padding-bottom')).toBe('4px')
-    expect(declarations('.queueSection[data-queue-scroll]')?.get('padding-bottom')).toBe('16px')
-    // The count bar: one line, always clickable, right edge with the rows.
-    expect(toggle?.get('flex')).toBe('none')
-    expect(toggle?.get('cursor')).toBe('pointer')
-    expect(toggle?.get('font-size')).toBe('11px')
-    expect(toggle?.get('margin-right'))
-      .toBe('calc(var(--dsh-session-list-edge-inset) - var(--dsh-session-list-scrollbar-offset))')
-    expect(declarations('.queueChevronOpen')?.get('transform')).toBe('rotate(90deg)')
-    // The alarm box keeps its old position now that the rows sit 8px inboard.
+  it('drops the removed queue segment styles and keeps the alarm line on the list seat (queue-zone-1113)', () => {
+    // The global segment (section, count bar, rows clip, empty line, fold
+    // chevron) went away with the ruling — no rule may survive for it.
+    for (const removed of [
+      '.queueSection', '.queueToggle', '.queueRows', '.queueEmpty', '.queueChevron', '.queueChevronOpen',
+    ]) expect(declarations(removed), removed).toBeUndefined()
+    expect(css).not.toContain('[data-queue-scroll]')
+    // The 安康位 alarm line keeps the list's trailing seat and row gutter.
     expect(declarations('.queueHealth')?.get('margin'))
       .toBe('0 calc(var(--dsh-session-list-edge-inset) - var(--dsh-session-list-scrollbar-offset)) 4px 12px')
+    // The group header badge separates its tiers by shape, not just colour:
+    // the yellow count rides the solid dot, the red count its own colour.
+    expect(rowDeclarations('.attentionDot')?.get('background')).toBe('currentColor')
+    expect(rowDeclarations(".attentionCount[data-attention='failed']")?.get('color'))
+      .toBe('var(--dsw-alias-state-error-primary)')
+    expect(rowDeclarations(".attentionCount[data-attention='pending']")?.get('color'))
+      .toBe('var(--dsw-alias-state-warn-primary)')
   })
 })
