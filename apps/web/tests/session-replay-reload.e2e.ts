@@ -72,7 +72,7 @@ describe.skipIf(webSnapshotMode() === 'record')('web session replay', () => {
       // FORK(replay-residual-1022): New session 按钮已随品牌行收整退役入页脚 ⋯ 菜单（question-composer 10-19 先例）
       await page.locator('[class*="footArea"]').getByRole('button', { name: 'More', exact: true }).click()
       await page.getByRole('menuitem', { name: 'New Session', exact: true }).click()
-      await page.getByText('Into the Unknown', { exact: true }).waitFor()
+      await page.getByText('What can I do for you?', { exact: true }).waitFor()
       await page.getByRole('treeitem').filter({ has: page.getByText('Use the bash tool to', { exact: true }) }).click()
       await page.getByText('DONE', { exact: true }).waitFor({ timeout: 15_000 })
       await compareOrRefreshGolden(UI_EXPECTED,
