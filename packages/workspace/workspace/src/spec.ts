@@ -53,6 +53,12 @@ const workspacePendingMutation = z.discriminatedUnion('operation', [
  * (most recently pinned first); pinning and archival are mutually
  * exclusive, so archiving drops the session's pin. Both session sets are
  * defaulted so records written before the fields parse unchanged.
+ * `archivedAtById` (archive-at-host-time-1114) stamps the archive moment in
+ * the same durable write as the archive set itself: keys are session ids in
+ * the same native spellings the archive set mixes, values are epoch-ms
+ * timestamps, and an entry lives exactly as long as the archived id does
+ * (unarchiving drops both). Defaulted so records written before the field
+ * parse unchanged.
  */
 export const workspaceDomainState = z.object({
   initialized: z.boolean(),
@@ -60,6 +66,8 @@ export const workspaceDomainState = z.object({
   defaultWorkspaceId: workspaceId.optional(),
   workspaceIds: z.array(workspaceId),
   archivedSessionIds: z.array(sessionId).default([]),
+  /** Epoch-ms archive moment per archived session id; keyed like the archive set. */
+  archivedAtById: z.record(z.string(), z.number()).default({}),
   pinnedSessionIds: z.array(sessionId).default([]),
   pendingMutation: workspacePendingMutation.optional(),
 })
@@ -78,7 +86,7 @@ export const workspaceDomainSpec = defineDomain({
   version: 2,
   global: {
     schema: workspaceDomainState,
-    initial: { initialized: false, workspaceIds: [], archivedSessionIds: [], pinnedSessionIds: [] },
+    initial: { initialized: false, workspaceIds: [], archivedSessionIds: [], archivedAtById: {}, pinnedSessionIds: [] },
   },
   tables: { workspaces: domainTable<WorkspaceId, WorkspaceRecord>(workspaceRecord) },
 })

@@ -346,6 +346,18 @@ export class WorkspaceRegistry extends Service {
   }
 
   /**
+   * The archive moment (epoch ms) of every currently archived session, keyed
+   * by the same native id spellings the archive set mixes (archive-at-host-
+   * time-1114). Written in the same durable write as the archive set, dropped
+   * in the same durable write as unarchiving, so the map always mirrors the
+   * set — the host is the time authority for every archive channel.
+   * @returns a snapshot of the id → archived-at map.
+   */
+  get archivedAtById(): Readonly<Record<string, number>> {
+    return { ...this.requireState().archivedAtById }
+  }
+
+  /**
    * The subagent-origin ids known to the startup/live header index: sessions
    * whose stored or live header carries `origin: 'subagent'`. Derived from
    * the in-memory index on each read (one pass over the index, no I/O), so
@@ -375,7 +387,9 @@ export class WorkspaceRegistry extends Service {
    * to stop the session's work: the durable archive set is what a provider's
    * `agent/pre-step` gate reads, so every wake the stops induce is already
    * blocked. Archiving drops the session's pin in the same durable write
-   * (pinning and archival are mutually exclusive). An already archived id
+   * (pinning and archival are mutually exclusive) and stamps the archive
+   * moment into `archivedAtById` in that same write, so a resolved archive
+   * always carries its time (archive-at-host-time-1114). An already archived id
    * resolves without writing, asking, or stopping.
    * @param sessionId - The session to archive.
    * @param options - Whether running work is stopped instead of refusing.
@@ -399,6 +413,7 @@ export class WorkspaceRegistry extends Service {
       await this.setState({
         ...state,
         archivedSessionIds: [...state.archivedSessionIds, sessionId],
+        archivedAtById: { ...state.archivedAtById, [sessionId]: Date.now() },
         pinnedSessionIds: state.pinnedSessionIds.filter(id => id !== sessionId),
       })
       if (options.stopActivity === true) await this.stopSessionActivity(sessionId)
@@ -411,7 +426,9 @@ export class WorkspaceRegistry extends Service {
    * returns to its recorded position. Unarchiving runs no session-existence
    * check because removing an id cannot introduce an unknown one, so an
    * entry whose session is gone still resolves. An id that is not archived
-   * resolves without writing.
+   * resolves without writing. Unarchiving also drops the id's `archivedAtById`
+   * entry in the same durable write: a re-archived session stamps a fresh
+   * moment, so the retention clock restarts (archive-at-host-time-1114).
    * @param sessionId - The session to unarchive.
    * @returns resolution after durability.
    */
@@ -421,9 +438,11 @@ export class WorkspaceRegistry extends Service {
       // check-then-write pair cannot interleave with a concurrent archive.
       const state = this.requireState()
       if (!state.archivedSessionIds.includes(sessionId)) return
+      const { [sessionId]: _unarchived, ...archivedAtById } = state.archivedAtById
       await this.setState({
         ...state,
         archivedSessionIds: state.archivedSessionIds.filter(id => id !== sessionId),
+        archivedAtById,
       })
     })
   }
@@ -749,6 +768,7 @@ export class WorkspaceRegistry extends Service {
         initialized: false,
         workspaceIds,
         archivedSessionIds: state.archivedSessionIds,
+        archivedAtById: state.archivedAtById,
         pinnedSessionIds: state.pinnedSessionIds,
       })
     }
@@ -756,6 +776,7 @@ export class WorkspaceRegistry extends Service {
       initialized: true,
       workspaceIds,
       archivedSessionIds: state.archivedSessionIds,
+      archivedAtById: state.archivedAtById,
       pinnedSessionIds: state.pinnedSessionIds,
     })
   }
