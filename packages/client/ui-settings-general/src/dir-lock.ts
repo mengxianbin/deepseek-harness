@@ -28,18 +28,31 @@ export const DIR_LOCK_STALE_MS = 5_000
  * the forced break is warned, never silent. */
 export const DIR_LOCK_WAIT_MS = 15_000
 
-/** Error subclass marking "another writer holds the lock right now". */
+/** Error subclass marking "another writer holds the lock right now".
+ * Fields are declared and assigned in the body on purpose: constructor
+ * parameter properties are non-erasable syntax, so a strip-only TypeScript
+ * loader (the collector task's bare `node script.ts`) cannot parse them —
+ * that parse failure silently killed the collector heartbeat (dir-lock-strip-1114). */
 export class DirLockBusyError extends Error {
-  public constructor(public readonly directory: string) {
+  public readonly directory: string
+
+  public constructor(directory: string) {
     super(`dir-lock: busy: ${directory}`)
+    this.directory = directory
     this.name = 'DirLockBusyError'
   }
 }
 
-/** Error subclass marking "the lock stayed busy past the wait bound". */
+/** Error subclass marking "the lock stayed busy past the wait bound".
+ * Same strip-only constraint as {@link DirLockBusyError} (dir-lock-strip-1114). */
 export class DirLockTimeoutError extends Error {
-  public constructor(public readonly directory: string, public readonly waitedMs: number) {
+  public readonly directory: string
+  public readonly waitedMs: number
+
+  public constructor(directory: string, waitedMs: number) {
     super(`dir-lock: wait bound exceeded after ${String(waitedMs)}ms: ${directory}`)
+    this.directory = directory
+    this.waitedMs = waitedMs
     this.name = 'DirLockTimeoutError'
   }
 }
