@@ -80,3 +80,47 @@ it('preserves unlisted child status through metadata updates and keeps it lit th
   expect(ui.sessionStatus.getSnapshot().get(childId)?.completionOutcome).toBe('failed')
   expect(ui.sessionStatus.getSnapshot().get(childId)?.readMarked).toBe(true)
 })
+
+it('keeps a running child lit across a Host-generation repair (投影清库窗口不剪枝)', async ({ mock, start }) => {
+  // The narrow listing carries the parent's catalog (cold rows are its only
+  // source), so the repair's own re-pull is what puts the child back in `byId`.
+  mock.remote.session.list.mockResolvedValue(ok({ items: [{
+    sessionId: parentId, updatedAt: 1, running: false, blank: false, agentAvailable: true,
+    projections: { kind: 'sequenced' as const, asOfSeq: 0, values: {
+      subagentCatalog: [{ id: childId, createdAt: 1, mode: 'continuable' as const, label: 'Child' }],
+    } },
+  }] }))
+  const client = await start()
+  const sessions = client.ctx.sessions
+  const ui = client.ctx.uiSession
+  await sessions.refresh()
+  await client.flush()
+  expect(sessions.list.getSnapshot().projectionsBySession[parentId]?.values.subagentCatalog).toHaveLength(1)
+  expect(ui.sessionStatus.getSnapshot().get(childId)).toMatchObject({ running: undefined })
+
+  mock.streams.push('$events', { type: 'emit', event: 'api-session/status', args: [childId, true] })
+  await mock.streams.drained('$events')
+  await client.flush()
+  expect(ui.sessionStatus.getSnapshot().get(childId)).toMatchObject({ running: true })
+
+  // A Host-generation repair discards every projection cut before the re-pull
+  // lands. The catalog row is the only thing holding this child in `byId`, so
+  // for that window the child drops out of `byId` while `list.phase` stays
+  // 'ready' — the reconcile prune must not destroy the running fact the Host
+  // already reported for it.
+  //
+  // `handleConnected` is the client's own generation-repair hook: deliberately
+  // absent from the `ISessions` contract face (hand-built fakes implement that
+  // interface), and "generation change → handleConnected" is already covered by
+  // `client-apply.client.spec.ts`. This test owns the other half — what the
+  // repair does to an unlisted child's observed running fact.
+  const repair = sessions as unknown as { handleConnected(): void }
+  repair.handleConnected()
+  // Drain the window: the clear, the reconcile that used to prune in it, and
+  // the repair's own re-pull that restores the catalog behind it.
+  await client.flush()
+  await vi.waitFor(() => {
+    expect(sessions.list.getSnapshot().projectionsBySession[parentId]?.values.subagentCatalog).toHaveLength(1)
+  })
+  expect(ui.sessionStatus.getSnapshot().get(childId)).toMatchObject({ running: true })
+})

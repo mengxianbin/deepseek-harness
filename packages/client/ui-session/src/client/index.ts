@@ -1102,7 +1102,22 @@ export class UiSession extends Service {
         this.knownMainIds.add(id)
       } else this.knownMainIds.delete(id)
     }
-    if (list.phase === 'ready') {
+    // 剪枝只对已定稿的快照生效 (投影清库窗口, row-status-subagent-1114): a
+    // Host-generation repair discards every projection cut before its re-pull
+    // lands, and until that pull settles `byId` is missing exactly the
+    // catalog-fallback subagent rows whose sessions are still alive — their
+    // parent row survives (it rides `summaries`, which no repair clears), so
+    // pruning here reads "this child is gone" from an incomplete roster and
+    // destroys the running fact the Host already reported for it. The fold
+    // above only walks `list.ids`, so a row that is not a Host-list member is
+    // never rebuilt: the loss lasts until the next status frame (the Host's
+    // 15s sweep), which under a reconnecting link is most of the time. A
+    // pull that failed leaves the same incomplete roster behind, so it
+    // suppresses the prune for the same reason. `state` is absent only in
+    // hand-built fixtures, which read as "no pull activity" and keep the
+    // original always-prune behaviour.
+    const settled = list.state === undefined || list.state === 'idle'
+    if (list.phase === 'ready' && settled) {
       for (const id of this.running.keys()) {
         if (present.has(id)) continue
         this.running.delete(id)
