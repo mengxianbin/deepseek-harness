@@ -642,6 +642,9 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
+  /* Full-round corners state their arc back to the universal superellipse
+     (ui-theme corner-shape contract), like every other dot in these rows. */
+  corner-shape: round;
   background: currentColor;
 }
 
