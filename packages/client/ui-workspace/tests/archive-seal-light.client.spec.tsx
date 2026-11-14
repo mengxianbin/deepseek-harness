@@ -334,6 +334,60 @@ describe('mergeHostSeals (status-carried verdicts overlay the pull snapshot)', (
     const statuses = new Map([[sid('host-only'), { seal: { verdict: 'NEUTRAL' } }]])
     expect(mergeHostSeals(new Map(), statuses).get(sid('host-only'))).toEqual({ verdict: 'NEUTRAL' })
   })
+
+  it('keeps the pull DONE when the host record is UNKNOWN — an unreadable record never presses a fresh C1 green (seal-lamp-consistency-1114)', () => {
+    // Given a C1 pull snapshot that just proved DONE and a Host record that
+    // could not be read (decode-fail), When the overlay folds them, Then the
+    // lamp data stays the pull's green, the store is untouched, and the
+    // snapshot identity holds — no spurious republish for a row that was
+    // already painted right.
+    const store: SealLightSnapshot = new Map([[sid('one'), { verdict: 'DONE' }]])
+    const statuses = new Map([[sid('one'), { seal: { verdict: 'UNKNOWN', detail: 'decode-fail' } }]])
+    const merged = mergeHostSeals(store, statuses)
+    expect(merged.get(sid('one'))).toEqual({ verdict: 'DONE' })
+    expect(store.get(sid('one'))).toEqual({ verdict: 'DONE' })
+    expect(merged).toBe(store)
+  })
+
+  it('keeps the host UNKNOWN pressing every other pull reading — only DONE yields (narrow scope, fail-visible intact)', () => {
+    // Given pull readings that are real but not green (UNSEALED / N_A) and a
+    // row the pull holds nothing for, When an unreadable Host record meets
+    // them, Then the Host stamp still presses on all three — the exception
+    // is DONE-only, so 查失败 keeps reading visibly on every non-green path.
+    const store: SealLightSnapshot = new Map([
+      [sid('unsealed'), { verdict: 'UNSEALED' }],
+      [sid('na'), { verdict: 'N_A' }],
+    ])
+    const statuses = new Map([
+      [sid('unsealed'), { seal: { verdict: 'UNKNOWN', detail: 'decode-fail' } }],
+      [sid('na'), { seal: { verdict: 'UNKNOWN' } }],
+      [sid('nopull'), { seal: { verdict: 'UNKNOWN', detail: 'decode-fail' } }],
+    ])
+    const merged = mergeHostSeals(store, statuses)
+    expect(merged.get(sid('unsealed'))).toEqual({ verdict: 'UNKNOWN', detail: 'decode-fail' })
+    expect(merged.get(sid('na'))).toEqual({ verdict: 'UNKNOWN' })
+    expect(merged.get(sid('nopull'))).toEqual({ verdict: 'UNKNOWN', detail: 'decode-fail' })
+  })
+
+  it('C1=DONE 且 Host=UNKNOWN → 灯 ready：merged verdict renders 归档就绪 in the DOM (seal-lamp-consistency-1114 acceptance)', () => {
+    // Given the conflict pair (pull DONE × host decode-fail UNKNOWN), When
+    // the merged snapshot feeds the row's lamp, Then the tone is ready and
+    // the aria-label reads 归档就绪 — the gate's answer, on the lamp.
+    const sealRows = observer()
+    const store: SealLightSnapshot = new Map([[sid('one'), { verdict: 'DONE' }]])
+    const statuses = new Map([[sid('one'), { seal: { verdict: 'UNKNOWN', detail: 'decode-fail' } }]])
+    const merged = mergeHostSeals(store, statuses)
+    const seal = merged.get(sid('one'))
+    expect(seal).toEqual({ verdict: 'DONE' })
+    // The ?? keeps the assertion honest without a non-null assertion: a lost
+    // verdict would fall back to UNKNOWN and paint unreadable, not ready.
+    expect(sealLightTone(seal ?? { verdict: 'UNKNOWN' })).toBe('ready')
+    render(<SealLight sessionId={sid('one')} running={false} seal={seal} sealRows={sealRows} t={t} />)
+    const lamp = screen.getByRole('img', { name: '归档就绪：save 已收口（DONE）' })
+    expect(lamp.getAttribute('data-seal-tone')).toBe('ready')
+    expect(lamp.getAttribute('aria-label')).toBe('归档就绪：save 已收口（DONE）')
+    expect(sealRows.watch).toHaveBeenCalledWith(sid('one'))
+  })
 })
 
 describe('SealLight (the lamp on the row)', () => {
