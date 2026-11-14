@@ -186,12 +186,15 @@
   transform: rotate(90deg);
 }
 
+/* Title and attention badge on one line: the badge follows the title and uses
+   its own margin as spacing; the title keeps its ellipsis by shrinking
+   (min-width: 0) while the badge holds its width (flex: none). */
 .projectText {
   flex: 1;
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-direction: row;
+  align-items: center;
 }
 
 .title {
