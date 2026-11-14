@@ -4,9 +4,11 @@
  * @module @deepseek-ai/dsh-home-paths
  */
 
+import { existsSync, readFileSync } from 'node:fs'
 import { opendir, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 /** Directory name for the default DeepSeek Harness home under the OS home. */
 export const DSH_HOME_DIR_NAME = '.dsh'
@@ -121,19 +123,108 @@ function rootDisplay(resolvedRoot: string, defaultRoot: string, defaultLabel: st
   return resolvedRoot === resolve(defaultRoot) ? defaultLabel : `$${envName}`
 }
 
+/** Config file names that may carry the data root, highest precedence first（F' 配置插层）. */
+export const DATA_ROOT_CONFIG_FILES = ['data-root.local.json', 'data-root.json'] as const
+
+/** Marker file that identifies the program root while walking up from this module. */
+const PROGRAM_ROOT_MARKER = 'pnpm-workspace.yaml'
+
+/** Cached self-location result; `null` means "not yet discovered". */
+let programRootCache: string | undefined | null = null
+
+/**
+ * Locate the harness program root by walking up from this module to the nearest
+ * `pnpm-workspace.yaml`（F' 配置插层自定位，dsh-home-configfile-1113）。
+ *
+ * A workspace checkout carries the marker at the repo root, beside the
+ * `data-root*.json` files this root exists to find. An npm-packaged install has
+ * no marker above it, so this returns `undefined`, the config layer is skipped,
+ * and the startup chain may still pass an explicit path instead（方案档 §1.2 兜底）。
+ * The answer cannot change within one process, so it is cached.
+ * @returns the program root directory, or undefined when no marker exists.
+ */
+export function findProgramRoot(): string | undefined {
+  if (programRootCache !== null) return programRootCache
+  let directory = dirname(fileURLToPath(import.meta.url))
+  for (;;) {
+    if (existsSync(join(directory, PROGRAM_ROOT_MARKER))) {
+      programRootCache = directory
+      return directory
+    }
+    const parent = dirname(directory)
+    if (parent === directory) {
+      programRootCache = undefined
+      return undefined
+    }
+    directory = parent
+  }
+}
+
+/**
+ * Read the configured data root from `<programRoot>/data-root*.json`
+ * （F' 配置插层，dsh-home-configfile-1113）：本机覆盖 `data-root.local.json`
+ * 先于入仓模板 `data-root.json`。缺文件、key 缺失或空值 → 跳下一层；
+ * JSON 损坏、顶层非对象或 `dataRoot` 非字符串 → 响亮抛错（配置 = 单一事实源，
+ * 不静默回落；同 m-note 侧约定，方案档 §2.4）。
+ * @param programRoot directory holding the config files.
+ * @returns the raw configured value (`~` expands later in {@link resolveRoot}), or undefined when no layer provides one.
+ */
+function readDataRootConfig(programRoot: string): string | undefined {
+  for (const name of DATA_ROOT_CONFIG_FILES) {
+    const file = join(programRoot, name)
+    if (!existsSync(file)) continue
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(readFileSync(file, 'utf8'))
+    } catch (error) {
+      throw new Error(`${file}: ${(error as Error).message}`)
+    }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error(`${file}: expected a JSON object`)
+    }
+    const value = (parsed as { dataRoot?: unknown }).dataRoot
+    if (value === undefined || value === null) continue
+    if (typeof value !== 'string') throw new Error(`${file}: "dataRoot" must be a string`)
+    const trimmed = value.trim()
+    if (trimmed.length > 0) return trimmed
+  }
+  return undefined
+}
+
+/**
+ * F' 配置插层的 fallback：配置文件优先，缺省回落 `~/.dsh`（dsh-home-configfile-1113）。
+ * @param programRoot -配置文件目录；省略则经 {@link findProgramRoot} 自定位。
+ * @returns the configured data root, or the built-in default when no layer provides one.
+ */
+function configOrDefault(programRoot?: string): string {
+  const root = programRoot ?? findProgramRoot()
+  return (root !== undefined ? readDataRootConfig(root) : undefined) ?? defaultDshHome()
+}
+
 /**
  * Resolve the single-root DeepSeek Harness home.
  *
- * Precedence, highest first: an explicit configured path, `$DSH_HOME`, then
- * `~/.dsh`. The harness keeps all user data under one root. An empty or
- * whitespace-only `$DSH_HOME` is treated as unset, so a blank override never
- * resolves the home to the current working directory.
+ * F' 配置插层（dsh-home-configfile-1113；方案档 = m-note 仓
+ * `content/tech/ai/dsh/dsh-home-configfile-1113.md` §〇.1），优先级从高到低：
+ * 1. 显式 `configured` 参数（启动链 / SDK 注入）；
+ * 2. `$DSH_HOME` —— 仅进程内覆盖层（测试钉扎、spawn 注入），不是全局配置通道；
+ * 3. 配置文件 `<programRoot>/data-root.local.json` > `data-root.json`
+ *    （程序根自定位见 {@link findProgramRoot}；值可写 `~` 形）；
+ * 4. 内置默认 `~/.dsh`。
+ *
+ * An empty or whitespace-only `$DSH_HOME` is treated as unset, so a blank
+ * override never resolves the home to the current working directory.
  * @param configured - explicit harness-home override, which has highest precedence.
  * @param env - environment mapping used to read `DSH_HOME`.
+ * @param programRoot - 配置文件目录；省略自动定位，测试 / 启动链可显式传入。
  * @returns the normalized absolute harness home path.
  */
-export function resolveDshHome(configured?: string, env: Record<string, string | undefined> = process.env): string {
-  return resolveRoot(configured, env, DSH_HOME_ENV, defaultDshHome)
+export function resolveDshHome(
+  configured?: string,
+  env: Record<string, string | undefined> = process.env,
+  programRoot?: string,
+): string {
+  return resolveRoot(configured, env, DSH_HOME_ENV, () => configOrDefault(programRoot))
 }
 
 /**

@@ -172,6 +172,28 @@ describe('config stamp', () => {
     writeFileSync(target, '- id: moved\n')
     expect(computeConfigStamp(dshHome, '')).not.toBe(base)
   })
+
+  it('moves with data-root config content (F\' 配置插层)', () => {
+    // dsh-home-configfile-1113 C3: 改数据根配置必须移动 S_cfg，否则运行中的
+    // 进程改了 data-root*.json 也收不到重启提示。programRoot 第三参是注入缝。
+    const dshHome = fixtureRoot('dsh-restart-stamp-dataroot-')
+    const programRoot = fixtureRoot('dsh-restart-stamp-programroot-')
+    writeFileSync(join(programRoot, 'data-root.json'), JSON.stringify({ dataRoot: '~/.dsh' }))
+    const base = computeConfigStamp(dshHome, '', programRoot)
+    expect(base).toMatch(/^[0-9a-f]{64}$/)
+
+    writeFileSync(join(programRoot, 'data-root.json'), JSON.stringify({ dataRoot: 'D:/other-home' }))
+    const withoutLocal = computeConfigStamp(dshHome, '', programRoot)
+    expect(withoutLocal).not.toBe(base)
+
+    // local 覆盖层同样入账
+    writeFileSync(join(programRoot, 'data-root.local.json'), JSON.stringify({ dataRoot: 'D:/local-home' }))
+    expect(computeConfigStamp(dshHome, '', programRoot)).not.toBe(withoutLocal)
+
+    // 无 data-root 文件的 programRoot 仍出 64hex（缺文件跳层，不炸）
+    const bare = fixtureRoot('dsh-restart-stamp-bareprogramroot-')
+    expect(computeConfigStamp(dshHome, '', bare)).toMatch(/^[0-9a-f]{64}$/)
+  })
 })
 
 describe('component parsing', () => {

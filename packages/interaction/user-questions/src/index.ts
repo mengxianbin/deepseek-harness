@@ -9,10 +9,10 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import { mkdir, writeFile } from 'node:fs/promises'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type {} from '@deepseek-ai/dsh-agent'
 import { createUserMessage, HarnessError, type MessageId, type ToolCallId, type UserMessage } from '@deepseek-ai/dsh-llm'
+import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type { Session } from '@deepseek-ai/dsh-session'
 import { scopeTarget } from '@deepseek-ai/dsh-scope'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
@@ -105,14 +105,14 @@ export interface Config {
 const foldedNote = (chars: number): string => `\n\n…（已折叠：完整内容 ${String(chars)} 字见下方附件）`
 
 /**
- * Default root for folded report files: `$DSH_HOME` (or `~/.dsh`) then
- * `ask-reports`. Mirrors `@deepseek-ai/dsh-home-paths` `resolveDshHome`
- * inline — a value import would need a package link this package does not
- * declare, and this seam stays dependency-light on purpose.
+ * Default root for folded report files: the resolved DSH home (F' 四层
+ * 配置插层——显式参 > `$DSH_HOME` > data-root 配置文件 > `~/.dsh`，见
+ * dsh-home-configfile-1113) then `ask-reports`. Delegates to
+ * `@deepseek-ai/dsh-home-paths` `resolveDshHome` so this seam can never
+ * diverge from the single source of truth by reading the environment alone.
  * @returns the absolute default report directory.
  */
-const defaultReportDir = (): string =>
-  join(process.env.DSH_HOME?.trim() || join(homedir(), '.dsh'), 'ask-reports')
+const defaultReportDir = (): string => join(resolveDshHome(), 'ask-reports')
 
 /** Cut a field to its inline summary, preferring a line boundary near the limit. */
 function foldSummary(text: string, limit: number): string {

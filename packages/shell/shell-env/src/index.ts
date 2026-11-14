@@ -155,6 +155,9 @@ export class ShellEnvRegistry extends Service {
    */
   collect(execution: ToolExecution): DshEnvironment {
     const values: Record<DshEnvironmentKey, string> = {
+      // F'：向子 shell 注入 DSH_HOME = 进程内覆盖层的正常用法（值经
+      // resolveDshHome 已含 data-root 配置层，见 dsh-home-configfile-1113），
+      // 非全局配置——全局 env 导出已废。
       [DSH_HOME_ENV]: this.dshHome,
       [DSH_SHELL_KEY]: '1',
     }

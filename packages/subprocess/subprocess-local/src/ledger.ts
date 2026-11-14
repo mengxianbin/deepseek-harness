@@ -8,8 +8,8 @@
  */
 
 import { appendFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type { SweptWindowsProcess } from './windows-inspector.ts'
 
 /** One `spawn` line: the runner that owned the Job for one target launch. */
@@ -45,17 +45,16 @@ export type LedgerEvent = LedgerSpawnEvent | LedgerSettleEvent
 const LEDGER_ENV = 'DSH_SUBPROCESS_LEDGER'
 
 /**
- * Resolve the ledger path: explicit override first, then `$DSH_HOME` as the
- * home root itself (same precedence and blank-is-unset rule as
- * dsh-home-paths), then `~/.dsh` by Node path rules.
+ * Resolve the ledger path: explicit override first, then the resolved DSH
+ * home (F' 四层配置插层——显式参 > `$DSH_HOME` > data-root 配置文件 >
+ * `~/.dsh`，见 dsh-home-configfile-1113)，so the ledger follows the single
+ * source of truth instead of re-reading the environment alone.
  * @returns the absolute JSONL path.
  */
 export function subprocessLedgerPath(): string {
   const override = process.env[LEDGER_ENV]
   if (override !== undefined && override.trim() !== '') return override.trim()
-  const dshHome = process.env.DSH_HOME
-  const home = dshHome !== undefined && dshHome.trim() !== '' ? dshHome.trim() : join(homedir(), '.dsh')
-  return join(home, 'subprocess-ledger.jsonl')
+  return join(resolveDshHome(), 'subprocess-ledger.jsonl')
 }
 
 /**

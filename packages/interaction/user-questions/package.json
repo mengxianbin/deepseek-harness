@@ -67,6 +67,7 @@
   },
   "dependencies": {
     "zod": "4.4.3",
+    "@deepseek-ai/dsh-home-paths": "workspace:*",
     "@deepseek-ai/schemastery": "workspace:~"
   }
 }

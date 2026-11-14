@@ -1,11 +1,11 @@
 /** Web-only host plugin: owner sign-in routes, the share-management Remote, and gateway lifetime. */
 
-import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-remote-access'
 import type {} from '@deepseek-ai/dsh-api-session-controller'
 import type {} from '@deepseek-ai/dsh-client-connection'
+import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-workspace'
 import {
@@ -585,8 +585,9 @@ export async function apply(ctx: Context, config: Config): Promise<() => Promise
 }
 
 function defaultOwnerStateFile(): string {
-  const dshHome = nonEmpty(process.env.DSH_HOME) ?? join(homedir(), '.dsh')
-  return join(dshHome, 'liveshare', 'owner-shares.json')
+  // F' 四层配置插层（dsh-home-configfile-1113）：跟随 resolveDshHome 单源，
+  // 不再内联读 env——内联读会绕过 data-root 配置文件层。
+  return join(resolveDshHome(), 'liveshare', 'owner-shares.json')
 }
 
 function nonEmpty(value: string | undefined): string | undefined {
