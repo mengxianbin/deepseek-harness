@@ -34,7 +34,7 @@ it.skipIf(webSnapshotMode() === 'record')('persists the upload switch and omits 
   const send = async (text: string) => {
     const settled = scaffold.whenTurnSettled()
     await input.fill(text)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     return settled
   }
   const setUpload = async (enabled: boolean) => {

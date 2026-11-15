@@ -139,7 +139,7 @@ it.skipIf(webSnapshotMode() === 'record').each(['inbox-first', 'transcript-first
       const settled = whenTurnSettled(scaffold)
       const input = page.locator('[data-composer-input]').first()
       await input.fill(TEXT)
-      await input.press('Enter')
+      await input.press('Shift+Enter')
       // The prompt receipt is not a stream frame: the accepted echo shows while the gate holds every Host frame.
       await poll(() => placement(page)).toMatchObject({ echo: 1, dock: 0, durable: 0 })
       trace.push({ phase: 'accepted', ...await placement(page) })

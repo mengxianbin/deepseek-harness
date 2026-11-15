@@ -59,7 +59,7 @@ describe('web e2e: recommended multi-select options', () => {
     await input.waitFor({ timeout: 10_000 })
     const settled = scaffold.whenTurnSettled(MODE === 'record' ? 180_000 : 30_000)
     await input.fill(PROMPT)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
 
     const composer = page.locator('[data-question-key]')
     await composer.waitFor({ timeout: MODE === 'record' ? 120_000 : 30_000 })

@@ -551,8 +551,8 @@ export interface ComposerBarInjected {
     /** Readable sequence while the fixed Stop command is registered. */
     stopShortcut: ObservableSnapshot<readonly string[]>
     /**
-     * Live busy-state submission preference: the delivery mode plain Enter
-     * and the primary Send button use while the addressed agent is busy.
+     * Live busy-state submission preference: the delivery mode the Shift+Enter
+     * send gesture and the primary Send button use while the addressed agent is busy.
      */
     busyEnter: ObservableSnapshot<BusyEnterBehavior>
     /** Live per-draft upload states for drafts that upload when added. */

@@ -41,7 +41,7 @@ describe('web e2e: fixed approval rejection keys', () => {
       expect(prompts).toHaveLength(1)
       const settled = scaffold.whenTurnSettled()
       await input.fill(prompts[0]!)
-      await input.press('Enter')
+      await input.press('Shift+Enter')
       const panel = page.locator('[data-approval-key]')
       await panel.waitFor()
       if (method === 'reject-button-enter') {

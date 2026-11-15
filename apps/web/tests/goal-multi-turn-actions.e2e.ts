@@ -134,7 +134,7 @@ describe('web e2e: Goal keeps one assistant action row per completed turn', () =
     await input.waitFor({ timeout: 10_000 })
     const settled = whenTurnsSettled(scaffold!, 2, timeoutMs)
     await input.fill(COMMAND)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     return settled
   }
 

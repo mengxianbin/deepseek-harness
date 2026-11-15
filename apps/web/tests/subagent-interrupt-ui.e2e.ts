@@ -163,7 +163,7 @@ describe.skipIf(MODE === 'record')('web e2e: composer interrupt for a running co
     const parentSettled = scaffold.whenTurnSettled()
     const parentInput = page.locator('[data-composer-input][contenteditable="true"]').first()
     await parentInput.fill('Ask a research subagent to explain event sourcing.')
-    await parentInput.press('Enter')
+    await parentInput.press('Shift+Enter')
     expect(await parentSettled).toBe(parent.id)
 
     // Reload onto the restart baseline (the proven route to a freshly
@@ -363,7 +363,7 @@ describe.skipIf(MODE === 'record')('web e2e: composer interrupt for a running co
 
     // Only the waking send resumes the parked queue, FIFO, to settlement.
     await input.fill(WAKING)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     await expect.poll(() => page.getByText(REARMED_ANSWER, { exact: true }).count(), { timeout: 30_000 }).toBe(1)
     await expect.poll(() => page.getByText(PARKED_ANSWER, { exact: true }).count(), { timeout: 30_000 }).toBe(1)
     await expect.poll(() => page.getByText(IMAGE_ANSWER, { exact: true }).count(), { timeout: 30_000 }).toBe(1)

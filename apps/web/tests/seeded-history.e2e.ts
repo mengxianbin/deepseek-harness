@@ -312,7 +312,7 @@ describe('web e2e: seeded history renders through cold resume', () => {
     await input.waitFor({ timeout: 10_000 })
     const settled = scaffold.whenTurnSettled()
     await input.fill(PROMPT)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     const sessionId = await settled
     await recordFixture(scaffold, sessionId, SEED)
   }, 200_000)
@@ -763,7 +763,7 @@ describe('web e2e: seeded history renders through cold resume', () => {
     try {
       const input = page.locator('[data-composer-input]').first()
       await input.fill('/feedback the diff view is unreadable')
-      await input.press('Enter')
+      await input.press('Shift+Enter')
       const row = page.locator('[data-variant="others"]').filter({
         hasText: `Feedback recorded for session ${SEED_ID}`,
       })

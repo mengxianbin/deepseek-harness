@@ -388,7 +388,7 @@ describe('web e2e: resident question composer round trip', () => {
     await input.waitFor({ timeout: 10_000 })
     const settled = scaffold.whenTurnSettled(MODE === 'record' ? 180_000 : 30_000)
     await input.fill(PROMPT)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
 
     // The composer takes over the input area while the tool blocks. Its
     // presence is a STABLE waiting state (not a transient): it stays until

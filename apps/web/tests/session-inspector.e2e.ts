@@ -42,7 +42,7 @@ it.skipIf(webSnapshotMode() === 'record')('inspects a replayed Session log and C
   const settled = scaffold.whenTurnSettled()
   const input = page.locator('[data-composer-input]').first()
   await input.fill(prompts[0]!)
-  await input.press('Enter')
+  await input.press('Shift+Enter')
   await settled
   await page.getByText('DONE', { exact: true }).waitFor()
   await page.getByRole('button', { name: 'Open right sidebar', exact: true }).click()

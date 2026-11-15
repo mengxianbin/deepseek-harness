@@ -40,7 +40,7 @@ describe.skipIf(mode === 'record')('web e2e: independent-writer Excel previews',
     const settled = scaffold.whenTurnSettled()
     const input = page.locator('[data-composer-input]').first()
     await input.fill('Reply with the single word LIGHTHOUSE and stop.')
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     const sessionId = await settled
     await page.getByText('LIGHTHOUSE', { exact: true }).waitFor()
     const cwd = scaffold.ctx.agents.get(sessionId)?.session.header.cwd

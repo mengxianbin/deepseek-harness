@@ -402,7 +402,7 @@ describe('composer focus handoff', () => {
     act(() => { shell.focus() })
     let settle!: (outcome: SubmitOutcome) => void
     sink.mockImplementationOnce(() => new Promise<SubmitOutcome>((resolve) => { settle = resolve }))
-    fireEvent.keyDown(textarea, { key: 'Enter' })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true })
     expect(textarea.getAttribute('contenteditable')).toBe('false')
     // A browser moves the keyboard to the body once the focused box stops being editable; jsdom does not.
     act(() => { textarea.blur() })
@@ -423,7 +423,7 @@ describe('composer focus handoff', () => {
     act(() => { shell.focus() })
     let settle!: (outcome: SubmitOutcome) => void
     sink.mockImplementationOnce(() => new Promise<SubmitOutcome>((resolve) => { settle = resolve }))
-    fireEvent.keyDown(textarea, { key: 'Enter' })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true })
     act(() => { other.focus() })
 
     await act(async () => { settle({ kind: 'success' }) })
@@ -440,7 +440,7 @@ describe('composer placeholder visibility', () => {
     writeDraft(shell, draft)
     expect(placeholder()).toBeNull()
     expect(button.disabled).toBe(true)
-    fireEvent.keyDown(textarea, { key: 'Enter', keyCode: 13 })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true, keyCode: 13 })
     await act(async () => {})
     expect(sink).not.toHaveBeenCalled()
     fireEvent.blur(textarea)
@@ -706,7 +706,7 @@ describe('image draft rail', () => {
     expect(removeAttachment).toHaveBeenCalledWith('draft-2')
     let settle!: (outcome: SubmitOutcome) => void
     sink.mockImplementationOnce(() => new Promise<SubmitOutcome>((resolve) => { settle = resolve }))
-    fireEvent.keyDown(textarea, { key: 'Enter' })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true })
     expect(sink).toHaveBeenCalledWith('', ['draft-1'], 'queue', expect.any(AbortSignal), expect.any(Function))
     // The rail keeps the sent image, and Send shows progress, until the Host accepts the message.
     expect(attachmentOwner(result.slotCalls).attachments).toEqual([attachments[0]])
@@ -728,7 +728,7 @@ describe('image draft rail', () => {
     const { textarea, sink } = result
     let fail!: (outcome: SubmitOutcome) => void
     sink.mockImplementationOnce(() => new Promise<SubmitOutcome>((resolve) => { fail = resolve }))
-    fireEvent.keyDown(textarea, { key: 'Enter' })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true })
     expect(attachmentOwner(result.slotCalls).attachments).toEqual([attachments[0]])
     await act(async () => { fail({ kind: 'error', text: '图片发送失败' }) })
     await vi.waitFor(() => {
@@ -843,32 +843,33 @@ describe('Enter semantics', () => {
     expect(sink).not.toHaveBeenCalled()
   })
 
-  it('plain Enter submits queue mode through the machine; repeat and empty are suppressed', () => {
+  it('Shift+Enter submits queue mode through the machine; repeat and empty are suppressed', () => {
     const { textarea, sink } = bench({ draft: 'hello' })
-    fireEvent.keyDown(textarea, { key: 'Enter' })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true })
     expect(sink).toHaveBeenCalledWith('hello', [], 'queue', expect.any(AbortSignal), expect.any(Function))
     // The submitting-phase lock, not draft emptiness, suppresses the repeat:
     // the draft is still uncleared while the sink round-trip is in flight.
-    fireEvent.keyDown(textarea, { key: 'Enter', repeat: true })
-    fireEvent.keyDown(textarea, { key: 'Enter' })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true, repeat: true })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true })
     expect(sink).toHaveBeenCalledTimes(1)
     const empty = bench({ draft: '   ' })
-    fireEvent.keyDown(empty.textarea, { key: 'Enter' })
+    fireEvent.keyDown(empty.textarea, { key: 'Enter', shiftKey: true })
     expect(empty.sink).not.toHaveBeenCalled()
   })
 
-  it('non-Enter keys and Shift+Enter fall through to native behavior', () => {
+  it('plain Enter falls through to the native line break and never sends', () => {
     const { textarea, sink } = bench({ draft: 'hello' })
     fireEvent.keyDown(textarea, { key: 'a' })
-    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true })
+    fireEvent.keyDown(textarea, { key: 'Enter' })
     expect(sink).not.toHaveBeenCalled()
   })
 
-  it('Shift+Enter newline wins even inside IME composition (unconditional precedence)', () => {
+  it('IME composition swallows Enter: neither the send nor the newline gesture fires', () => {
     const { textarea, sink } = bench({ draft: 'hello' })
     fireEvent.compositionStart(textarea)
     fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true })
-    expect(sink).not.toHaveBeenCalled() // and not preventDefault'd: native newline
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    expect(sink).not.toHaveBeenCalled() // and neither is preventDefault'd: the IME owns the gesture
   })
 
   it('Ctrl/Meta+Enter sends normally while idle and steers while running', () => {
@@ -906,9 +907,9 @@ describe('Enter semantics', () => {
     expect(idle.steerQueue).not.toHaveBeenCalled()
     expect(idle.sink).not.toHaveBeenCalled()
 
-    // Plain Enter never steers the queue, even under the busy Steer preference.
+    // The plain send gesture never steers the queue, even under the busy Steer preference.
     const plain = bench({ running: true, busyEnter: 'steer', queue: [row('q-1')], steerQueue: vi.fn() })
-    fireEvent.keyDown(plain.textarea, { key: 'Enter' })
+    fireEvent.keyDown(plain.textarea, { key: 'Enter', shiftKey: true })
     expect(plain.steerQueue).not.toHaveBeenCalled()
     expect(plain.sink).not.toHaveBeenCalled()
 
@@ -1042,7 +1043,7 @@ describe('Enter semantics', () => {
       vi.advanceTimersByTime(20)
       fireEvent.keyDown(textarea, { key: 'Enter', keyCode: 229 })
       expect(sink).not.toHaveBeenCalled()
-      fireEvent.keyDown(textarea, { key: 'Enter' })
+      fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true })
       expect(sink).toHaveBeenCalledTimes(1)
     } finally {
       vi.useRealTimers()
@@ -1115,7 +1116,7 @@ describe('running and lock semantics', () => {
     const { view, textarea, stop, sink } = bench({ running: true, draft: '排队消息' })
     let settle!: (outcome: SubmitOutcome) => void
     sink.mockImplementationOnce(() => new Promise<SubmitOutcome>((resolve) => { settle = resolve }))
-    fireEvent.keyDown(textarea, { key: 'Enter' })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true })
     const sending = view.getByRole('button', { name: '正在发送消息' }) as HTMLButtonElement
     expect(sending.disabled).toBe(true)
     fireEvent.click(view.getByRole('button', { name: '停止生成' }))
@@ -1226,7 +1227,7 @@ describe('running and lock semantics', () => {
     }
     const enterWith = (upload: NonNullable<BenchOptions['fileUploads']>[string]): string | null => {
       const result = bench({ draft: '带图', attachments: [image], fileUploads: { [image.id]: upload }, imageLimits: limits })
-      fireEvent.keyDown(result.textarea, { key: 'Enter' })
+      fireEvent.keyDown(result.textarea, { key: 'Enter', shiftKey: true })
       expect(result.sink).not.toHaveBeenCalled()
       const text = result.view.getByRole('alert').textContent
       cleanup()
@@ -1280,7 +1281,7 @@ describe('running and lock semantics', () => {
 
   it('running plain Enter follows the busy-state Steer preference', () => {
     const { textarea, sink } = bench({ running: true, busyEnter: 'steer', draft: '直接插话' })
-    fireEvent.keyDown(textarea, { key: 'Enter' })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true })
     expect(sink).toHaveBeenCalledWith('直接插话', [], 'steer', expect.any(AbortSignal), expect.any(Function))
   })
 
@@ -1473,7 +1474,7 @@ describe('running and lock semantics', () => {
       parentAvailable: true,
     }
     const plain = bench({ running: true, busyEnter: 'steer', draft: 'plain', subagent })
-    fireEvent.keyDown(plain.textarea, { key: 'Enter' })
+    fireEvent.keyDown(plain.textarea, { key: 'Enter', shiftKey: true })
     expect(plain.sink).toHaveBeenCalledWith('plain', [], 'steer', expect.any(AbortSignal), expect.any(Function))
 
     const accelerated = bench({ running: true, draft: 'accelerated', subagent })
@@ -1632,7 +1633,7 @@ describe('running and lock semantics', () => {
 
     writeDraft(shell, '')
     expect(document.activeElement).toBe(textarea)
-    fireEvent.keyDown(textarea, { key: 'Enter' })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true })
     expect(sink).not.toHaveBeenCalled()
     expect(document.activeElement).toBe(textarea)
 
@@ -1643,7 +1644,7 @@ describe('running and lock semantics', () => {
         fireEvent.mouseDown(button, { button: 0 })
         fireEvent.click(button)
       } else {
-        fireEvent.keyDown(textarea, { key: 'Enter' })
+        fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true })
       }
       await act(async () => {})
       expect(sink).toHaveBeenLastCalledWith(`send by ${gesture}`, [], 'queue', expect.any(AbortSignal), expect.any(Function))
@@ -1659,7 +1660,7 @@ describe('running and lock semantics', () => {
       )
       textarea.focus()
     })
-    fireEvent.keyDown(textarea, { key: 'Enter' })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true })
     await act(async () => {})
     expect(shell.snapshot.phase).toBe('claimed')
     expect(shell.snapshot.draft).toBe('/goal ')

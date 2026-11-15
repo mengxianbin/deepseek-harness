@@ -39,7 +39,7 @@ it('hides the placeholder for typed and pasted spaces and restores it after dele
       await input.click()
       await observe('Focus restored', false)
       const draftMarkup = await input.innerHTML()
-      await page.keyboard.press('Enter')
+      await page.keyboard.press('Shift+Enter')
       expect(await input.innerHTML()).toBe(draftMarkup)
       await observe('Whitespace submission rejected', false)
       await clear()

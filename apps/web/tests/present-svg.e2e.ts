@@ -138,7 +138,7 @@ describe('web e2e: requested SVG is explicitly delivered', () => {
     const settled = scaffold.whenTurnSettled()
     const input = page.locator('[data-composer-input]').first()
     await input.fill(prompts[0]!)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     const sessionId = await settled
     const session = scaffold.ctx.agents.get(sessionId)?.session
     if (session?.header.cwd === undefined) throw new Error('SVG Session has no workspace')

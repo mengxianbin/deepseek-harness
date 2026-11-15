@@ -766,7 +766,7 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY || notReady.length > 0)('web smoke
     await screen(page, '02-empty-state')
     const prompt = `Please answer this request carefully: explain event sourcing in two sentences, ending with exactly ${ROUND_DONE_MARKER}.`
     await input.fill(prompt)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     // The first send must keep the session tree mounted; a near-empty body
     // reveals a duplicate runtime bundle with incompatible scope tags.
     await page.waitForFunction(() => document.body.innerText.length > 50, undefined, { timeout: 15_000 })
@@ -822,7 +822,7 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY || notReady.length > 0)('web smoke
     onTestFailed(() => saveFailureShot(page, 'w5-tool-details'))
     const input = page.locator('[data-composer-input]').first()
     await input.fill('请用 bash 工具运行命令 echo w5marker 然后告诉我结果')
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     // Wait for the tool ROW, not response text (the reply echoes any marker).
     // Bash renders through the third-party sample registration. Match that
     // exact row: other clickable variants (for example Think disclosure)

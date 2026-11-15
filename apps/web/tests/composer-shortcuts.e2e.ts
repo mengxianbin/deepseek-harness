@@ -29,7 +29,7 @@ it('preserves the composer draft and menu for application Enter combinations', a
         await input.press('Escape')
       }
       await writeComposerDraft(page, input, 'first line')
-      await input.press('Shift+Enter')
+      await input.press('Enter')
       await page.keyboard.type('second line')
       expect(await input.innerText()).toBe('first line\nsecond line')
       expect(events.filter(event => event.type === 'user/message')).toHaveLength(0)

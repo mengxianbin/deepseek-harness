@@ -58,7 +58,7 @@ function surface(page: Page): ReturnType<Page['locator']> {
 
 /**
  * Replace the draft through real gestures: select-all, delete, then insert
- * the rows with soft line breaks (the composer's Enter submits).
+ * the rows with soft line breaks (the composer's Shift+Enter submits).
  * @param page - the page under test.
  * @param rows - draft lines; a trailing empty row leaves a trailing newline.
  */
@@ -68,7 +68,7 @@ async function typeDraft(page: Page, rows: readonly string[]): Promise<void> {
   await page.keyboard.press('ControlOrMeta+KeyA')
   await page.keyboard.press('Delete')
   for (const [index, row] of rows.entries()) {
-    if (index > 0) await page.keyboard.press('Shift+Enter')
+    if (index > 0) await page.keyboard.press('Enter')
     if (row !== '') await page.keyboard.insertText(row)
   }
 }

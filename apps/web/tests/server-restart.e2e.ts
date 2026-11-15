@@ -175,7 +175,7 @@ it.each([false, true])('keeps the same revision, Session and page across a serve
   await notice.click({ timeout: 15_000 })
   const composer = page.locator('[data-composer-input][contenteditable="true"]')
   await writeComposerDraft(page, composer, 'Create a completed turn for the server restart test.')
-  await composer.press('Enter')
+  await composer.press('Shift+Enter')
   const response = page.getByRole('paragraph').filter({ hasText: /^Persisted server restart fixture\.$/u })
   await response.last().waitFor({ timeout: 20_000 })
   const draft = 'Unsent draft across a server restart'
@@ -228,7 +228,7 @@ it.each([false, true])('keeps the same revision, Session and page across a serve
   expect(await composer.textContent()).toBe(draft)
   expect(await response.isVisible()).toBe(true)
 
-  await composer.press('Enter')
+  await composer.press('Shift+Enter')
   await expect.poll(() => response.count(), { timeout: 20_000 }).toBe(2)
   expect(errors).toEqual([])
   expect(streamErrors).toEqual([])

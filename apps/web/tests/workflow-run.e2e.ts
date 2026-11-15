@@ -87,7 +87,7 @@ describe.skipIf(MODE === 'record')('web e2e: durable workflow run in Chat', () =
     })
     const input = page.locator('[data-composer-input]').first()
     await input.fill(prompt)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
 
     const workflow = page.locator('[data-workflow-run][data-run-status="running"]')
     await expandOwningTurnProcess(page, workflow)

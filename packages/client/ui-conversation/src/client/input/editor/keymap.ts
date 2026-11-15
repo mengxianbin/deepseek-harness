@@ -3,8 +3,11 @@
  * (arrows/escape/enter), space adjudication, the Enter submit gesture, and
  * paste routing. Registered at CRITICAL priority so it decides before
  * @lexical/plain-text's own Enter/paste defaults; a handler returning false
- * falls through to those defaults (Shift+Enter's line break, ordinary
+ * falls through to those defaults (plain Enter's line break, ordinary
  * spaces, text paste the bar routes itself).
+ *
+ * Enter gestures (swapped 2026-11-15): plain Enter breaks the line,
+ * Shift+Enter submits, Ctrl/Cmd+Enter submits accelerated.
  *
  * IME guard: a composition-closing Enter/Space must not submit or adjudicate.
  * KeyboardEvent.isComposing covers most engines; Safari delivers the closing
@@ -35,7 +38,7 @@ export interface ComposerKeymapHandlers {
   dismissPopup(): void
   /** Whether Enter may submit right now (locked/busy states refuse). */
   canSubmit(): boolean
-  /** Plain Enter submits; exactly Ctrl+Enter or Cmd+Enter selects accelerated delivery. */
+  /** Shift+Enter submits; exactly Ctrl+Enter or Cmd+Enter selects accelerated delivery. */
   submit(accelerated: boolean): void
   /**
    * Pasted files with directory metadata supplied by the clipboard entry API.
@@ -259,19 +262,21 @@ export function registerComposerKeymap(editor: LexicalEditor, handlers: Composer
       // the DOM event that application shortcuts need.
       if (event !== null && (event.altKey || event.getModifierState('AltGraph')
         || (event.ctrlKey && event.metaKey) || (event.shiftKey && (event.ctrlKey || event.metaKey)))) return true
-      // Plain Shift+Enter keeps its native line break, including during composition.
-      if (event?.shiftKey === true) return false
       if (event !== null && isComposingEvent(event, recentlyComposing)) {
         // The IME consumes this Enter (candidate pick); neither submit nor
         // break the line. No preventDefault: the browser owns the gesture.
         return true
       }
       // Menu-open Enter picks the highlight through arbitration; a
-      // no-highlight menu passes down to the submit gesture.
+      // no-highlight menu passes down to the send/newline gesture.
       if (handlers.arbitrate('enter', false) !== 'pass') {
         event?.preventDefault()
         return true
       }
+      // Plain Enter is the newline gesture: fall through to Lexical's line
+      // break (on iOS/Safari the browser's own beforeinput insertion).
+      if (event !== null && !event.shiftKey && !event.ctrlKey && !event.metaKey) return false
+      // Shift+Enter submits; Ctrl/Cmd+Enter selects accelerated delivery.
       event?.preventDefault()
       if (event?.repeat === true) return true // held-down Enter must not machine-gun sends
       if (!handlers.canSubmit()) return true

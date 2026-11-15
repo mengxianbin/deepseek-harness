@@ -144,7 +144,7 @@ describe('web e2e: persisted subagent conversation and human continuation', () =
     const parentSettled = scaffold.whenTurnSettled()
     const parentInput = page.locator('[data-composer-input][contenteditable="true"]').first()
     await parentInput.fill(PARENT_PROMPT)
-    await parentInput.press('Enter')
+    await parentInput.press('Shift+Enter')
     expect(await parentSettled).toBe(parent.id)
 
     const started = await scaffold.ctx.subagents.startActivation({
@@ -523,7 +523,7 @@ describe('web e2e: persisted subagent conversation and human continuation', () =
     })
     const input = page.getByRole('textbox', { name: 'Message or run a task, / commands, @ files or sessions' })
     await input.fill(FOLLOWUP)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     await expect.poll(
       () => scaffold.ctx.agents.get(childId)?.status,
       { timeout: 10_000 },
@@ -665,7 +665,7 @@ describe('web e2e: persisted subagent conversation and human continuation', () =
     const promptResponse = page.waitForResponse(response =>
       new URL(response.url()).pathname === '/api/subagents/prompt')
     await input.fill(POST_FORK_FOLLOWUP)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     const promptReceipt = await (await promptResponse).json() as {
       result: { ok: true } | { ok: false; error: { code: string; message: string } }
     }

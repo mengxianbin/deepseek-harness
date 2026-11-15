@@ -115,7 +115,7 @@ describe.skipIf(MODE === 'record')('web e2e: user-explicit skill invocation thro
 
     const settled = scaffold.whenTurnSettled()
     await composer.fill(`/${SKILL_NAME} ${ARGS_TEXT}`)
-    await composer.press('Enter')
+    await composer.press('Shift+Enter')
 
     // The gesture stays an ordinary user bubble with the skill chip and trailing text.
     const bubble = page.locator('[data-ref-chip="skill"]').first()

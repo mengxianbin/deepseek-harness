@@ -294,11 +294,11 @@ export function apply(ctx: Context, config: Config = Config({})): void {
   ctx.inject(['shortcuts'], (scope) => {
     stopWindowMs = scope.shortcuts.stopSequenceMs
     const fixedInputs: readonly ShortcutFixedCommand[] = [
-      { id: 'fixed.send' as ShortcutCommandId, label: () => t('input.send'), keys: ['Enter'],
-        bindings: [{ code: 'Enter', modifiers: [] }], group: 'input' },
-      { id: 'fixed.newline' as ShortcutCommandId, label: () => t('shortcut.newline'),
+      { id: 'fixed.send' as ShortcutCommandId, label: () => t('input.send'),
         keys: scope.shortcuts.describeBinding({ code: 'Enter', modifiers: ['shift'] }).keys,
         bindings: [{ code: 'Enter', modifiers: ['shift'] }], group: 'input' },
+      { id: 'fixed.newline' as ShortcutCommandId, label: () => t('shortcut.newline'), keys: ['Enter'],
+        bindings: [{ code: 'Enter', modifiers: [] }], group: 'input' },
       { id: 'fixed.complementary' as ShortcutCommandId, label: () => t('shortcut.complementary'),
         keys: scope.shortcuts.describeBinding({ code: 'Enter', modifiers: ['primary'] }).keys,
         bindings: [{ code: 'Enter', modifiers: ['control'] }, { code: 'Enter', modifiers: ['meta'] }], group: 'input' },

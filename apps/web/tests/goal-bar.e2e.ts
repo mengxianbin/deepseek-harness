@@ -48,7 +48,7 @@ describe('web e2e: goal bar clear convergence', () => {
     const input = page.locator('[data-composer-input][data-placeholder="Describe what you want to build, / commands, @ files or sessions"]')
     await input.waitFor({ timeout: 10_000 })
     await input.fill('/goal guard rapid clear clicks')
-    await input.press('Enter')
+    await input.press('Shift+Enter')
 
     const bar = page.locator('[data-goal-bar]')
     await bar.waitFor({ timeout: 10_000 })
@@ -118,7 +118,7 @@ describe('web e2e: goal bar clear convergence', () => {
     }
     const input = page.locator('[data-composer-input]')
     await input.fill('/goal retry after a blocker')
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     const bar = page.locator('[data-goal-bar]')
     await bar.getByRole('button', { name: 'Pause goal' }).waitFor({ timeout: 10_000 })
 

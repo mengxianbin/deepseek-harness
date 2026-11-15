@@ -202,7 +202,7 @@ describe('web e2e: opt-in Search API web search', () => {
     await input.waitFor({ timeout: 10_000 })
     const settled = scaffold.whenTurnSettled()
     await input.fill(PROMPT)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     const sessionId = await settled
     if (MODE === 'record') await recordFixture(scaffold, sessionId, FIXTURE)
   }, 200_000)
