@@ -90,6 +90,13 @@ export const JsonlCompressionSchema: z<JsonlCompression> = z.union([
 /** Default maximum listing filesystem operations in flight per backend. */
 const DEFAULT_LIST_CONCURRENCY = 3
 
+/**
+ * Ceiling on {@link JsonlSessionPersistence}'s header-frame memo. A
+ * session home sits far below it; eviction is a wholesale clear (one cold
+ * pass afterwards) so hits pay no LRU bookkeeping.
+ */
+const HEADER_FRAME_MEMO_MAX = 8192
+
 /** Plugin config for the JSONL backend's root, physical encoding, and listing concurrency. */
 export interface Config {
   /**
@@ -207,6 +214,11 @@ function fileRevision(identity: JsonlPhysicalIdentity): PersistenceRevision {
   ].join(':'))
 }
 
+/** Memo key for one artifact path plus the id a caller asserts, if any (the assertion scopes its own entries). */
+function headerFrameMemoKey(path: string, expectedId: SessionId | undefined): string {
+  return expectedId === undefined ? path : `${path}\0${expectedId}`
+}
+
 /** Whether a filesystem error means absence; every non-ENOENT failure must surface. */
 function isENOENT(error: unknown): boolean {
   return (error as NodeJS.ErrnoException | null)?.code === 'ENOENT'
@@ -312,6 +324,18 @@ class JsonlSessionPersistence extends SessionPersistence {
   private readonly coldLogMemo = new Map<SessionId, StoredLog>()
   /** One joinable decode/migration operation per selected historical Session file revision. */
   private readonly migrationPreparations = new Map<SessionId, MigrationPreparation>()
+  /**
+   * Header-frame memo for header reads (archive-inline-inventory-1111 刀①):
+   * an artifact whose stat-derived {@link fileRevision} is unchanged has an
+   * unchanged first line, so the open + first-frame decompress + parse +
+   * identity assert below can be skipped entirely — those reads measured at
+   * 96% of `list()` (2254 ms of 2356 ms over 2074 sessions at the default
+   * concurrency of 3). A foreign write misses through the same revision
+   * guard the rest of the backend uses; a deleted artifact drops its entry
+   * at the ENOENT stat; only completed outcomes are stored — a translation
+   * that threw (unsupported format, identity mismatch) propagates uncached.
+   */
+  private readonly headerFrameMemo = new Map<string, { revision: PersistenceRevision; result: GenerationHeader | undefined }>()
 
   constructor(ctx: Context, public config: Config, private readonly tracker: JsonlBackendTracker) {
     super(ctx)
@@ -1204,10 +1228,52 @@ class JsonlSessionPersistence extends SessionPersistence {
     return artifacts
   }
 
-  /** Read and translate one selected generation header without inspecting its body. */
+  /**
+   * Read and translate one selected generation header without inspecting its
+   * body, stat-guarded by {@link headerFrameMemo} (刀①): an artifact whose
+   * revision is unchanged serves its previous translation, so a listing over
+   * an untouched home pays one stat per session instead of the open +
+   * first-frame decompress + parse + identity assert (96% of `list()` before
+   * this memo). A thrown refusal propagates without caching, exactly as an
+   * uncached read would.
+   */
   private async readGenerationHeader(
     selected: ResolvedJsonlGeneration,
     expectedId?: SessionId,
+    signal?: AbortSignal,
+  ): Promise<GenerationHeader | undefined> {
+    signal?.throwIfAborted()
+    let identity: JsonlPhysicalIdentity
+    try {
+      identity = await stat(selected.sourcePath, { bigint: true })
+    } catch (error: unknown) {
+      signal?.throwIfAborted()
+      if (isENOENT(error)) {
+        this.headerFrameMemo.delete(headerFrameMemoKey(selected.sourcePath, expectedId))
+        return undefined
+      }
+      throw error
+    }
+    signal?.throwIfAborted()
+    const key = headerFrameMemoKey(selected.sourcePath, expectedId)
+    const revision = fileRevision(identity)
+    const cached = this.headerFrameMemo.get(key)
+    if (cached !== undefined && cached.revision === revision) return cached.result
+    const result = await this.translateGenerationHeader(selected, expectedId, signal)
+    // Bounded FIFO: a wholesale clear costs one cold pass, cheaper than
+    // bookkeeping on every hit.
+    if (this.headerFrameMemo.size >= HEADER_FRAME_MEMO_MAX) {
+      const oldest = this.headerFrameMemo.keys().next().value
+      if (oldest !== undefined) this.headerFrameMemo.delete(oldest)
+    }
+    this.headerFrameMemo.set(key, { revision, result })
+    return result
+  }
+
+  /** The uncached translation: first frame, parse, catalog classification, identity assert. */
+  private async translateGenerationHeader(
+    selected: ResolvedJsonlGeneration,
+    expectedId: SessionId | undefined,
     signal?: AbortSignal,
   ): Promise<GenerationHeader | undefined> {
     let first: string | undefined
