@@ -18,6 +18,7 @@
     "src/health.ts",
     "src/duty.ts",
     "src/auto-route.ts",
+    "src/revive-health.ts",
     "src/history.ts",
     "src/history/controller.ts",
     "src/history/listener.ts",

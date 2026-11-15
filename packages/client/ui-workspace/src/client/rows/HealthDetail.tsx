@@ -1,18 +1,20 @@
 /**
- * The 安康位 detail body — THREE sections in ONE surface (批2
+ * The 安康位 detail body — FOUR sections in ONE surface (批2
  * duty-shield-b2-1103, ruling `shield-entry-ruling` A案 淡绿常驻可点:
  * 一个入口多段内容): 会话对账 (the three-invariant difference detail) above
  * 值守清单 (the duty ledger's rows) above 自动路由 (the controller's meter-
- * poll verdict, 2026-11-04 ruling). Shared verbatim by the header
+ * poll verdict, 2026-11-04 ruling) above 复活机制 (the selflearn revival
+ * mechanism's five-fact verdict, 拍板⑭⑮). Shared verbatim by the header
  * shield popover and the queue alarm row, so both entrances expand the same
  * segments (step3 §3.3/§5.2 duty extension).
  *
  * 三态纪律 (清单档 §6.3, 警报经济学 archive-seal-light 2026-11-02): healthy
  * items are HIDDEN behind the summary counts (健康隐藏 — nothing to act on),
  * 有意停用 renders grey with its tag and never lights, failed renders red
- * with the collector's per-item reasons (逐项明细). The autoRoute plane is
- * optional (absent = plugin not wired → quiet line, never broken); a failing
- * poll renders red WITH its raw error and streak age — the detail is the
+ * with the collector's per-item reasons (逐项明细). The autoRoute and
+ * reviveHealth planes are optional (absent = plugin not wired → quiet line,
+ * never broken); a failing poll renders red WITH its raw error and streak
+ * age, a red revive bundle with its raw fact tokens — the detail is the
  * on-demand investigation surface, so even a transient miss shows here even
  * though it never sets any ambient alarm.
  */
@@ -35,14 +37,15 @@ const INVARIANT_KEYS = {
 } as const satisfies Record<HealthInvariant, WorkspaceKey>
 
 /**
- * Render the three-section detail over one wire report.
- * @param report - the sweep's audit (with its duty and autoRoute folds); `undefined` until the first frame lands.
+ * Render the four-section detail over one wire report.
+ * @param report - the sweep's audit (with its duty, autoRoute and reviveHealth folds); `undefined` until the first frame lands.
  * @param t - the workspace namespace translator.
- * @returns the sessions + duty + autoRoute sections as one fragment.
+ * @returns the sessions + duty + autoRoute + revive sections as one fragment.
  */
 export function HealthDetail({ report, t }: { report: HealthReport; t: DetailTranslate }) {
   const duty = report?.duty
   const autoRoute = report?.autoRoute
+  const revive = report?.reviveHealth
   const failed = duty?.items.filter(item => item.status === 'failed') ?? []
   const disabled = duty?.items.filter(item => item.status === 'disabled') ?? []
   return (
@@ -127,6 +130,24 @@ export function HealthDetail({ report, t }: { report: HealthReport; t: DetailTra
                 )}
                 {/* Controller error text, untranslated by policy (collector language, like duty reasons). */}
                 <span className={css.dutyItemReasons}>{autoRoute.error ?? '—'}</span>
+              </div>
+            )}
+      </section>
+      {/* 拍板⑭⑮: the selflearn revival mechanism's five-fact verdict. The
+          writer stamps ONLY on a fact flip (change-only), so presence/parse
+          is the whole freshness story — absent reads 「未接线」 (quiet, never
+          broken); a red bundle lists its raw fact tokens (mode / status /
+          breaker / halted / active), untranslated like duty reasons. */}
+      <section className={css.section} data-health-section="reviveHealth">
+        <div className={css.sectionTitle}>{t('health.section.revive')}</div>
+        {revive === undefined
+          ? <div className={css.quiet}>{t('health.revive.unwired')}</div>
+          : revive.ok
+            ? <div className={css.quiet}>{t('health.revive.ok')}</div>
+            : (
+              <div className={css.dutyFailed} data-revive-health="failing">
+                <span className={css.dutyItemName}>{t('health.revive.failing')}</span>
+                <span className={css.dutyItemReasons}>{revive.failed.join(', ') || '—'}</span>
               </div>
             )}
       </section>
