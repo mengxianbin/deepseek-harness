@@ -94,11 +94,15 @@ describe('sidebar shell snapshots', () => {
     const { runtime, locale } = await bench()
     const slot = runtime.renderSlot('sidebar', { collapsed: false, width: 300 })
     // FORK (usage glance v2): the glance control carries the locale-bound copy.
-    expect(slot.view.getAllByRole('button', { name: '打开使用统计' })).toHaveLength(1)
+    // The glance copy is English in every locale since the all-English usage
+    // plugin (2026-11-15), so the flip is observed on the collapse toggle.
+    expect(slot.view.getAllByRole('button', { name: 'Open usage statistics' })).toHaveLength(1)
+    expect(slot.view.getAllByRole('button', { name: '收起侧边栏' })).toHaveLength(1)
     // Same fiber, same registration: setLocale alone re-renders the outlet.
     act(() => { locale.setLocale('en') })
     expect(slot.view.getAllByRole('button', { name: 'Open usage statistics' })).toHaveLength(1)
-    expect(slot.view.queryByRole('button', { name: '打开使用统计' })).toBeNull()
+    expect(slot.view.getAllByRole('button', { name: 'Collapse sidebar' })).toHaveLength(1)
+    expect(slot.view.queryByRole('button', { name: '收起侧边栏' })).toBeNull()
     await runtime.dispose()
   })
 
