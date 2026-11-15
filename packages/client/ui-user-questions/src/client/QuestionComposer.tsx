@@ -10,6 +10,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ArbitrateKey } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { AnswerSurfaceInsert } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
+import { classifyComposerEnter } from '@deepseek-ai/dsh-client-shortcuts/client'
 import { planReviewOf, type QuestionAnswer, type QuestionCardSnapshot, type QuestionComposerProps } from './contract/slots.ts'
 import type { PendingQuestion } from './contract/slots.ts'
 import type { QuestionDraftAnswer, QuestionDraftProgress } from './draft-store.ts'
@@ -132,7 +133,7 @@ interface AnswerFieldProps {
 
 /**
  * Auto-growing free-text answer: a textarea, so a long answer soft-wraps and
- * Shift+Enter breaks a line, over a hidden mirror that owns the height.
+ * Enter breaks a line, over a hidden mirror that owns the height.
  *
  * The mirror renders the draft plus a trailing newline in normal flow and so
  * sizes the grid row (counting rows by '\n' cannot see soft wraps); the
@@ -608,7 +609,9 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
 
   // Shared by the inline custom field and the optionless one: a multi-select
   // draft retains checked labels, while a single-select custom answer replaces
-  // its selection. Enter continues the flow, Shift+Enter breaks a line.
+  // its selection. The shared composer gesture pair decides (same authority as
+  // the message input): Enter breaks a line through the browser's own
+  // insertion; Shift/Ctrl+Enter continues the flow.
   const draftCustom = (event: ChangeEvent<HTMLTextAreaElement>): void => {
     const value = event.target.value
     updateDraft(current => ({
@@ -620,14 +623,16 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
   }
 
   const continueFromCustom = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
-    if (event.key !== 'Enter' || event.shiftKey || isComposing(event)) return
+    if (isComposing(event)) return
+    const gesture = classifyComposerEnter(event)
+    if (gesture === 'newline' || gesture === 'none') return
     event.preventDefault()
     continueFlow()
   }
 
   // Menu arbitration first: a key the open '/' menu claims (arrows, Escape,
-  // Tab, or Enter settling the highlight) never reaches the flow's Enter
-  // continuation — a highlighted pick inserts its text instead of advancing.
+  // Tab, or Enter settling the highlight) never reaches the flow's continue
+  // gesture — a highlighted pick inserts its text instead of advancing.
   const answerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
     const composing = isComposing(event)
     const key = ARBITRATE_KEYS[event.key]

@@ -65,12 +65,13 @@
       - listitem:
         - button "Edit shortcut for Focus session list"
         - text: Focus session list Ctrl + Alt + 1
-  - region "Message input":
-    - heading "Message input" [level=3]
+  - region "Text input":
+    - heading "Text input" [level=3]
     - list:
       - listitem: Use the complementary Queue / Steer action Ctrl + Enter
       - listitem: Open reference menu @
       - listitem: New line Enter
+      - listitem: Next / Submit Shift + Enter
       - listitem: Send message Shift + Enter
       - listitem: Open command menu /
       - listitem: Stop generating Esc Esc

@@ -29,7 +29,7 @@ export const zh = {
   'global-hint': '全局唤起查看', 'clear-search': '清空搜索',
   title: '快捷键', open: '快捷键速查', settings: '快捷键', view: '编辑快捷键',
   description: '查看和编辑当前可用的快捷键和输入操作', search: '搜索快捷键', close: '关闭快捷键',
-  application: '应用操作', input: '消息输入', menus: '菜单与弹层', approval: '审批区域', unbound: '暂无快捷键',
+  application: '应用操作', input: '文本输入', menus: '菜单与弹层', approval: '审批区域', unbound: '暂无快捷键',
   empty: '没有匹配的快捷键',
   move: '移动菜单选择', select: '选择菜单项', dismiss: '关闭菜单或顶层弹窗',
 }
@@ -64,7 +64,7 @@ export const en: Record<keyof typeof zh, string> = {
   'global-hint': 'Open from anywhere', 'clear-search': 'Clear search',
   title: 'Keyboard shortcuts', open: 'Open keyboard shortcuts', settings: 'Keyboard shortcuts', view: 'Edit shortcuts',
   description: 'View and edit available shortcuts and input actions', search: 'Search shortcuts', close: 'Close keyboard shortcuts',
-  application: 'Application', input: 'Message input', menus: 'Menus and dialogs', approval: 'Approval area', unbound: 'No shortcut',
+  application: 'Application', input: 'Text input', menus: 'Menus and dialogs', approval: 'Approval area', unbound: 'No shortcut',
   empty: 'No matching shortcuts',
   move: 'Move menu selection', select: 'Select menu item', dismiss: 'Close menu or top dialog',
 }
@@ -119,7 +119,7 @@ export const ja = {
   'search': 'ショートカットを検索',
   'close': 'キーボードショートカットを閉じる',
   'application': 'アプリケーション',
-  'input': 'メッセージ入力',
+  'input': 'テキスト入力',
   'menus': 'メニューとダイアログ',
   'approval': '承認エリア',
   'unbound': 'ショートカットなし',
@@ -160,7 +160,7 @@ export const es = {
   'global-hint': 'Abierto desde cualquier lugar', 'clear-search': 'Borrar búsqueda',
   title: 'Atajos de teclado', open: 'Abrir atajos de teclado', settings: 'Atajos de teclado', view: 'Editar atajos',
   description: 'Ver y editar atajos disponibles y acciones de entrada', search: 'Buscar atajos', close: 'Cerrar atajos de teclado',
-  application: 'Solicitud', input: 'Entrada de mensaje', menus: 'Menús y cuadros de diálogo', approval: 'Área de aprobación', unbound: 'Sin atajos',
+  application: 'Solicitud', input: 'Entrada de texto', menus: 'Menús y cuadros de diálogo', approval: 'Área de aprobación', unbound: 'Sin atajos',
   empty: 'No hay atajos coincidentes',
   move: 'Mover selección de menú', select: 'Seleccionar elemento del menú', dismiss: 'Cerrar menú o cuadro de diálogo superior',
 } satisfies Record<keyof typeof en, string>
@@ -196,7 +196,7 @@ export const fr = {
   'global-hint': "Ouvert de n'importe où", 'clear-search': 'Effacer la recherche',
   title: 'Raccourcis clavier', open: 'Ouvrir les raccourcis clavier', settings: 'Raccourcis clavier', view: 'Modifier les raccourcis',
   description: 'Afficher et modifier les raccourcis et les actions de saisie disponibles', search: 'Raccourcis de recherche', close: 'Fermer les raccourcis clavier',
-  application: 'Demande', input: 'Saisie des messages', menus: 'Menus et boîtes de dialogue', approval: "Zone d'approbation", unbound: 'Pas de raccourci',
+  application: 'Demande', input: 'Saisie de texte', menus: 'Menus et boîtes de dialogue', approval: "Zone d'approbation", unbound: 'Pas de raccourci',
   empty: 'Aucun raccourci correspondant',
   move: 'Déplacer la sélection du menu', select: 'Sélectionner un élément de menu', dismiss: 'Fermer le menu ou la boîte de dialogue supérieure',
 } satisfies Record<keyof typeof en, string>
@@ -232,7 +232,7 @@ export const de = {
   'global-hint': 'Von überall aus öffnen', 'clear-search': 'Suche löschen',
   title: 'Tastaturkürzel', open: 'Öffnen Sie Tastaturkürzel', settings: 'Tastaturkürzel', view: 'Verknüpfungen bearbeiten',
   description: 'Verfügbare Verknüpfungen und Eingabeaktionen anzeigen und bearbeiten', search: 'Suchverknüpfungen', close: 'Tastaturkürzel schließen',
-  application: 'Anwendung', input: 'Nachrichteneingabe', menus: 'Menüs und Dialoge', approval: 'Genehmigungsbereich', unbound: 'Keine Abkürzung',
+  application: 'Anwendung', input: 'Texteingabe', menus: 'Menüs und Dialoge', approval: 'Genehmigungsbereich', unbound: 'Keine Abkürzung',
   empty: 'Keine passenden Verknüpfungen',
   move: 'Menüauswahl verschieben', select: 'Menüpunkt auswählen', dismiss: 'Menü oder oberen Dialog schließen',
 } satisfies Record<keyof typeof en, string>
@@ -268,7 +268,7 @@ export const ru = {
   'global-hint': 'Открыто из любого места', 'clear-search': 'Очистить поиск',
   title: 'Сочетания клавиш', open: 'Открытие сочетаний клавиш', settings: 'Сочетания клавиш', view: 'Редактировать ярлыки',
   description: 'Просмотр и редактирование доступных ярлыков и действий ввода', search: 'Поиск ярлыков', close: 'Закрыть сочетания клавиш',
-  application: 'Приложение', input: 'Ввод сообщения', menus: 'Меню и диалоги', approval: 'Область утверждения', unbound: 'Нет ярлыка',
+  application: 'Приложение', input: 'Текстовый ввод', menus: 'Меню и диалоги', approval: 'Область утверждения', unbound: 'Нет ярлыка',
   empty: 'Нет подходящих ярлыков',
   move: 'Переместить выбор меню', select: 'Выберите пункт меню', dismiss: 'Закрыть меню или верхний диалог',
 } satisfies Record<keyof typeof en, string>
@@ -304,7 +304,7 @@ export const pt = {
   'global-hint': 'Abra de qualquer lugar', 'clear-search': 'Limpar pesquisa',
   title: 'Atalhos de teclado', open: 'Abra atalhos de teclado', settings: 'Atalhos de teclado', view: 'Editar atalhos',
   description: 'Visualize e edite atalhos e ações de entrada disponíveis', search: 'Atalhos de pesquisa', close: 'Fechar atalhos de teclado',
-  application: 'Aplicação', input: 'Entrada de mensagem', menus: 'Menus e caixas de diálogo', approval: 'Área de aprovação', unbound: 'Sem atalho',
+  application: 'Aplicação', input: 'Entrada de texto', menus: 'Menus e caixas de diálogo', approval: 'Área de aprovação', unbound: 'Sem atalho',
   empty: 'Nenhum atalho correspondente',
   move: 'Mover seleção de menu', select: 'Selecione o item do menu', dismiss: 'Fechar menu ou caixa de diálogo superior',
 } satisfies Record<keyof typeof en, string>

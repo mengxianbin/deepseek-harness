@@ -48,7 +48,7 @@ describe('web e2e: shortcut reference', () => {
       expect(await dialog.boundingBox()).toMatchObject({ width: 480, height: 600 })
       expect(await dialog.getByRole('search').boundingBox()).toMatchObject({ width: 440, height: 36 })
       const rows = dialog.getByRole('listitem')
-      const stopRow = dialog.getByRole('region', { name: locale === 'zh-CN' ? '消息输入' : 'Message input', exact: true })
+      const stopRow = dialog.getByRole('region', { name: locale === 'zh-CN' ? '文本输入' : 'Text input', exact: true })
         .getByRole('listitem').last()
       await stopRow.getByText(locale === 'zh-CN' ? '停止生成' : 'Stop generating', { exact: true }).waitFor()
       const stopButtons = stopRow.getByRole('button')

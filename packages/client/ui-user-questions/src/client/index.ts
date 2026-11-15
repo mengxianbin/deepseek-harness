@@ -35,6 +35,7 @@ import type { UserQuestionPanels, UserQuestionRecord } from '@deepseek-ai/dsh-cl
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { brandString } from '@deepseek-ai/dsh-brand'
+import { composerEnterDisplay, composerEnterGestures, type ShortcutCommandId } from '@deepseek-ai/dsh-client-shortcuts/client'
 import { fileAddressFor } from '@deepseek-ai/dsh-util-workspace-path'
 import {
   createWaterfallRequest, PendingQuestion,
@@ -386,6 +387,17 @@ function publishContinuedQuestions(ctx: ClientContext, cards: QuestionCards): ()
  */
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en, ja, es, fr, de, ru, pt }), 'ui-user-questions: dictionaries')
+  // The answer field consumes the shared composer gesture pair; its advance
+  // row joins the shortcut reference from the same bindings, so the panel
+  // shows what the keys actually do instead of leaving them to experiment.
+  ctx.inject(['shortcuts'], (scope) => {
+    const t = ctx.locale.bind(NS)
+    scope.effect(() => scope.shortcuts.registerFixed({
+      id: 'fixed.question-advance' as ShortcutCommandId, label: () => t('shortcut.advance'),
+      keys: scope.shortcuts.describeBinding(composerEnterDisplay.submit).keys,
+      bindings: composerEnterGestures.submit, group: 'input',
+    }), 'ui-user-questions: fixed question advance')
+  })
   const questionDraftStore = createQuestionDraftStore()
   const inputTriggers = ctx.get('inputTriggers') as InputTriggerServiceContract
   const sessions = ctx.sessions

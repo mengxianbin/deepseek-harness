@@ -28,10 +28,14 @@
   },
   "dsh": {
     "client": {
+      "external": [
+        "@deepseek-ai/dsh-client-shortcuts/client"
+      ],
       "inject": [
         "@deepseek-ai/dsh-api-session-controller",
         "@deepseek-ai/dsh-client-file-upload",
         "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-shortcuts",
         "@deepseek-ai/dsh-client-ui-layout",
         "@deepseek-ai/dsh-client-ui-renderer",
         "@deepseek-ai/dsh-client-ui-session",

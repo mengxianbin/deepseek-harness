@@ -337,7 +337,7 @@ describe('QuestionComposer', () => {
     expect(screen.queryByRole('button', { name: '填写答案' })).toBeNull()
     const custom = screen.getByPlaceholderText('输入你的答案')
     fireEvent.change(custom, { target: { value: '要能独立排查线上问题' } })
-    fireEvent.keyDown(custom, { key: 'Enter' })
+    fireEvent.keyDown(custom, { key: 'Enter', shiftKey: true })
 
     expect(screen.getByText('3 / 3')).toBeTruthy()
     // The model's question text renders verbatim — no marker filtering.
@@ -352,7 +352,7 @@ describe('QuestionComposer', () => {
     expect(screen.getByRole('checkbox', { name: '系统设计' }).getAttribute('aria-checked')).toBe('true')
     expect(screen.getByRole('checkbox', { name: '代码质量' }).getAttribute('aria-checked')).toBe('true')
     expect((multiCustom as HTMLInputElement).value).toBe('沟通能力')
-    fireEvent.keyDown(multiCustom, { key: 'Enter' })
+    fireEvent.keyDown(multiCustom, { key: 'Enter', shiftKey: true })
 
     // The domain face encoded the whole batch into one carrier envelope.
     expect(answer).toHaveBeenCalledWith(answerBatch([
@@ -511,7 +511,7 @@ describe('QuestionComposer', () => {
     expect(screen.getByText('2 / 3')).toBeTruthy()
     expect(answer).not.toHaveBeenCalled()
 
-    fireEvent.keyDown(custom, { key: 'Enter' })
+    fireEvent.keyDown(custom, { key: 'Enter', shiftKey: true })
     expect(screen.getByText('3 / 3')).toBeTruthy()
   })
 
@@ -522,9 +522,11 @@ describe('QuestionComposer', () => {
     expect(screen.getByPlaceholderText('输入你的答案')).toBeTruthy()
     fireEvent.click(screen.getByRole('radio', { name: '工程落地型' }))
     const emptyCustom = screen.getByPlaceholderText('输入你的答案')
-    fireEvent.keyDown(emptyCustom, { key: 'Enter', shiftKey: true })
+    // Plain Enter is the newline gesture: it neither advances nor validates.
+    expect(fireEvent.keyDown(emptyCustom, { key: 'Enter' })).toBe(true)
     expect(screen.getByText('2 / 3')).toBeTruthy()
-    fireEvent.keyDown(emptyCustom, { key: 'Enter' })
+    // Shift+Enter runs the flow, which reports the missing answer.
+    fireEvent.keyDown(emptyCustom, { key: 'Enter', shiftKey: true })
     expect(screen.getByText('请选择一个选项或填写自定义答案。')).toBeTruthy()
 
     fireEvent.click(screen.getByLabelText('下一题'))
@@ -537,12 +539,12 @@ describe('QuestionComposer', () => {
     expect(answer).not.toHaveBeenCalled()
   })
 
-  it('answers over multiple lines: both fields grow with the draft and keep Shift+Enter a newline', () => {
+  it('answers over multiple lines: both fields grow with the draft and keep Enter a newline', () => {
     const { carrier, answer } = wait()
     render(<QuestionComposer matched={carrier} {...kit} />)
 
     // Both question shapes answer into a textarea, so the engine soft-wraps a
-    // long answer and Shift+Enter breaks the line natively.
+    // long answer and Enter breaks the line natively.
     const inline = screen.getByPlaceholderText('输入你的答案')
     expect(inline.tagName).toBe('TEXTAREA')
 
@@ -551,19 +553,19 @@ describe('QuestionComposer', () => {
     // The hidden height ruler carries the draft plus the trailing newline the
     // textarea's own last line needs, so the box is as tall as the answer.
     expect(inline.previousElementSibling?.textContent).toBe(`${multiline}\n`)
-    // Shift+Enter belongs to the field, never to the flow.
-    fireEvent.keyDown(inline, { key: 'Enter', shiftKey: true })
+    // Enter belongs to the field, never to the flow: it stays unprevented.
+    expect(fireEvent.keyDown(inline, { key: 'Enter' })).toBe(true)
     expect(screen.getByText('1 / 3')).toBeTruthy()
 
-    fireEvent.keyDown(inline, { key: 'Enter' })
+    fireEvent.keyDown(inline, { key: 'Enter', shiftKey: true })
     const optionless = screen.getByPlaceholderText('输入你的答案')
     expect(optionless.tagName).toBe('TEXTAREA')
     fireEvent.change(optionless, { target: { value: multiline } })
     expect(optionless.previousElementSibling?.textContent).toBe(`${multiline}\n`)
-    fireEvent.keyDown(optionless, { key: 'Enter', shiftKey: true })
+    expect(fireEvent.keyDown(optionless, { key: 'Enter' })).toBe(true)
     expect(screen.getByText('2 / 3')).toBeTruthy()
 
-    fireEvent.keyDown(optionless, { key: 'Enter' })
+    fireEvent.keyDown(optionless, { key: 'Enter', shiftKey: true })
     fireEvent.click(screen.getByRole('checkbox', { name: '系统设计' }))
     fireEvent.click(screen.getByRole('button', { name: '提交' }))
     // Line breaks reach the model verbatim: nothing along the way flattens them.
@@ -605,7 +607,7 @@ describe('QuestionComposer', () => {
     fireEvent.click(screen.getByRole('radio', { name: /工程落地型/ }))
     const custom = screen.getByPlaceholderText('输入你的答案')
     fireEvent.change(custom, { target: { value: 'x' } })
-    fireEvent.keyDown(custom, { key: 'Enter' })
+    fireEvent.keyDown(custom, { key: 'Enter', shiftKey: true })
     fireEvent.click(screen.getByRole('checkbox', { name: '系统设计' }))
     fireEvent.click(screen.getByRole('button', { name: '提交' }))
     expect(second.answer).toHaveBeenNthCalledWith(1, answerBatch([
@@ -1405,7 +1407,7 @@ describe('QuestionComposer answer-surface wiring', () => {
     const harness = triggerFace()
     render(<QuestionComposer matched={carrier} {...kit} answerTriggers={harness.face} />)
     fireEvent.click(screen.getByRole('radio', { name: 'Alpha' }))
-    fireEvent.keyDown(answerField(), { key: 'Enter' })
+    fireEvent.keyDown(answerField(), { key: 'Enter', shiftKey: true })
 
     expect(answer).toHaveBeenCalledOnce()
     expect(harness.track).toHaveBeenLastCalledWith(expect.any(String), expect.any(Number), 'frozen', expect.any(Number))
@@ -1447,7 +1449,7 @@ describe('folded long-content attachment row', () => {
   })
 })
 
-it('retains custom-answer focus across Enter navigation between option questions', () => {
+it('retains custom-answer focus across Shift+Enter navigation between option questions', () => {
   const { carrier } = wait([
     { id: 'one', question: 'First?', options: [{ label: 'One', description: 'First description' }] },
     { id: 'two', question: 'Second?', options: [{ label: 'Two' }] },
@@ -1459,7 +1461,7 @@ it('retains custom-answer focus across Enter navigation between option questions
   const first = screen.getByRole('textbox')
   act(() => { first.focus() })
   fireEvent.change(first, { target: { value: 'first answer' } })
-  fireEvent.keyDown(first, { key: 'Enter' })
+  fireEvent.keyDown(first, { key: 'Enter', shiftKey: true })
   expect(screen.getByRole('heading', { name: 'Second?' })).toBeTruthy()
   const second = screen.getByRole('textbox')
   expect(second).toBe(first)

@@ -12,7 +12,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
-import type { ShortcutCommandId, ShortcutFixedCommand } from '@deepseek-ai/dsh-client-shortcuts/client'
+import { composerEnterDisplay, composerEnterGestures, type ShortcutCommandId, type ShortcutFixedCommand } from '@deepseek-ai/dsh-client-shortcuts/client'
 import { UiConversation } from './conversation/assembly.ts'
 import { UserText, PlainUserText, SessionReference } from './user-text/UserText.tsx'
 import { sessionReferenceRule } from './user-text/session-reference-rule.ts'
@@ -293,15 +293,19 @@ export function apply(ctx: Context, config: Config = Config({})): void {
   const stopShortcut = createSnapshotStore<readonly string[]>([])
   ctx.inject(['shortcuts'], (scope) => {
     stopWindowMs = scope.shortcuts.stopSequenceMs
+    // The Enter pair rows render from the shared gesture authority — the same
+    // bindings the message input and the question composer classify with — so
+    // the reference cannot drift from what the keys actually do.
     const fixedInputs: readonly ShortcutFixedCommand[] = [
       { id: 'fixed.send' as ShortcutCommandId, label: () => t('input.send'),
-        keys: scope.shortcuts.describeBinding({ code: 'Enter', modifiers: ['shift'] }).keys,
-        bindings: [{ code: 'Enter', modifiers: ['shift'] }], group: 'input' },
-      { id: 'fixed.newline' as ShortcutCommandId, label: () => t('shortcut.newline'), keys: ['Enter'],
-        bindings: [{ code: 'Enter', modifiers: [] }], group: 'input' },
+        keys: scope.shortcuts.describeBinding(composerEnterDisplay.submit).keys,
+        bindings: composerEnterGestures.submit, group: 'input' },
+      { id: 'fixed.newline' as ShortcutCommandId, label: () => t('shortcut.newline'),
+        keys: scope.shortcuts.describeBinding(composerEnterDisplay.newline).keys,
+        bindings: composerEnterGestures.newline, group: 'input' },
       { id: 'fixed.complementary' as ShortcutCommandId, label: () => t('shortcut.complementary'),
-        keys: scope.shortcuts.describeBinding({ code: 'Enter', modifiers: ['primary'] }).keys,
-        bindings: [{ code: 'Enter', modifiers: ['control'] }, { code: 'Enter', modifiers: ['meta'] }], group: 'input' },
+        keys: scope.shortcuts.describeBinding(composerEnterDisplay.accelerated).keys,
+        bindings: composerEnterGestures.accelerated, group: 'input' },
       { id: 'fixed.slash' as ShortcutCommandId, label: () => t('shortcut.slash'), keys: ['/'],
         bindings: [{ code: 'Slash', modifiers: [] }], group: 'input' },
       { id: 'fixed.mention' as ShortcutCommandId, label: () => t('shortcut.mention'), keys: ['@'],

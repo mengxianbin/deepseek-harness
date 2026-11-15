@@ -582,7 +582,7 @@ describe('web e2e: resident question composer round trip', () => {
       const snapshot = await captureStableAria(page, '[data-question-key]', scaffold.workspaceCwd)
       await compareOrRefreshGolden(COMPOSED_EXPECTED, snapshot, MODE)
     }
-    await custom.press('Enter')
+    await custom.press('Shift+Enter')
 
     const sessionId = await settled
     if (MODE === 'record') {
@@ -945,7 +945,7 @@ describe('web e2e: resident question composer round trip', () => {
       await composer.getByRole('checkbox', { name: 'Explicit install' }).click()
       const answer = composer.getByRole('textbox')
       await answer.fill('Keep the migration steps explicit.')
-      await answer.press('Enter')
+      await answer.press('Shift+Enter')
       await composer.getByRole('heading', { name: 'Who should own the rollout?' }).waitFor()
       expect(await answer.evaluate(node => document.activeElement === node)).toBe(true)
       await page.keyboard.type('Release owner')
