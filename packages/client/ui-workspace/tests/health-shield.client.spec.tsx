@@ -98,6 +98,25 @@ const autoRouteTransient: SessionHealthState = {
   },
 }
 
+/** Balanced books + a red revive mechanism verdict (拍板⑭⑮: the shield's fourth alarm). */
+const reviveBroken: SessionHealthState = {
+  report: {
+    ok: true,
+    total: 1,
+    counts: { running: 1, awaiting: 0, failed: 0, rest: 0 },
+    issues: [],
+    reviveHealth: {
+      ok: false,
+      mode: 'live',
+      status: 'ok',
+      breakerTrips: 3,
+      halted: false,
+      failed: ['breaker'],
+      at: 1_700_000_000_000,
+    },
+  },
+}
+
 afterEach(cleanup)
 
 describe('HealthShield', () => {
@@ -210,5 +229,34 @@ describe('HealthShield', () => {
     // Absent = not attached, NEVER broken.
     const shield = screen.getByLabelText('安康位：对账平，点击展开明细').closest('[data-health-state]') as HTMLElement
     expect(shield.getAttribute('data-health-state')).toBe('ok')
+  })
+
+  // 拍板⑭⑮: revive mechanism health = the shield's fourth alarm.
+  it('burns red on a red revive verdict — with its own label, never 对账对不上 (拍板⑭⑮)', () => {
+    render(<HealthShield useSessionHealth={selector => selector(reviveBroken)} t={t} />)
+    const label = '安康位：复活机制不健康，点击展开明细'
+    const shield = screen.getByLabelText(label).closest('[data-health-state]') as HTMLElement
+    expect(shield.getAttribute('data-health-state')).toBe('broken')
+    // The books balance — the label must not claim a reconciliation break.
+    expect(shield.textContent).not.toContain('对账对不上')
+
+    // The fourth detail section explains the red: raw fact tokens, untranslated.
+    fireEvent.click(screen.getByLabelText(label))
+    const detail = document.querySelector('[data-health-detail=""]') as HTMLElement
+    const revive = detail.querySelector('[data-health-section="reviveHealth"]') as HTMLElement
+    expect(revive.textContent).toContain('复活机制异常')
+    expect(revive.textContent).toContain('breaker')
+    // The other sections keep their own verdicts (books balance, planes quiet).
+    expect(detail.querySelector('[data-health-section="sessions"]')?.textContent).toContain('对账平')
+    expect(detail.querySelector('[data-health-section="autoRoute"]')?.textContent).toContain('控制器轮询未接入')
+  })
+
+  it('stays faint green when the revive health document is absent — quiet 未接线, never broken (拍板⑭⑮)', () => {
+    render(<HealthShield useSessionHealth={selector => selector(noAutoRoute)} t={t} />)
+    const shield = screen.getByLabelText('安康位：对账平，点击展开明细').closest('[data-health-state]') as HTMLElement
+    expect(shield.getAttribute('data-health-state')).toBe('ok')
+    fireEvent.click(screen.getByLabelText('安康位：对账平，点击展开明细'))
+    const detail = document.querySelector('[data-health-detail=""]') as HTMLElement
+    expect(detail.querySelector('[data-health-section="reviveHealth"]')?.textContent).toContain('复活机制未接入')
   })
 })

@@ -364,7 +364,11 @@ type SessionTreeProps = Pick<
  * sets the verdict, so it never alarms — 灰不亮不报警), and the expansion
  * renders the shared HealthDetail (会话对账 + 值守清单). 2026-11-04 ruling: a
  * SUSTAINED auto-route poll failure joins the row with its own text (never
- * borrowed from 对账), and the detail gains the 自动路由 section.
+ * borrowed from 对账), and the detail gains the 自动路由 section. 拍板⑭⑮: the
+ * revive mechanism's red verdict joins with its own text too (正常静默、异常才
+ * 亮 — an ABSENT health document never triggers this row; the detail's fourth
+ * section carries the quiet 「未接线」 line), and the detail gains the 复活机制
+ * section.
  */
 /** The 安康位 alarm's conditional row at the top of a list body (collab step3 §5.2). */
 function HealthQueueAlert({ health, t }: { health: SessionHealthState; t: SessionTreeProps['t'] }) {
@@ -377,7 +381,10 @@ function HealthQueueAlert({ health, t }: { health: SessionHealthState; t: Sessio
   // 2026-11-04 ruling: a SUSTAINED auto-route meter-poll failure joins the
   // alarm (transient misses set nothing — the glance tooltip owns those).
   const autoRouteSustained = report?.autoRoute?.sustained === true
-  const broken = sessionBroken || dutyBroken || autoRouteSustained
+  // 拍板⑭⑮: the revive mechanism's own verdict joins with its own text; an
+  // ABSENT health document sets nothing (change-only writer, optional plane).
+  const reviveBroken = report?.reviveHealth?.ok === false
+  const broken = sessionBroken || dutyBroken || autoRouteSustained || reviveBroken
   return (
     <div className={css.queueHealth} data-row-key="queue-health" data-health-alert={broken ? 'broken' : 'stale'}>
       <button
@@ -394,7 +401,11 @@ function HealthQueueAlert({ health, t }: { health: SessionHealthState; t: Sessio
               // Its own text: the books balance, the controller is blind —
               // never borrow "对账对不上" for a different fact.
               ? t('queue.health.autoRoute')
-              : t('queue.health.stale', { s: health.staleSeconds ?? 0 })}
+              : reviveBroken
+                // 拍板⑭⑮: its own text — the revival mechanism, not any
+                // other plane's words (one fact, one alarm surface).
+                ? t('queue.health.revive')
+                : t('queue.health.stale', { s: health.staleSeconds ?? 0 })}
       </button>
       {expanded && (
         <div className={css.queueHealthDetail} data-health-alert-detail="">
@@ -413,9 +424,10 @@ function HealthQueueAlert({ health, t }: { health: SessionHealthState; t: Sessio
  * The 安康位 alarm line at the head of a list body (queue-zone-1113): the
  * health hook is read unconditionally (a hook must stay unconditional), but
  * the row renders only while its trigger holds — stale readings, a broken
- * session/duty reconciliation, or a sustained auto-route failure — so an idle
- * body shows no chrome at all. The grouped and the flat body both mount this
- * as their first child, above the rows.
+ * session/duty reconciliation, a sustained auto-route failure, or (拍板⑭⑮)
+ * the revive mechanism's red verdict — so an idle body shows no chrome at
+ * all. The grouped and the flat body both mount this as their first child,
+ * above the rows.
  */
 function HealthAlertLine({ useSessionHealth, t }: {
   useSessionHealth: WorkspaceBrowserProps['useSessionHealth']
@@ -424,7 +436,7 @@ function HealthAlertLine({ useSessionHealth, t }: {
   const health = useSessionHealth?.(state => state)
   if (health === undefined) return null
   const triggered = health.stale === true || health.report?.ok === false || health.report?.duty?.ok === false
-    || health.report?.autoRoute?.sustained === true
+    || health.report?.autoRoute?.sustained === true || health.report?.reviveHealth?.ok === false
   return triggered ? <HealthQueueAlert health={health} t={t} /> : null
 }
 

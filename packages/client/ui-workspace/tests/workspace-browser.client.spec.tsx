@@ -3162,6 +3162,37 @@ describe('Workspace tree grouping', () => {
     expect(detail.textContent).toContain('connect ECONNREFUSED')
   })
 
+  // 拍板⑭⑮: the revive mechanism's red verdict queues with its own text; an
+  // ABSENT health document (change-only writer) queues nothing — quiet, never broken.
+  it('cuts the revive-mechanism alarm into the queue head only when the verdict is red (拍板⑭⑮)', () => {
+    const sessionsBalanced: SessionHealthReport = {
+      ok: true, total: 1, counts: { running: 1, awaiting: 0, failed: 0, rest: 0 }, issues: [],
+    }
+    // Absent document = not attached: the queue stays quiet (never broken).
+    const absent = mount({ useSessionHealth: hook({ report: sessionsBalanced }) })
+    expect(document.querySelector('[data-row-key="queue-health"]')).toBeNull()
+    absent.view.unmount()
+
+    // Red verdict: the row cuts in with its own text, red-flagged.
+    mount({
+      useSessionHealth: hook({
+        report: {
+          ...sessionsBalanced,
+          reviveHealth: { ok: false, mode: 'shadow', status: 'ok', breakerTrips: 0, halted: false, failed: ['mode'], at: 1 },
+        },
+      }),
+    })
+    const alert = screen.getByText('复活机制告警：准入/除名机制不健康，点开看明细')
+      .closest('[data-row-key="queue-health"]') as HTMLElement
+    expect(alert.getAttribute('data-health-alert')).toBe('broken')
+    // The books balance — this alarm must not borrow the reconciliation text.
+    expect(alert.textContent).not.toContain('对账对不上')
+    fireEvent.click(alert.querySelector('button') as HTMLElement)
+    const detail = alert.querySelector('[data-health-alert-detail=""]') as HTMLElement
+    expect(detail.querySelector('[data-health-section="reviveHealth"]')?.textContent).toContain('复活机制异常')
+    expect(detail.textContent).toContain('mode')
+  })
+
   it('seats the shield outside the actions cluster clip window (件C5 裁切复修1101)', () => {
     const balanced: SessionHealthReport = {
       ok: true, total: 1, counts: { running: 1, awaiting: 0, failed: 0, rest: 0 }, issues: [],

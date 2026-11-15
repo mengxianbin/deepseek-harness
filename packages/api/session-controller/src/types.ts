@@ -857,6 +857,18 @@ export interface SessionHealthReport {
    * fail-closed, because that collector is mandatory and this one is not).
    */
   readonly autoRoute?: AutoRoutePollReport
+  /**
+   * The revive mechanism-health fold (拍板⑭⑮, ruled 2026-11-15: the shield
+   * reports revive mechanism health ONLY — 插件激活 / mode=live / status 端点
+   * 可读 / 断路器无连跳 / 无 HALT, 正常静默、异常才亮). dsh-session-revive
+   * stamps `<dsh-home>/session-revive-health.json` ONLY when a fact flips
+   * (change-only writer, deliberately no heartbeat), so the sweep reads it by
+   * presence/parse — never by mtime — and folds it into this frame beside
+   * duty and autoRoute (同一数据源同一周期). Absent = the plane is not
+   * attached: the client renders the 「未接线」 quiet line, never broken
+   * (optional plane, the inverse of duty's fail-closed).
+   */
+  readonly reviveHealth?: ReviveHealthReport
 }
 
 /** One 值守总账 item exactly as the collector wrote it (清单档 §6.3 三态语义). */
@@ -928,6 +940,32 @@ export interface AutoRoutePollReport {
   readonly error?: string
   /** Seconds since the writer stamped the ledger; the sweep's freshness judgment. */
   readonly ageSec: number
+}
+
+/**
+ * The revive mechanism-health verdict the sweep published (拍板⑭⑮, ruled
+ * 2026-11-15). The dsh-web plugin owns the facts AND the composed `ok`; this
+ * side only echoes them plus the red fact tokens for the detail surface —
+ * 正常静默、异常才亮, and a missing document is 「未接线」 (quiet, never
+ * broken — optional-plugin family, inverse of duty's fail-closed). No mtime
+ * freshness judgment on purpose: a change-only writer's last stamp IS the
+ * current truth until the next flip.
+ */
+export interface ReviveHealthReport {
+  /** The writer's composed verdict (all five facts hold). Only `false` may redden. */
+  readonly ok: boolean
+  /** The configured revival mode; the verdict requires `live` (拍板⑮). */
+  readonly mode: 'shadow' | 'live'
+  /** The status endpoint read; the verdict requires `ok` (拍板⑮). */
+  readonly status: 'ok' | 'error'
+  /** Consecutive breaker trips since the last completed turn (detail surface). */
+  readonly breakerTrips: number
+  /** host-revive is HALTed (拍板⑮; missing host state reads healthy upstream). */
+  readonly halted: boolean
+  /** The red fact tokens exactly as the writer's fields name them (raw, collector language). */
+  readonly failed: readonly string[]
+  /** Epoch ms of the writer's last fact flip (change-only stamp — no freshness judgment). */
+  readonly at: number
 }
 
 /** One swept Session's facts exactly as that sweep traversal read them. */

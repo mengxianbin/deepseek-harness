@@ -34,6 +34,7 @@ import { ArchivedSessionGate } from './archived-session-gate.ts'
 import { reconcileSessionHealth } from './health.ts'
 import { readDutyInventory } from './duty.ts'
 import { readAutoRoutePoll } from './auto-route.ts'
+import { readReviveHealth } from './revive-health.ts'
 import type {
   ModelCatalog,
   SessionWorkspacePathApplication,
@@ -421,10 +422,16 @@ export class SessionController extends TypertRemoteService {
         // 2026-11-04 ruling: the auto-route poll ledger rides the same fold
         // (optional plane — absent when the plugin is, see auto-route.ts).
         const autoRoute = readAutoRoutePoll()
+        // 拍板⑭⑮: the revive mechanism-health document rides the same fold —
+        // change-only writer, so presence/parse attaches it (no mtime; an old
+        // stamp is still the current truth) and absence stays a quiet
+        // 「未接线」 line, never a break (optional plane, like autoRoute).
+        const reviveHealth = readReviveHealth()
         ctx.emit('api-session/health', {
           ...reconcileSessionHealth(rows),
           duty: readDutyInventory(),
           ...(autoRoute === undefined ? {} : { autoRoute }),
+          ...(reviveHealth === undefined ? {} : { reviveHealth }),
         })
       }, SESSION_STATUS_SWEEP_MS)
       timer.unref()
