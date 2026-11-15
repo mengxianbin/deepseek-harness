@@ -100,9 +100,13 @@ export class ChatNavigation {
    * human-intervention marks alike — so every node stays walkable without
    * hunting for each row and the step carries no sense of mark kind. The
    * current position is the newest mark at or above the reading line: the
-   * visible intervention when one is loaded, otherwise the reading line's own
-   * Turn's mark; with neither on screen a downward step starts at the ladder's
-   * top and an upward step has nowhere to go.
+   * reading line's own Turn's intervention when one lies at or above the
+   * line, otherwise the reading line's own Turn's mark. An intervention of an
+   * earlier Turn never counts — it lies far above the line, and adopting it
+   * would send the next step back into that older Turn instead of to the mark
+   * beside the line; with no mounted Turn its visible intervention still
+   * counts. With neither on screen a downward step starts at the ladder's top
+   * and an upward step has nowhere to go.
    * @param marks - the rail's flattened marks, ascending by Turn and seq.
    * @param delta - `1` for the next mark, `-1` for the previous one.
    * @returns the mark the step landed on, or undefined when it walked off an edge.
@@ -114,7 +118,7 @@ export class ChatNavigation {
     let position: number | null = null
     if (intervention !== null) {
       const current = marks.findIndex(mark => mark.kind === 'intervention' && mark.item.seq === intervention)
-      if (current >= 0) position = current
+      if (current >= 0 && (turn === null || marks[current]?.item.turn === turn)) position = current
     }
     if (position === null) {
       if (turn === null) {
