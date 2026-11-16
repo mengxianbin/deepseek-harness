@@ -156,11 +156,16 @@ function parseSealRow(row: unknown): { id: SessionId; seal: SessionSealInfo } | 
 /**
  * Ask the seal service about one batch of Sessions (contract C1).
  * @param ids - Session ids to classify.
+ * @param options - `recheck` (archive-seal-falsered-1116 段2) marks a
+ *   click-time ask: the server re-probes a memoized `no-endorsement` red
+ *   instead of serving it frozen to the transcript stamp. Lamp pulls omit it
+ *   and keep the memo window (板行四问②：重探只在判红时触发、灯查频度不变).
  * @returns the verdicts by id, or `null` when the service failed — the
  * fail-open signal the caller archives quietly on. Never rejects.
  */
 export async function requestSealCheck(
   ids: readonly SessionId[],
+  options?: { readonly recheck?: boolean },
 ): Promise<Map<SessionId, SessionSealInfo> | null> {
   if (ids.length === 0) return new Map()
   const controller = new AbortController()
@@ -169,7 +174,7 @@ export async function requestSealCheck(
     const response = await fetch(SEAL_CHECK_ROUTE, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ids }),
+      body: JSON.stringify(options?.recheck === true ? { ids, recheck: true } : { ids }),
       signal: controller.signal,
     })
     if (!response.ok) {

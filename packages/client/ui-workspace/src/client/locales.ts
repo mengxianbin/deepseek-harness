@@ -78,6 +78,8 @@ export const zh = {
   'toast.stoppedAndArchived': '已停止并归档，可',
   'toast.sealStale': '上次 save 已 DONE、其后续聊 {n} 条',
   'toast.sealStaleContinue': '继续归档',
+  'toast.sealEndorseRetry': 'save 背书复算失败，可重试（行灯仍为绿）',
+  'toast.sealEndorseRetryAction': '重试归档',
   'archive.confirm.title': '停止并归档此会话？',
   'archive.confirm.desc': '“{title}”仍有正在进行的工作。归档会先停止这些工作；之后可在侧栏筛选“全部对话（显示已归档）”中恢复会话，被停止的工作不会自动继续。',
   'archive.confirm.activity': '将被停止的工作',
@@ -276,6 +278,8 @@ export const en = {
   'toast.stoppedAndArchived': 'Session stopped and archived. You can ',
   'toast.sealStale': 'Last save is DONE; {n} messages followed.',
   'toast.sealStaleContinue': 'Archive anyway',
+  'toast.sealEndorseRetry': 'Save endorsement recheck failed; retry (the row lamp is still green).',
+  'toast.sealEndorseRetryAction': 'Retry archive',
   'archive.confirm.title': 'Stop and archive this session?',
   'archive.confirm.desc': '“{title}” still has work in progress. Archiving stops it first; you can restore the session later from the “All conversations (show archived)” filter in the sidebar, and the stopped work will not resume on its own.',
   'archive.confirm.activity': 'Work that will be stopped',
@@ -590,6 +594,8 @@ export const ja = {
   'status.turnFailed': '前のターンが失敗しました',
   'toast.sealStale': '前回の save は DONE 済み、その後に {n} 件のやり取りがあります',
   'toast.sealStaleContinue': 'それでもアーカイブする',
+  'toast.sealEndorseRetry': 'save の背書再検証に失敗しました。再試行できます（行ランプは緑のまま）',
+  'toast.sealEndorseRetryAction': 'アーカイブを再試行',
 } satisfies Record<keyof typeof en, string>
 
 /** Spanish dictionary, checked against the English keys. */
@@ -785,6 +791,8 @@ export const es = {
   'status.turnFailed': 'El último turno falló',
   'toast.sealStale': 'El último guardado está DONE; le siguieron {n} mensajes.',
   'toast.sealStaleContinue': 'Archivar de todos modos',
+  'toast.sealEndorseRetry': 'La revalidación del respaldo de save falló; puedes reintentar (la luz de la fila sigue en verde).',
+  'toast.sealEndorseRetryAction': 'Reintentar archivo',
 } satisfies Record<keyof typeof en, string>
 
 /** French dictionary, checked against the English keys. */
@@ -980,6 +988,8 @@ export const fr = {
   'status.turnFailed': 'Le dernier tour a échoué',
   'toast.sealStale': 'La dernière sauvegarde est DONE ; {n} messages ont suivi.',
   'toast.sealStaleContinue': 'Archiver quand même',
+  'toast.sealEndorseRetry': 'Le recoupement de l’attestation save a échoué ; vous pouvez réessayer (la lampe de la ligne est toujours verte).',
+  'toast.sealEndorseRetryAction': 'Réessayer l’archivage',
 } satisfies Record<keyof typeof en, string>
 
 /** German dictionary, checked against the English keys. */
@@ -1175,6 +1185,8 @@ export const de = {
   'status.turnFailed': 'Letzte Runde fehlgeschlagen',
   'toast.sealStale': 'Letzter Speichervorgang ist DONE; {n} Nachrichten folgten.',
   'toast.sealStaleContinue': 'Trotzdem archivieren',
+  'toast.sealEndorseRetry': 'Save-Bestätigungsprüfung fehlgeschlagen; erneut versuchbar (die Zeilenlampe bleibt grün).',
+  'toast.sealEndorseRetryAction': 'Archivierung erneut versuchen',
 } satisfies Record<keyof typeof en, string>
 
 /** Russian dictionary, checked against the English keys. */
@@ -1370,6 +1382,8 @@ export const ru = {
   'status.turnFailed': 'Последний ход завершился ошибкой',
   'toast.sealStale': 'Последнее сохранение в статусе DONE; далее {n} сообщений.',
   'toast.sealStaleContinue': 'Всё равно архивировать',
+  'toast.sealEndorseRetry': 'Повторная проверка подтверждения save не пройдена; можно повторить (индикатор строки всё ещё зелёный).',
+  'toast.sealEndorseRetryAction': 'Повторить архивацию',
 } satisfies Record<keyof typeof en, string>
 
 /** Portuguese dictionary, checked against the English keys. */
@@ -1565,4 +1579,6 @@ export const pt = {
   'status.turnFailed': 'O último turno falhou',
   'toast.sealStale': 'A última gravação está DONE; {n} mensagens seguiram-se.',
   'toast.sealStaleContinue': 'Arquivar mesmo assim',
+  'toast.sealEndorseRetry': 'A revalidação do endosso do save falhou; pode tentar novamente (a luz da linha continua verde).',
+  'toast.sealEndorseRetryAction': 'Tentar arquivar novamente',
 } satisfies Record<keyof typeof en, string>

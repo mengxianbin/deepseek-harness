@@ -8,12 +8,12 @@ import { ArchiveToastEntry, ToastEntry, WorkspaceToast } from './Toast.tsx'
 /** Register notice presentations with their business-owned display fields and actions.
  * @param ctx - Workspace plugin context.
  * @param viewStore - Viewing store, read only by archive notices.
- * @param actions - Archive, stale-continue, and source-opening callbacks.
+ * @param actions - Archive, stale-continue, endorsement-retry, and source-opening callbacks.
  */
 export function registerToasts(
   ctx: Context,
   viewStore: WorkspaceViewStoreHandle,
-  actions: Pick<RowToastActions, 'undoArchive' | 'showArchived' | 'openForkSource' | 'continueSealedArchive'>,
+  actions: Pick<RowToastActions, 'undoArchive' | 'showArchived' | 'openForkSource' | 'continueSealedArchive' | 'retrySealedArchive'>,
 ): void {
   const archiveFilterAction: ArchiveToastInjected['filterAction'] = (t, dismiss) => ({
     prefix: t('toast.archivedOr'), label: t('toast.archivedFilter'),
@@ -117,6 +117,26 @@ export function registerToasts(
         }),
       }),
     }, ToastEntry<PropsRuntime<'workspace.toast', 'sealStale'>>)
+    // archive-seal-falsered-1116 段3 灯门对账: the lamp paints green while the
+    // click-time endorsement recheck answered no-endorsement — the split that
+    // used to drop straight into the unsealed force dialog. The one-line
+    // notice offers the retry; its action re-runs the gate (green archives
+    // quietly, a still-red answer then reaches the force dialog — the escape
+    // hatch stays open), so the prompt never seals the force path shut.
+    yield ctx.slots.register({
+      name: 'workspace.toast', key: 'sealEndorseRetry', locale: 'workspace',
+      inject: (): ToastDisplayInjected<'sealEndorseRetry'> => ({
+        display: (notice, t, dismiss) => ({
+          text: t('toast.sealEndorseRetry'),
+          tone: 'warning',
+          holdMs: 10_000,
+          actions: [{
+            label: t('toast.sealEndorseRetryAction'),
+            onClick: () => { dismiss(); actions.retrySealedArchive(notice.sessionId) },
+          }],
+        }),
+      }),
+    }, ToastEntry<PropsRuntime<'workspace.toast', 'sealEndorseRetry'>>)
     // FORK session-relay-1106: the dispatch half failed — nothing was
     // created and nothing was archived, so the notice carries the failure's
     // own message (untranslated, like createFailed) and the row stays

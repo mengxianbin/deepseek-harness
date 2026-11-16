@@ -35,7 +35,9 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 // Type-only: pulls the SlotRegistry service merge (ctx.slots).
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
-// Type-only: pulls the Session root standard-hook merge.
+// Type-only: pulls the Session root standard-hook merge (the Context.uiSession
+// face the 灯门对账 read uses rides this same augmentation,
+// archive-seal-falsered-1116 段3).
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import {
   type ArchiveSessionInjected, type ForkSessionInjected, menuOpenStateFactory, type PinSessionInjected,
@@ -52,6 +54,7 @@ import {
   archiveOverrideRequest, isGreenSeal, isStaleSeal, postArchiveOverride, requestSealCheck, STALE_SEAL,
   type SessionSealInfo,
 } from './session-actions/seal.ts'
+import type { SessionSealState } from '@deepseek-ai/dsh-api-session-controller/types'
 import { derive } from './session-actions/derived.ts'
 // FORK session-relay-1106: the successor dispatch POST (loopback, one call
 // that creates and seeds), and the row button that offers the chain.
@@ -59,7 +62,8 @@ import { postSessionDispatch } from './session-actions/dispatch.ts'
 import { RelaySessionRowButton } from './session-actions/RelaySession.tsx'
 // FORK archive-seal-light-1101: the row lamps' C1 store (one handle created
 // here in apply, shared through the browser's inject face — no module-level handle).
-import { createSealLightStore } from './session-actions/seal-light.ts'
+// mergeHostSeals rides along for the 灯门对账 read (archive-seal-falsered-1116 段3).
+import { createSealLightStore, mergeHostSeals } from './session-actions/seal-light.ts'
 import { ForkSessionMenuItem } from './session-actions/ForkSession.tsx'
 import { PinSessionMenuItem, PinSessionRowButton } from './session-actions/PinSession.tsx'
 import { RenameSessionMenuItem, SessionRenameDialog } from './session-actions/RenameSession.tsx'
@@ -253,12 +257,30 @@ export function apply(ctx: Context): void {
   // relay learns when its archive half died after the dispatch succeeded;
   // the stale, red, and running-work branches have their own surfaces and
   // are not failures.
-  const archiveSealGated = (sessionId: SessionId, onHardFailure?: () => void): void => {
+  // archive-seal-falsered-1116 段2/段3: the ask carries `recheck` (the server
+  // re-probes a memoized no-endorsement instead of serving the transcript-
+  // stamped red), and a first-encounter split — lamp green × recheck red on
+  // `no-endorsement` — raises the one-line retry notice instead of dropping
+  // straight into the unsealed force dialog (灯门对账). The retry re-runs this
+  // same gate with `retried = true`: green archives quietly, a still-red
+  // answer then opens the force dialog, so the escape hatch to a forced
+  // archive never seals shut.
+  const lampPaintsGreen = (sessionId: SessionId): boolean => {
+    // The SAME merge the row lamps paint from (Host status record over the C1
+    // pull snapshot), so "green" here is the green the operator sees — the
+    // incident's split was Host-leg green × fresh-recheck red.
+    const uiSession = ctx.get('uiSession')
+    const host = uiSession?.sessionStatus.getSnapshot().get(sessionId)
+    const statuses = new Map<SessionId, { readonly seal?: SessionSealState }>()
+    if (host !== undefined) statuses.set(sessionId, host)
+    return mergeHostSeals(sealLight.observable.getSnapshot(), statuses).get(sessionId)?.verdict === 'DONE'
+  }
+  const archiveSealGated = (sessionId: SessionId, onHardFailure?: () => void, retried = false): void => {
     if (sessions.list.getSnapshot().byId[sessionId]?.blank === true) {
       archiveQuietly(sessionId, undefined, onHardFailure)
       return
     }
-    void requestSealCheck([sessionId]).then((results) => {
+    void requestSealCheck([sessionId], { recheck: true }).then((results) => {
       const seal = results?.get(sessionId)
       if (seal === undefined || isGreenSeal(seal)) {
         archiveQuietly(sessionId, undefined, onHardFailure)
@@ -270,6 +292,10 @@ export function apply(ctx: Context): void {
           sessionId,
           ...(seal.followUpCount === undefined ? {} : { followUpCount: seal.followUpCount }),
         })
+        return
+      }
+      if (!retried && seal.detail === 'no-endorsement' && lampPaintsGreen(sessionId)) {
+        notify({ kind: 'sealEndorseRetry', sessionId })
         return
       }
       const displayTitle = sessions.list.getSnapshot().byId[sessionId]?.displayTitle ?? sessionId
@@ -408,6 +434,12 @@ export function apply(ctx: Context): void {
     // the reported count stays with the verdict for any confirmation later.
     continueSealedArchive: (sessionId: SessionId, followUpCount?: number) => {
       archiveQuietly(sessionId, followUpCount === undefined ? STALE_SEAL : { ...STALE_SEAL, followUpCount })
+    },
+    // archive-seal-falsered-1116 段3: the endorsement-retry notice's action —
+    // re-run the gate with the fresh recheck ask; green archives quietly, and
+    // a still-red answer this time (retried) opens the force dialog.
+    retrySealedArchive: (sessionId: SessionId) => {
+      archiveSealGated(sessionId, undefined, true)
     },
   }
   registerToasts(ctx, viewStore, toastActions)
