@@ -1,0 +1,22 @@
+# Bilingual-pair consistency record for 2026-11-16-numpad-digit-shortcuts.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/proposed/feature/2026-11-16-numpad-digit-shortcuts.md
+/agent-note-numpad-digits-trigger-digit-row-shortcut-bindings:
+  en: e85f9164a23513f6
+  zh: 89f5e8928577fd7b
+/agent-note-numpad-digits-trigger-digit-row-shortcut-bindings/problem:
+  en: ba1405df7a0e4771
+  zh: 7a9db6b0b255e8bd
+/agent-note-numpad-digits-trigger-digit-row-shortcut-bindings/proposal:
+  en: 54dd3c17916ef55e
+  zh: e3c7dfbc795c1138
+/agent-note-numpad-digits-trigger-digit-row-shortcut-bindings/alternatives-considered:
+  en: 3b906a7bd8774d68
+  zh: d027d719ad298382
+/agent-note-numpad-digits-trigger-digit-row-shortcut-bindings/acceptance-criteria:
+  en: 455278f57cd0dce5
+  zh: 01ddabfe03d87006
+/agent-note-numpad-digits-trigger-digit-row-shortcut-bindings/risks:
+  en: 5c1059c5b42f5040
+  zh: 3de0ed8a5c773b13
