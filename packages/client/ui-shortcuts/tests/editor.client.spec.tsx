@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { bindSnapshotSelector, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { ShortcutRegistry } from '../../shortcuts/src/client/registry.ts'
-import { bindingIssue, initialShortcutConfig, normalizeBinding, overlappingBindings, presentBinding, ShortcutPersistence } from '@deepseek-ai/dsh-client-shortcuts/protocol'
+import { aliasKeypad, bindingIssue, initialShortcutConfig, normalizeBinding, overlappingBindings, presentBinding, ShortcutPersistence } from '@deepseek-ai/dsh-client-shortcuts/protocol'
 import type { ShortcutCommandId, ShortcutSaveResult } from '@deepseek-ai/dsh-client-shortcuts/protocol'
 import { ShortcutEditor } from '../src/client/Editor.tsx'
 import type {} from '../src/client/index.ts'
@@ -108,6 +108,7 @@ async function mount(options: {
     runtime={runtime} platform={platform}
     edit={(edit, revision) => options.result?.() ?? persistence.edit(edit, revision)}
     describeBinding={options.describe ?? describeBinding}
+    aliasCode={aliasKeypad}
     recording={recording} t={makeTranslate(en)}
     onClose={onClose} onSaved={onSaved} onError={onError} />)
   if (options.recording === undefined) await waitFor(() => { expect((screen.getByRole('button', { name: 'Press a shortcut' })).hasAttribute('disabled')).toBe(false) })
@@ -136,6 +137,19 @@ it.each([
   fireEvent.keyUp(recorder, input)
   await waitFor(() => { expect(f.onSaved).toHaveBeenCalledOnce() })
   expect(f.registry.catalog.getSnapshot()[0]?.keys).toEqual(keys)
+})
+
+it('records a keypad digit as its main-row code and never stores Numpad', async () => {
+  const f = await mount({ platform: 'windows' })
+  const recorder = screen.getByRole('button', { name: en.record })
+  recorder.focus()
+  fireEvent.keyDown(recorder, { code: 'Numpad7', key: '7', ctrlKey: true, metaKey: false })
+  fireEvent.keyUp(recorder, { code: 'Numpad7' })
+  await waitFor(() => { expect(f.onSaved).toHaveBeenCalledOnce() })
+  expect(f.registry.catalog.getSnapshot()[0]?.keys).toEqual(['Ctrl', '+', '7'])
+  const stored = f.storage.write.mock.calls.flat().join('\n')
+  expect(stored).toContain('Digit7')
+  expect(stored).not.toContain('Numpad')
 })
 
 it('records macOS Web Option+Command+N reported as Dead and saves on Command release', async () => {

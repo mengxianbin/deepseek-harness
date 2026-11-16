@@ -17,6 +17,7 @@ export interface ReferenceInjected {
   edit: Shortcuts['edit']
   recording: Shortcuts['recording']
   describeBinding: Shortcuts['describeBinding']
+  aliasCode: Shortcuts['aliasCode']
   hooks: { catalog: ObservableSnapshot<readonly ShortcutCatalogEntry[]>; config: Shortcuts['config']; fixedCatalog: Shortcuts['fixedCatalog'] }
 }
 type Store = PropsStore<ReturnType<typeof createShortcutsStore>>
@@ -124,7 +125,7 @@ export function ShortcutReference({
     notify(result.status === 'saved' ? t('reset-saved')
       : result.status === 'write-failed' ? t('reset-failed') : shortcutFailure(result, catalog, t, runtime), result.status !== 'saved')
   }
-  const editorProps = { useCatalog, useConfig, useFixedCatalog, platform, runtime, edit: persist, recording, describeBinding, t,
+  const editorProps = { useCatalog, useConfig, useFixedCatalog, platform, runtime, edit: persist, recording, describeBinding, aliasCode, t,
     onClose: closeEditor,
     onSaved: () => { notify(t('saved')); closeEditor() },
     onError: (message: string) => { notify(message, true) } }

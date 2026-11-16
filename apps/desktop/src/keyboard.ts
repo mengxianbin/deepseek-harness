@@ -1,6 +1,6 @@
 /** Product-window preference IPC and native menu interception during physical-key dispatch/recording. */
 import { ipcMain, type BrowserWindow, type IpcMainInvokeEvent, type Input, type MenuItemConstructorOptions, type WebContents } from 'electron'
-import { bindingKey, effectiveShortcuts, presentBinding, parseShortcutDefinitions, parseShortcutEdit } from '@deepseek-ai/dsh-client-shortcuts/protocol'
+import { aliasKeypad, bindingKey, effectiveShortcuts, presentBinding, parseShortcutDefinitions, parseShortcutEdit } from '@deepseek-ai/dsh-client-shortcuts/protocol'
 import type { NormalizedBinding, ShortcutConfigSnapshot, ShortcutDefinition, ShortcutPlatform, ShortcutRevision } from '@deepseek-ai/dsh-client-shortcuts/protocol'
 import type { DesktopBrowserLeaseId } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 import { desktopKeybindings } from './keybindings.ts'
@@ -125,7 +125,9 @@ export function installDesktopShortcuts(
     const navigation = (event: Electron.Event<Electron.WebContentsDidStartNavigationEventParams>): void => {
       if (event.isMainFrame && !event.isSameDocument) clear()
     }
-    const beforeInput = (event: Electron.Event, input: Input): void => {
+    const beforeInput = (event: Electron.Event, rawInput: Input): void => {
+      // Keypad digits arrive as Numpad*; alias at ingestion so every downstream reader sees Digit* only.
+      const input: Input = { ...rawInput, code: aliasKeypad(rawInput.code) }
       const overlay = overlayInput(window)
       if (overlay.revision !== overlayRevision) { resetInput(); overlayRevision = overlay.revision }
       if (overlay.blocked) { event.preventDefault(); return }

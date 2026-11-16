@@ -34,10 +34,12 @@ export function apply(ctx: Context): void {
   const edit: typeof ctx.shortcuts.edit = (...args) => ctx.shortcuts.edit(...args)
   const recording = (active: boolean) => ctx.shortcuts.recording(active)
   const describeBinding: typeof ctx.shortcuts.describeBinding = binding => ctx.shortcuts.describeBinding(binding)
+  const aliasCode: typeof ctx.shortcuts.aliasCode = code => ctx.shortcuts.aliasCode(code)
   for (const command of fixedCommands(t)) {
     ctx.effect(() => ctx.shortcuts.registerFixed(command), `shortcuts: ${command.id}`)
   }
   const injected = () => ({ platform: ctx.shortcuts.platform, runtime: ctx.shortcuts.runtime, edit, recording, describeBinding,
+    aliasCode,
     hooks: { catalog: ctx.shortcuts.catalog, config: ctx.shortcuts.config, fixedCatalog: ctx.shortcuts.fixedCatalog } })
   ctx.slots.inject('settings.general.item', () => ctx.slots.register({
     name: 'settings.general.item', id: 'shortcuts', order: 16, locale: 'shortcuts', store,

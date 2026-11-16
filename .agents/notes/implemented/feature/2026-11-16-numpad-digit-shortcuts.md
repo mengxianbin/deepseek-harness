@@ -1,6 +1,6 @@
 # Agent Note: Numpad digits trigger digit-row shortcut bindings
 
-Status: proposed
+Status: implemented
 
 English | [中文](2026-11-16-numpad-digit-shortcuts.zh.md)
 
@@ -18,13 +18,13 @@ Any fix must clear five constraints the whitelist has quietly been carrying:
 - **Electron accelerators.** The menu vocabulary spells keypad keys `num1` and friends — a third spelling — and Electron does not fire a digit-row accelerator from the keypad ([electron#3332](https://github.com/electron/electron/issues/3332)).
 - **Chords.** Two-key bindings sort and compare raw codes in [`keyboard.ts`](../../../../apps/desktop/src/keyboard.ts) and the recording editor; two vocabularies through that state machine invite mismatches.
 
-## Proposal
+## Decision
 
-Map the keypad digits onto the digit row at the three seams where a physical code enters the shortcut system, through one shared helper exported from the shortcut protocol (for example an `aliasKeypad` beside `bindingKey`), so both adapters and the editor use one mapping instead of three copies:
+The keypad digits map onto the digit row at the three seams where a physical code enters the shortcut system, through one shared helper exported from the shortcut protocol: [`aliasKeypad`](../../../../packages/client/shortcuts/src/binding.ts) sits beside `bindingKey`, matches `^Numpad([0-9])$`, returns `Digit$1`, and passes every other code through unchanged — both adapters call it directly and the recording editor reaches it through the injected `Shortcuts.aliasCode` service method (client feature packages may not value-import across plugins), so one mapping serves all three seams instead of copies:
 
-- [`dom.ts`](../../../../packages/client/shortcuts/src/client/dom.ts) — map `event.code` before the gesture object is built, covering Web and Linux dispatch and every fixed sequence.
-- [`keyboard.ts`](../../../../apps/desktop/src/keyboard.ts) — map `input.code` once at the top of `before-input-event`, so the match lookup, the held-key two-key state, the menu-close comparison, and the code forwarded to the renderer all see `Digit*`.
-- [`Editor.tsx`](../../../../packages/client/ui-shortcuts/src/client/Editor.tsx) — map `event.code` before `describeBinding`, so recording stores the `Digit*` binding and two-key recording captures both keys alike.
+- [`dom.ts`](../../../../packages/client/shortcuts/src/client/dom.ts) — the gesture object is built with `code: aliasKeypad(event.code)`, so one line covers Web and Linux dispatch and every fixed sequence.
+- [`keyboard.ts`](../../../../apps/desktop/src/keyboard.ts) — `beforeInput` aliases once at the top through a shadow copy of the Electron `Input`, so the match lookup, the held-key two-key state, the menu-close comparison, and the code forwarded to the renderer all see `Digit*` without a single downstream edit.
+- [`Editor.tsx`](../../../../packages/client/ui-shortcuts/src/client/Editor.tsx) — both the `keydown` and `keyup` handlers alias `event.code` through `aliasCode`: recording stores the `Digit*` binding, two-key recording captures both keys alike, and the release comparison matches the aliased candidate — without the `keyup` alias the capture would never fire.
 
 Everything downstream — registry index, conflict detection, keycaps, `aria-keyshortcuts`, preference documents — keeps consuming `Digit*` only, so no display, ARIA, accelerator, or schema surface changes and no preference document can ever contain `Numpad*`.
 
@@ -46,17 +46,18 @@ One binding, two triggers: the keypad cannot be bound to a different command fro
 
 **Do nothing and document the gap.** Rejected: the gap has no recorded rationale behind it, the ergonomic complaint is concrete, and the fix touches input adapters only — deferring preserves an unexplained exclusion rather than a decision.
 
-## Acceptance criteria
+## Testing
 
-- On Windows/macOS Desktop and on the Web, `Ctrl` plus a keypad `1`/`2`/`3` (Web: `Ctrl+Alt` plus …) focuses the session list, conversation, and composer exactly as the digit row does, with NumLock both on and off.
-- The shortcut editor records a keypad digit as the corresponding `Digit*` binding, shows the digit keycap, and never answers with the unsupported-key message for `Numpad0`–`Numpad9`.
-- On Windows/macOS Desktop a keypad digit takes part in a two-key binding as either key, matching the same combination written with digit-row keys.
-- Recording a keypad press writes only `Digit*` into `dsh.keybindings.v1` (Web) and `keybindings.json` (Desktop); a test asserts the stored document contains no `Numpad*`.
-- Unit tests cover the mapping at each of the three seams plus one dispatch round-trip, the existing suites stay green, and `doc-sync` passes.
+What pins the shipped behavior:
 
-## Risks
+- The registry spec carries the mapping unit cases: `Numpad0`/`Numpad7`/`Numpad9` alias to `Digit0`/`Digit7`/`Digit9`, while `NumpadEnter`, `NumpadDecimal`, `NumpadAdd`, `Digit7`, and `KeyB` pass through untouched — the scope boundary is asserted, not just documented.
+- The DOM seam spec is the dispatch round-trip, on both runtimes: a `Numpad7` press runs the command bound to `Digit7` and a `Digit7` press runs it again — one binding, two triggers. After the alias no reader can tell the two rows apart, which is what makes the NumLock on/off and "focuses exactly as the digit row" acceptance hold by construction.
+- The desktop keyboard spec drives `before-input-event` with `Numpad7`: the `Digit7` binding suppresses the menu and the renderer forward carries `code: 'Digit7'`; a second case proves a two-key binding matches with the keypad as either chord key.
+- The editor spec records a `Numpad7` press as the `['Ctrl', '+', '7']` keycaps and asserts the stored preference document contains `Digit7` and no `Numpad` — the no-`Numpad*`-in-storage criterion is a literal string assertion on the written document.
+- The existing suites, `pnpm typecheck`, oxlint, and `build:lib` stay green; this change's `doc-sync` gates (note pair, wrap, links) pass — the corpus-wide `doc-sync` run still reports pre-existing legacy reds tracked on the m-note board (`#translation-pairing-legacy-red-1116` pairing, `#harness-legacy-red-links-graph-1115` links), untouched by this change.
 
-- The alias fuses the two rows: a user who wants a *different* command on the keypad cannot get one. If that demand appears, first-class `Numpad*` is the follow-up — and this alias must be revisited rather than stacked on top of it.
-- Windows/macOS Desktop admit modifier-less digit bindings in `bindingIssue`; with NumLock off a keypad press would fire such a binding where the user expects `End`-family navigation. Every shipped default carries modifiers, so only users who deliberately record a bare digit meet this.
-- The alias is invisible in the saved document and the reference UI — a keypad press looks exactly like the digit row everywhere, which is the intent — but a bug report about what the keypad did needs that in mind.
-- A fourth input path added later without the mapping would silently reject the keypad again; until one exists, the three-seam test is the guard.
+## Consequences
+
+**Bought:** the keypad and the digit row trigger the same bindings everywhere dispatch runs — Web, Linux, and Windows/macOS Desktop, with NumLock on or off — and the editor records keypad digits instead of answering "unsupported key". Nothing downstream changed: keycaps, `aria-keyshortcuts`, Electron accelerators, the persistence schema, and the chord state machine keep consuming one vocabulary, and a preference document written by this build still parses on older builds, so the alias closes the downgrade-lock surface rather than opening it.
+
+**Cost:** the alias fuses the two rows — a user who wants a *different* command on the keypad cannot get one; if that demand appears, first-class `Numpad*` is the follow-up, and this alias must be revisited rather than stacked on top of it. Windows/macOS Desktop admit modifier-less digit bindings in `bindingIssue`, so with NumLock off a keypad press fires such a binding where the user expects `End`-family navigation — every shipped default carries modifiers, so only users who deliberately record a bare digit meet this. The alias is invisible in the saved document and the reference UI — a keypad press looks exactly like the digit row everywhere, which is the intent — but a bug report about what the keypad did needs that in mind. A fourth input path added later without the mapping would silently reject the keypad again; the three-seam tests are the guard.
