@@ -19,6 +19,7 @@ import {
   initProfile,
   loadProfile,
   loadProfileDirectory,
+  LOCAL_PATCH_FILENAME,
   PROFILE_COMPATIBILITY_FILENAME,
   PROFILE_PATCH_FILENAME,
   readProfileManifest,
@@ -223,6 +224,31 @@ it('composes current files from profile data and retains launch overlay and tele
   expect(composeEntries([readProfilePatches('test', { ...enabled, overlays: [] })])[0]?.disabled).toBe(true)
   writeFileSync(patchPath, '- id: session-telemetry-otel\n  disabled: false\n')
   expect(composeEntries([readProfilePatches('test', { ...enabled, overlays: [] })])[0]?.disabled).toBe(false)
+})
+
+it('reads the local layer above home and below overlays, and skips it when absent', () => {
+  const home = tmp()
+  const installAnchor = stageInstallation({ base: { patch: '- insert:\n  - id: session-telemetry-otel\n    name: telemetry\n' } })
+  const dir = resolveProfileDir('test', home)
+  initProfile(dir, ['base'])
+  const patchPath = join(dir, 'application.patch.yml')
+  writeFileSync(patchPath, '- id: session-telemetry-otel\n  config: { from: profile }\n')
+  writeFileSync(join(home, PROFILE_PATCH_FILENAME), '- id: session-telemetry-otel\n  config: { from: home }\n')
+  const context = {
+    name: 'test', dir, patchPath, installAnchor, home, cwd: home,
+    startedBundles: ['base'],
+    overlays: [{ id: 'session-telemetry-otel', config: { from: 'overlay' } }], telemetryDisabledEnv: undefined,
+  }
+  const from = (overrides: typeof context.overlays = context.overlays): unknown =>
+    composeEntries([readProfilePatches('test', { ...context, overlays: overrides })])[0]?.config
+  // Absent local file: an empty layer, no error, and initProfile never creates it.
+  expect(existsSync(join(dir, LOCAL_PATCH_FILENAME))).toBe(false)
+  expect(from([])).toEqual({ from: 'home' })
+  // Present: the local layer outranks home and profile…
+  writeFileSync(join(dir, LOCAL_PATCH_FILENAME), '- id: session-telemetry-otel\n  config: { from: local }\n')
+  expect(from([])).toEqual({ from: 'local' })
+  // …while a launch overlay applied after it still wins.
+  expect(from()).toEqual({ from: 'overlay' })
 })
 
 describe('initProfile', () => {

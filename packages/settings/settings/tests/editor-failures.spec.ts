@@ -1,6 +1,7 @@
 /** File failures between validation and commit must not persist partial edits. */
 import * as fs from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { configurationFixture } from './configuration-fixture.ts'
 
@@ -17,12 +18,14 @@ it.each([
 ] as const)('refuses %s observed after initial validation', async (_name, result) => {
   const { ctx, profile } = await configurationFixture({ hmr: false })
   const entry = ctx.configEditor.entries().find(row => row.options.id === 'first')!
-  const before = readFileSync(profile.patchPath, 'utf8')
-  const read = vi.mocked(fs.readFile)
-  if (typeof result === 'string') read.mockResolvedValueOnce(result)
-  else read.mockRejectedValueOnce(result)
+  const document = join(profile.dir, 'cordis.local.patch.yml')
+  const read = () => { try { return readFileSync(document, 'utf8') } catch { return undefined } }
+  const before = read()
+  const read_ = vi.mocked(fs.readFile)
+  if (typeof result === 'string') read_.mockResolvedValueOnce(result)
+  else read_.mockRejectedValueOnce(result)
   await expect(ctx.configEditor.edit(entry, raw => ({ ...raw, count: 6 }))).rejects.toThrow()
-  expect(readFileSync(profile.patchPath, 'utf8')).toBe(before)
+  expect(read()).toBe(before)
 })
 
 it('creates a patch removed between validation and reading the document', async () => {
@@ -30,5 +33,5 @@ it('creates a patch removed between validation and reading the document', async 
   const entry = ctx.configEditor.entries().find(row => row.options.id === 'first')!
   vi.mocked(fs.readFile).mockRejectedValueOnce(Object.assign(new Error('removed'), { code: 'ENOENT' }))
   await ctx.configEditor.edit(entry, raw => ({ ...raw, count: 6 }))
-  expect(readFileSync(profile.patchPath, 'utf8')).toContain('count: 6')
+  expect(readFileSync(join(profile.dir, 'cordis.local.patch.yml'), 'utf8')).toContain('count: 6')
 })

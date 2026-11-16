@@ -1,6 +1,6 @@
 /** Launcher-owned profile locations and composition inputs. */
 import { join } from 'node:path'
-import { composeEntries, loadProfileDirectory, PROFILE_PATCH_FILENAME, type Profile } from './profile.ts'
+import { composeEntries, LOCAL_PATCH_FILENAME, loadProfileDirectory, PROFILE_PATCH_FILENAME, type Profile } from './profile.ts'
 import { loadOptionalPatches } from './index.ts'
 import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 
@@ -66,16 +66,28 @@ export function readBundlePatches(binName: string, context: ProfileContext, init
 }
 
 /** Read current bundle and user layers with the launch-time overlays.
+ *
+ * Layer order (later wins): bundle layers → profile patch → home patch →
+ * local patch → launch overlays → telemetry opt-out. The local layer is the
+ * volatile per-profile file the settings surface writes; a missing file is an
+ * empty layer.
+ *
  * @param binName Diagnostic prefix for malformed or missing configuration.
  * @param context Data supplied by the profile launcher.
  * @param initialProfile Already loaded startup profile; omitted reads the current files.
+ * @param localPatches Simulated local layer for a write guard; `undefined` reads
+ *   the local file, an array (including empty) replaces it — the edited document
+ *   sits in the local slot, so only a launch overlay applied above it can reject.
  * @returns Detached ordered patches; this function does not update the Loader.
  */
-export function readProfilePatches(binName: string, context: ProfileContext, initialProfile?: Profile): PatchOptions[] {
+export function readProfilePatches(
+  binName: string, context: ProfileContext, initialProfile?: Profile, localPatches?: PatchOptions[],
+): PatchOptions[] {
   const patches = structuredClone([
     ...readBundlePatches(binName, context, initialProfile),
     ...(initialProfile?.patches ?? loadOptionalPatches(binName, context.patchPath) ?? []),
     ...(loadOptionalPatches(binName, join(context.home, PROFILE_PATCH_FILENAME)) ?? []),
+    ...(localPatches ?? loadOptionalPatches(binName, join(context.dir, LOCAL_PATCH_FILENAME)) ?? []),
     ...context.overlays,
   ])
   const telemetryPatch = resolveTelemetryPatch(context.telemetryDisabledEnv,

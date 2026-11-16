@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { isMap, isNode, isScalar, isSeq, parseDocument } from 'yaml'
 import type { EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
 import { composeEntries, loadOptionalPatches, readBundlePatches, type ProfileContext } from '@deepseek-ai/dsh-app-boot'
-import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
+import { resolveLinkedPath, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 
 /** Flatten only the groups addressable by the profile's patch composer.
  * @param rows Composed top-level entries.
@@ -23,7 +23,10 @@ export function flatten(rows: EntryOptions[]): EntryOptions[] {
  * @returns Whether the file changed.
  */
 export async function writePluginEnabled(profile: ProfileContext, id: string, name: string, enabled: boolean): Promise<boolean> {
-  const filename = profile.patchPath
+  // Resolved once at entry: a link created after boot leaves the launch-time
+  // `patchPath` stale, and a junction-to-file does not even read (ENOENT), so
+  // the whole read-modify-write must share one resolved path.
+  const filename = resolveLinkedPath(profile.patchPath)
   let text: string
   try {
     text = await readFile(filename, 'utf8')

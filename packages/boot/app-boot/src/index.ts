@@ -68,6 +68,7 @@ export {
   removeLinkProjections,
   loadProfile,
   loadProfileDirectory,
+  LOCAL_PATCH_FILENAME,
   PROFILE_PATCH_FILENAME,
   PROFILES_DIR,
   readProfileManifest,

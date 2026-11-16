@@ -1,4 +1,5 @@
 /** Remote form operations over real Cordis profile configuration. */
+import { join } from 'node:path'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { remoteErrorOf, remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
@@ -52,7 +53,7 @@ describe('settings Remote', () => {
     const controller = new SettingsController(ctx, { openTextFile })
     const abort = new AbortController()
     await controller.openSettingsDocument(abort.signal)
-    expect(openTextFile).toHaveBeenCalledWith(profile.patchPath, abort.signal)
+    expect(openTextFile).toHaveBeenCalledWith(join(profile.dir, 'cordis.local.patch.yml'), abort.signal)
     openTextFile.mockRejectedValueOnce(new Error('no editor'))
     await expect(controller.openSettingsDocument(abort.signal)).rejects.toMatchObject({ code: 'gateway/internal' })
     abort.abort()
