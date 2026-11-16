@@ -1,6 +1,5 @@
 - region "Which color do you prefer?":
   - text: Pick one
-  - button "Collapse the question card" [expanded]
   - button "Dismiss all questions"
   - heading "Which color do you prefer?" [level=2]
   - group:
