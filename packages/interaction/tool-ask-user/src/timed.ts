@@ -33,7 +33,11 @@ const description = 'Ask brief, direct, self-contained questions about missing i
   + `Use distinct stable question IDs. ${skippedAnswerGuidance} `
   + 'A pending result instead means no answer batch arrived before the timeout and the user can still answer. '
   + 'Keep every question field brief — the card renders question, detail, and option text inline; '
-  + 'put long reports in a file and reference its path instead.'
+  + 'put long reports in a file and reference its path instead. '
+  // FORK dsh-local (ask-long-stem, 2026-11-17 裁定 D): kept identical to the
+  // legacy description in index.ts — same numbers, same before-call channel.
+  + 'The question field itself must fit on one line — at most 36 CJK characters (or 72 half-width units). '
+  + 'Put background or long context into a regular conversation message sent before calling this tool, not into the card.'
 
 /**
  * Instruction the pending result carries in its `message` field. It is a field

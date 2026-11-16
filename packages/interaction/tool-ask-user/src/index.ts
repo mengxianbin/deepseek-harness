@@ -31,7 +31,12 @@ export const inject = ['tools', 'userQuestions']
 const description = 'Ask the user a concise question when you need confirmation, a choice, or missing information before proceeding. '
   + skippedAnswerGuidance
   + ' Keep every question field brief — the card renders question, detail, and option text inline; '
-  + 'put long reports in a file and reference its path instead.'
+  + 'put long reports in a file and reference its path instead. '
+  // FORK dsh-local (ask-long-stem, 2026-11-17 裁定 D): the stem must fit one
+  // line of the card, and background belongs to the conversation before the
+  // call — kept identical in the timed description below.
+  + 'The question field itself must fit on one line — at most 36 CJK characters (or 72 half-width units). '
+  + 'Put background or long context into a regular conversation message sent before calling this tool, not into the card.'
 
 export function apply(ctx: Context, config: Config = {}): void {
   if (config.mode === 'timed') {
