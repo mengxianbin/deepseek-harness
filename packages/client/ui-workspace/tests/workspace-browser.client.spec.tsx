@@ -836,6 +836,38 @@ describe('WorkspaceBrowser', () => {
     expect(open).toHaveBeenCalledWith(sid('two'))
   })
 
+  it('jumps focus to the first and last session rows with Home and End', () => {
+    const open = vi.fn()
+    mount({
+      useSessions: hook(sessionState([summary('one', 3), summary('two', 2), summary('three', 1)])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['one', 'two', 'three'])])),
+      open,
+    })
+    fireEvent.click(screen.getByText('alpha'))
+    const tree = document.querySelector('[role="tree"]')!
+    const rows = Array.from(tree.querySelectorAll<HTMLElement>('[data-row-key^="session:"]'))
+    expect(rows).toHaveLength(3)
+    const [first, , third] = [rows[0]!, rows[1]!, rows[2]!]
+    rows[1]!.focus()
+    // session-list-arrow-nav-1115: Home/End move focus only — no selection
+    // change, no session opened by the jump itself.
+    fireEvent.keyDown(rows[1]!, { key: 'Home' })
+    expect(document.activeElement).toBe(first)
+    expect(open).not.toHaveBeenCalled()
+    // At either end the focus stays put: no wrap, no focus escape.
+    fireEvent.keyDown(first, { key: 'Home' })
+    expect(document.activeElement).toBe(first)
+    fireEvent.keyDown(first, { key: 'End' })
+    expect(document.activeElement).toBe(third)
+    fireEvent.keyDown(third, { key: 'End' })
+    expect(document.activeElement).toBe(third)
+    expect(first.getAttribute('aria-selected')).toBe('false')
+    expect(third.getAttribute('aria-selected')).toBe('false')
+    // Enter still opens the row holding focus after the jump.
+    fireEvent.keyDown(third, { key: 'Enter' })
+    expect(open).toHaveBeenCalledWith(sid('three'))
+  })
+
   it('a title double-click asks for the rename dialog with the row title', () => {
     const requestSessionRename = vi.fn()
     const open = vi.fn()

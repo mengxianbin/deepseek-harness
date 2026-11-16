@@ -1737,6 +1737,39 @@ describe('session row decoration seats', () => {
     expect(document.activeElement).toBe(first)
   })
 
+  it('jumps focus to the ends of the row list with Home/End without opening or selecting', () => {
+    const onOpen = vi.fn()
+    const nodes = (['a', 'b', 'c'] as const).map((key): SessionNode => (
+      { ...idle, id: sid(key), title: `Row ${key}` }
+    ))
+    render(
+      <div role="tree" aria-label="sessions">
+        {nodes.map(node => (
+          <SessionNodeItem key={node.id} node={node} currentId={undefined} now={0} onOpen={onOpen} t={t} />
+        ))}
+      </div>,
+    )
+    const rows = screen.getAllByRole('treeitem')
+    const [first, , third] = [rows[0]!, rows[1]!, rows[2]!]
+    rows[1]!.focus()
+    fireEvent.keyDown(rows[1]!, { key: 'Home' })
+    expect(document.activeElement).toBe(first)
+    fireEvent.keyDown(first, { key: 'End' })
+    expect(document.activeElement).toBe(third)
+    // The ends hold: focus neither wraps nor escapes the list.
+    fireEvent.keyDown(third, { key: 'End' })
+    expect(document.activeElement).toBe(third)
+    fireEvent.keyDown(first, { key: 'Home' })
+    expect(document.activeElement).toBe(first)
+    // The jump moves focus only: nothing opened, selection never followed.
+    expect(onOpen).not.toHaveBeenCalled()
+    expect(screen.getAllByRole('treeitem').map(row => row.getAttribute('aria-selected')))
+      .toEqual(['false', 'false', 'false'])
+    // Home/End with a modifier stay available to the global shortcuts registry.
+    expect(fireEvent.keyDown(first, { key: 'Home', ctrlKey: true })).toBe(true)
+    expect(document.activeElement).toBe(first)
+  })
+
   it('offers the leading seat only while the row is idle, and no state dot beside it', () => {
     const renderSlot = seatSpy()
     const view = renderRow(idle, renderSlot)
