@@ -804,6 +804,38 @@ describe('WorkspaceBrowser', () => {
     expect(screen.queryByText('alpha-s')).toBeNull()
   })
 
+  it('walks focus between session rows with the arrows, then Enter opens the focused row', () => {
+    const open = vi.fn()
+    mount({
+      useSessions: hook(sessionState([summary('one', 3), summary('two', 2)])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['one', 'two'])])),
+      open,
+    })
+    fireEvent.click(screen.getByText('alpha'))
+    const tree = document.querySelector('[role="tree"]')!
+    const rows = Array.from(tree.querySelectorAll<HTMLElement>('[data-row-key^="session:"]'))
+    expect(rows.map(row => row.textContent)).toEqual([
+      expect.stringContaining('one'), expect.stringContaining('two'),
+    ])
+    const [first, second] = [rows[0]!, rows[1]!]
+    first.focus()
+    expect(document.activeElement).toBe(first)
+    // session-list-arrow-nav-1115: the arrows move focus only — no selection
+    // change, no session opened by the walk itself.
+    fireEvent.keyDown(first, { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(second)
+    expect(open).not.toHaveBeenCalled()
+    expect(first.getAttribute('aria-selected')).toBe('false')
+    expect(second.getAttribute('aria-selected')).toBe('false')
+    fireEvent.keyDown(second, { key: 'ArrowUp' })
+    expect(document.activeElement).toBe(first)
+    // Enter opens the row holding focus, not the row that had it before.
+    fireEvent.keyDown(first, { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(second)
+    fireEvent.keyDown(second, { key: 'Enter' })
+    expect(open).toHaveBeenCalledWith(sid('two'))
+  })
+
   it('a title double-click asks for the rename dialog with the row title', () => {
     const requestSessionRename = vi.fn()
     const open = vi.fn()

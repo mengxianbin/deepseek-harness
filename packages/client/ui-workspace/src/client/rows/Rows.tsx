@@ -936,6 +936,22 @@ export function SessionNodeItem({
     if (watchSessionJobs === undefined) return
     return watchSessionJobs(node.id)
   }, [node.id, watchSessionJobs])
+  // session-list-arrow-nav-1115 (A 案): the arrows only walk focus across the
+  // rendered session rows of this list — selection never follows, so no
+  // session is opened or loaded here; Enter/Space below open the focused row.
+  const walkFocus = (step: -1 | 1): void => {
+    const row = rowRef.current
+    if (row === null) return
+    // Both list bodies (grouped and flat) render inside a role="tree" div, so
+    // the nearest one scopes the walk to this list only.
+    const tree = row.closest<HTMLElement>('[role="tree"]')
+    if (tree === null) return
+    const rows = Array.from(tree.querySelectorAll<HTMLElement>('[data-row-key^="session:"]'))
+    const index = rows.indexOf(row)
+    if (index === -1) return
+    // At either end the focus stays put: no wrap, no focus escape.
+    rows[index + step]?.focus()
+  }
   const ownRow = (
     <div
       ref={rowRef}
@@ -951,10 +967,16 @@ export function SessionNodeItem({
       tabIndex={0}
       onClick={() => { onOpen(node.id) }}
       onKeyDown={(event) => {
-        if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return
+        if (event.target !== event.currentTarget) return
+        if (event.key !== 'Enter' && event.key !== ' '
+          && event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
         if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
         event.preventDefault()
-        onOpen(node.id)
+        if (event.key === 'Enter' || event.key === ' ') {
+          onOpen(node.id)
+          return
+        }
+        walkFocus(event.key === 'ArrowUp' ? -1 : 1)
       }}
       onPointerEnter={marquee.enter}
       onPointerLeave={marquee.leave}
