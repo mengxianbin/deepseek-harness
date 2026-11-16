@@ -16,7 +16,6 @@
 - button "Copy"
 - region "Ready to continue?":
   - text: Checkpoint
-  - button "Collapse the question card" [expanded]
   - button "Dismiss all questions"
   - heading "Ready to continue?" [level=2]
   - radiogroup:

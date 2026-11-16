@@ -164,7 +164,7 @@ describe('web e2e: mid-turn steering lands durably and visibly', () => {
     // the steer as user/message, and the steered continuation runs the
     // final model call.
     await composer.getByRole('radio', { name: 'Yes' }).click()
-    await composer.getByRole('radio', { name: 'Yes' }).press('Enter')
+    await composer.getByRole('radio', { name: 'Yes' }).press('Shift+Enter')
     await settled
 
     if (MODE === 'record') {
@@ -429,7 +429,7 @@ describe.each(['reconnect', 'delayed-inbox'] as const)('web e2e: composer shortc
     try {
       holdInbox = handoff === 'delayed-inbox'
       await composer.getByRole('radio', { name: 'Yes' }).click()
-      await composer.getByRole('radio', { name: 'Yes' }).press('Enter')
+      await composer.getByRole('radio', { name: 'Yes' }).press('Shift+Enter')
       await expect.poll(() => claimed, { timeout: 10_000 }).toBe(true)
       await page.evaluate(() => new Promise<void>((resolve) => {
         requestAnimationFrame(() => requestAnimationFrame(() => { resolve() }))
@@ -524,7 +524,7 @@ describe('web e2e: composer shortcut follows the swapped busy behavior', () => {
     const composer = page.locator('[data-question-key]')
     await composer.waitFor({ timeout: 30_000 })
     await composer.getByRole('radio', { name: 'Yes' }).click()
-    await composer.getByRole('radio', { name: 'Yes' }).press('Enter')
+    await composer.getByRole('radio', { name: 'Yes' }).press('Shift+Enter')
     await settled
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
@@ -647,7 +647,7 @@ describe('web e2e: empty-draft Cmd+Enter steers the whole queue', () => {
     const composer = page.locator('[data-question-key]')
     await composer.waitFor({ timeout: 30_000 })
     await composer.getByRole('radio', { name: 'Yes' }).click()
-    await composer.getByRole('radio', { name: 'Yes' }).press('Enter')
+    await composer.getByRole('radio', { name: 'Yes' }).press('Shift+Enter')
     await settled
 
     const first = claimedMessages(sessionEvents, STEER_ONE)
