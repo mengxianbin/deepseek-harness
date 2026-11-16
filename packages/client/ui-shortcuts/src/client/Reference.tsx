@@ -72,7 +72,7 @@ export function ShortcutsRow({ actions, t, useCatalog }: PropsRuntime<'settings.
  * @returns the single reference dialog when open.
  */
 export function ShortcutReference({
-  useStore, actions, useCatalog, useConfig, useFixedCatalog, platform, runtime, edit, recording, describeBinding, t,
+  useStore, actions, useCatalog, useConfig, useFixedCatalog, platform, runtime, edit, recording, describeBinding, aliasCode, t,
 }:
   PropsRuntime<'shell.overlay'> & Store & Locale & InjectFace<ReferenceInjected>) {
   const { open, query, focusRequest } = useStore(state => state)
