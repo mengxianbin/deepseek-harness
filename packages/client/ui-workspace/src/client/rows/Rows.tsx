@@ -939,7 +939,8 @@ export function SessionNodeItem({
   // session-list-arrow-nav-1115 (A 案): the arrows only walk focus across the
   // rendered session rows of this list — selection never follows, so no
   // session is opened or loaded here; Enter/Space below open the focused row.
-  const walkFocus = (step: -1 | 1): void => {
+  // Home/End jump straight to the first/last rendered row of the same list.
+  const walkFocus = (target: -1 | 1 | 'first' | 'last'): void => {
     const row = rowRef.current
     if (row === null) return
     // Both list bodies (grouped and flat) render inside a role="tree" div, so
@@ -949,8 +950,16 @@ export function SessionNodeItem({
     const rows = Array.from(tree.querySelectorAll<HTMLElement>('[data-row-key^="session:"]'))
     const index = rows.indexOf(row)
     if (index === -1) return
+    if (target === 'first') {
+      rows[0]?.focus()
+      return
+    }
+    if (target === 'last') {
+      rows[rows.length - 1]?.focus()
+      return
+    }
     // At either end the focus stays put: no wrap, no focus escape.
-    rows[index + step]?.focus()
+    rows[index + target]?.focus()
   }
   const ownRow = (
     <div
@@ -969,11 +978,20 @@ export function SessionNodeItem({
       onKeyDown={(event) => {
         if (event.target !== event.currentTarget) return
         if (event.key !== 'Enter' && event.key !== ' '
-          && event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+          && event.key !== 'ArrowUp' && event.key !== 'ArrowDown'
+          && event.key !== 'Home' && event.key !== 'End') return
         if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
         event.preventDefault()
         if (event.key === 'Enter' || event.key === ' ') {
           onOpen(node.id)
+          return
+        }
+        if (event.key === 'Home') {
+          walkFocus('first')
+          return
+        }
+        if (event.key === 'End') {
+          walkFocus('last')
           return
         }
         walkFocus(event.key === 'ArrowUp' ? -1 : 1)
