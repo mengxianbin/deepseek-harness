@@ -1051,6 +1051,14 @@ describe('web e2e: resident question composer round trip', () => {
         }).toBe(true)
         return await read()
       }
+      // The attention fold (2026-11-17 裁定 A2) drops the card to its strip on
+      // any press outside its frame — the width-handle drag and the sidebar
+      // toggles below are exactly that gesture — so each one reopens the strip
+      // before the next measurement. Clicking the stem is the strip's own
+      // unfold path and no-ops while the card is already open.
+      const unfoldComposer = async (): Promise<void> => {
+        await heading.click()
+      }
       // The right transcript handle widens the content column by twice its
       // outward travel. The composer seat covers the handle's lower part, so
       // the gesture grabs it beside the transcript.
@@ -1066,6 +1074,7 @@ describe('web e2e: resident question composer round trip', () => {
         } finally {
           await page.mouse.up()
         }
+        await unfoldComposer()
       }
 
       // Expanded copy is the user's choice and survives every width change below.
@@ -1088,9 +1097,11 @@ describe('web e2e: resident question composer round trip', () => {
 
       // The right sidebar narrows the conversation column, and collapsing it restores the wide state.
       await page.getByRole('button', { name: 'Open right sidebar', exact: true }).click()
+      await unfoldComposer()
       const withSidebar = await settle()
       expect(withSidebar.card.width).toBeLessThan(wide.card.width)
       await page.getByRole('button', { name: 'Collapse right sidebar', exact: true }).click()
+      await unfoldComposer()
       expect(await settle()).toEqual(wide)
 
       // A smaller window clamps the dragged width; restoring the window restores it.

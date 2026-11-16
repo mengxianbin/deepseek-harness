@@ -348,6 +348,33 @@ export function apply(ctx: Context, config: Config = Config({})): void {
   const focusComposer = (): void => {
     const id = mainSessionId()
     if (id === undefined) return
+    // FORK dsh-local (ask-keys-focus, 2026-11-17 裁定 B): a takeover card
+    // occupying this Session's composer seat owns the keyboard — focus lands
+    // on the card first (its frame takes click-focus, and a question frame's
+    // onFocus lifts an auto-fold), then on the card's first safe target: the
+    // plan review's discussion button, else the question's first enabled
+    // option, else its answer field. A folded card rides the same path — the
+    // frame focus unfolds it and the next frame finds the body mounted.
+    let seat: HTMLElement | null = null
+    for (const occurrence of document.querySelectorAll<HTMLElement>('[data-conversation-session]')) {
+      if (occurrence.dataset.conversationSession === id) {
+        seat = occurrence
+        break
+      }
+    }
+    const card = seat?.querySelector<HTMLElement>('[data-question-key], [data-plan-review-key]') ?? null
+    if (card !== null) {
+      card.focus()
+      requestAnimationFrame(() => {
+        const target = card.dataset.planReviewKey !== undefined
+          ? card.querySelector<HTMLElement>('[data-plan-review-first]')
+          : card.querySelector<HTMLButtonElement>('[data-option-row] button:not([disabled])')
+            ?? card.querySelector<HTMLTextAreaElement>('textarea:not([disabled])')
+        // No target (a stripped-down card): the frame keeps the focus it took.
+        target?.focus()
+      })
+      return
+    }
     const binding = sessions.binding(id)
     if (binding === undefined) return
     inputHub.for(binding.ctx).focus()
