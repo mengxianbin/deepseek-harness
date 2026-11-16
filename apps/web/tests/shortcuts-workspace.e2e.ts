@@ -274,9 +274,9 @@ it.skipIf(mode === 'record')('explains a first-turn fork refusal and retries fro
 })
 
 it.skipIf(mode === 'record').each([
-  { platform: 'Win32', primary: 'Control', file: '../shortcuts/en-US', custom: 'Control+Alt+Shift+Meta+J' },
-  { platform: 'MacIntel', primary: 'Meta', file: 'macos-defaults', custom: 'Meta+Alt+Shift+J' },
-])('runs $platform defaults over recorded history and restores them after a multi-modifier binding', async ({ platform, primary, file, custom }) => {
+  { platform: 'Win32', primary: 'Control', file: '../shortcuts/en-US', custom: 'Control+Alt+Shift+Meta+J', toggle: 'Control+Alt+4' },
+  { platform: 'MacIntel', primary: 'Meta', file: 'macos-defaults', custom: 'Meta+Alt+Shift+J', toggle: 'Meta+Alt+B' },
+])('runs $platform defaults over recorded history and restores them after a multi-modifier binding', async ({ platform, primary, file, custom, toggle }) => {
   const scaffold = await launchWebScaffold({ developerTools: false })
   let browser: Browser | undefined
   try {
@@ -334,9 +334,9 @@ it.skipIf(mode === 'record').each([
     expect(searchAppearance).toEqual({ outline: 'none', shadow: 'none', surfaceOutline: 'none', surfaceShadow: 'none' })
     await page.keyboard.press('Escape')
     expect(await search.evaluate(element => getComputedStyle(element).boxShadow)).toBe(searchAppearance.shadow)
-    await page.keyboard.press(`${primary}+Alt+B`)
+    await page.keyboard.press(toggle)
     await page.getByRole('button', { name: 'Open sidebar', exact: true }).waitFor()
-    await page.keyboard.press(`${primary}+Alt+B`)
+    await page.keyboard.press(toggle)
     await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).waitFor()
     await page.keyboard.press(`${primary}+Slash`)
     await reference.getByRole('button', { name: 'Edit shortcut for Toggle left sidebar', exact: true }).click()
@@ -351,7 +351,7 @@ it.skipIf(mode === 'record').each([
     await reference.getByRole('button', { name: 'Restore default', exact: true }).click()
     await reference.getByRole('group').waitFor({ state: 'hidden' })
     await page.keyboard.press('Escape')
-    expect(await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).getAttribute('aria-keyshortcuts')).toBe(primary === 'Meta' ? 'Alt+Meta+B' : 'Control+Alt+B')
+    expect(await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).getAttribute('aria-keyshortcuts')).toBe(primary === 'Meta' ? 'Alt+Meta+B' : 'Control+Alt+4')
     if (platform === 'MacIntel') {
       await page.keyboard.press('Meta+Slash')
       await reference.getByRole('button', { name: 'Edit shortcut for New Session', exact: true }).click()

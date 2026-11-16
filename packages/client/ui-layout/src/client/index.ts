@@ -195,7 +195,8 @@ export function apply(ctx: ClientContext): void {
         'desktop:windows': { code: 'KeyB', modifiers: ['primary'] },
         'desktop:linux': { code: 'KeyB', modifiers: ['primary'] },
         'web:macos': { code: 'KeyB', modifiers: ['primary', 'alt'] },
-        'web:windows': { code: 'KeyB', modifiers: ['primary', 'alt'] },
+        // Local preference: keypad-style left/right pair (left=4, right=6), see m-note .dsh fork notes.
+        'web:windows': { code: 'Digit4', modifiers: ['primary', 'alt'] },
       },
       regions: ['page', 'editable'], modals: [],
       resolve: () => ({ status: 'handled', run: () => { layout.toggleSidebar() } }),

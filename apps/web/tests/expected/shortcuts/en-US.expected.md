@@ -14,7 +14,7 @@
         - text: New Session Ctrl + Alt + N
       - listitem:
         - button "Edit shortcut for Toggle left sidebar"
-        - text: Toggle left sidebar Ctrl + Alt + B
+        - text: Toggle left sidebar Ctrl + Alt + 4
       - listitem:
         - button "Edit shortcut for Search sessions"
         - text: Search sessions Ctrl + Alt + K
@@ -35,7 +35,7 @@
         - text: Open settings Ctrl + Alt + ,
       - listitem:
         - button "Edit shortcut for Toggle right sidebar"
-        - text: Toggle right sidebar Ctrl + Shift + B
+        - text: Toggle right sidebar Ctrl + Alt + 6
       - listitem:
         - button "Edit shortcut for Workspace files"
         - text: Workspace files Ctrl + Alt + P
