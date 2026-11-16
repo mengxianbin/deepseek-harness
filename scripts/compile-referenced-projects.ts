@@ -48,7 +48,7 @@ export function runPnpmCommand(root: string, args: readonly string[]): void {
  * @param root - Repository root containing the aggregate tsconfig.
  * @param face - Independent compiler face whose package projects are emitted.
  * @param mode - Check package types by default; benchmark emission defers diagnostics to required full builds.
- * @returns Arguments for `process.execPath`, including an 8 GiB old-space heap limit for the Host face.
+ * @returns Arguments for `process.execPath`, including a 4 GiB old-space heap limit for the Host face.
  * @throws If the aggregate configuration is invalid, has no references, or can emit files.
  */
 export function referencedProjectsCompilerArgs(
@@ -94,7 +94,7 @@ export function referencedProjectsCompilerArgs(
  * @returns Arguments for `process.execPath`, run from the repository root.
  */
 export function aggregateCheckArgs(face: 'host' | 'client'): string[] {
-  return ['--max-old-space-size=8192', fileURLToPath(import.meta.resolve('typescript/bin/tsc')), '-p', `tsconfig.${face}.json`]
+  return ['--max-old-space-size=4096', fileURLToPath(import.meta.resolve('typescript/bin/tsc')), '-p', `tsconfig.${face}.json`]
 }
 
 /**
@@ -105,11 +105,11 @@ export function aggregateCheckArgs(face: 'host' | 'client'): string[] {
  * @returns Arguments for `process.execPath`, run from the repository root.
  */
 export function aggregateBuildArgs(face: 'host' | 'client'): string[] {
-  return ['--max-old-space-size=8192', fileURLToPath(import.meta.resolve('typescript/bin/tsc')), '-b', `tsconfig.${face}.json`]
+  return ['--max-old-space-size=4096', fileURLToPath(import.meta.resolve('typescript/bin/tsc')), '-b', `tsconfig.${face}.json`]
 }
 
 function hostHeapArgs(face: 'host' | 'client'): string[] {
-  return face === 'host' ? ['--max-old-space-size=8192'] : []
+  return face === 'host' ? ['--max-old-space-size=4096'] : []
 }
 
 /**
