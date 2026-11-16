@@ -256,6 +256,12 @@ describe('PlanReviewPanel', () => {
     render(<QuestionComposer matched={carrier} {...kit} />)
 
     expect(document.querySelector('[data-plan-review-key]')?.getAttribute('data-plan-review-key')).toBe(carrier.key)
+    // FORK dsh-local (ask-keys-focus 2026-11-17 裁定 B/C): the frame takes
+    // click-focus for focus.composer, and the discussion button is the
+    // first-focus hook — landing on 讨论, never on a one-Enter approval.
+    const frame = document.querySelector('[data-plan-review-key]') as HTMLElement
+    expect(frame.getAttribute('tabindex')).toBe('-1')
+    expect(frame.querySelector('[data-plan-review-first]')).toBe(screen.getByRole('button', { name: zh['plan.discuss'] }))
     expect(screen.getByText(zh['plan.header'])).toBeTruthy()
     expect(document.querySelector('[data-plan-review-key] [data-state="warning"]')).not.toBeNull()
     expect(screen.getByRole('heading', { name: 'Ship the picker' })).toBeTruthy()

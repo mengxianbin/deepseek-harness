@@ -107,6 +107,101 @@ describe('focus shortcuts', () => {
     await b.runtime.dispose()
   })
 
+  /** Wait out one animation frame: focus.composer parks its card-target focus in a rAF. */
+  const nextFrame = (): Promise<void> =>
+    new Promise(resolve => requestAnimationFrame(() => { resolve() }))
+
+  /** The main Session's conversation element, where a takeover card may sit. */
+  const mainSessionEl = (b: Awaited<ReturnType<typeof bench>>): HTMLElement => {
+    const occurrence = [...b.view.container.querySelectorAll<HTMLElement>('[data-conversation-session]')]
+      .find(element => element.dataset.conversationSession === SID)
+    expect(occurrence).toBeDefined()
+    return occurrence as HTMLElement
+  }
+
+  // FORK dsh-local (ask-keys-focus 2026-11-17 裁定 B): a takeover card in the
+  // seat owns focus.composer — frame first (which lifts an auto-fold), then
+  // the card's first safe target on the next frame.
+  it('lands on a takeover question card: frame first, then the first enabled option', async () => {
+    const b = await bench()
+    const card = document.createElement('div')
+    card.tabIndex = -1
+    card.dataset.questionKey = 'question:1'
+    card.dataset.composerCard = ''
+    const row = document.createElement('div')
+    row.dataset.optionRow = ''
+    const disabled = document.createElement('button')
+    disabled.disabled = true
+    const option = document.createElement('button')
+    option.textContent = 'Alpha'
+    row.append(disabled, option)
+    const field = document.createElement('textarea')
+    field.placeholder = '输入你的答案'
+    card.append(row, field)
+    mainSessionEl(b).append(card)
+
+    expect(document.activeElement).not.toBe(card)
+    b.run('focus.composer')
+    expect(document.activeElement).toBe(card)
+    await nextFrame()
+    // The disabled sibling never wins: the first enabled option takes focus.
+    expect(document.activeElement).toBe(option)
+    await b.runtime.dispose()
+  })
+
+  it('falls back to the answer field when the card has no option rows', async () => {
+    const b = await bench()
+    const card = document.createElement('div')
+    card.tabIndex = -1
+    card.dataset.questionKey = 'question:2'
+    card.dataset.composerCard = ''
+    const field = document.createElement('textarea')
+    card.append(field)
+    mainSessionEl(b).append(card)
+
+    b.run('focus.composer')
+    expect(document.activeElement).toBe(card)
+    await nextFrame()
+    expect(document.activeElement).toBe(field)
+    await b.runtime.dispose()
+  })
+
+  it('lands a plan review on its discussion button, never the approval', async () => {
+    const b = await bench()
+    const card = document.createElement('div')
+    card.tabIndex = -1
+    card.dataset.planReviewKey = 'plan-review:1'
+    const discuss = document.createElement('button')
+    discuss.dataset.planReviewFirst = ''
+    const approve = document.createElement('button')
+    card.append(discuss, approve)
+    mainSessionEl(b).append(card)
+
+    b.run('focus.composer')
+    expect(document.activeElement).toBe(card)
+    await nextFrame()
+    expect(document.activeElement).toBe(discuss)
+    await b.runtime.dispose()
+  })
+
+  it('ignores a takeover card that belongs to another Session', async () => {
+    const b = await bench()
+    const other = document.createElement('div')
+    other.dataset.conversationSession = 'other-session'
+    const card = document.createElement('div')
+    card.tabIndex = -1
+    card.dataset.questionKey = 'question:other'
+    other.append(card)
+    b.view.container.append(other)
+
+    b.run('focus.composer')
+    await nextFrame()
+    // No card in the main Session: the composer input keeps the focus.
+    expect(document.activeElement).toBe(b.view.container.querySelector('[data-composer-input]'))
+    expect(document.activeElement).not.toBe(card)
+    await b.runtime.dispose()
+  })
+
   it('keeps the keyboard where it is while no main Conversation is published', async () => {
     const b = await bench({ open: false })
     const composer = b.view.container.querySelector<HTMLElement>('[data-composer-input]')!
