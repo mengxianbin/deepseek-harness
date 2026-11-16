@@ -75,10 +75,10 @@ describe('repository build steps', () => {
     }
   })
 
-  it.each(['complete', 'check', 'typecheck'] as const)('gives Host compilers and both aggregate checks an 8 GiB heap in %s scope', (scope) => {
+  it.each(['complete', 'check', 'typecheck'] as const)('gives Host compilers and both aggregate checks a 4 GiB heap in %s scope', (scope) => {
     const gates = buildGates(root, scope)
     for (const gate of gates.filter(gate => gate.id === 'host-src' || gate.id === 'host-check' || gate.id === 'client-check')) {
-      expect(gate.args[0]).toBe('--max-old-space-size=8192')
+      expect(gate.args[0]).toBe('--max-old-space-size=4096')
     }
     for (const gate of gates.filter(gate => gate.id === 'client-src')) {
       expect(gate.args.some(arg => arg.startsWith('--max-old-space-size'))).toBe(false)
@@ -89,20 +89,22 @@ describe('repository build steps', () => {
     expect(graph(buildGates(root, 'artifacts'))).toEqual(artifactGraph)
   })
 
-  it('checks both aggregate programs without artifact predecessors', () => {
+  it('checks both aggregate programs without artifact predecessors, serialized', () => {
     const gates = buildGates(root, 'check')
-    expect(graph(gates)).toEqual({ 'host-check': [], 'client-check': [] })
+    // 双 -p tsc 同闸并发曾打穿 16GB 机器（2026-11-16 complete scope 复发）→ 两聚合串行。
+    expect(graph(gates)).toEqual({ 'host-check': [], 'client-check': ['host-check'] })
     expect(gates.map(gate => gate.args.slice(-2))).toEqual([
       ['-p', 'tsconfig.host.json'],
       ['-p', 'tsconfig.client.json'],
     ])
   })
 
-  it('starts each aggregate check after its own package compilation in the complete build', () => {
+  it('starts each aggregate check after its own package compilation, and Client after Host, in the complete build', () => {
     expect(graph(buildGates(root, 'complete'))).toEqual({
       ...artifactGraph,
       'host-check': ['host-src'],
-      'client-check': ['client-src'],
+      // 同 2026-11-16：complete scope 的双 -p tsc 也须串行。
+      'client-check': ['client-src', 'host-check'],
     })
   })
 
@@ -113,7 +115,7 @@ describe('repository build steps', () => {
       'host-src': ['host-typert'],
       'client-src': ['host-src'],
       'host-check': ['host-src'],
-      // 双 -b tsc（各 8 GiB 堆）同闸并发曾打穿 16GB 机器（2026-11-13）→ 两聚合串行。
+      // 双 -b tsc 同闸并发曾打穿 16GB 机器（2026-11-13 typecheck scope）→ 两聚合串行；2026-11-16 扩至全 scope。
       'client-check': ['client-src', 'host-check'],
     })
     expect(gates.find(gate => gate.id === 'host-typert')?.args.at(-1)).toBe(resolve(root, 'scripts/generate-typert.ts'))
