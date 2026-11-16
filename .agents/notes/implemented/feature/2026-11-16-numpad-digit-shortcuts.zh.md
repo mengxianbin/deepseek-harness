@@ -1,6 +1,6 @@
 # Agent Note: 小键盘数字键触发数字行快捷键绑定
 
-Status: proposed
+Status: implemented
 
 [English](2026-11-16-numpad-digit-shortcuts.md) | 中文
 
@@ -18,13 +18,13 @@ Status: proposed
 - **Electron 加速器。** 菜单词表把小键盘键拼作 `num1` 那一套——这是第三种拼法——而且 Electron 不会因小键盘按下而触发数字行的加速器（[electron#3332](https://github.com/electron/electron/issues/3332)）。
 - **双键组合。** 双键绑定在 [`keyboard.ts`](../../../../apps/desktop/src/keyboard.ts) 和录制编辑器里对裸键码做排序与比较；两套键码词汇流过同一台状态机容易对不上。
 
-## 提案
+## 决策
 
-在物理键码进入快捷键系统的三处接缝上，把小键盘数字映射到数字行，映射逻辑通过一个由快捷键协议导出的共享辅助函数提供（例如放在 `bindingKey` 旁的 `aliasKeypad`），让两个适配器和编辑器共用一份映射而不是各写一份：
+小键盘数字在物理键码进入快捷键系统的三处接缝上映射到数字行，映射逻辑通过一个由快捷键协议导出的共享辅助函数提供：[`aliasKeypad`](../../../../packages/client/shortcuts/src/binding.ts) 放在 `bindingKey` 旁，匹配 `^Numpad([0-9])$`、返回 `Digit$1`，其余键码原样通过——两个适配器和编辑器共用它，一份映射而不是三份拷贝：
 
-- [`dom.ts`](../../../../packages/client/shortcuts/src/client/dom.ts) —— 在构造手势对象之前映射 `event.code`，覆盖 Web 与 Linux 的分发以及全部固定序列。
-- [`keyboard.ts`](../../../../apps/desktop/src/keyboard.ts) —— 在 `before-input-event` 顶部映射一次 `input.code`，使匹配查找、按住键的双键状态、菜单关闭比对、以及转发给渲染进程的键码看到的都是 `Digit*`。
-- [`Editor.tsx`](../../../../packages/client/ui-shortcuts/src/client/Editor.tsx) —— 在 `describeBinding` 之前映射 `event.code`，使录制存下 `Digit*` 绑定，双键录制也把两个键一并捕获。
+- [`dom.ts`](../../../../packages/client/shortcuts/src/client/dom.ts) —— 手势对象以 `code: aliasKeypad(event.code)` 构造，一行覆盖 Web 与 Linux 的分发以及全部固定序列。
+- [`keyboard.ts`](../../../../apps/desktop/src/keyboard.ts) —— `beforeInput` 在入口处通过 Electron `Input` 的影子拷贝一次性别名，使匹配查找、按住键的双键状态、菜单关闭比对、以及转发给渲染进程的键码看到的都是 `Digit*`，下游一行不改。
+- [`Editor.tsx`](../../../../packages/client/ui-shortcuts/src/client/Editor.tsx) —— `keydown` 与 `keyup` 两个处理器都对 `event.code` 做别名：录制存下 `Digit*` 绑定、双键录制把两个键一并捕获、释键比对也对得上别名后的候选——没有 `keyup` 的别名，捕获永远不会触发。
 
 下游的一切——注册表索引、冲突检测、键帽、`aria-keyshortcuts`、偏好文档——继续只消费 `Digit*`，因此显示、ARIA、加速器、schema 四层都不需要改动，偏好文档里也永远不会出现 `Numpad*`。
 
@@ -46,17 +46,18 @@ Status: proposed
 
 **什么都不做、只把缺口记进文档。** 否决：这个缺口背后没有任何有案可查的理由，人体工学抱怨是具体的，而修复只触及输入适配器——拖延保留的是一个没有解释的排除，而不是一个决策。
 
-## 验收标准
+## 测试
 
-- 在 Windows/macOS 桌面端与 Web 上，`Ctrl` 加小键盘 `1`/`2`/`3`（Web：`Ctrl+Alt` 加……）聚焦会话列表、对话区与输入框，效果与数字行完全一致，且 NumLock 开启与关闭皆然。
-- 快捷键编辑器把小键盘数字录成对应的 `Digit*` 绑定、显示数字键帽，对 `Numpad0`–`Numpad9` 不再回答不支持按键的提示。
-- 在 Windows/macOS 桌面端，小键盘数字可以作为双键绑定的任意一键参与组合，与用数字行键写出的同一组合匹配。
-- 录制小键盘按键只把 `Digit*` 写进 `dsh.keybindings.v1`（Web）与 `keybindings.json`（桌面端）；有测试断言已存文档不含任何 `Numpad*`。
-- 单元测试覆盖三处接缝各一处映射、外加一次分发往返，既有测试套件保持全绿，`doc-sync` 通过。
+钉住已交付行为的东西：
 
-## 风险
+- 注册表 spec 携带映射的单元用例：`Numpad0`/`Numpad7`/`Numpad9` 别名成 `Digit0`/`Digit7`/`Digit9`，而 `NumpadEnter`、`NumpadDecimal`、`NumpadAdd`、`Digit7`、`KeyB` 原样通过——范围边界是被断言的，不只是被记下来的。
+- DOM 接缝 spec 是分发往返，两种运行时各一遍：`Numpad7` 按键执行绑定到 `Digit7` 的命令，`Digit7` 按键再执行一遍——一个绑定、两个触发键。别名之后没有任何读者能分辨两行，这正是 NumLock 开/关与「聚焦效果与数字行完全一致」两条验收按构造成立的原因。
+- 桌面 keyboard spec 用 `Numpad7` 驱动 `before-input-event`：`Digit7` 绑定压掉菜单、渲染进程转发携带 `code: 'Digit7'`；第二个用例证明双键绑定在小键盘作为任意一键时都能匹配。
+- 编辑器 spec 把 `Numpad7` 按键录成 `['Ctrl', '+', '7']` 键帽，并断言已存偏好文档含 `Digit7` 且不含 `Numpad`——「存储无 `Numpad*`」这条验收是对写入文档的字面字符串断言。
+- 既有测试套件、`pnpm typecheck`、oxlint、`build:lib` 保持全绿；本改动涉及的 `doc-sync` 门（note 配对、换行、链接）通过——`doc-sync` 全库跑仍报存量红，已记 m-note 板行（`#translation-pairing-legacy-red-1116` 配对、`#harness-legacy-red-links-graph-1115` 断链），与本改动零交集。
 
-- 别名把两行熔为一体：想在小键盘上绑到*不同*命令的用户得不到满足。若这种需求出现，一等公民的 `Numpad*` 才是后继方案——届时这个别名必须重新审视，而不是叠在它上面。
-- Windows/macOS 桌面端的 `bindingIssue` 放行不带修饰键的数字绑定；NumLock 关闭时，小键盘按键会在用户期待 `End` 系导航的位置触发这类绑定。所有出厂默认都带修饰键，因此只有刻意录制裸数字的用户才会遇到。
-- 别名在已存文档与速查界面里是隐形的——小键盘按键处处看起来都和数字行一样，这正是本意——但关于小键盘做了什么的 bug 报告需要把这一点放在心上。
-- 日后新增的第四条输入路径若没有这份映射，会再次悄悄拒绝小键盘；在那之前，三处接缝的测试就是护栏。
+## 影响
+
+**换来：** 在分发运行的每一处——Web、Linux、Windows/macOS 桌面端——小键盘与数字行触发同一套绑定，NumLock 开关皆然；编辑器录制小键盘数字而不再回答「暂不支持这个按键」。下游零改动：键帽、`aria-keyshortcuts`、Electron 加速器、持久化 schema、双键状态机继续只消费一套词汇，且本构建写出的偏好文档在旧构建上依然能解析——别名关上了降级锁死面，而不是打开它。
+
+**代价：** 别名把两行熔为一体——想在小键盘上绑到*不同*命令的用户得不到满足；若这种需求出现，一等公民的 `Numpad*` 才是后继方案，届时这个别名必须重新审视，而不是叠在它上面。Windows/macOS 桌面端的 `bindingIssue` 放行不带修饰键的数字绑定，因此 NumLock 关闭时，小键盘按键会在用户期待 `End` 系导航的位置触发这类绑定——所有出厂默认都带修饰键，只有刻意录制裸数字的用户才会遇到。别名在已存文档与速查界面里是隐形的——小键盘按键处处看起来都和数字行一样，这正是本意——但关于小键盘做了什么的 bug 报告需要把这一点放在心上。日后新增的第四条输入路径若没有这份映射，会再次悄悄拒绝小键盘；三处接缝的测试就是护栏。

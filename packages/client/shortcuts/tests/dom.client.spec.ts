@@ -209,3 +209,20 @@ it('passes the original input element to a feature target resolver', () => {
   press(window)
   expect(dispatch).toHaveBeenLastCalledWith(expect.anything(), { region: 'page', modal: null, target: document.body }, expect.any(Function))
 })
+
+it.each([['desktop', ['primary']], ['web', ['primary', 'alt']]] as const)(
+  'dispatches a keypad digit through the alias as its main-row twin on %s', (runtime, modifiers) => {
+    const { registry, input, run } = mount(runtime, 'windows')
+    registry.register({ id: 'test.seven' as ShortcutCommandId, label: () => 'Seven', aliases: [],
+      defaults: { [`${runtime}:windows`]: { code: 'Digit7', modifiers } },
+      regions: ['page', 'editable'], modals: [], resolve: () => ({ status: 'handled', run }) })
+    const extra = { ctrlKey: true, altKey: runtime === 'web' }
+    const keypad = new KeyboardEvent('keydown', { key: '7', code: 'Numpad7', ...extra, bubbles: true, cancelable: true })
+    input.dispatchEvent(keypad)
+    expect(keypad.defaultPrevented).toBe(true)
+    expect(run).toHaveBeenCalledOnce()
+    const mainRow = new KeyboardEvent('keydown', { key: '7', code: 'Digit7', ...extra, bubbles: true, cancelable: true })
+    input.dispatchEvent(mainRow)
+    expect(mainRow.defaultPrevented).toBe(true)
+    expect(run).toHaveBeenCalledTimes(2)
+  })

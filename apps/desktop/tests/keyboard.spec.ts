@@ -122,6 +122,14 @@ function updateOverlayFixture(f: Awaited<ReturnType<typeof fixture>>) {
   }
 }
 
+/** Emit one keyDown through a fixture's before-input-event listener and return its preventDefault spy. */
+function emitBeforeInput(f: Awaited<ReturnType<typeof fixture>>, code: string, key: string) {
+  const preventDefault = vi.fn()
+  f.contents.emit('before-input-event', { preventDefault },
+    { type: 'keyDown', modifiers: [], code, key, meta: true, control: false, alt: false, shift: false })
+  return preventDefault
+}
+
 it('mirrors only successful bindings, suppresses recording menus, and invalidates pre-navigation drafts', async () => {
   const f = await fixture()
   const initial = await f.call<ShortcutConfigSnapshot>(DESKTOP_IPC.shortcutsGet, f.definitions)
@@ -142,6 +150,35 @@ it('mirrors only successful bindings, suppresses recording menus, and invalidate
   expect((await f.call<ShortcutSaveResult>(DESKTOP_IPC.shortcutsEdit, { type: 'reset-all' }, saved.snapshot.revision)).status).toBe('not-ready')
   await f.call(DESKTOP_IPC.shortcutsGet, f.definitions)
   expect((await f.call<ShortcutSaveResult>(DESKTOP_IPC.shortcutsEdit, { type: 'reset-all' }, saved.snapshot.revision)).status).toBe('stale')
+})
+
+it('aliases keypad digits so a Digit binding matches the physical keypad', async () => {
+  const f = await fixture()
+  await f.call<ShortcutConfigSnapshot>(DESKTOP_IPC.shortcutsGet, [
+    { id: 'sidebar.left.toggle' as ShortcutCommandId, defaults: desktopDefaults({ code: 'Digit7', modifiers: ['primary'] }) },
+  ])
+  emitBeforeInput(f, 'KeyB', 'b')
+  expect(f.contents.setIgnoreMenuShortcuts).toHaveBeenLastCalledWith(false)
+  expect(emitBeforeInput(f, 'Numpad7', '7')).toHaveBeenCalled()
+  expect(f.contents.setIgnoreMenuShortcuts).toHaveBeenLastCalledWith(true)
+  expect(f.contents.send).toHaveBeenLastCalledWith(DESKTOP_IPC.shortcutsInput,
+    expect.objectContaining({ code: 'Digit7' }))
+})
+
+it('takes part in a two-key binding as either chord key through the alias', async () => {
+  const f = await fixture()
+  await f.call<ShortcutConfigSnapshot>(DESKTOP_IPC.shortcutsGet, [
+    { id: 'sidebar.left.toggle' as ShortcutCommandId,
+      defaults: { 'desktop:macos': { code: 'Digit7', secondCode: 'KeyK', modifiers: ['primary'] } } },
+  ])
+  expect(emitBeforeInput(f, 'Numpad7', '7')).not.toHaveBeenCalled()
+  expect(emitBeforeInput(f, 'KeyK', 'k')).toHaveBeenCalled()
+  expect(f.contents.send).toHaveBeenLastCalledWith(DESKTOP_IPC.shortcutsInput,
+    expect.objectContaining({ code: 'Digit7', secondCode: 'KeyK' }))
+  expect(emitBeforeInput(f, 'KeyK', 'k')).not.toHaveBeenCalled()
+  expect(emitBeforeInput(f, 'Numpad7', '7')).toHaveBeenCalled()
+  expect(f.contents.send).toHaveBeenLastCalledWith(DESKTOP_IPC.shortcutsInput,
+    expect.objectContaining({ code: 'Digit7', secondCode: 'KeyK' }))
 })
 
 it('blocks macOS shortcuts while an update overlay loads and clears held and consumed keys before dismissal', async () => {

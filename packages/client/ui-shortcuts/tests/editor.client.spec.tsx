@@ -138,6 +138,19 @@ it.each([
   expect(f.registry.catalog.getSnapshot()[0]?.keys).toEqual(keys)
 })
 
+it('records a keypad digit as its main-row code and never stores Numpad', async () => {
+  const f = await mount({ platform: 'windows' })
+  const recorder = screen.getByRole('button', { name: en.record })
+  recorder.focus()
+  fireEvent.keyDown(recorder, { code: 'Numpad7', key: '7', ctrlKey: true, metaKey: false })
+  fireEvent.keyUp(recorder, { code: 'Numpad7' })
+  await waitFor(() => { expect(f.onSaved).toHaveBeenCalledOnce() })
+  expect(f.registry.catalog.getSnapshot()[0]?.keys).toEqual(['Ctrl', '+', '7'])
+  const stored = f.storage.write.mock.calls.flat().join('\n')
+  expect(stored).toContain('Digit7')
+  expect(stored).not.toContain('Numpad')
+})
+
 it('records macOS Web Option+Command+N reported as Dead and saves on Command release', async () => {
   const f = await mount({ runtime: 'web' })
   const recorder = screen.getByRole('button', { name: en.record })

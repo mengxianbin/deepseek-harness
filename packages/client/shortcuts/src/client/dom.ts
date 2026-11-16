@@ -2,6 +2,7 @@
 import { modalSelector, observeComposition } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ShortcutContext, ShortcutFixedInput } from './types.ts'
 import type { ShortcutRegistry } from './registry.ts'
+import { aliasKeypad } from '../protocol.ts'
 import type { ShortcutPlatform, ShortcutRuntime } from '../protocol.ts'
 
 /**
@@ -81,7 +82,7 @@ export function installKeyboard(window: Window, shortcuts: Pick<ShortcutRegistry
     const commandDeadKey = isDead && shortcuts.runtime === 'web' && shortcuts.platform === 'macos'
       && event.code === 'KeyN' && event.metaKey && event.altKey && !event.ctrlKey && !event.shiftKey
     deadKey = isDead
-    const gesture = { code: event.code, control: event.ctrlKey, alt: event.altKey, shift: event.shiftKey,
+    const gesture = { code: aliasKeypad(event.code), control: event.ctrlKey, alt: event.altKey, shift: event.shiftKey,
       meta: event.metaKey, repeat: event.repeat, composing: guarded || isDead, defaultPrevented: event.defaultPrevented }
     const consume = (): void => {
       event.preventDefault()

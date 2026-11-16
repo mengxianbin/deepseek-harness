@@ -15,6 +15,7 @@ import { Config } from '../config.ts'
 export type { ShortcutCatalogEntry, ShortcutCommand, ShortcutContext, ShortcutGesture, Shortcuts } from './types.ts'
 export type { ShortcutFixedInput, ShortcutFixedCommand, ShortcutFixedCatalogEntry } from './types.ts'
 export type { ShortcutBinding, ShortcutCommandId, ShortcutPlatform, ShortcutRuntime } from '../protocol.ts'
+export { aliasKeypad } from '../protocol.ts'
 export { classifyComposerEnter, composerEnterDisplay, composerEnterGestures } from './gestures.ts'
 export type { ComposerEnterEvent, ComposerEnterGesture } from './gestures.ts'
 

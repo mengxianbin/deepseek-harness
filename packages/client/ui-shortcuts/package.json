@@ -28,6 +28,9 @@
   },
   "dsh": {
     "client": {
+      "external": [
+        "@deepseek-ai/dsh-client-shortcuts/client"
+      ],
       "inject": [
         "@deepseek-ai/dsh-client-shortcuts",
         "@deepseek-ai/dsh-client-locale",

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { bindingKey, initialShortcutConfig, normalizeBinding, presentBinding } from '../src/protocol.ts'
+import { aliasKeypad, bindingKey, initialShortcutConfig, normalizeBinding, presentBinding } from '../src/protocol.ts'
 import type { ShortcutCommandId } from '../src/protocol.ts'
 import { ShortcutRegistry } from '../src/client/registry.ts'
 import { isWebBindingAllowed } from '../src/binding.ts'
@@ -76,6 +76,17 @@ describe('physical key registry', () => {
       .toEqual({ keys: ['Ctrl', '+', '/'], aria: 'Control+/' })
     expect(presentBinding(null, 'linux')).toEqual({ keys: [], aria: undefined })
     expect(() => normalizeBinding({ code: 'Unidentified', modifiers: [] }, 'macos')).toThrow('Unsupported')
+  })
+
+  it('aliases keypad digits at ingestion and leaves every other code untouched', () => {
+    expect(aliasKeypad('Numpad0')).toBe('Digit0')
+    expect(aliasKeypad('Numpad7')).toBe('Digit7')
+    expect(aliasKeypad('Numpad9')).toBe('Digit9')
+    expect(aliasKeypad('NumpadEnter')).toBe('NumpadEnter')
+    expect(aliasKeypad('NumpadDecimal')).toBe('NumpadDecimal')
+    expect(aliasKeypad('NumpadAdd')).toBe('NumpadAdd')
+    expect(aliasKeypad('Digit7')).toBe('Digit7')
+    expect(aliasKeypad('KeyB')).toBe('KeyB')
   })
 
   it('rejects duplicate ids, cross-platform default conflicts, and unverified Web combinations atomically', () => {

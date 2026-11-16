@@ -63,6 +63,19 @@ export function bindingKey(binding: NormalizedBinding): string {
 }
 
 /**
+ * Map a keypad digit onto its main-row twin so every seam downstream of ingestion sees one code family.
+ * `event.code` is NumLock-independent, so the alias holds with NumLock on or off; only `Numpad0`–`Numpad9`
+ * alias — `NumpadEnter`, `NumpadDecimal`, and the arithmetic keys keep their own codes. One binding with
+ * two triggers (main row and keypad) is the deliberate trade.
+ * @param code - raw physical code reported by an ingestion seam.
+ * @returns `Digit0`–`Digit9` for keypad digits, otherwise the input unchanged.
+ */
+export function aliasKeypad(code: string): string {
+  const digit = /^Numpad([0-9])$/u.exec(code)
+  return digit === null ? code : `Digit${digit[1]}`
+}
+
+/**
  * Format keycaps and ARIA; Windows separates modifiers with plus signs, while chord keys remain adjacent.
  * @param binding - normalized binding, or null for an unbound command.
  * @param platform - receiving device platform.
