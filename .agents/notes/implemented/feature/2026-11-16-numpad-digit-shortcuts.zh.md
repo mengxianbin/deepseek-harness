@@ -8,7 +8,7 @@ Status: implemented
 
 快捷键分发把物理键码 `event.code` 对照一份封闭白名单匹配：[`normalizeBinding`](../../../../packages/client/shortcuts/src/binding.ts) 只接受 `Key[A-Z]`、`Digit[0-9]`、`F1`–`F24` 和一张固定的标点、编辑、导航键表，其余一律抛出 `Unsupported shortcut code`。数字小键盘发送的是 `Numpad0`–`Numpad9`，因此小键盘既不能触发快捷键、也无法被录制成绑定——录制编辑器对小键盘按键回答「暂不支持这个按键。」——而快捷键相关包里从来没有任何提交讨论过这次排除（对 `packages/client/shortcuts`、`packages/client/ui-shortcuts` 和 `apps/desktop/src/keyboard.ts` 跑 `git log -S Numpad` 均为空）。
 
-这次排除是未经审视的初始范围，而非有案可查的决策：提交 `efdf8e5b6d`（2026-09-21）引入 `binding.ts` 时白名单就已如此，没有任何测试钉住它，该包的[已知限制清单](../../../../packages/client/shortcuts/README.zh.md)也没有列出它。记录里没有留下任何可供遵循的理由，代价却落在用户身上：用大键盘时小键盘就在右手边，`Ctrl+1`/`Ctrl+2`/`Ctrl+3` 却仍要伸手去够字母上方数字行——同一套绑定在不同设备形态上有了不同的人体工学。
+这次排除是未经审视的初始范围，而非有案可查的决策：2026-09-21 引入 `binding.ts` 的那次提交里白名单就已如此，没有任何测试钉住它，该包的[已知限制清单](../../../../packages/client/shortcuts/README.zh.md)也没有列出它。记录里没有留下任何可供遵循的理由，代价却落在用户身上：用大键盘时小键盘就在右手边，`Ctrl+1`/`Ctrl+2`/`Ctrl+3` 却仍要伸手去够字母上方数字行——同一套绑定在不同设备形态上有了不同的人体工学。
 
 任何修复都必须先越过白名单一直默默承载的五条约束：
 
