@@ -275,6 +275,13 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     }
     /** Rows of the View tab row's More menu; the header shows More only while this list has registrations. */
     'conversation.session.header.views.actions': { kind: 'list'; scope: 'root'; owner: ConversationViewActionsOwnerProps }
+    /**
+     * Trailing indicators after the View tab row's More launcher (right of ⋯);
+     * rendered only while the tab row itself renders. The header measures this
+     * seat's width and folds tabs before it, so a wide occupant never overflows
+     * the row. Entries receive no owner-specific values.
+     */
+    'conversation.session.header.views.trailing': { kind: 'list'; scope: 'session' }
     /** Registered Conversation target Views, rendered one at a time. */
     'conversation.view': { kind: 'list'; scope: 'session'; owner: ConvViewOwnerProps }
     /** Selector-routed replacements for the current Session's resident composer. */
@@ -661,6 +668,7 @@ export type ConversationSessionHeaderSlotProps =
     | 'conversation.session.header.utilities'
     | 'conversation.session.header.corner'
     | 'conversation.session.header.views.actions'
+    | 'conversation.session.header.views.trailing'
   >
   & PropsStore<ConversationStore>
   & InjectFace<ConversationSessionHeaderInjected>

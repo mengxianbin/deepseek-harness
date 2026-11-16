@@ -208,7 +208,13 @@
   display: none;
 }
 
-/* The tab row sits above the header paint so the active bar covers its rule. */
+/* The tab row sits above the header paint so the active bar covers its rule.
+   It doubles as the anonymous inline-size container for its trailing
+   occupants (a metrics chip and its kin run their @container degradations
+   against the nearest container, which is this row): CSS modules hash
+   container-names per module, so occupants match the nearest container
+   without sharing a name. The width:100% grid span sizes the row, so
+   inline-size containment cannot collapse it. */
 .tabs {
   grid-column: 1 / -1;
   position: relative;
@@ -222,6 +228,7 @@
   flex-wrap: wrap;
   margin-top: 10px;
   padding-left: 8px;
+  container-type: inline-size;
 }
 
 .viewTabs {
@@ -301,6 +308,25 @@
 .viewsMoreMenu {
   width: 288px;
   max-width: calc(100vw - 24px);
+}
+
+/* Trailing seat after More (conversation.session.header.views.trailing):
+   fixed width so a wide occupant never squeezes the tab share — the fold
+   budget above subtracts this element's measured width instead, and the row
+   wraps (header grows) before anything clips. The -3px matches .viewsMore,
+   centering a 22px box on the 16px text line. */
+.viewsTrailing {
+  flex: none;
+  display: flex;
+  margin-top: -3px;
+}
+
+/* An empty seat hides itself so it costs neither its width nor the flex gap
+   after More. The renderSlot outlet anchor is display:contents and always
+   rides the seat, so emptiness is judged on the anchor's children: no
+   registered entry, or an occupant that paints nothing (host off). */
+.viewsTrailing:not(:has(> [data-slot] > *)) {
+  display: none;
 }
 
 .viewArea {

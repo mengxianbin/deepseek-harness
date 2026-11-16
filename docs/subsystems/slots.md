@@ -130,6 +130,7 @@ root [AppFrame]
       │     ├─ conversation.session.header.actions
       │     ├─ conversation.session.header.utilities
       │     ├─ conversation.session.header.views.actions
+      │     ├─ conversation.session.header.views.trailing
       │     └─ conversation.session.header.corner
       └─ calls Factory: conversation.content
 

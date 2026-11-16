@@ -547,6 +547,8 @@ describe('ConversationRoot resident composer', () => {
     expect(b.slotCalls).toContain('conversation.session.header.actions')
     expect(b.slotCalls).toContain('conversation.session.header.utilities')
     expect(b.slotCalls).toContain('conversation.session.header.corner')
+    // The tab row's trailing seat renders with the tab strip (right of More).
+    expect(b.slotCalls).toContain('conversation.session.header.views.trailing')
   })
 
   it('sticky composer seat wraps the whole overlay chain, not only the fallback stack', () => {
@@ -575,6 +577,8 @@ describe('ConversationRoot resident composer', () => {
     expect(b.view.queryByRole('tablist')).toBeNull()
     expect(b.slotCalls).not.toContain('conversation.session.header.utilities')
     expect(b.slotCalls).not.toContain('conversation.session.header.actions')
+    // No tab row in the hero, so its trailing seat never renders either.
+    expect(b.slotCalls).not.toContain('conversation.session.header.views.trailing')
     expect(b.view.getByText('What can I do for you?')).toBeTruthy()
     expect(b.view.queryByText('预览版')).toBeNull()
     expect(b.view.queryByTestId('view-chat')).toBeNull()
@@ -706,6 +710,37 @@ describe('ConversationRoot resident composer', () => {
     expect(within(b.view.getByRole('tablist')).getAllByRole('tab').map(tab => tab.textContent)).toEqual(['chat', 'trajectory'])
     fireEvent.click(b.view.getByRole('button', { name: zh['session.moreViews'] }))
     expect(b.actionsOwner().entries.map(entry => entry.id)).toEqual(['timeline'])
+  })
+
+  it('folds tabs before the trailing seat width so a wide occupant never overflows the row', () => {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(660)
+    let trailingWidth = 480
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const width = this.hasAttribute('data-conversation-views-trailing') ? trailingWidth : 0
+      return { top: 0, bottom: 0, left: 0, right: width, width, height: 0, x: 0, y: 0, toJSON: () => ({}) }
+    })
+    const viewTabs = ['chat', 'trajectory', 'notes', 'plan', 'audit'].map(id => ({ id, label: id }))
+    // (660 - 48 - 20 - 480) / 120 = 0.93 → only the fixed Chat stays outside;
+    // the seat itself renders right of the More launcher.
+    const b = mount(sessionSnapshotOf(), undefined, undefined, { viewTabs, entryActions: true })
+    expect(within(b.view.getByRole('tablist')).getAllByRole('tab').map(tab => tab.textContent)).toEqual(['chat'])
+    // Document order is the anchor for "right of More": the menu's own slot
+    // renders into a portal after mount, so slot-call order says nothing
+    // about where the seat sits in the row.
+    const moreLauncher = b.view.getByRole('button', { name: zh['session.moreViews'] })
+    const seat = document.querySelector('[data-conversation-views-trailing]')
+    expect(seat).not.toBeNull()
+    expect(moreLauncher.compareDocumentPosition(seat as Node) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    fireEvent.click(moreLauncher)
+    expect(b.actionsOwner().entries.map(entry => entry.id)).toEqual(['trajectory', 'notes', 'plan', 'audit'])
+    // The same row without a trailing occupant keeps the original budget:
+    // (660 - 48) / 120 = 5.08 → every View stays outside More.
+    cleanup()
+    trailingWidth = 0
+    const plain = mount(sessionSnapshotOf(), undefined, undefined, { viewTabs, entryActions: true })
+    expect(within(plain.view.getByRole('tablist')).getAllByRole('tab').map(tab => tab.textContent))
+      .toEqual(['chat', 'trajectory', 'notes', 'plan', 'audit'])
   })
 
   it('keeps an unpinned View selected without exposing its tab', () => {
