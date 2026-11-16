@@ -47,7 +47,7 @@ it('saves index sources without remounting, announces them, and restores them at
     expect(market.listIndexes().map(index => index.url)).toEqual(['https://second.example/index.json', 'http://127.0.0.1:8080/index.json'])
     expect(entry.fiber === fiber).toBe(true)
     expect(changes).toBe(1)
-    expect(readFileSync(profile.patchPath, 'utf8')).toContain('https://second.example/index.json')
+    expect(readFileSync(join(dir, 'cordis.local.patch.yml'), 'utf8')).toContain('https://second.example/index.json')
     await ctx.fiber.dispose()
     ctx = await start()
     expect(ctx.get('pluginMarket')!.listIndexes().map(index => index.url)).toEqual(['https://second.example/index.json', 'http://127.0.0.1:8080/index.json'])

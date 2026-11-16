@@ -6,6 +6,12 @@ import { parse } from 'yaml'
 import z from '@deepseek-ai/schemastery'
 import { configurationFixture as fixture } from './configuration-fixture.ts'
 
+/** The edited local document; absent until the first write. */
+const localPath = (profile: { dir: string }) => join(profile.dir, 'cordis.local.patch.yml')
+const readLocal = (profile: { dir: string }): string | undefined => {
+  try { return readFileSync(localPath(profile), 'utf8') } catch { return undefined }
+}
+
 it('persists a model edit, updates the real consumer without remounting, and restores it at restart', async () => {
   const { ctx, profile, start } = await fixture()
   const consumer = ctx.agentDefaultModel
@@ -13,7 +19,7 @@ it('persists a model edit, updates the real consumer without remounting, and res
   await ctx.settings.mutate('default-model', [{ op: 'set', path: ['model'], value: 'changed' }])
   expect([...ctx.loader.entries()].find(entry => entry.options.id === 'default-model')!.fiber === fiber).toBe(true)
   expect(consumer.currentSelection()).toEqual({ provider: 'test', model: 'changed' })
-  expect(parse(readFileSync(profile.patchPath, 'utf8'))).toContainEqual({ id: 'default-model', name: 'cordis:model', config: { provider: 'test', model: 'changed' } })
+  expect(parse(readFileSync(localPath(profile), 'utf8'))).toContainEqual({ id: 'default-model', name: 'cordis:model', config: { provider: 'test', model: 'changed' } })
   await ctx.fiber.dispose()
   const restored = await start()
   expect(restored.agentDefaultModel.currentSelection()).toEqual({ provider: 'test', model: 'changed' })
@@ -77,14 +83,14 @@ it('records the calling peer as the author when a gateway context drives the wri
 
 it('isolates instances, hides ordinary fields, rejects invalid edits, and redacts secrets', async () => {
   const { ctx, profile } = await fixture()
-  const before = readFileSync(profile.patchPath, 'utf8')
+  const before = readLocal(profile)
   const first = ctx.settings.describe({ redactSecrets: true }).find(row => row.ns === 'first')!
   expect(first.value).toEqual({ count: 2, list: [] })
   expect(first.secrets).toContainEqual({ path: ['token'], set: true })
   expect(JSON.stringify(first)).not.toContain('private')
   await expect(ctx.settings.update('first', { count: 0 })).rejects.toThrow()
   await expect(ctx.settings.update('first', { ordinary: 'changed' })).rejects.toThrow('not volatile')
-  expect(readFileSync(profile.patchPath, 'utf8')).toBe(before)
+  expect(readLocal(profile)).toBe(before)
   await ctx.settings.update('first', { count: 5 })
   expect(ctx.settings.describe({ redactSecrets: true }).find(row => row.ns === 'first')!.value).toEqual({ count: 5, list: [] })
   expect(ctx.settings.describe({ redactSecrets: true }).find(row => row.ns === 'second')!.value).toEqual({ count: 2, list: [] })
@@ -92,14 +98,56 @@ it('isolates instances, hides ordinary fields, rejects invalid edits, and redact
   expect(ctx.settings.describe({ redactSecrets: true }).find(row => row.ns === 'first')!.value).toEqual({ count: 2, list: [] })
 })
 
-it('refuses an edit shadowed by a higher home layer', async () => {
+it('lands an edit above a home layer in the local document instead of refusing it', async () => {
   const { ctx, home, profile } = await fixture()
-  writeFileSync(join(home, 'cordis.patch.yml'), JSON.stringify([{ id: 'default-model', config: { provider: 'test', model: 'home' } }]))
-  const before = readFileSync(profile.patchPath, 'utf8')
-  await expect(ctx.settings.update('default-model', { model: 'profile' })).rejects.toThrow('overridden')
-  expect(readFileSync(profile.patchPath, 'utf8')).toBe(before)
-  expect(ctx.agentDefaultModel.currentSelection().model).toBe('home')
+  const homePatch = join(home, 'cordis.patch.yml')
+  writeFileSync(homePatch, JSON.stringify([{ id: 'default-model', config: { provider: 'test', model: 'home' } }]))
+  await ctx.settings.update('default-model', { model: 'local' })
+  // The edit outranks home: it lands in the local document, home stays untouched.
+  expect(parse(readLocal(profile)!)).toContainEqual({ id: 'default-model', name: 'cordis:model', config: { provider: 'test', model: 'local' } })
+  expect(JSON.parse(readFileSync(homePatch, 'utf8'))).toEqual([{ id: 'default-model', config: { provider: 'test', model: 'home' } }])
+  expect(ctx.agentDefaultModel.currentSelection().model).toBe('local')
 }, 15_000)
+
+it('refuses an edit shadowed by a command-line overlay', async () => {
+  const { ctx, profile } = await fixture({ overlays: [{ id: 'default-model', config: { provider: 'test', model: 'overlay' } }] })
+  const before = readLocal(profile)
+  await expect(ctx.settings.update('default-model', { model: 'local' })).rejects.toThrow('overridden by a command-line overlay')
+  expect(readLocal(profile)).toBe(before)
+  expect(ctx.agentDefaultModel.currentSelection().model).toBe('overlay')
+}, 15_000)
+
+it('lands an edit above a profile layer in the local document without touching the profile file', async () => {
+  const { ctx, profile, start } = await fixture({ hmr: false })
+  await ctx.fiber.dispose()
+  writeFileSync(profile.patchPath, JSON.stringify([{ id: 'first', config: { ordinary: 'profile-value' } }]))
+  const restored = await start()
+  await restored.settings.update('first', { count: 5 })
+  // The document sits in the local slot above the profile layer, so the profile config never refuses the edit.
+  const rows = parse(readLocal(profile)!) as Array<{ id: string; config: Record<string, unknown> }>
+  expect(rows.find(row => row.id === 'first')?.config).toMatchObject({ count: 5 })
+  expect(JSON.parse(readFileSync(profile.patchPath, 'utf8'))).toEqual([{ id: 'first', config: { ordinary: 'profile-value' } }])
+  expect(restored.settings.describe().find(row => row.ns === 'first')!.value).toMatchObject({ count: 5 })
+})
+
+it('shows home and local layer values in the inherited base and override', async () => {
+  const { ctx, home, profile } = await fixture({ hmr: false })
+  writeFileSync(join(home, 'cordis.patch.yml'), JSON.stringify([
+    { id: 'first', config: { ordinary: 'from-home' } },
+    { id: 'second', config: { ordinary: 'from-home-second' } },
+  ]))
+  writeFileSync(localPath(profile), JSON.stringify([{ id: 'first', config: { count: 6 } }]))
+  const rows = ctx.configEditor.configuration()
+  const first = rows.find(row => row.entry.options.id === 'first')!
+  // The local document's own config is the override; the base beneath it carries the home layer.
+  expect(first.override).toEqual({ count: 6 })
+  expect(first.inherited).toMatchObject({ ordinary: 'from-home' })
+  const second = rows.find(row => row.entry.options.id === 'second')!
+  // An entry the local document does not touch still composes home into its base.
+  expect(second.override).toEqual({})
+  expect(second.inherited).toMatchObject({ ordinary: 'from-home-second' })
+  expect(ctx.settings.describe().find(row => row.ns === 'first')!.user).toEqual({ count: 6 })
+})
 
 it('serializes concurrent writes and refuses stale revisions after external changes', async () => {
   const { ctx, profile } = await fixture()
@@ -111,16 +159,16 @@ it('serializes concurrent writes and refuses stale revisions after external chan
   expect(writes.filter(result => result.status === 'fulfilled')).toHaveLength(1)
   expect(writes.filter(result => result.status === 'rejected')).toHaveLength(1)
   const before = ctx.settings.describe().find(row => row.ns === 'first')!.revision
-  writeFileSync(profile.patchPath, JSON.stringify([{ id: 'first', config: { ordinary: 'fixed', count: 9 } }]))
+  writeFileSync(localPath(profile), JSON.stringify([{ id: 'first', config: { ordinary: 'fixed', count: 9 } }]))
   await expect(ctx.settings.update('first', { count: 10 }, before)).rejects.toThrow('changed since it was read')
   expect(ctx.settings.describe().find(row => row.ns === 'first')!.value).toEqual({ count: 9, list: [] })
 })
 
 it('preserves configuration expressions while editing a different live field', async () => {
   const { ctx, profile, start } = await fixture()
-  writeFileSync(profile.patchPath, '- id: first\n  config:\n    ordinary: !!js "\'expression-value\'"\n    count: 3\n- id: second\n  config:\n    ordinary: !!js "\'untouched-expression\'"\n')
+  writeFileSync(localPath(profile), '- id: first\n  config:\n    ordinary: !!js "\'expression-value\'"\n    count: 3\n- id: second\n  config:\n    ordinary: !!js "\'untouched-expression\'"\n')
   await ctx.settings.update('first', { count: 4 })
-  const saved = readFileSync(profile.patchPath, 'utf8')
+  const saved = readFileSync(localPath(profile), 'utf8')
   expect(saved).toContain('!!js')
   expect(saved).toContain('expression-value')
   await ctx.fiber.dispose()
@@ -150,22 +198,22 @@ it('resets a whole form without losing ordinary fields or pinning inherited defa
   await ctx.settings.update('first', { count: 7, list: [{ name: 'custom' }] })
   await ctx.settings.replace('first', {})
   expect(ctx.settings.describe().find(row => row.ns === 'first')!.value).toEqual({ count: 2, token: 'private', list: [] })
-  expect(parse(readFileSync(profile.patchPath, 'utf8'))).toEqual([])
+  expect(parse(readFileSync(localPath(profile), 'utf8'))).toEqual([])
   await ctx.settings.update('first', { count: 9 })
   await ctx.settings.mutate('first', [{ op: 'unset', path: [] }])
-  expect(parse(readFileSync(profile.patchPath, 'utf8'))).toEqual([])
+  expect(parse(readFileSync(localPath(profile), 'utf8'))).toEqual([])
 })
 
 it('rejects non-JSON inputs and invalid array paths without changing the patch', async () => {
   const { ctx, profile } = await fixture({ hmr: false })
-  const before = readFileSync(profile.patchPath, 'utf8')
+  const before = readLocal(profile)
   const circular: unknown[] = []; circular.push(circular)
   const object: Record<string, unknown> = {}; object.self = object
   const custom = Object.create({ constructor: undefined }) as object
   for (const value of [NaN, Infinity, 1n, Symbol('value'), () => {}, new Date(), custom, circular, object, [undefined]]) {
     await expect(ctx.settings.update('first', { count: value })).rejects.toThrow('Config')
   }
-  expect(readFileSync(profile.patchPath, 'utf8')).toBe(before)
+  expect(readLocal(profile)).toBe(before)
   await ctx.settings.update('first', { list: [{ name: 'one' }], count: undefined })
   for (const path of [['list', '-1'], ['list', '2'], ['list', '1', 'name']]) {
     await expect(ctx.settings.mutate('first', [{ op: 'set', path, value: 'x' }])).rejects.toThrow('out of range')
@@ -209,9 +257,9 @@ it('restores the profile patch when a plugin rejects activation after validation
     if ((config as { ordinary: string }).ordinary === 'rejected') throw new Error('activation refused')
   } })
   const entry = ctx.configEditor.entries().find(entry => entry.options.id === 'first')!
-  const before = readFileSync(profile.patchPath, 'utf8')
+  const before = readLocal(profile)
   await expect(ctx.configEditor.edit(entry, raw => ({ ...raw, ordinary: 'rejected' }))).rejects.toThrow()
-  expect(readFileSync(profile.patchPath, 'utf8')).toBe(before)
+  expect(parse(readLocal(profile) ?? '[]')).toEqual(parse(before ?? '[]'))
   expect(ctx.settings.describe().find(row => row.ns === 'first')!.value).toMatchObject({ count: 2 })
 })
 
@@ -230,9 +278,9 @@ it('invalidates removed forms once and rejects writes held across entry removal'
 
 it('restores inherited array elements and preserves metadata during a full reset', async () => {
   const { ctx, profile } = await fixture({ hmr: false })
-  writeFileSync(profile.patchPath, '- id: first\n  name: cordis:probe\n  disabled: false\n  config:\n    ordinary: fixed\n    token: private\n    count: 8\n- id: second\n  disabled: false\n')
+  writeFileSync(localPath(profile), '- id: first\n  name: cordis:probe\n  disabled: false\n  config:\n    ordinary: fixed\n    token: private\n    count: 8\n- id: second\n  disabled: false\n')
   await ctx.settings.replace('first', {})
-  expect(parse(readFileSync(profile.patchPath, 'utf8'))).toEqual([
+  expect(parse(readFileSync(localPath(profile), 'utf8'))).toEqual([
     { id: 'first', name: 'cordis:probe', disabled: false }, { id: 'second', disabled: false },
   ])
   await ctx.settings.mutate('first', [{ op: 'set', path: ['list', '0'], value: { name: 'one' } }])
@@ -375,7 +423,7 @@ it('imports the removed settings.yaml into the profile once and keeps rejected s
   writeFileSync(legacy, 'default-model:\n  model: legacy\nfirst:\n  ordinary: rejected\nmissing:\n  count: 1\n')
   const restored = await start()
   await vi.waitFor(() => { expect(restored.agentDefaultModel.currentSelection().model).toBe('legacy') })
-  expect(parse(readFileSync(profile.patchPath, 'utf8'))).toContainEqual({ id: 'default-model', name: 'cordis:model', config: { provider: 'test', model: 'legacy' } })
+  expect(parse(readFileSync(localPath(profile), 'utf8'))).toContainEqual({ id: 'default-model', name: 'cordis:model', config: { provider: 'test', model: 'legacy' } })
   expect(restored.settings.describe({ redactSecrets: true }).find(row => row.ns === 'first')!.value).toEqual({ count: 2, list: [] })
   expect(existsSync(legacy)).toBe(false)
   expect(readFileSync(`${legacy}.imported`, 'utf8')).toContain('rejected')
@@ -404,7 +452,8 @@ it('describes an entry whose required field only the profile supplies, and repor
   const restored = await start()
   const first = restored.settings.describe().find(row => row.ns === 'first')!
   expect(first.value).toEqual({ count: 4 })
-  expect(first.base).toEqual({})
+  // The profile layer sits beneath the local document, so its config now shows in the inherited base.
+  expect(first.base).toEqual({ count: 4 })
   vi.spyOn(restored.settings, 'describe').mockImplementationOnce(() => { throw new Error('refresh failed') })
   restored.emit('app-boot/config-reload')
   const failures = (): unknown[] => restored.logger.buffer.filter(message => message.type === 'error').map((message): unknown => message.args[0])

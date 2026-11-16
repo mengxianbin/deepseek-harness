@@ -49,7 +49,8 @@ async function fixture(beforeWatch?: (profile: ProfileContext) => void) {
     host.loader.builtins.probe = { apply(ctx: Context, config: { value: string }) { ctx.provide('profileProbe', config.value) } }
   })
   onTestFinished(async () => { await ctx.fiber.dispose(); rmSync(home, { recursive: true, force: true }) })
-  const configWatches = watchers.slice(start, start + 3)
+  // profile, home, local and manifest watchers — four config watches in order.
+  const configWatches = watchers.slice(start, start + 4)
   const emit = (index: number, filename: string) => { configWatches[index]!.emit('change', filename) }
   const drain = () => ctx.hmr.runExclusive(async () => {})
   return { ctx, profile, dir, home, emit, drain, commit: () => commit?.() }
@@ -81,7 +82,7 @@ it('waits for application readiness and applies profile, home and manifest chang
   f.emit(1, homePatch)
   await f.drain()
   expect(f.ctx.get('profileProbe')).toBe('edited')
-  f.emit(2, manifest)
+  f.emit(3, manifest)
   await f.drain()
   expect(f.ctx.get('profileProbe')).toBe('edited')
 })
@@ -109,7 +110,7 @@ it('ignores dependency-only manifest changes and reloads a changed bundle list',
   manifest.dependencies = { added: '1.0.0' }
   delete manifest.dsh!.profile!.bundles
   writeFileSync(manifestPath, JSON.stringify(manifest))
-  f.emit(2, manifestPath)
+  f.emit(3, manifestPath)
   await f.drain()
   expect(update).not.toHaveBeenCalled()
   const packageDir = join(f.dir, 'node_modules', 'added')
@@ -118,7 +119,7 @@ it('ignores dependency-only manifest changes and reloads a changed bundle list',
   writeFileSync(join(packageDir, 'cordis.patch.yml'), '- insert:\n    - id: bundled\n      name: cordis:probe\n      disabled: true\n')
   manifest.dsh!.profile!.bundles = ['added']
   writeFileSync(manifestPath, JSON.stringify(manifest))
-  f.emit(2, manifestPath)
+  f.emit(3, manifestPath)
   await f.drain()
   expect(update).toHaveBeenCalledOnce()
   f.emit(0, f.profile.patchPath)
@@ -151,6 +152,25 @@ it('reports unreadable inputs and recovers after the file is corrected', async (
   f.emit(0, f.profile.patchPath)
   await f.drain()
   expect(readFileSync(f.profile.patchPath, 'utf8')).toBe(original)
+})
+
+it('warns and skips a corrupt local layer, then applies it once corrected', async () => {
+  const f = await fixture()
+  f.commit()
+  const warn = vi.spyOn(f.ctx.logger, 'warn').mockImplementation(() => {})
+  onTestFinished(() => { warn.mockRestore() })
+  const localPath = join(f.dir, 'cordis.local.patch.yml')
+  // A corrupt local document fails the reload loudly and the app keeps its previous configuration.
+  writeFileSync(localPath, '- id: [broken\n')
+  f.emit(2, localPath)
+  await f.drain()
+  expect(warn).toHaveBeenCalled()
+  expect(f.ctx.get('profileProbe')).toBe('initial')
+  // Correcting the file applies the local layer above profile and home.
+  writeFileSync(localPath, '- id: probe\n  config: { value: local }\n')
+  f.emit(2, localPath)
+  await f.drain()
+  expect(f.ctx.get('profileProbe')).toBe('local')
 })
 
 it('rejects a profile launcher that omits application readiness', async () => {

@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { isAlias, isMap, isNode, isScalar, parseDocument, visit } from 'yaml'
 import { ManagementFailure } from './failure.ts'
-import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
+import { resolveLinkedPath, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 
 /** Value pnpm leaves for a build script that still needs a decision. */
 const UNDECIDED_BUILD = 'set this to true or false'
@@ -27,7 +27,10 @@ function carriesCredential(key: string): boolean {
 
 async function readPolicy(dir: string) {
   let text: string
-  try { text = await readFile(join(dir, 'pnpm-workspace.yaml'), 'utf8') }
+  // Resolved for the read: a junction-to-file does not read (ENOENT), which
+  // would look like an absent policy and let the write below drop its entries.
+  const path = resolveLinkedPath(join(dir, 'pnpm-workspace.yaml'))
+  try { text = await readFile(path, 'utf8') }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     text = '{}\n'
@@ -66,7 +69,7 @@ export async function recordPendingBuilds(dir: string, output: string): Promise<
   const added = blockedBuildNames(output).filter(name => !known.has(name))
   if (added.length === 0) return pending
   for (const name of added) document.setIn(['allowBuilds', name], UNDECIDED_BUILD)
-  await writeFileAtomic(join(dir, 'pnpm-workspace.yaml'), String(document), { mode: 0o600 })
+  await writeFileAtomic(resolveLinkedPath(join(dir, 'pnpm-workspace.yaml')), String(document), { mode: 0o600 })
   return [...pending, ...added]
 }
 
@@ -92,5 +95,5 @@ export async function approveBuilds(dir: string, names: readonly string[]): Prom
   if (names.some(name => !pending.includes(name))) throw new ManagementFailure('stale-approval')
   if (names.length === 0) return
   for (const name of names) document.setIn(['allowBuilds', name], true)
-  await writeFileAtomic(join(dir, 'pnpm-workspace.yaml'), String(document), { mode: 0o600 })
+  await writeFileAtomic(resolveLinkedPath(join(dir, 'pnpm-workspace.yaml')), String(document), { mode: 0o600 })
 }

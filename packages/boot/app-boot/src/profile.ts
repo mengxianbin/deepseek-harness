@@ -42,6 +42,16 @@ export const PROFILES_DIR = 'profiles'
 /** The user patch layer inside a profile directory (hot-reloaded on long-lived surfaces). */
 export const PROFILE_PATCH_FILENAME = 'cordis.patch.yml'
 
+/**
+ * The local, volatile patch layer inside a profile directory. It is composed
+ * after the home layer and before any `--patch` overlay, so it outranks every
+ * on-disk user layer while still losing to a launch overlay. The file is never
+ * created ahead of its first write: a missing file is an empty layer, not an
+ * error, and an unreadable or malformed one fails loud exactly like the
+ * profile and home layers.
+ */
+export const LOCAL_PATCH_FILENAME = 'cordis.local.patch.yml'
+
 /** Package metadata accepted by the profile reader; local profiles need no published identity. */
 export type ProfileManifest = Partial<DshPackageManifest>
 
