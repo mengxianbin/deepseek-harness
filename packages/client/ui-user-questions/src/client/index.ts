@@ -390,6 +390,8 @@ export function apply(ctx: ClientContext): void {
   // The answer field consumes the shared composer gesture pair; its advance
   // row joins the shortcut reference from the same bindings, so the panel
   // shows what the keys actually do instead of leaving them to experiment.
+  // The selection and paging pairs are not composer gestures, so they join as
+  // literal rows below.
   ctx.inject(['shortcuts'], (scope) => {
     const t = ctx.locale.bind(NS)
     scope.effect(() => scope.shortcuts.registerFixed({
@@ -397,6 +399,21 @@ export function apply(ctx: ClientContext): void {
       keys: scope.shortcuts.describeBinding(composerEnterDisplay.submit).keys,
       bindings: composerEnterGestures.submit, group: 'input',
     }), 'ui-user-questions: fixed question advance')
+    // FORK dsh-local (ask-ref-rows-1117, 2026-11-17 E 批): the card's own
+    // selection and paging keys are declared literally for the Ctrl+/
+    // reference (fixed.slash precedent) — Enter/Space press the focused
+    // option, PageUp/PageDown walk the questions and never submit. Plain
+    // Enter is the newline gesture's physical binding (same key, contextual
+    // meaning), so the code literal stays inside the gesture authority.
+    scope.effect(() => scope.shortcuts.registerFixed({
+      id: 'fixed.question-select' as ShortcutCommandId, label: () => t('shortcut.select'),
+      keys: ['Enter', 'Space'],
+      bindings: [...composerEnterGestures.newline, { code: 'Space', modifiers: [] }], group: 'input',
+    }), 'ui-user-questions: fixed question select')
+    scope.effect(() => scope.shortcuts.registerFixed({
+      id: 'fixed.question-pager' as ShortcutCommandId, label: () => t('shortcut.pager'),
+      keys: ['PageUp', 'PageDown'], bindings: [{ code: 'PageUp', modifiers: [] }, { code: 'PageDown', modifiers: [] }], group: 'input',
+    }), 'ui-user-questions: fixed question pager')
   })
   const questionDraftStore = createQuestionDraftStore()
   const inputTriggers = ctx.get('inputTriggers') as InputTriggerServiceContract

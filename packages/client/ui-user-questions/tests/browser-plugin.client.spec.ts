@@ -57,8 +57,11 @@ async function bench(
   durable: readonly PendingUserQuestion[] | 'absent' = [],
   remainingMs = 60_000,
   initialInbox: InboxWireState = emptyInbox(),
+  /** Optional shortcut service: the fixed reference rows publish only when one is present. */
+  shortcuts?: object,
 ) {
   const ctx = new Context()
+  if (shortcuts !== undefined) ctx.provide('shortcuts', shortcuts as never)
   await ctx.plugin(SlotRegistry).await()
   const slots = ctx.get('slots') as SlotRegistry
   if (declare) {
@@ -785,5 +788,43 @@ describe('apply', () => {
 
     b.projection.set(view([CONTINUED, { callId: ToolCallId('call-after-dispose'), questions: [...QUESTIONS], state: 'continued' }]))
     expect(b.pending.getSnapshot()).toEqual([])
+  })
+
+  it("publishes the card's selection and paging keys as fixed reference rows", async () => {
+    const registerFixed = vi.fn((_command: unknown) => () => {})
+    const b = await bench(true, [], 60_000, emptyInbox(), {
+      describeBinding: vi.fn(() => ({ keys: ['Shift', 'Enter'] })),
+      registerFixed,
+    })
+    try {
+      expect(registerFixed).toHaveBeenCalledTimes(3)
+      const rows = registerFixed.mock.calls.map(([command]) => command as {
+        id: string
+        label: () => string
+        keys: readonly string[]
+        bindings: readonly { code: string; modifiers: readonly string[] }[]
+        group: string
+      })
+      expect(rows.map(row => row.id)).toEqual([
+        'fixed.question-advance', 'fixed.question-select', 'fixed.question-pager',
+      ])
+      // A key the dictionaries do not carry would surface as the bare key.
+      const labels = rows.map(row => row.label())
+      expect(labels).not.toContain('shortcut.advance')
+      expect(labels).not.toContain('shortcut.select')
+      expect(labels).not.toContain('shortcut.pager')
+      expect(labels.every(label => label.length > 0)).toBe(true)
+      expect(rows[0]).toMatchObject({ group: 'input' })
+      expect(rows[1]).toMatchObject({
+        group: 'input', keys: ['Enter', 'Space'],
+        bindings: [{ code: 'Enter', modifiers: [] }, { code: 'Space', modifiers: [] }],
+      })
+      expect(rows[2]).toMatchObject({
+        group: 'input', keys: ['PageUp', 'PageDown'],
+        bindings: [{ code: 'PageUp', modifiers: [] }, { code: 'PageDown', modifiers: [] }],
+      })
+    } finally {
+      await b.fiber.dispose()
+    }
   })
 })
