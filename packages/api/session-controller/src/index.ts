@@ -35,6 +35,7 @@ import { reconcileSessionHealth } from './health.ts'
 import { readDutyInventory } from './duty.ts'
 import { readAutoRoutePoll } from './auto-route.ts'
 import { readReviveHealth } from './revive-health.ts'
+import { syncAlertInbox } from './alert-inbox.ts'
 import type {
   ModelCatalog,
   SessionWorkspacePathApplication,
@@ -427,11 +428,18 @@ export class SessionController extends TypertRemoteService {
         // stamp is still the current truth) and absence stays a quiet
         // 「未接线」 line, never a break (optional plane, like autoRoute).
         const reviveHealth = readReviveHealth()
+        // 告警信箱 (设计档 §七, alert-inbox-signal-face-1116): the SAME tick
+        // folds the revive state machine's export into `<dsh-home>/alert-inbox.json`
+        // — clustering and the three channels live on the WRITE side, change-only
+        // (revive-health mount precedent: zero new processes, zero new timers) —
+        // and publishes the unread counts the envelope badge renders beside duty.
+        const alertInbox = syncAlertInbox()
         ctx.emit('api-session/health', {
           ...reconcileSessionHealth(rows),
           duty: readDutyInventory(),
           ...(autoRoute === undefined ? {} : { autoRoute }),
           ...(reviveHealth === undefined ? {} : { reviveHealth }),
+          ...(alertInbox === undefined ? {} : { alertInbox }),
         })
       }, SESSION_STATUS_SWEEP_MS)
       timer.unref()

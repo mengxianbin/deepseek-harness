@@ -42,6 +42,7 @@ import {
 } from '../tree.ts'
 import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
 import { HealthShield } from './HealthShield.tsx'
+import { AlertInboxBadge } from './AlertInboxBadge.tsx'
 import { HealthDetail } from './HealthDetail.tsx'
 import { FLAT_SESSION_ORDER_KEY, type SessionGroupBy } from '../stores.ts'
 import { WorkspacePickFlow } from '../WorkspacePicker.tsx'
@@ -1735,6 +1736,12 @@ export function WorkspaceBrowser({
             dashed ring when the health chain itself goes silent (step3 §5.2
             自指 fail-closed). */}
         {wide && <HealthShield useSessionHealth={useSessionHealth} t={t} />}
+        {/* 告警信箱 (设计档 §七, alert-inbox-signal-face-1116): the envelope
+            seat AFTER the shield — mechanism health and pending alert entries
+            are two dimensions, each with its own seat (不抢一槽). Signal-only:
+            it renders the fold's unread count (徽标数 = unread 计数) and takes
+            no click action (行动面 = 追查会话). */}
+        {wide && <AlertInboxBadge useSessionHealth={useSessionHealth} t={t} />}
         {/* Add flow + its error dialog (same package — direct composition). */}
         <WorkspacePickFlow
           t={t}

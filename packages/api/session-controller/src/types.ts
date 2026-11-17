@@ -869,6 +869,17 @@ export interface SessionHealthReport {
    * (optional plane, the inverse of duty's fail-closed).
    */
   readonly reviveHealth?: ReviveHealthReport
+  /**
+   * The alert-inbox fold (设计档 session-revival-v2-alert-inbox-1116.md §七 信号
+   * 面, alert-inbox-signal-face-1116): the SAME 15s tick folds the revive state
+   * machine's export into `<dsh-home>/alert-inbox.json` — clustered on the
+   * write side (同因 + 同时段 → 一个事件族), change-only — and publishes the
+   * counts the envelope badge renders (徽标数 = unread 计数 = 未处理数, the 机检
+   * 对账基准) beside duty and reviveHealth. Optional plane — absent while
+   * neither the state export nor the inbox document exists (面消失, quiet,
+   * never broken; the inverse of duty's fail-closed).
+   */
+  readonly alertInbox?: AlertInboxReport
 }
 
 /** One 值守总账 item exactly as the collector wrote it (清单档 §6.3 三态语义). */
@@ -966,6 +977,23 @@ export interface ReviveHealthReport {
   readonly failed: readonly string[]
   /** Epoch ms of the writer's last fact flip (change-only stamp — no freshness judgment). */
   readonly at: number
+}
+
+/**
+ * The alert-inbox counts the sweep published (设计档 §七 信号面; the write side
+ * lives in alert-inbox.ts). The badge renders `unread` —机检基准: 徽标数 =
+ * unread 计数 = 未处理数 — and duty-inventory reads the SAME document with the
+ * SAME `unread && !archived` predicate, so the two 对账 faces cannot disagree.
+ */
+export interface AlertInboxReport {
+  /** Epoch ms of the inbox document's last content change (0 until the first flip). */
+  readonly at: number
+  /** Unread, unarchived entries — the badge count (未处理数). */
+  readonly unread: number
+  /** Of those, entries past the 2-cooldown escalation window (超时未确认; never disappears). */
+  readonly escalated: number
+  /** Every entry in the document, archived included (mailbox history length). */
+  readonly total: number
 }
 
 /** One swept Session's facts exactly as that sweep traversal read them. */
