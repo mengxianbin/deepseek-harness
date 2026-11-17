@@ -68,11 +68,11 @@ type StateOrderFixture = { summary: SessionSummary; status: SessionStatus }
  * @returns both halves `orderByResting` needs.
  */
 function stateOrderFixture(rows: readonly StateOrderFixture[]): {
-  summaries: SessionListState['byId']
+  list: SessionListState
   statuses: SessionStatusSnapshot
 } {
   return {
-    summaries: Object.fromEntries(rows.map(row => [row.summary.id, row.summary])),
+    list: list(...rows.map(row => row.summary)),
     statuses: new Map(rows.map(row => [row.summary.id, row.status])),
   }
 }
@@ -1285,6 +1285,18 @@ describe('状态序 restingStateOf（绿点完成态=已完成 / running=运行�
   it('状态序：状态缺省时回落 Host 列表行的 running 基线', () => {
     expect(restingStateOf({ running: true }, statusRow({ running: undefined }))).toBe('running')
   })
+
+  it('状态序：子代理 / 后台任务在跑即归运行中，即使耐久绿点亮着（与行面转圈、齿轮同源）', () => {
+    expect(restingStateOf({ running: false }, statusRow({ completionUnread: true }), 1))
+      .toBe('running')
+    expect(restingStateOf({ running: false }, statusRow({ completionUnread: true, activeJobCount: 1 })))
+      .toBe('running')
+    expect(restingStateOf({ running: false }, statusRow({ activeJobCount: 2 }))).toBe('running')
+    expect(restingStateOf({ running: false }, statusRow({}), 3)).toBe('running')
+    // 没有活动事实时档位口径不变：绿点亮着仍是已完成。
+    expect(restingStateOf({ running: false }, statusRow({ completionUnread: true }), 0))
+      .toBe('completed')
+  })
 })
 
 describe('状态序 orderByResting（真实排序链：置顶 > 状态序 > 活跃时间）', () => {
@@ -1297,7 +1309,7 @@ describe('状态序 orderByResting（真实排序链：置顶 > 状态序 > 活�
     ])
     expect(orderByResting(
       [sid('running'), sid('completed'), sid('silent'), sid('pinned-running')],
-      fixture.summaries,
+      fixture.list,
       fixture.statuses,
       { pinnedSessionIds: [sid('pinned-running')], archivedSessionIds: [] },
     )).toEqual([sid('pinned-running'), sid('completed'), sid('silent'), sid('running')])
@@ -1310,8 +1322,39 @@ describe('状态序 orderByResting（真实排序链：置顶 > 状态序 > 活�
     ])
     expect(orderByResting(
       [sid('older'), sid('newer'), sid('missing')],
-      fixture.summaries,
+      fixture.list,
       fixture.statuses,
     )).toEqual([sid('newer'), sid('older')])
+  })
+
+  it('状态序：带后台任务的完成行沉底，不夹在【新完成】中间', () => {
+    const fixture = stateOrderFixture([
+      { summary: summary('done-new', 500), status: statusRow({ completionUnread: true }) },
+      { summary: summary('busy-job', 400), status: statusRow({ completionUnread: true, activeJobCount: 1 }) },
+      { summary: summary('done-old', 300), status: statusRow({ completionUnread: true }) },
+      { summary: summary('silent', 100), status: statusRow({}) },
+    ])
+    expect(orderByResting(
+      [sid('busy-job'), sid('done-new'), sid('done-old'), sid('silent')],
+      fixture.list,
+      fixture.statuses,
+    )).toEqual([sid('done-new'), sid('done-old'), sid('silent'), sid('busy-job')])
+  })
+
+  it('状态序：子代理在跑的完成行沉底（行面转圈 ≠ 新完成）', () => {
+    const parent = summary('parent', 400)
+    const child = { ...summary('child', 100), parentId: parent.id, running: true }
+    const done = summary('done', 500)
+    const sessions: SessionListState = {
+      ...list(parent, child, done),
+      projectionsBySession: { [parent.id]: catalog('child') },
+    }
+    const statuses = new Map<SessionId, SessionStatus>([
+      [parent.id, statusRow({ completionUnread: true })],
+      [child.id, statusRow({ running: true })],
+      [done.id, statusRow({ completionUnread: true })],
+    ])
+    expect(orderByResting([sid('parent'), sid('child'), sid('done')], sessions, statuses))
+      .toEqual([sid('done'), sid('parent'), sid('child')])
   })
 })
