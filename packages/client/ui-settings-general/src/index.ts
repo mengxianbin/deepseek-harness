@@ -10,6 +10,7 @@ import { registerRestart } from './restart-host.ts'
 import { registerRestartDisposition } from './restart-disposition-host.ts'
 import { registerRestartSignal } from './restart-signal-host.ts'
 import { registerRestartSignalPoll } from './restart-signal-poll-host.ts'
+import { registerServerStartedAt } from './server-started-at-host.ts'
 import { restartStamp } from './restart-stamp.ts'
 
 /** Runtime preferences projected to the browser. */
@@ -25,8 +26,9 @@ export const Config = z.object({
 
 /** The browser consumes the configuration form projection, and the configured restart command
  * (absent by default) gains its dispatch route and capability page global. The process-start
- * read of the restart-signal build manifest (R stamp) happens unconditionally at load, and the
- * recheck route serves the seven-state signal judgment the browser badge renders.
+ * read of the restart-signal build manifest (R stamp) happens unconditionally at load, the
+ * recheck route serves the seven-state signal judgment the browser badge renders, and the
+ * start-time route serves this process's boot instant for the settings-row stamp.
  * @param ctx Plugin context used for optional settings presentation and restart registration.
  */
 export function apply(ctx: Context): void {
@@ -42,10 +44,12 @@ export function apply(ctx: Context): void {
   registerAutoBuild(ctx)
   registerRestartDisposition(ctx)
   ctx.inject(['settings'], (child) => { child.effect(() => child.settings.configure({ auto: false }, ctx.fiber)) })
-  // Both routes ride Connection's authenticated exact-route fence; the dispatch additionally
-  // gates on the configured command and the served-page injection table.
+  // Every route rides Connection's authenticated exact-route fence; the dispatch additionally
+  // gates on the configured command and the served-page injection table, while the signal
+  // recheck and the start-time pull register unconditionally.
   ctx.inject(['connection', 'webServer'], (webCtx) => {
     registerRestart(webCtx)
     registerRestartSignal(webCtx)
+    registerServerStartedAt(webCtx)
   })
 }
