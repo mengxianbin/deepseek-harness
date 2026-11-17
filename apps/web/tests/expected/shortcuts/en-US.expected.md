@@ -72,6 +72,8 @@
       - listitem: Open reference menu @
       - listitem: New line Enter
       - listitem: Next / Submit Shift + Enter
+      - listitem: Previous / Next question PageUp PageDown
+      - listitem: Select option Enter Space
       - listitem: Send message Shift + Enter
       - listitem: Open command menu /
       - listitem: Stop generating Esc Esc

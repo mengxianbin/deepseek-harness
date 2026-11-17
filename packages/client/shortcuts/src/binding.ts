@@ -24,11 +24,16 @@ export interface NormalizedBinding {
   readonly modifiers: readonly ('control' | 'alt' | 'shift' | 'meta')[]
 }
 
+// FORK dsh-local (ask-ref-rows-1117, 2026-11-17 E 批): PageUp/PageDown join
+// the code table so the ask card's pager keys can be declared as a fixed
+// reference row (normalizeBinding rejects codes outside this table); each
+// label equals its code, so presentation is unchanged.
 const keyNames: Readonly<Record<string, string>> = {
   Slash: '/', Comma: ',', Period: '.', Backslash: '\\', Backquote: '`', Minus: '-', Equal: '=',
   BracketLeft: '[', BracketRight: ']', Semicolon: ';', Quote: "'", Enter: 'Enter',
   Escape: 'Esc', Space: 'Space', Tab: 'Tab', Backspace: 'Backspace', Delete: 'Delete',
   ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→',
+  PageUp: 'PageUp', PageDown: 'PageDown',
 }
 const modifierOrder = ['control', 'alt', 'shift', 'meta'] as const
 
