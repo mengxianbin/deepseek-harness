@@ -142,7 +142,11 @@
 
 .crumb {
   display: inline-block;
-  max-width: 220px;
+  /* 480px (2026-11-17 header-trailing-seat): the legacy 220px cap idled the
+     row's free space and ellipsized ordinary session titles once the sysmon
+     chip left this row; 480 fits ~33 CJK chars while still bounding a
+     pathological title so it cannot swallow the header. */
+  max-width: 480px;
   overflow: hidden;
   padding: 4px 8px;
   border: none;
