@@ -921,11 +921,16 @@ describe('ConversationRoot resident composer', () => {
     expect(b.slotCalls).toContain('conversation.hero.options')
   })
 
-  it('seats the New Session options after the agent-preset chip, and only for a Session', () => {
+  it('trails the row with the New Session options and the agent-preset seat, only for a Session', () => {
     const b = mount(sessionSnapshotOf({ blank: true }))
     const preset = within(b.view.container).getByTestId('view-conversation.hero.agentPreset')
     const options = within(b.view.container).getByTestId('view-conversation.hero.options')
-    expect(options.parentElement?.previousElementSibling).toBe(preset)
+    // Options and the preset share the trailing group; the preset seat is the
+    // row's last control, hard against its right edge.
+    expect(options.parentElement?.nextElementSibling).toBe(preset)
+    expect(preset.parentElement).toBe(options.parentElement?.parentElement)
+    expect(preset.nextElementSibling).toBeNull()
+    expect(preset.parentElement?.nextElementSibling).toBeNull()
 
     const cold = mount(sessionSnapshotOf(), [], undefined, { sessionId: undefined })
     expect(cold.slotCalls).toContain('conversation.hero.agentPreset')

@@ -129,8 +129,12 @@ export function ConversationContent(props: ConversationContentProps) {
         },
         onClose: () => { setPickerOpen(false) },
       })}
-      {renderSlot('conversation.hero.agentPreset', {})}
-      {sessionId === undefined ? null : <div className={css.heroOptions}>{renderSlot('conversation.hero.options', {})}</div>}
+      {/* Trailing group at the row's right edge: plugin options, then the
+          preset seat — the seat is the row's last control. */}
+      <div className={css.heroTrailing}>
+        {sessionId === undefined ? null : <div className={css.heroOptions}>{renderSlot('conversation.hero.options', {})}</div>}
+        {renderSlot('conversation.hero.agentPreset', {})}
+      </div>
     </div>
   )
 

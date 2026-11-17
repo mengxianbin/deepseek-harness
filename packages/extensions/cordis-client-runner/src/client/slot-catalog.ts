@@ -1054,8 +1054,8 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     key: 'conversation.hero.options',
     kind: 'list',
     scope: 'session',
-    summary: 'Compact options right-aligned in the New Session row after the workspace and preset controls; rendered only with a Session.',
-    doc: 'Compact options right-aligned in the New Session row after the workspace and preset controls; rendered only with a Session.',
+    summary: 'Compact options right-aligned in the New Session row, left of the trailing preset seat; rendered only with a Session.',
+    doc: 'Compact options right-aligned in the New Session row, left of the trailing preset seat; rendered only with a Session.',
     registerOptions: [
       {
         name: 'id',
@@ -1910,7 +1910,6 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     slotInject: '',
     declaredBy: 'an entry in \'conversation.session.header\' (client-ui-conversation), so it exists while that entry is mounted',
     occupants: [
-      'client-ui-agent-preset AgentPresetLabel id \'agent-preset\'',
       'client-ui-jobs JobListAction id \'job-list\'',
       'client-ui-subagent SubagentCatalogAction id \'subagent-catalog\'',
       'experimental-client-ui-agent-team TeamAction id \'agent-team\'',
