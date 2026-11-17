@@ -911,6 +911,42 @@ describe('header-validated membership projection', () => {
     expect(storedRecord(pool, id).sessionIds).toEqual([])
   })
 
+  it('canonicalizes each distinct cwd once per index pass, and re-resolves on the next (archive-header-cwd-dedup-1117)', async () => {
+    // Given two directories shared by five headers (plus one cwd-less header
+    // that never probes the filesystem)
+    const dirA = await makeDir('cwd-dedup-a')
+    const dirB = await makeDir('cwd-dedup-b')
+    const spy = vi.spyOn(workspacePaths, 'realpathNormalize')
+    onTestFinished(() => { spy.mockRestore() })
+
+    // When the boot index pass walks all six headers
+    const result = await harness({
+      sessions: [
+        header('a-one', dirA), header('a-two', dirA), header('a-three', dirA),
+        header('b-one', dirB), header('b-two', dirB),
+        header('no-cwd'),
+      ],
+    })
+    onTestFinished(() => result.ctx.fiber.dispose())
+
+    // Then the pass paid one realpath per distinct cwd, not one per header,
+    // and the membership projection still sees every header's canonical path
+    expect(spy).toHaveBeenCalledTimes(2)
+    const grouped = result.registry.list()
+      .map(entry => [...entry.sessionIds].sort().join(','))
+      .sort()
+    expect(grouped).toEqual(['a-one,a-three,a-two', 'b-one,b-two'])
+
+    // And the memo lives only for that pass: a later index pass over the
+    // same two cwds resolves them again (per-pass, never cross-pass)
+    result.setSessions([
+      header('a-one', dirA), header('a-two', dirA),
+      header('b-one', dirB), header('fresh', dirB),
+    ])
+    await result.registry.pinSession(SessionId('fresh'))
+    expect(spy).toHaveBeenCalledTimes(4)
+  })
+
   it('filters absent headers and invalid cwd facts while retaining only missing-directory candidates', async () => {
     const dir = await makeDir('candidate-validation')
     const elsewhere = await makeDir('candidate-elsewhere')

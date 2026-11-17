@@ -154,6 +154,19 @@ interface BootstrapGroup {
   readonly newestAt: number
 }
 
+/**
+ * One cwd's filesystem resolution, memoized for the duration of a single
+ * header-index pass (see `indexHeaders`): `directory` carries the canonical
+ * path, `not-directory` a path that exists but is no longer a directory, and
+ * `failed` the original `realpath`/`stat` error so each header sharing the
+ * cwd applies the same ENOENT / invalid-path classification it would have
+ * gotten from its own probe.
+ */
+type CwdResolution =
+  | { readonly kind: 'directory'; readonly path: string }
+  | { readonly kind: 'not-directory' }
+  | { readonly kind: 'failed'; readonly error: unknown }
+
 const sameIds = (left: readonly WorkspaceId[], right: readonly WorkspaceId[]): boolean =>
   left.length === right.length && left.every((id, index) => id === right[index])
 
@@ -927,10 +940,22 @@ export class WorkspaceRegistry extends Service {
   }
 
   private async indexHeaders(headers: readonly SessionHeader[]): Promise<void> {
-    for (const header of headers) await this.indexHeader(header)
+    // Per-pass cwd memo (archive-header-cwd-dedup-1117): one index pass walks
+    // every stored header — the archive cascade does it on every archive, and
+    // the production root held 2141 headers across just 13 distinct cwds
+    // (measured 2026-11-17) — but the filesystem work only varies by cwd.
+    // Resolving each distinct cwd once per pass collapses that to a handful
+    // of realpath+stat calls (the per-header probes cost ~1.4 s per pass).
+    // The memo is scoped to this call on purpose: every later pass still
+    // re-reads the filesystem, so symlink retargets, directory removal or
+    // restoration, and permission changes keep exactly their per-pass
+    // semantics (workspace.spec: missing-path exemption clearing, reattach
+    // after restore, the realpath/stat race).
+    const resolutions = new Map<string, CwdResolution>()
+    for (const header of headers) await this.indexHeader(header, resolutions)
   }
 
-  private async indexHeader(header: SessionHeader): Promise<void> {
+  private async indexHeader(header: SessionHeader, resolutions: Map<string, CwdResolution>): Promise<void> {
     this.headers.set(header.id, header)
     this.sessionPaths.delete(header.id)
     this.missingSessionPaths.delete(header.id)
@@ -938,21 +963,36 @@ export class WorkspaceRegistry extends Service {
       this.invalidSessionPaths.set(header.id, 'header has no cwd')
       return
     }
-    try {
-      const path = await realpathNormalize(header.cwd)
-      if (!(await stat(path)).isDirectory()) {
-        this.invalidSessionPaths.set(header.id, `cwd '${header.cwd}' is not a directory`)
-        return
+    let resolution: CwdResolution
+    const cached = resolutions.get(header.cwd)
+    if (cached !== undefined) {
+      resolution = cached
+    } else {
+      try {
+        const path = await realpathNormalize(header.cwd)
+        resolution = (await stat(path)).isDirectory()
+          ? { kind: 'directory', path }
+          : { kind: 'not-directory' }
+      } catch (error) {
+        resolution = { kind: 'failed', error }
       }
-      this.sessionPaths.set(header.id, path)
+      resolutions.set(header.cwd, resolution)
+    }
+    if (resolution.kind === 'directory') {
+      this.sessionPaths.set(header.id, resolution.path)
       this.invalidSessionPaths.delete(header.id)
-    } catch (error) {
+      return
+    }
+    if (resolution.kind === 'failed') {
+      const error = resolution.error
       if (fullyQualifiedWorkspacePath(header.cwd)
         && error instanceof Error && 'code' in error && error.code === 'ENOENT') {
         this.missingSessionPaths.add(header.id)
       }
       this.invalidSessionPaths.set(header.id, `cwd '${header.cwd}' does not resolve`)
+      return
     }
+    this.invalidSessionPaths.set(header.id, `cwd '${header.cwd}' is not a directory`)
   }
 
   /** Every stored session's header, projected from the persistence snapshot listing. */
