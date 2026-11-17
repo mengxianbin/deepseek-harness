@@ -310,6 +310,36 @@ describe('WorkspaceBrowser', () => {
     ])
   })
 
+  it('状态序：带后台任务的完成行垫底，不夹在【新完成】中间（拍板账⑧ 回合归属补全）', () => {
+    localStorage.clear()
+    const preferences = createWorkspaceViewStore().create()
+    preferences.actions.setGroupExpanded('alpha', true)
+    localStorage.setItem('dsh.workspace.view.v5', JSON.stringify(preferences.getSnapshot()))
+    // busy-s 是最活跃的一行，却有后台任务在跑：行面画齿轮、档位必须跟齿轮走，
+    // 否则一行「正在干活」的会话会被塞进待验收的绿勾堆中间。
+    const statuses = hook<SessionStatusSnapshot>(new Map([
+      [sid('busy-s'), { running: false, pendingInteraction: undefined, completionUnread: true, activeJobCount: 1 }],
+      [sid('completed-s'), { running: false, pendingInteraction: undefined, completionUnread: true }],
+      [sid('silent-s'), { running: false, pendingInteraction: undefined, completionUnread: false }],
+    ]))
+    const b = mount({
+      useSessions: hook(sessionState([
+        summary('busy-s', 30),
+        summary('completed-s', 20),
+        summary('silent-s', 10),
+      ])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['busy-s', 'completed-s', 'silent-s'])])),
+      useSessionStatus: statuses,
+    })
+    expect(b.store.getSnapshot().orderBy).toBe('updated')
+    const rows = () => screen.getAllByRole('treeitem').filter(row => row.getAttribute('aria-expanded') === null)
+    expect(rows().map(row => row.textContent)).toEqual([
+      expect.stringContaining('completed-s'),
+      expect.stringContaining('silent-s'),
+      expect.stringContaining('busy-s'),
+    ])
+  })
+
   it('moves focus into Workspace controls without selecting a Session while a main panel is active', () => {
     const panelInfo = { activePanelId: 'panel-a' as MainPanelId }
     const b = mount({

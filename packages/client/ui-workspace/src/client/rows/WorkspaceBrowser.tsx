@@ -1306,7 +1306,7 @@ export function WorkspaceBrowser({
   const orderedWorkspaces = useMemo(() => workspaces.map((workspace) => {
     const memberIds = workspace.sessionIds
     const baseOrder = orderBy === 'updated'
-      ? orderByResting(memberIds, list.byId, statuses, orderState)
+      ? orderByResting(memberIds, list, statuses, orderState)
       : reconcileManualOrder(memberIds, sessionOrderByAccount[workspace.workspaceId], list.byId, orderState)
     return {
       ...workspace,
@@ -1315,25 +1315,25 @@ export function WorkspaceBrowser({
         currentBlank !== undefined && memberIds.includes(currentBlank) ? currentBlank : undefined,
       ),
     }
-  }), [currentBlank, list.byId, orderBy, orderState, sessionOrderByAccount, statuses, workspaces])
+  }), [currentBlank, list, orderBy, orderState, sessionOrderByAccount, statuses, workspaces])
   const orderedUngroupedSessionIds = useMemo(() => {
     const baseOrder = orderBy === 'updated'
-      ? orderByResting(ungroupedMemberIds, list.byId, statuses, orderState)
+      ? orderByResting(ungroupedMemberIds, list, statuses, orderState)
       : reconcileManualOrder(ungroupedMemberIds, sessionOrderByAccount[UNGROUPED_KEY], list.byId, orderState)
     return pinCurrentBlank(
       baseOrder,
       currentBlank !== undefined && ungroupedMemberIds.includes(currentBlank) ? currentBlank : undefined,
     )
-  }, [currentBlank, list.byId, orderBy, orderState, sessionOrderByAccount, statuses, ungroupedMemberIds])
+  }, [currentBlank, list, orderBy, orderState, sessionOrderByAccount, statuses, ungroupedMemberIds])
   const orderedFlatSessionIds = useMemo(() => {
     const baseOrder = orderBy === 'updated'
-      ? orderByResting(flatMemberIds, list.byId, statuses, orderState)
+      ? orderByResting(flatMemberIds, list, statuses, orderState)
       : reconcileManualOrder(flatMemberIds, sessionOrderByAccount[FLAT_SESSION_ORDER_KEY], list.byId, orderState)
     return pinCurrentBlank(
       baseOrder,
       currentBlank !== undefined && flatMemberIds.includes(currentBlank) ? currentBlank : undefined,
     )
-  }, [currentBlank, flatMemberIds, list.byId, orderBy, orderState, sessionOrderByAccount, statuses])
+  }, [currentBlank, flatMemberIds, list, orderBy, orderState, sessionOrderByAccount, statuses])
   const activeSessionOrders = useMemo<Readonly<Record<string, readonly SessionId[]>>>(() => Object.fromEntries([
     ...orderedWorkspaces.map(workspace => [workspace.workspaceId, workspace.sessionIds] as const),
     [UNGROUPED_KEY, orderedUngroupedSessionIds] as const,

@@ -921,20 +921,32 @@ const RESTING_STATE_RANK: Readonly<Record<RestingState, number>> = {
  * - `running` — the ball is under the bot's feet, so the row sinks (防打扰).
  *   Checked first: a durable green dot from a previous turn stays lit while the
  *   next turn runs, and that row is not awaiting my acceptance yet.
+ * - live subagents / live background jobs — the same answer for the same
+ *   reason: the bot is still working this row even though its own turn is
+ *   closed. `sessionBaseStatuses` ranks both above the unread-completion dot,
+ *   so the row *renders* as busy (spinner / gear) while a tier built from
+ *   `running` + `completionUnread` alone would file it under 已完成 — a busy
+ *   row parked inside the acceptance block, which is what the sidebar showed
+ *   for `ask panel` (1 subagent running) and `taskbot-接管` (background job).
+ *   The tier has to agree with the glyph the row actually draws.
  * - otherwise `completionUnread` — the 待收讫 dot is the "waiting on me" state.
  * - otherwise `silent` — stopped with nothing owed to either side.
  * `running` reads the live status when it carries one and falls back to the
  * Host list row, the same precedence `sessionNode` uses for the rendered dot.
  * @param summary - list row carrying the Host running baseline.
  * @param status - live UI status for that row, when one has been published.
+ * @param runningSubagents - direct running subagent count (default 0 when the
+ * caller has no catalog yet), the same number `sessionNode` renders.
  * @returns the row's tier.
  */
 export function restingStateOf(
   summary: Pick<SessionSummary, 'running'>,
   status: SessionStatus | undefined,
+  runningSubagents = 0,
 ): RestingState {
   const running = status?.running ?? summary.running
-  if (running) return 'running'
+  if (running || runningSubagents > 0) return 'running'
+  if ((status?.activeJobCount ?? 0) > 0) return 'running'
   if (status?.completionUnread === true) return 'completed'
   return 'silent'
 }
@@ -992,27 +1004,28 @@ export function compareRestingRows(
  * (最近更新) view. Rows without a summary are omitted until it arrives; the
  * id tie-break keeps equal facts deterministic.
  * @param sessionIds - authoritative account membership.
- * @param summaries - current Session summaries.
+ * @param list - current Session list state; `byId` feeds the summary facts and
+ * `projectionsBySession` feeds the running-subagent count the tier reads.
  * @param statuses - unified UI status by Session, for the 状态序 tier.
  * @param rowState - global pin and archive membership (置顶过渡优先).
  * @returns known members ordered by pin, tier, then newest first.
  */
 export function orderByResting(
   sessionIds: readonly SessionId[],
-  summaries: SessionListState['byId'],
+  list: SessionListState,
   statuses: SessionStatusSnapshot,
   rowState?: Pick<SessionRowState, 'pinnedSessionIds' | 'archivedSessionIds'>,
 ): SessionId[] {
   const pinned = new Set(rowState?.pinnedSessionIds)
   const archived = new Set(rowState?.archivedSessionIds)
   return sessionIds.flatMap((id) => {
-    const summary = summaries[id]
+    const summary = list.byId[id]
     if (summary === undefined) return []
     return [{
       id,
       facts: {
         pinned: pinned.has(id) && !archived.has(id),
-        state: restingStateOf(summary, statuses.get(id)),
+        state: restingStateOf(summary, statuses.get(id), runningChildCount(list, id, statuses)),
         updatedAt: summary.updatedAt,
       },
     }]
