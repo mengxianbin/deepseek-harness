@@ -30,4 +30,12 @@ describe('conversation header geometry', () => {
     expect(css.match(/\.viewTabs\s*\{([^}]*)\}/)?.[1]).toContain('gap: 32px')
     expect(css.match(/\.tabs\s*\{([^}]*)\}/)?.[1]).toContain('gap: 16px 20px')
   })
+
+  it('pins the trailing seat to the right edge of the tab row', () => {
+    // The auto margin absorbs only the row's leftover width, so the fold
+    // budget — which measures the border box — and the wrap point, which
+    // counts auto margins as zero, both keep their exact meaning.
+    const seat = css.match(/^\.viewsTrailing\s*\{([^}]*)\}/m)?.[1]
+    expect(seat).toContain('margin-left: auto')
+  })
 })

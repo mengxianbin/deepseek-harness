@@ -318,11 +318,16 @@
    fixed width so a wide occupant never squeezes the tab share — the fold
    budget above subtracts this element's measured width instead, and the row
    wraps (header grows) before anything clips. The -3px matches .viewsMore,
-   centering a 22px box on the 16px text line. */
+   centering a 22px box on the 16px text line. margin-left:auto parks the
+   seat on the row's right edge rather than butting against More: it takes
+   only the width the tabs leave over — zero once the row is exactly full —
+   so the border box the budget measures and the wrap point, which counts
+   auto margins as zero, both stay put. */
 .viewsTrailing {
   flex: none;
   display: flex;
   margin-top: -3px;
+  margin-left: auto;
 }
 
 /* An empty seat hides itself so it costs neither its width nor the flex gap
