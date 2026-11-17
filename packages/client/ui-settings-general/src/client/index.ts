@@ -49,6 +49,7 @@ import { AUTH_EXPIRED_EVENT } from './auth-expired.ts'
 import { HostReleasePrompt, type HostReleasePromptInjected } from './HostReleasePrompt.tsx'
 import { countRunningSessions } from './restart-count.ts'
 import { startRestartSignalFlow } from './restart-signal-flow.ts'
+import { startServerStartedAtFlow } from './server-started-at-flow.ts'
 import { en, ja, es, fr, de, ru, pt, zh, type SettingsKey } from './locales.ts'
 import { RESTART_GLOBAL, resolveRestartCapability, type RestartSignalView } from '../restart.ts'
 
@@ -168,14 +169,6 @@ export function apply(ctx: ClientContext): void {
     runningCount: () => restartRunningSessions.getSnapshot(),
   })
   ctx.effect(() => () => { restartSignalFlow.dispose() }, 'ui-settings-general: restart-signal flow')
-  let previousConnectionState = connection.state.getSnapshot()
-  ctx.effect(() => connection.state.subscribe(() => {
-    const next = connection.state.getSnapshot()
-    const reconnected = next === 'connected'
-      && (previousConnectionState === 'disconnected' || previousConnectionState === 'connecting')
-    previousConnectionState = next
-    if (reconnected) restartSignalFlow.recheck()
-  }), 'ui-settings-general: restart-signal reconnect')
   // The Host push leg (design C.5): the poller emits this allowlisted event
   // after its moved-fingerprint recheck lands, so an open, untouched page
   // pulls the fresh judgment on its own (R3「页面开着不操作角标自现」).
@@ -186,6 +179,28 @@ export function apply(ctx: ClientContext): void {
     () => ctx.remote.$on('restart-signal/changed', () => { restartSignalFlow.recheck() }),
     'ui-settings-general: restart-signal push',
   )
+  // The server start-time stamp (server-started-at-1117): one pull flow
+  // (boot + return-to-visibility) publishes the Host process's start instant
+  // into a snapshot store. The connected transition below clears the store
+  // before rechecking, so a pre-restart instant can never outlive the process
+  // it came from — the stamp hides until the new process's answer lands
+  // (stale = a lie; the whole point of the fact is that it moves exactly
+  // when the process does).
+  const serverStartedAt = createSnapshotStore<string | undefined>(undefined)
+  const serverStartedAtFlow = startServerStartedAtFlow((startedAt) => { serverStartedAt.set(startedAt) })
+  ctx.effect(() => () => { serverStartedAtFlow.dispose() }, 'ui-settings-general: server-started-at flow')
+  let previousConnectionState = connection.state.getSnapshot()
+  ctx.effect(() => connection.state.subscribe(() => {
+    const next = connection.state.getSnapshot()
+    const reconnected = next === 'connected'
+      && (previousConnectionState === 'disconnected' || previousConnectionState === 'connecting')
+    previousConnectionState = next
+    if (reconnected) {
+      restartSignalFlow.recheck()
+      serverStartedAt.set(undefined)
+      serverStartedAtFlow.recheck()
+    }
+  }), 'ui-settings-general: restart-signal reconnect')
   const shellInjected = (): SettingsRootInjected => ({
     openDesktopUpdate: () => { desktopUpdate.open() },
     reconnect: () => { connection.reconnect() },
@@ -196,6 +211,7 @@ export function apply(ctx: ClientContext): void {
       restartConfigured,
       restartRunningSessions,
       restartSignal,
+      serverStartedAt,
       sections: {
         getSnapshot: () => {
           const version = ctx.slots.getVersion('settings.section')
