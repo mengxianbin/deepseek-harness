@@ -647,14 +647,23 @@
   padding: 0 16px 0 20px;
 }
 
-/* Plugin options share the row, pushed to its right edge. */
+/* Trailing group pushed to the row's right edge: plugin options first, then
+   the agent-preset seat as the row's last control. */
+.heroTrailing {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  margin-left: auto;
+}
+
+/* Plugin options sit inside the trailing group, left of the preset seat. */
 .heroOptions {
   display: flex;
   flex: none;
   align-items: center;
   gap: 2px;
   min-width: 0;
-  margin-left: auto;
 }
 
 .heroOptions:empty {
