@@ -647,8 +647,8 @@
   padding: 0 16px 0 20px;
 }
 
-/* Trailing group pushed to the row's right edge: plugin options first, then
-   the agent-preset seat as the row's last control. */
+/* Trailing group pushed to the row's right edge: the agent-preset seat as
+   the row's last control. */
 .heroTrailing {
   display: flex;
   align-items: center;
@@ -657,7 +657,9 @@
   margin-left: auto;
 }
 
-/* Plugin options sit inside the trailing group, left of the preset seat. */
+/* New Session options grouped after the workspace slot. This wrapper stays a
+   direct child of the row — the git-graph BranchChip portals itself right
+   before this marker, keeping the branch chip beside the workspace chip. */
 .heroOptions {
   display: flex;
   flex: none;

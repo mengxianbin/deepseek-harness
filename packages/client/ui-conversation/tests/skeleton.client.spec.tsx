@@ -921,14 +921,16 @@ describe('ConversationRoot resident composer', () => {
     expect(b.slotCalls).toContain('conversation.hero.options')
   })
 
-  it('trails the row with the New Session options and the agent-preset seat, only for a Session', () => {
+  it('keeps the options group a direct row child ahead of the trailing preset seat, only for a Session', () => {
     const b = mount(sessionSnapshotOf({ blank: true }))
     const preset = within(b.view.container).getByTestId('view-conversation.hero.agentPreset')
     const options = within(b.view.container).getByTestId('view-conversation.hero.options')
-    // Options and the preset share the trailing group; the preset seat is the
-    // row's last control, hard against its right edge.
-    expect(options.parentElement?.nextElementSibling).toBe(preset)
-    expect(preset.parentElement).toBe(options.parentElement?.parentElement)
+    // The options wrapper is a DIRECT child of the hero row — the git-graph
+    // BranchChip portals itself right before that marker, which is what keeps
+    // the branch chip beside the workspace chip — and the trailing preset
+    // seat closes the row at its right edge.
+    expect(options.parentElement?.nextElementSibling).toBe(preset.parentElement)
+    expect(preset.parentElement?.parentElement).toBe(options.parentElement?.parentElement)
     expect(preset.nextElementSibling).toBeNull()
     expect(preset.parentElement?.nextElementSibling).toBeNull()
 
