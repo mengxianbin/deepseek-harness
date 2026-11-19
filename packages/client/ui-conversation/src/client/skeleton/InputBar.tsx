@@ -635,6 +635,11 @@ export const InputBar = memo(function InputBar({
           ? renderSlot('conversation.composer.dock', {})
           : null}
         {activity ? null : <ContextMeter useProjection={useProjection} t={t} />}
+        {/* Trailing seat: same guard as the dock itself, so a trailing
+            indicator renders exactly while the row it trails does. */}
+        {variant === 'composer' && input !== undefined && sessionId !== undefined
+          ? renderSlot('conversation.composer.dock.trailing', {})
+          : null}
       </div>
     </div>
   )

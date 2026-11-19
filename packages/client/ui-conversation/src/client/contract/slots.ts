@@ -308,6 +308,13 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'conversation.composer.overlay': { kind: 'list'; scope: 'session' }
     /** Ambient entries below the composer card. */
     'conversation.composer.dock': { kind: 'list'; scope: 'session' }
+    /**
+     * Ambient entries at the right end of the row below the composer card,
+     * after the context meter; rendered only under the same composer states
+     * as `conversation.composer.dock`, so a trailing indicator never outlives
+     * the row it trails. Entries receive no owner-specific values.
+     */
+    'conversation.composer.dock.trailing': { kind: 'list'; scope: 'session' }
     /** Compact controls at the left of the composer tool row. */
     'conversation.input.left': { kind: 'list'; scope: 'session' }
     /** Compact controls before the composer submit action. */
@@ -590,7 +597,7 @@ export type ComposerBarProps =
     | 'conversation.input.permission'
     | 'conversation.input.left' | 'conversation.input.plan'
     | 'conversation.input.right' | 'conversation.input.model' | 'conversation.input.activity'
-    | 'conversation.composer.dock'
+    | 'conversation.composer.dock' | 'conversation.composer.dock.trailing'
   >
   & InjectFace<ComposerBarInjected>
   & PropsLocale<'conversation'>

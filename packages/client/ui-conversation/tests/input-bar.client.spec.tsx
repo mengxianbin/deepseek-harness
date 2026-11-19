@@ -106,6 +106,7 @@ interface BenchOptions {
   activityEntry?: (owner: InputActivityOwnerProps) => React.ReactNode
   contextPressure?: ContextPressureProjection
   footer?: React.ReactNode
+  footerTrailing?: React.ReactNode
   attachments?: readonly ComposerAttachment[]
   /** Upload states served for file-kind drafts (absent = every file is ready). */
   fileUploads?: DraftFileUploads
@@ -175,6 +176,7 @@ function bench(over?: BenchOptions) {
     if (key === 'conversation.input.left') return over?.leftItems ?? null
     if (key === 'conversation.input.right') return over?.rightItems ?? null
     if (key === 'conversation.composer.dock') return over?.footer ?? null
+    if (key === 'conversation.composer.dock.trailing') return over?.footerTrailing ?? null
     if (key === 'conversation.input.plan') return over?.planEntry ?? null
     if (key === 'conversation.input.permission') return over?.permissionEntry ?? null
     if (key === 'conversation.input.model') return over?.modelEntry ?? null
@@ -2068,17 +2070,24 @@ describe('strips and variants', () => {
     expect(view.container.querySelector('[class*="hero"]')).not.toBeNull()
   })
 
-  it('renders overlay, left/right, and footer slots at their layout positions', () => {
+  it('renders overlay, left/right, footer, and trailing-footer slots at their layout positions', () => {
     const { view } = bench({
       overlay: <i data-testid="ov" />,
       leftItems: <i data-testid="li" />,
       rightItems: <i data-testid="ri" />,
       footer: <i data-testid="foot" />,
+      footerTrailing: <i data-testid="trail" />,
     })
     expect(view.getByTestId('ov')).toBeTruthy()
     expect(view.getByTestId('li')).toBeTruthy()
     expect(view.getByTestId('ri')).toBeTruthy()
     expect(view.getByTestId('foot')).toBeTruthy()
+    expect(view.getByTestId('trail')).toBeTruthy()
+    // The trailing seat sits after the dock row's own entries in document
+    // order: it trails what the dock renders, never precedes it.
+    const foot = view.getByTestId('foot')
+    const trail = view.getByTestId('trail')
+    expect(foot.compareDocumentPosition(trail) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 })
 
@@ -2094,7 +2103,7 @@ describe('command launcher chrome and control seats', () => {
       'conversation.input.overlay', 'conversation.input.attachments',
       'conversation.input.permission', 'conversation.input.plan', 'conversation.input.left',
       'conversation.input.right', 'conversation.input.model', 'conversation.input.activity',
-      'conversation.composer.dock',
+      'conversation.composer.dock', 'conversation.composer.dock.trailing',
     ])
     expect(view.queryByLabelText('Plan mode')).toBeNull()
     expect(view.queryByLabelText('Model')).toBeNull()
