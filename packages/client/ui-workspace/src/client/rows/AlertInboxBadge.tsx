@@ -102,6 +102,7 @@ function AlertInboxPanel(
     <Modal
       open
       onClose={onClose}
+      className={css.panel as string}
       title={unread.length > 0 ? t('alertInbox.unread').replace('{n}', String(unread.length)) : t('alertInbox.clear')}
       closeLabel={t('alertInbox.close')}
     >

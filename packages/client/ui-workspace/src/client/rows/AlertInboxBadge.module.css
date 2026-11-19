@@ -65,6 +65,16 @@
 }
 
 /* ── 双栏面板 (改判 A)：未读 ∪ 最近24h，均 lastAt 逆序；消失只有已读/恢复两条路 ── */
+
+/* 对话框加宽（2026-11-19 修复）：Modal 原语默认 `width: min(380px, 100%)` +
+   `overflow: hidden`，而 .columns min-width 720px —— 第二栏（最近 24h）起点
+   392px > 380px，整栏被裁到框外，真机只见未读栏。照 PresetGuideDialog 先例
+   （min(640px, …) 同款 className 覆盖）把对话框撑到 768px：内容列
+   768 − 48（body 双侧 24px padding）= 720px，恰合 .columns min-width。 */
+.panel {
+  width: min(768px, calc(100vw - 48px));
+}
+
 .columns {
   display: grid;
   grid-template-columns: 1fr 1fr;

@@ -14,6 +14,7 @@
  * 反例判据 keeps asserting that absence while allowing the panel button.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SessionHealthState } from '@deepseek-ai/dsh-client-ui-session/client'
@@ -21,6 +22,7 @@ import type { AlertInboxEntryView } from '@deepseek-ai/dsh-api-session-controlle
 import { ALERT_INBOX_PATH } from '../src/client/rows/alert-inbox-path.ts'
 import type { WorkspaceBrowserProps } from '../src/client/contract/slots.ts'
 import { AlertInboxBadge } from '../src/client/rows/AlertInboxBadge.tsx'
+import panelCss from '../src/client/rows/AlertInboxBadge.module.css'
 import { zh } from '../src/client/locales.ts'
 
 const t = makeTranslate(zh) as WorkspaceBrowserProps['t']
@@ -131,6 +133,24 @@ describe('AlertInboxBadge', () => {
     expect(recent?.textContent).toContain('zero-token') // 未本地化的类回落类键
     expect(unread?.textContent).toContain('宿主死因不明') // 未读不受 24h 窗约束
     expect(recent?.textContent).not.toContain('宿主死因不明') // 已滑出 24h 视图窗
+  })
+
+  it('反裁切: 面板对话框带 .panel 加宽类（Modal 默认 380px 会把 720px 双栏的第二栏整栏裁掉）', () => {
+    render(<AlertInboxBadge useSessionHealth={selector => selector(panel)} t={t} />)
+    fireEvent.click(document.querySelector('[data-alert-inbox-open]') as HTMLElement)
+    const dialog = document.querySelector('[role="dialog"]')
+    expect(dialog).not.toBeNull()
+    // jsdom 不做布局，这里钉的是「覆盖类确实传到了 dialog 元素」——宽度本身由
+    // AlertInboxBadge.module.css `.panel { width: min(768px, …) }` 承载（源文件字面见下断言）.
+    expect(dialog?.classList.contains(panelCss.panel!)).toBe(true)
+    expect(panelCss.panel).toBeTruthy()
+    // 源字面钉死：覆盖类必须真的把宽度撑到 ≥720px 双栏（否则类在、宽没改 = 静默回退）.
+    // jsdom 下 import.meta.url 非 file scheme，按仓根相对路径读（vitest cwd = 仓根）.
+    const source = readFileSync(
+      'packages/client/ui-workspace/src/client/rows/AlertInboxBadge.module.css',
+      'utf8',
+    )
+    expect(source).toMatch(/\.panel\s*\{[^}]*min\(768px/)
   })
 
   it('改判 A: 未读行点【已读】→ POST read，响应 report 让行即刻翻位（不等心跳帧）', async () => {
