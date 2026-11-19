@@ -414,6 +414,14 @@ export function apply(ctx: ClientContext): void {
       id: 'fixed.question-pager' as ShortcutCommandId, label: () => t('shortcut.pager'),
       keys: ['PageUp', 'PageDown'], bindings: [{ code: 'PageUp', modifiers: [] }, { code: 'PageDown', modifiers: [] }], group: 'input',
     }), 'ui-user-questions: fixed question pager')
+    // FORK dsh-local (ask-arrow-reference-1119, 2026-11-19): the option walk
+    // joins the reference the same literal way — the card owns the keydown,
+    // this row only advertises ↑/↓ (the menus 'move' row already carries the
+    // same codes in another group; no registry command is added).
+    scope.effect(() => scope.shortcuts.registerFixed({
+      id: 'fixed.question-option-nav' as ShortcutCommandId, label: () => t('shortcut.optionNav'),
+      keys: ['↑', '↓'], bindings: [{ code: 'ArrowUp', modifiers: [] }, { code: 'ArrowDown', modifiers: [] }], group: 'input',
+    }), 'ui-user-questions: fixed question option nav')
   })
   const questionDraftStore = createQuestionDraftStore()
   const inputTriggers = ctx.get('inputTriggers') as InputTriggerServiceContract

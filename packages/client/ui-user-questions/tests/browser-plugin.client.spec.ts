@@ -790,14 +790,14 @@ describe('apply', () => {
     expect(b.pending.getSnapshot()).toEqual([])
   })
 
-  it("publishes the card's selection and paging keys as fixed reference rows", async () => {
+  it("publishes the card's selection, paging, and option-walk keys as fixed reference rows", async () => {
     const registerFixed = vi.fn((_command: unknown) => () => {})
     const b = await bench(true, [], 60_000, emptyInbox(), {
       describeBinding: vi.fn(() => ({ keys: ['Shift', 'Enter'] })),
       registerFixed,
     })
     try {
-      expect(registerFixed).toHaveBeenCalledTimes(3)
+      expect(registerFixed).toHaveBeenCalledTimes(4)
       const rows = registerFixed.mock.calls.map(([command]) => command as {
         id: string
         label: () => string
@@ -807,12 +807,14 @@ describe('apply', () => {
       })
       expect(rows.map(row => row.id)).toEqual([
         'fixed.question-advance', 'fixed.question-select', 'fixed.question-pager',
+        'fixed.question-option-nav',
       ])
       // A key the dictionaries do not carry would surface as the bare key.
       const labels = rows.map(row => row.label())
       expect(labels).not.toContain('shortcut.advance')
       expect(labels).not.toContain('shortcut.select')
       expect(labels).not.toContain('shortcut.pager')
+      expect(labels).not.toContain('shortcut.optionNav')
       expect(labels.every(label => label.length > 0)).toBe(true)
       expect(rows[0]).toMatchObject({ group: 'input' })
       expect(rows[1]).toMatchObject({
@@ -822,6 +824,10 @@ describe('apply', () => {
       expect(rows[2]).toMatchObject({
         group: 'input', keys: ['PageUp', 'PageDown'],
         bindings: [{ code: 'PageUp', modifiers: [] }, { code: 'PageDown', modifiers: [] }],
+      })
+      expect(rows[3]).toMatchObject({
+        group: 'input', keys: ['↑', '↓'],
+        bindings: [{ code: 'ArrowUp', modifiers: [] }, { code: 'ArrowDown', modifiers: [] }],
       })
     } finally {
       await b.fiber.dispose()
