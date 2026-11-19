@@ -149,19 +149,13 @@
 }
 
 /* Row-cell status glyphs, drawn where the dot would go and inheriting the
- * slot's tertiary tone: the background-job gear carries its live count as a
- * superscript; the wake-up sleep mark stays a quiet outline. */
+ * slot's tertiary tone: the wake-up sleep mark stays a quiet outline (the
+ * background-job gear retired into the gray ring's numeric badge, 五态定稿 §二). */
 .statusGlyph {
   display: inline-block;
   line-height: 1;
   white-space: nowrap;
   color: var(--dsw-alias-label-tertiary);
-}
-
-.statusGlyphCount {
-  font-size: 8px;
-  font-weight: 600;
-  margin-left: 1px;
 }
 
 .folderActive {
@@ -579,30 +573,71 @@
   color: var(--dsw-alias-label-caption);
 }
 
-/* Shape-channel badge beside the status dot (collab step3 §3.1, q3-visual):
-   a superscript-weight glyph colored by the primary state, so the dot keeps
-   carrying base color while the badge carries the semantic variant. */
-.statusMark {
-  display: inline-block;
+/* 五态定稿 §二: the solid states render as a filled circle at the gray
+   ring's outer diameter with their glyph embedded — ✓ 成了 / ✕ 败了 /
+   ! 等你 — so the red/green pair reads by shape, never by colour alone,
+   and the retired top-right statusMark badge carries nothing extra. The
+   three fills are one step deeper than the 500-level state tokens so a
+   white glyph clears 4.5:1 (5.0:1 / 5.4:1 / 5.0:1) while the circle still
+   clears 3:1 against both the light and dark row background. */
+.stateDot {
+  display: inline-flex;
   flex: none;
-  position: relative;
-  top: -4px;
-  margin-left: -3px;
-  font-size: 8px;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  /* Full-round corners state their arc back to the universal superellipse
+     (ui-theme corner-shape contract), like every other dot in these rows. */
+  corner-shape: round;
+  color: #FFFFFF;
+  font-size: 9px;
   font-weight: 700;
   line-height: 1;
 }
 
-.statusMark[data-state='done'] {
-  color: var(--dsw-alias-state-success-primary);
+.stateDot[data-state='done'] {
+  background: #1A7F4B;
 }
 
-.statusMark[data-state='error'] {
-  color: var(--dsw-alias-state-error-primary);
+.stateDot[data-state='error'] {
+  background: #C0392B;
 }
 
-.statusMark[data-state='warning'] {
-  color: var(--dsw-alias-state-warn-primary);
+.stateDot[data-state='warning'] {
+  background: #B45309;
+}
+
+/* The ongoing gray ring's wrapper: it holds the ring and lets the numeric
+   badge hang off its top-right corner without changing the 16px cell. */
+.stateDotBusy {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 五态定稿 §二 角标数字 = running subagents + live jobs on one badge
+   (the ◌ⁿ/⚙ⁿ sub-forms merged here; the count data source is unchanged).
+   Inverted pill (near-black on light / near-white on dark) so the number
+   stays legible in both themes; omitted at zero. */
+.busyBadge {
+  position: absolute;
+  top: -3px;
+  right: -4px;
+  min-width: 9px;
+  padding: 0 2px;
+  border-radius: 6px;
+  corner-shape: round;
+  background: var(--dsw-alias-label-primary);
+  color: var(--dsw-alias-label-primary-foreground);
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 10px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Group-header attention counts (queue-zone-1113): the removed global queue

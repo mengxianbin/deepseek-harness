@@ -1435,6 +1435,129 @@ describe('UiSession wake-up, job-count, and stale status sources', () => {
     connection.set(undefined)
     expect(service.sessionStatus.getSnapshot().get(id)?.statusStale).toBeUndefined()
   })
+
+  it('turns a clean green red when the shutdown killed an in-flight subagent (聚合红·subagent 腿)', () => {
+    const ctx = new Context()
+    const bench = createSessionsBench(ctx)
+    const parent = sessionId('agg-parent')
+    const child = sessionId('agg-child')
+    bench.binding(parent)
+    const service = createUiSession(ctx, bench)
+    const status = () => service.sessionStatus.getSnapshot().get(parent)
+    const openChildTurn = {
+      turnBoundary: {
+        openTurnStartSeq: SessionSeq(9),
+        lastStepStartSeq: SessionSeq(10),
+        lastStepBoundary: { kind: 'start' as const, seq: SessionSeq(10) },
+        lastTurn: 1,
+      },
+    }
+
+    // All clean: the main turn ended clean and the child row reads clean too.
+    bench.list.update((draft) => {
+      if (!draft.ids.includes(child)) draft.ids.push(child)
+      draft.byId[parent] = {
+        id: parent, displayTitle: parent, running: false, retainedBy: {}, blank: false, updatedAt: 0,
+        projectionValues: { lastTurnOutcome: { kind: 'completed', at: 5 } },
+      }
+      draft.byId[child] = {
+        id: child, displayTitle: child, running: false, retainedBy: {}, blank: false, updatedAt: 0,
+        projectionValues: { lastTurnOutcome: { kind: 'completed', at: 4 } },
+      }
+      // Whole-property assignment exactly like the runtime spec's precedent
+      // (the store field is Readonly<Record<…>>; this test needs no other key).
+      draft.projectionsBySession = {
+        [parent]: {
+          state: 'ready', error: null,
+          values: { subagentCatalog: [{ id: child, createdAt: 1, mode: 'continuable', label: 'worker' }] },
+        },
+      }
+    })
+    expect(status()?.completionOutcome).toBe('completed')
+    expect(status()?.completionInterrupted).toBeUndefined()
+
+    // The Host died with the child mid-turn: the parent's own turn closed
+    // clean, but a stopped child holding an open turn is work left behind —
+    // the all-clean green may not stand (整体聚合 §三).
+    bench.list.update((draft) => {
+      draft.byId[child]!.projectionValues = openChildTurn
+    })
+    expect(status()?.completionOutcome).toBe('failed')
+    expect(status()?.completionInterrupted).toBe(true)
+
+    // Fail-open: a child still running belongs to the busy tier, never red.
+    bench.list.update((draft) => {
+      draft.byId[child]!.projectionValues = { lastTurnOutcome: { kind: 'completed', at: 4 } }
+      draft.byId[child]!.running = true
+    })
+    expect(status()?.completionOutcome).toBe('completed')
+
+    // Fail-open: a catalog row whose Session row is absent invents nothing.
+    bench.list.update((draft) => {
+      draft.byId[child]!.running = false
+      Reflect.deleteProperty(draft.byId, child)
+      draft.ids.splice(draft.ids.indexOf(child), 1)
+    })
+    expect(status()?.completionOutcome).toBe('completed')
+
+    // Closing the child restores the ordinary clean mark.
+    bench.list.update((draft) => {
+      if (!draft.ids.includes(child)) draft.ids.push(child)
+      draft.byId[child] = {
+        id: child, displayTitle: child, running: false, retainedBy: {}, blank: false, updatedAt: 0,
+        projectionValues: { lastTurnOutcome: { kind: 'completed', at: 6 } },
+      }
+    })
+    expect(status()?.completionOutcome).toBe('completed')
+    expect(status()?.completionInterrupted).toBeUndefined()
+  })
+
+  it('turns a clean green red when an outage killed an in-flight job (聚合红·job 腿)', () => {
+    const ctx = new Context()
+    const bench = createSessionsBench(ctx)
+    const id = sessionId('agg-job')
+    bench.binding(id)
+    const jobsBench = createJobsBench()
+    const connection = createConnectionBench()
+    ctx.provide('slots', { bindStoreScope: vi.fn() } as never)
+    const service = new UiSession(ctx, bench.sessions, jobsBench.jobs, connection.source)
+    const status = () => service.sessionStatus.getSnapshot().get(id)
+    const release = service.watchSessionJobs(id)
+
+    // The row's main turn ended clean — the ordinary green promise.
+    bench.list.update((draft) => {
+      if (!draft.ids.includes(id)) draft.ids.push(id)
+      draft.byId[id] = {
+        id, displayTitle: id, running: false, retainedBy: {}, blank: false, updatedAt: 0,
+        projectionValues: { lastTurnOutcome: { kind: 'completed', at: 5 } },
+      }
+    })
+    expect(status()?.completionOutcome).toBe('completed')
+
+    // A live own job rides the roster while the link is up.
+    jobsBench.setRows(id, [statusJob({ owner: id })])
+    expect(status()?.activeJobCount).toBe(1)
+
+    // The link drops with the job in flight: the pin is the only record of
+    // what a Host restart would take down.
+    connection.set('disconnected')
+    expect(status()?.statusStale).toBe(true)
+
+    // The Host comes back and the refreshed roster no longer carries the
+    // job — it did not settle, it was killed with the Host (整体聚合 §三).
+    connection.set('connected')
+    jobsBench.setRows(id, [])
+    expect(status()?.completionOutcome).toBe('failed')
+    expect(status()?.completionInterrupted).toBe(true)
+    expect(status()?.activeJobCount).toBeUndefined()
+
+    // A rerun is the legal channel: it supersedes the interruption. The
+    // durable clean end keeps its own green underneath (绿点耐久).
+    bench.emitStatus(id, true)
+    expect(status()?.completionOutcome).toBe('completed')
+    expect(status()?.completionInterrupted).toBeUndefined()
+    release()
+  })
 })
 
 describe('UiSession pending interactions', () => {
