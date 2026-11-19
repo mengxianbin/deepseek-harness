@@ -1025,6 +1025,154 @@ describe('focus follow after a page change', () => {
   })
 })
 
+describe('arrow keys switch the options', () => {
+  it('walks the option buttons with wrap, focus only — the choice and the page stay put', () => {
+    const { carrier, answer } = wait()
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    const first = screen.getByRole('radio', { name: /工程落地型/ })
+    const second = screen.getByRole('radio', { name: /研究潜力型/ })
+    act(() => { first.focus() })
+
+    // ↓ claims the key and moves focus to the next option; the selection
+    // does not follow — a single-select arrow must not choose (choose()
+    // steps the page on), so the recommended default stays the answer and
+    // the card stays on question 1.
+    expect(fireEvent.keyDown(first, { key: 'ArrowDown' })).toBe(false)
+    expect(document.activeElement).toBe(second)
+    expect(first.getAttribute('aria-checked')).toBe('true')
+    expect(second.getAttribute('aria-checked')).toBe('false')
+    expect(screen.getByText('1 / 3')).toBeTruthy()
+
+    // Past the last option it wraps to the first; ArrowUp walks back and
+    // wraps at the top the same way.
+    expect(fireEvent.keyDown(second, { key: 'ArrowDown' })).toBe(false)
+    expect(document.activeElement).toBe(first)
+    expect(fireEvent.keyDown(first, { key: 'ArrowUp' })).toBe(false)
+    expect(document.activeElement).toBe(second)
+    expect(answer).not.toHaveBeenCalled()
+  })
+
+  it('moves a multi-select focus without toggling the choice', () => {
+    const { carrier, answer } = wait([{
+      id: 'checks', question: 'Which checks?', multiSelect: true,
+      options: [{ label: 'Unit' }, { label: 'Lint' }, { label: 'Types' }],
+    }])
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    const unit = screen.getByRole('checkbox', { name: 'Unit' })
+    const lint = screen.getByRole('checkbox', { name: 'Lint' })
+    act(() => { unit.focus() })
+
+    expect(fireEvent.keyDown(unit, { key: 'ArrowDown' })).toBe(false)
+    expect(document.activeElement).toBe(lint)
+    expect(unit.getAttribute('aria-checked')).toBe('false')
+    expect(lint.getAttribute('aria-checked')).toBe('false')
+    expect(answer).not.toHaveBeenCalled()
+  })
+
+  it('leaves modified, composing, and locked keys to the browser', () => {
+    const { carrier, answer } = wait([{
+      id: 'one', question: 'First?',
+      options: [{ label: 'A', description: 'A detail' }, { label: 'B' }],
+    }])
+    answer.mockReturnValueOnce(new Promise(() => {}))
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    const a = screen.getByRole('radio', { name: 'A' })
+    act(() => { a.focus() })
+
+    // Modified keys stay the browser's own — Ctrl/Shift combos are never
+    // claimed and focus does not move.
+    expect(fireEvent.keyDown(a, { key: 'ArrowDown', ctrlKey: true })).toBe(true)
+    expect(document.activeElement).toBe(a)
+    expect(fireEvent.keyDown(a, { key: 'ArrowDown', shiftKey: true })).toBe(true)
+    expect(document.activeElement).toBe(a)
+    expect(fireEvent.keyDown(a, { key: 'Tab', ctrlKey: true })).toBe(true)
+    expect(document.activeElement).toBe(a)
+
+    // IME composition keeps its keys, same as the card's page keys.
+    expect(fireEvent.keyDown(a, { key: 'ArrowDown', isComposing: true })).toBe(true)
+    expect(fireEvent.keyDown(a, { key: 'ArrowDown', keyCode: 229 })).toBe(true)
+    expect(document.activeElement).toBe(a)
+
+    // A busy submission disables every option: the arrow has nowhere to
+    // move focus to, so it stays unclaimed (the card body keeps its own
+    // scroll) and focus parked on the row's still-enabled description
+    // toggle stays put.
+    fireEvent.click(a)
+    fireEvent.click(screen.getByRole('button', { name: '提交' }))
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '正在提交…' }).disabled).toBe(true)
+    const row = a.closest('[data-option-row]') as HTMLElement
+    const rowToggle = row.querySelector('button:not([disabled])') as HTMLButtonElement
+    act(() => { rowToggle.focus() })
+    expect(fireEvent.keyDown(rowToggle, { key: 'ArrowDown' })).toBe(true)
+    expect(document.activeElement).toBe(rowToggle)
+  })
+
+  it('keeps the answer-field arrows out of the option walk', () => {
+    const { carrier } = wait()
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    const field = screen.getByPlaceholderText<HTMLTextAreaElement>('输入你的答案')
+    act(() => { field.focus() })
+
+    // The textarea's ↓ belongs to its own path (caret movement and the
+    // '/' menu arbitration): unclaimed here, focus stays in the field.
+    expect(fireEvent.keyDown(field, { key: 'ArrowDown' })).toBe(true)
+    expect(document.activeElement).toBe(field)
+  })
+})
+
+describe('Tab leaves the option list in one press', () => {
+  it('skips the remaining options forward to the answer field', () => {
+    const { carrier } = wait([{
+      id: 'one', question: 'First?', options: [{ label: 'A' }, { label: 'B' }, { label: 'C' }],
+    }])
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    const a = screen.getByRole('radio', { name: 'A' })
+    act(() => { a.focus() })
+
+    // One press past B and C lands in the answer field: the option buttons
+    // are no longer a walk of their own.
+    expect(fireEvent.keyDown(a, { key: 'Tab' })).toBe(false)
+    expect(document.activeElement).toBe(screen.getByPlaceholderText('输入你的答案'))
+  })
+
+  it('keeps the description toggles in the Tab path and walks back out of the list', () => {
+    const { carrier } = wait([{
+      id: 'one', question: 'First?',
+      options: [{ label: 'A', description: 'A detail' }, { label: 'B', description: 'B detail' }],
+    }])
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    const a = screen.getByRole('radio', { name: 'A' })
+    const b = screen.getByRole('radio', { name: 'B' })
+    const rowToggles = screen.getAllByRole('button', { name: '展开' })
+      .filter(element => element.closest('[data-option-row]') !== null)
+    expect(rowToggles).toHaveLength(2)
+    const toggleA = rowToggles[0] as HTMLElement
+    const toggleB = rowToggles[1] as HTMLElement
+
+    // Tab first visits its own row's description toggle — disclosure stays
+    // reachable — then skips option B to B's toggle, then the field.
+    act(() => { a.focus() })
+    expect(fireEvent.keyDown(a, { key: 'Tab' })).toBe(false)
+    expect(document.activeElement).toBe(toggleA)
+    expect(fireEvent.keyDown(toggleA, { key: 'Tab' })).toBe(false)
+    expect(document.activeElement).toBe(toggleB)
+    expect(fireEvent.keyDown(toggleB, { key: 'Tab' })).toBe(false)
+    expect(document.activeElement).toBe(screen.getByPlaceholderText('输入你的答案'))
+
+    // Shift+Tab walks back over the skipped options to the first row's
+    // toggle; from the first option it leaves the list for the header's
+    // own toggle (the one outside every option row).
+    act(() => { b.focus() })
+    expect(fireEvent.keyDown(b, { key: 'Tab', shiftKey: true })).toBe(false)
+    expect(document.activeElement).toBe(toggleA)
+    const questionToggle = screen.getAllByRole('button', { name: '展开' })
+      .find(element => element.closest('[data-option-row]') === null) as HTMLElement
+    act(() => { a.focus() })
+    expect(fireEvent.keyDown(a, { key: 'Tab', shiftKey: true })).toBe(false)
+    expect(document.activeElement).toBe(questionToggle)
+  })
+})
+
 describe('parseRecommendedLabel', () => {
   it('recognizes English and Chinese suffixes without changing ordinary labels', () => {
     expect(parseRecommendedLabel('Fast (Recommended)')).toEqual({ label: 'Fast', recommended: true })

@@ -659,6 +659,57 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
     setError(null)
   }
 
+  // FORK dsh-local (ask-option-arrows-1118, 2026-11-19): option switching
+  // moves off Tab / Shift+Tab — Shift+Tab is awkward to hold and Tab read
+  // like it was about to turn the page — onto ArrowUp / ArrowDown. The
+  // handler sits on the option row so it catches the option button and its
+  // description toggle alike: arrows walk the rows with wrap and move focus
+  // only (a single-select arrow must not select — choose() steps the page
+  // on, so Enter stays the one selection gesture), while Tab / Shift+Tab
+  // leave the option list in one press by skipping the option buttons to
+  // the nearest other control — the description toggle, the answer field,
+  // the header — keeping Tab the way out of the card. Modifier keys and IME
+  // composition stay native, a locked card (busy submission, review) has no
+  // enabled option to hand focus to and lets the key through, and the
+  // answer field never sees this handler: its arrows keep the '/'
+  // arbitration.
+  const optionRowKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (isComposing(event)) return
+    if (event.altKey || event.ctrlKey || event.metaKey) return
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown' && event.key !== 'Tab') return
+    const target = event.target
+    if (!(target instanceof HTMLElement)) return
+    if (event.key === 'Tab') {
+      const frame = frameRef.current
+      if (frame === null) return
+      const focusables = [...frame.querySelectorAll<HTMLElement>('button:not([disabled]), textarea:not([disabled]), a[href]')]
+      const from = focusables.indexOf(target)
+      if (from < 0) return
+      const step = event.shiftKey ? -1 : 1
+      let landing: HTMLElement | undefined
+      for (let cursor = from + step; cursor >= 0 && cursor < focusables.length; cursor += step) {
+        const candidate = focusables[cursor]
+        if (candidate === undefined || candidate.matches('[role="radio"], [role="checkbox"]')) continue
+        landing = candidate
+        break
+      }
+      if (landing === undefined) return
+      event.preventDefault()
+      landing.focus()
+      return
+    }
+    if (event.shiftKey || locked) return
+    const rows = [...(event.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[data-option-row]') ?? [])]
+    const from = rows.indexOf(event.currentTarget)
+    if (from < 0) return
+    const step = event.key === 'ArrowDown' ? 1 : -1
+    const next = rows[(from + step + rows.length) % rows.length]
+    const button = next?.querySelector<HTMLButtonElement>('button:not([disabled])') ?? undefined
+    if (button === undefined) return
+    event.preventDefault()
+    button.focus()
+  }
+
   // FORK dsh-local (ask-keys-focus, 2026-11-17 裁定 A5): when the page moves
   // under the keyboard — a single-select choice auto-advancing, or any other
   // index change — and the option that held focus unmounted with it, focus
@@ -826,6 +877,7 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
                       )}
                       data-option-row
                       data-expanded={descriptionExpanded || undefined}
+                      onKeyDown={optionRowKeyDown}
                     >
                       <button
                         type="button"
