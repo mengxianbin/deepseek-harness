@@ -65,7 +65,7 @@ const panel: SessionHealthState = {
 const unattached: SessionHealthState = { report: { ...base } }
 
 function badgeOf(): HTMLElement {
-  const badge = document.querySelector('[data-alert-inbox-state]') as HTMLElement | null
+  const badge = document.querySelector<HTMLElement>('[data-alert-inbox-state]')
   expect(badge).not.toBeNull()
   return badge as HTMLElement
 }
@@ -152,12 +152,12 @@ describe('AlertInboxBadge', () => {
     fireEvent.click(document.querySelector('[data-alert-inbox-open]') as HTMLElement)
     fireEvent.click(screen.getAllByRole('button', { name: '已读' })[0]!)
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    await waitFor(() => { expect(fetchMock).toHaveBeenCalledTimes(1) })
     const [path, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
     expect(path).toBe(ALERT_INBOX_PATH)
     expect(JSON.parse(init.body as string)).toEqual({ id: 'fam-storm', action: 'read' })
     // 乐观翻位：该行改显示【恢复】，徽标数同步 2 → 1.
-    await waitFor(() => expect(screen.getAllByRole('button', { name: '恢复' }).length).toBeGreaterThan(0))
+    await waitFor(() => { expect(screen.getAllByRole('button', { name: '恢复' }).length).toBeGreaterThan(0) })
     expect(document.querySelector('[data-alert-inbox-count]')?.textContent).toBe('1')
   })
 
@@ -173,7 +173,7 @@ describe('AlertInboxBadge', () => {
     // 最近24h栏里的已读行（fam-read）显示【恢复】.
     const restore = screen.getAllByRole('button', { name: '恢复' })[0]!
     fireEvent.click(restore)
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    await waitFor(() => { expect(fetchMock).toHaveBeenCalledTimes(1) })
     const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
     expect(JSON.parse(init.body as string)).toEqual({ id: 'fam-read', action: 'restore' })
   })

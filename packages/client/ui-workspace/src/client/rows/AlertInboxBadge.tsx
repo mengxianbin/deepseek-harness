@@ -77,7 +77,7 @@ function AlertInboxRow(
       <Button
         size="sm"
         variant="outline"
-        onClick={() => onAction(entry.id, open ? 'read' : 'restore')}
+        onClick={() => { onAction(entry.id, open ? 'read' : 'restore') }}
       >
         {open ? t('alertInbox.action.read') : t('alertInbox.action.restore')}
       </Button>
@@ -204,7 +204,7 @@ export function AlertInboxBadge({ useSessionHealth, t }: AlertInboxBadgeProps) {
           entries={entries}
           t={t}
           onAction={act}
-          onClose={() => setOpen(false)}
+          onClose={() => { setOpen(false) }}
         />
       )}
     </>
