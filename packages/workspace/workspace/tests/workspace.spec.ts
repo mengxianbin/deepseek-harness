@@ -11,7 +11,7 @@ import type { DomainChanged } from '@deepseek-ai/dsh-storage-domain'
 import SessionStore, { SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionHeader } from '@deepseek-ai/dsh-session'
 import { SessionPersistenceRevision } from '@deepseek-ai/dsh-session-persistence'
-import type { SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence'
+import type { SessionPersistenceListOptions, SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence'
 import { MemoryMediaPool, MemoryStorageBackend } from '../../../storage/storage-domain/tests/helpers/memory-backend.ts'
 import WorkspaceRegistry, {
   WorkspaceId,
@@ -52,8 +52,13 @@ async function harness(options: HarnessOptions = {}) {
   ctx.provide('storageDomain', facility)
 
   let listed = options.sessions ?? []
-  const list = vi.fn(async (): Promise<SessionPersistenceSnapshot[]> =>
-    listed.map(header => ({ header, revision: SessionPersistenceRevision(`rev-${header.id}`) })))
+  // The peer honours the listing options the registry relies on: an excluded
+  // id never reaches the result (the cascade's freshness probe lists with
+  // every known id excluded; archive-cascade-list-1117).
+  const list = vi.fn(async (listOptions?: SessionPersistenceListOptions): Promise<SessionPersistenceSnapshot[]> =>
+    listed
+      .filter(header => !listOptions?.excludeSessionIds?.has(header.id))
+      .map(header => ({ header, revision: SessionPersistenceRevision(`rev-${header.id}`) })))
   const open = vi.fn(() => { throw new Error('event bodies must not be opened') })
   const stat = vi.fn(() => { throw new Error('per-session stat must not be needed') })
   ctx.provide('sessionPersistence', { list, open, stat } as never)
@@ -1483,11 +1488,70 @@ describe('subagent cascade archive', () => {
     const result = await harness({ sessions: [header('fp', dir, 100), sub('fc', 'fp', dir, 200)] })
     onTestFinished(() => result.ctx.fiber.dispose())
     const report = vi.spyOn(result.ctx.logger, 'error').mockImplementation(() => undefined)
-    result.list.mockRejectedValueOnce(new Error('persistence backend down'))
+    // The freshness probe reads persistence before the re-pull does, so a
+    // one-shot failure would be absorbed by the probe and the re-pull would
+    // succeed; the loud-skip path is "the refresh cannot read at all", which
+    // is a persistent backend failure (archive-cascade-list-1117).
+    result.list.mockRejectedValue(new Error('persistence backend down'))
 
     await expect(result.registry.archiveSession(SessionId('fp'))).resolves.toBeUndefined()
     expect(result.registry.archivedSessionIds).toEqual(['fp'])
     expect(report).toHaveBeenCalledWith(expect.stringContaining('header refresh failed'))
+  })
+
+  it('reuses the in-memory snapshot when persistence grew nothing new, without a full re-pull', async () => {
+    const dir = await makeDir('cascade-fresh')
+    const result = await harness({ sessions: [header('qp', dir, 100), sub('qc', 'qp', dir, 200)] })
+    onTestFinished(() => result.ctx.fiber.dispose())
+    const report = vi.spyOn(result.ctx.logger, 'error').mockImplementation(() => undefined)
+
+    await result.registry.archiveSession(SessionId('qp'))
+
+    // The known child is still archived: reusing the snapshot never drops one.
+    expect(result.registry.archivedSessionIds).toEqual(['qp', 'qc'])
+    expect(storedState(result.pool).archivedSessionIds).toEqual(['qp', 'qc'])
+    // Boot listing + one probe with every known id excluded; the full
+    // re-pull (a third, option-less listing) never ran.
+    expect(result.list).toHaveBeenCalledTimes(2)
+    expect(result.list).toHaveBeenLastCalledWith({
+      excludeSessionIds: new Set([SessionId('qp'), SessionId('qc')]),
+    })
+    expect(report).not.toHaveBeenCalledWith(expect.stringContaining('header refresh failed'))
+  })
+
+  it('re-pulls the full listing when a session appears after boot and still cascades to it', async () => {
+    const dir = await makeDir('cascade-stale')
+    const result = await harness({ sessions: [header('sp', dir, 100)] })
+    onTestFinished(() => result.ctx.fiber.dispose())
+
+    // A child materialized in persistence after boot: unknown to the
+    // in-memory index, so the probe surfaces it and forces the full re-pull.
+    result.setSessions([header('sp', dir, 100), sub('sc', 'sp', dir, 200)])
+
+    await result.registry.archiveSession(SessionId('sp'))
+
+    expect(result.registry.archivedSessionIds).toEqual(['sp', 'sc'])
+    expect(storedState(result.pool).archivedSessionIds).toEqual(['sp', 'sc'])
+    // Boot listing + probe + the full re-pull (the re-pull takes no options).
+    expect(result.list).toHaveBeenCalledTimes(3)
+    expect(result.list).toHaveBeenLastCalledWith()
+  })
+
+  it('falls back to the full re-pull when the freshness probe itself fails', async () => {
+    const dir = await makeDir('cascade-probe-fault')
+    const result = await harness({ sessions: [header('zp', dir, 100), sub('zc', 'zp', dir, 200)] })
+    onTestFinished(() => result.ctx.fiber.dispose())
+    const report = vi.spyOn(result.ctx.logger, 'error').mockImplementation(() => undefined)
+    // One-shot failure: the probe absorbs it, and fail-closed sends the
+    // cascade into the full re-pull, which succeeds — the child is archived
+    // and no loud skip fires.
+    result.list.mockRejectedValueOnce(new Error('probe backend blip'))
+
+    await expect(result.registry.archiveSession(SessionId('zp'))).resolves.toBeUndefined()
+
+    expect(result.registry.archivedSessionIds).toEqual(['zp', 'zc'])
+    expect(result.list).toHaveBeenCalledTimes(3)
+    expect(report).not.toHaveBeenCalledWith(expect.stringContaining('header refresh failed'))
   })
 
   it('cascades to a child that exists only in the live session store', async () => {

@@ -467,18 +467,23 @@ export class WorkspaceRegistry extends Service {
   /**
    * Archive every subagent descendant of a freshly archived session,
    * breadth-first over `parentSession` links (archive-cascade-reap-1114).
-   * The header index is refreshed first so a child created after boot is
-   * still found — a missed child is exactly the leak this cascade closes —
-   * and a refresh failure skips the cascade loudly instead of flipping the
+   * The header snapshot is re-pulled first only when it may be stale: a
+   * freshness probe that finds no session beyond the in-memory index reuses
+   * the snapshot, so the common archive stops paying a full persistence
+   * listing per archive (archive-cascade-list-1117) — while any doubt falls
+   * closed toward the re-pull, because a child created after boot must still
+   * be found: a missed child is exactly the leak this cascade closes. A
+   * refresh failure skips the cascade loudly instead of flipping the
    * parent's completed archive (the idle reaper backstops whatever the skip
-   * leaves behind). Each child is archived individually without
-   * `stopActivity`; a child that refuses or fails is logged and leaves the
-   * rest of the batch archived.
+   * leaves behind), and the live session store is always re-indexed because
+   * the probe only sees persistence. Each child is archived individually
+   * without `stopActivity`; a child that refuses or fails is logged and
+   * leaves the rest of the batch archived.
    * @param rootId - The session whose subagent descendants cascade.
    */
   private async cascadeSubagentDescendants(rootId: SessionId): Promise<void> {
     try {
-      await this.indexHeaders(await this.listStoredHeaders())
+      if (!(await this.storedHeaderSnapshotFresh())) await this.indexHeaders(await this.listStoredHeaders())
       await this.indexLiveSessions()
     } catch (error) {
       this.ctx.logger.error(`workspace: cascade archive of session '${rootId}' skipped, header refresh failed: ${String(error)}`)
@@ -999,6 +1004,34 @@ export class WorkspaceRegistry extends Service {
   private async listStoredHeaders(): Promise<SessionHeader[]> {
     const snapshots = await this.ctx.sessionPersistence.list()
     return snapshots.map(snapshot => snapshot.header)
+  }
+
+  /**
+   * Whether the in-memory header snapshot provably covers every session the
+   * persistence layer holds (archive-cascade-list-1117). The probe lists
+   * with every known id excluded: the backend skips an excluded session at
+   * the directory enumeration alone, so the probe costs directory walks over
+   * the project roots instead of one header read per stored session — the
+   * full pull the cascade used to run on every archive read all 2141
+   * production headers (hot 1.4 s / cold 3.7 s, measured 2026-11-17). An
+   * empty probe result means no session appeared since the last index pass,
+   * so the cascade reuses `this.headers`. Doubt always falls closed toward
+   * the full re-pull: a failing probe resolves to `false`, and a session the
+   * index does not know surfaces in the probe result — a missed child is the
+   * leak this cascade closes (archive-cascade-reap-1114), while a redundant
+   * pull only costs time. An empty index over an empty root skips a pull
+   * that could not have found anything anyway.
+   * @returns `true` only when skipping the full re-pull cannot hide a child.
+   */
+  private async storedHeaderSnapshotFresh(): Promise<boolean> {
+    try {
+      const unknown = await this.ctx.sessionPersistence.list({
+        excludeSessionIds: new Set(this.headers.keys()),
+      })
+      return unknown.length === 0
+    } catch {
+      return false
+    }
   }
 
   private async indexLiveSessions(): Promise<void> {
