@@ -607,26 +607,28 @@
 
 /* Group-header attention counts (queue-zone-1113): the removed global queue
    segment's cross-workspace counts, now a badge beside the group title. Red
-   (failed stops awaiting a ruling) leads with the failed-stop bang glyph;
-   yellow (rows awaiting the user's reply) follows with the solid state dot —
-   shape, not just colour, separates the tiers; the separator is tertiary so
-   the counts keep the weight. */
+   (failed stops awaiting a ruling) leads, yellow (rows awaiting the user's
+   reply) follows; both counts ride the solid state dot in their tier colour,
+   a notch under the title's own size but on the title's line — a full-size
+   pair outgrew a lowercase name — and the wider inset keeps the pair reading
+   as status instead of as part of the name; a plain space separates the two
+   counts. */
 .attentionBadges {
   display: inline-flex;
   flex: none;
   align-items: center;
   gap: 3px;
-  margin-inline-start: 6px;
-  font-size: 10px;
+  margin-inline-start: 14px;
+  font-size: 12px;
   font-weight: 600;
-  line-height: 1;
+  line-height: 20px;
   vertical-align: middle;
 }
 
 .attentionCount {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
 }
 
 .attentionCount[data-attention='failed'] {
@@ -637,13 +639,9 @@
   color: var(--dsw-alias-state-warn-primary);
 }
 
-.attentionGlyph {
-  font-weight: 700;
-}
-
 .attentionDot {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   /* Full-round corners state their arc back to the universal superellipse
      (ui-theme corner-shape contract), like every other dot in these rows. */

@@ -3385,7 +3385,7 @@ describe('Workspace tree grouping', () => {
     // The badge rides the folded header too — the count never hides behind a click.
     const badge = () => screen.getByRole('img', { name: '待裁决 1 · 待回话 1' })
     expect(badge()).toBeTruthy()
-    // Red leads, each count on its own shape channel (bang glyph vs solid dot).
+    // Red leads; both counts ride the solid dot in their tier colour.
     expect([...badge().querySelectorAll('[data-attention]')].map(part => part.getAttribute('data-attention')))
       .toEqual(['failed', 'pending'])
     // beta has nothing queued: only the counted group carries a badge.

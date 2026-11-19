@@ -224,11 +224,14 @@ function rowHalf(e: { clientY: number; currentTarget: HTMLElement }): 'before' |
  * cross-workspace counts that used to live in the removed global segment's
  * count bar now ride the group header — red = queued tier p1 rows (unread
  * failed stops awaiting a ruling), yellow = queued tier p0 rows (awaiting the
- * user's reply). Red always leads. Each count carries its own shape channel —
- * red the failed-stop bang glyph, yellow the solid state dot — so the pair
- * reads by shape, never by color alone (StatusGlyph vocabulary). Hidden
- * entirely while no member is queued (N+M = 0), and a zero colour inside a
- * non-empty pair renders no part at all.
+ * user's reply). Red always leads. Both counts ride the solid state dot in
+ * their tier colour, set a notch under the workspace title's size but on the
+ * title's line — a full-size pair outgrew a lowercase name — with a wider
+ * inset keeping the pair apart from the name, and a plain space between the
+ * two counts; the accessible name (role="img")
+ * spells out both tier words, so the tiers stay distinguishable without
+ * colour. Hidden entirely while no member is queued (N+M = 0), and a zero
+ * colour inside a non-empty pair renders no part at all.
  */
 function AttentionBadges({ red, yellow, t }: { red: number; yellow: number; t: RowTranslate }) {
   if (red + yellow === 0) return null
@@ -236,12 +239,12 @@ function AttentionBadges({ red, yellow, t }: { red: number; yellow: number; t: R
     <span className={css.attentionBadges} role="img" aria-label={t('group.attention', { red, yellow })}>
       {red > 0 && (
         <span className={css.attentionCount} data-attention="failed">
-          <span className={css.attentionGlyph} aria-hidden="true">!</span>
+          <span className={css.attentionDot} aria-hidden="true" />
           {red}
         </span>
       )}
       {red > 0 && yellow > 0 && (
-        <span className={css.attentionSeparator} aria-hidden="true">·</span>
+        <span className={css.attentionSeparator} aria-hidden="true">{'\u00A0'}</span>
       )}
       {yellow > 0 && (
         <span className={css.attentionCount} data-attention="pending">
