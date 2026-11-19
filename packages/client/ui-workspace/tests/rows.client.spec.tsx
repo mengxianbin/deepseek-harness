@@ -382,21 +382,22 @@ describe('workspace browser rows', () => {
     expect(onToggle).toHaveBeenCalledOnce()
   })
 
-  it('shows the group attention badge red-first with shape-distinct glyphs, hidden at zero (queue-zone-1113)', () => {
+  it('shows the group attention badge red-first with dot-marked counts, hidden at zero (queue-zone-1113)', () => {
     const group = (queuedRed: number, queuedYellow: number): GroupNode => ({
       key: 'project', workspaceId: wid('project'), cwd: '/projects/project', createdAt: 0, label: 'Project',
       sessionCount: 5, queuedRed, queuedYellow, expanded: true, containsCurrent: false, sessions: [],
     })
     const view = render(<ProjectRowItem group={group(2, 3)} onToggle={vi.fn()} onCreate={vi.fn()} t={t} />)
     const badge = screen.getByRole('img', { name: '待裁决 2 · 待回话 3' })
-    // Red leads, and each count rides its own shape channel: the failed-stop
-    // bang glyph for red, the solid state dot for yellow — never colour alone.
+    // Red leads; both counts ride the solid dot in their tier colour, sized
+    // with the title, and a space separates the pair — the accessible name
+    // spells out the tiers, so colour is not the only channel.
     expect([...badge.querySelectorAll('[data-attention]')].map(part => part.getAttribute('data-attention')))
       .toEqual(['failed', 'pending'])
-    expect(badge.querySelector('[data-attention="failed"]')?.textContent).toBe('!2')
+    expect(badge.querySelector('[data-attention="failed"]')?.textContent).toBe('2')
     expect(badge.querySelector('[data-attention="pending"]')?.textContent).toBe('3')
+    expect(badge.querySelector('[data-attention="failed"] [class*="attentionDot"]')).toBeTruthy()
     expect(badge.querySelector('[data-attention="pending"] [class*="attentionDot"]')).toBeTruthy()
-    expect(badge.querySelector('[data-attention="failed"] [class*="attentionGlyph"]')?.textContent).toBe('!')
     // A zero colour inside a live pair renders no part of its own…
     view.rerender(<ProjectRowItem group={group(0, 1)} onToggle={vi.fn()} onCreate={vi.fn()} t={t} />)
     expect(screen.getByRole('img', { name: '待裁决 0 · 待回话 1' })).toBeTruthy()

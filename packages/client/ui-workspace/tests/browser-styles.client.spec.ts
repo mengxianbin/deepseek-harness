@@ -191,8 +191,12 @@ describe('WorkspaceBrowser.module.css list', () => {
     // The 安康位 alarm line keeps the list's trailing seat and row gutter.
     expect(declarations('.queueHealth')?.get('margin'))
       .toBe('0 calc(var(--dsh-session-list-edge-inset) - var(--dsh-session-list-scrollbar-offset)) 4px 12px')
-    // The group header badge separates its tiers by shape, not just colour:
-    // the yellow count rides the solid dot, the red count its own colour.
+    // The group header badge rides the title's line a notch under the title's
+    // size, spaced clear of the name, on a dot sized to the smaller type.
+    expect(rowDeclarations('.attentionBadges')?.get('font-size')).toBe('12px')
+    expect(rowDeclarations('.attentionBadges')?.get('line-height')).toBe('20px')
+    expect(rowDeclarations('.attentionBadges')?.get('margin-inline-start')).toBe('14px')
+    expect(rowDeclarations('.attentionDot')?.get('width')).toBe('7px')
     expect(rowDeclarations('.attentionDot')?.get('background')).toBe('currentColor')
     expect(rowDeclarations(".attentionCount[data-attention='failed']")?.get('color'))
       .toBe('var(--dsw-alias-state-error-primary)')
