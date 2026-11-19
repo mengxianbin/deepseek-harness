@@ -17,15 +17,17 @@
  * hold conclusions (结论不能删), so it waits for a human while duty reports the
  * read failure loudly (duty-inventory fail-closed on its side).
  *
- * Three channels (§七 清单行三通道), all folded on this side:
- * - 客观恢复: every member session completed a turn after the family's last
- *   attempt with `stopped` cleared (or its relay session did) → auto-archive
- *   (真·解决; heal = `auto`/`relay`).
- * - 人工确认: {@link acknowledgeAlert} marks read → archive with NO physical
- *   delete; {@link setAlertResolution} backfills the conclusion pointer —
- *   conclusions stay readable in the archived entry forever.
- * - 超时升级: an unread entry older than 2 cooldown windows (2×10min, §八 已定)
- *   stays put and flips `escalated` — it never disappears on its own (防误清).
+ * Three channels are gone — 2026-11-18 改版裁定 C/D supersedes §七 旧三通道:
+ * - 客观恢复 (auto-archive) and 超时升级 (escalated) are **retired**: an entry
+ *   never disappears on its own; red clears only by a human action.
+ * - 人工确认 stays: {@link acknowledgeAlert} marks read (leaves the unread
+ *   column, keeps the body), {@link restoreAlert} puts it back, and
+ *   {@link setAlertResolution} backfills the conclusion pointer — conclusions
+ *   stay readable forever (结论不能删).
+ * - **多信源、单写者 (改判 D)**: the m-note restart/death source
+ *   (`restart-alert-source.json`, writer = `scripts/dsh/restart-alert-source.py`)
+ *   is folded here as category entries — sources deliver, only this module
+ *   reads-modifies-writes the box.
  *
  * File-name twins (keep in sync): `session-revive-v2-state.json` with the
  * sibling task's writer (设计档 §七 接口契约) and `alert-inbox.json` with m-note
@@ -42,14 +44,16 @@ export const ALERT_INBOX_FILE = 'alert-inbox.json'
 /** The revive state machine's export filename (contract twin, 设计档 §七). */
 export const REVIVE_V2_STATE_FILE = 'session-revive-v2-state.json'
 
+/** The m-note restart/death source filename (信源契约, 设计档 §七「重启/死因信源契约」). */
+export const RESTART_ALERT_SOURCE_FILE = 'restart-alert-source.json'
+
 /** Cooling window (§八 已定: 冷却 10 分钟) — twin of the state machine's cooldown policy. */
 export const ALERT_COOLDOWN_MS = 10 * 60 * 1000
 
-/** 超时升级: an unread entry stays > 2 cooling windows → `escalated` (§七, 不消失反升红). */
-export const ALERT_ESCALATE_AFTER_MS = 2 * ALERT_COOLDOWN_MS
-
-/** Clustering window (同时段): same-cause attempts within this gap chain into one family. */
-export const ALERT_FAMILY_WINDOW_MS = 6 * 60 * 60 * 1000
+// ALERT_ESCALATE_AFTER_MS (超时升级) retired with 改判 C — an unread entry never
+// flips on its own; the red is cleared by 已读 only.
+// ALERT_FAMILY_WINDOW_MS (同时段聚类) retired with 改判 B — the cluster key is
+// the 分类 (one open entry per cause), not a time window.
 
 /** The probe-alarm event cause (§五: 探针持续红 → 清单「可能探针自己坏了」). */
 export const PROBE_RED_CAUSE = 'probe-red-alarm'
@@ -91,7 +95,8 @@ export interface AlertInboxEntry {
   readonly unread: boolean
   /** Archived = in the mailbox archive. Never a physical delete (结论不能删). */
   readonly archived: boolean
-  /** 超时升级 flag: stays red, never disappears (防误清). */
+  /** 超时升级 flag — **retired (改判 C)**: kept in the shape for document
+   *  compatibility, always false; red clears only through 已读. */
   readonly escalated: boolean
   /** 结论回填; null until the action face backfills. */
   readonly resolution: AlertInboxResolution | null
@@ -134,6 +139,20 @@ export interface ReviveV2SessionState {
 export interface ReviveV2StateDocument {
   readonly at?: unknown
   readonly sessions?: unknown
+}
+
+/** One fact object inside the restart-alert-source document (信源契约, 设计档 §七). */
+export interface RestartAlertSourceFact {
+  readonly lastAt?: unknown
+  readonly count24h?: unknown
+  readonly rle24?: unknown
+}
+
+/** The m-note source document (`{ at, schema, facts: { <cause>: fact } }`, pull 型). */
+export interface RestartAlertSourceDocument {
+  readonly at?: unknown
+  readonly schema?: unknown
+  readonly facts?: unknown
 }
 
 /** One fold's outcome: the next document plus whether its content flipped. */
@@ -328,17 +347,17 @@ function deliver(entry: AlertInboxEntry, now: number): AlertInboxEntry {
   return { ...entry, deliveredAt: now, unread: true }
 }
 
-/** Cluster one attempt event: 同因 + 同时段 (|gap| ≤ window) extends the closest open family; otherwise a new family starts. */
+/**
+ * Cluster one attempt event: **分类 (改判 B)** — one OPEN entry per cause; a
+ * new cause starts its own family. The old 同时段 window is retired: sorting IS
+ * the heat signal (`lastAt` refresh floats the class to the top) and the counts
+ * live in `attempts`.
+ */
 function applyAttempt(entries: readonly AlertInboxEntry[], event: AttemptEvent): AlertInboxEntry[] {
   let target: AlertInboxEntry | undefined
-  let bestGap = Number.POSITIVE_INFINITY
   for (const entry of entries) {
     if (entry.archived || entry.cause !== event.cause) continue
-    const gap = Math.abs(event.at - entry.lastAt)
-    if (gap <= ALERT_FAMILY_WINDOW_MS && gap < bestGap) {
-      target = entry
-      bestGap = gap
-    }
+    if (target === undefined || entry.lastAt > target.lastAt) target = entry
   }
   if (target === undefined) {
     return [...entries, makeEntry(entries, {
@@ -394,54 +413,91 @@ function deliverFamily(
 }
 
 /**
- * 客观恢复 verdict for one open entry (§七 channel literal: 会话复活并完成一个
- * turn → 自动消失). A turn completed after the family's last attempt proves it —
- * by the member itself or, failing that, by its relay session (接力 = a 自愈方式).
- * @returns `auto`/`relay` when every member proves recovery, `undefined` while
- *   any member has not completed a turn or graduated out of the export (cannot
- *   confirm — the manual channel owns it, fail-safe against a disappearing
- *   state file faking green).
+ * 客观恢复 verdict — **retired (改判 C)**: entries never auto-archive. Kept out
+ * of the fold on purpose; a future reader must not resurrect the channel.
  */
-function resolveVerdict(
-  entry: AlertInboxEntry,
-  sessions: Record<string, unknown>,
-): 'auto' | 'relay' | undefined {
-  if (entry.sessionIds.length === 0) return undefined
-  let relayed = false
-  for (const sessionId of entry.sessionIds) {
-    const session = asSession(sessions[sessionId])
-    if (session === undefined) return undefined
-    if (numberOr(session.lastSuccessAt, 0) > entry.lastAt) continue
-    const relayId = stringOr(session.relaySessionId)
-    const relay = relayId === undefined ? undefined : asSession(sessions[relayId])
-    if (relay !== undefined && numberOr(relay.lastSuccessAt, 0) > entry.lastAt) {
-      relayed = true
-      continue
-    }
-    return undefined
+
+/**
+ * Pull-型信源 fact ingestion (改判 D, 设计档 §七「重启/死因信源契约」): one OPEN
+ * category entry per fact key. Re-occurrence refreshes `lastAt` (浮顶) and
+ * replaces the window count; **it never flips `unread`** — the red is cleared
+ * by 已读 and re-armed only by 恢复 (human hands own both directions), so a
+ * recurring class a human already read stays read until they restore it.
+ */
+function deliverSourceFact(
+  entries: readonly AlertInboxEntry[],
+  cause: string,
+  lastAt: number,
+  count: number,
+  now: number,
+): readonly AlertInboxEntry[] {
+  const existing = entries.find(entry => entry.cause === cause && entry.sessionIds.length === 0)
+  if (existing !== undefined) {
+    return entries.map(entry => (entry === existing
+      ? {
+        ...entry,
+        startedAt: Math.min(entry.startedAt, lastAt),
+        lastAt: Math.max(entry.lastAt, lastAt),
+        // 类内计数 = 本窗读数（count24h / rle24），刷新而非累加 —— 逐次证据留各源日志。
+        attempts: count,
+      }
+      : entry))
   }
-  return relayed ? 'relay' : 'auto'
+  const created: AlertInboxEntry = {
+    id: uniqueId(entries, lastAt, cause),
+    cause,
+    startedAt: lastAt,
+    lastAt,
+    endedAt: null,
+    deliveredAt: now,
+    sessionIds: [],
+    attempts: count,
+    tokens: 0,
+    heal: null,
+    investigationSessionId: null,
+    unread: true,
+    archived: false,
+    escalated: false,
+    resolution: null,
+  }
+  return [...entries, created]
 }
 
-function archive(entry: AlertInboxEntry, heal: 'auto' | 'relay', now: number): AlertInboxEntry {
-  return { ...entry, archived: true, unread: false, endedAt: now, heal }
+/** Parse the source document into `[cause, { lastAt, count }]` facts (tolerant reader). */
+function readSourceFacts(source: RestartAlertSourceDocument): Array<[string, { lastAt: number; count: number }]> {
+  const raw = source.facts
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return []
+  const out: Array<[string, { lastAt: number; count: number }]> = []
+  for (const cause of Object.keys(raw as Record<string, unknown>).sort()) {
+    const fact = (raw as Record<string, unknown>)[cause]
+    if (typeof fact !== 'object' || fact === null || Array.isArray(fact)) continue
+    const candidate = fact as RestartAlertSourceFact
+    const lastAt = numberOr(candidate.lastAt, 0)
+    if (lastAt <= 0) continue
+    const count = numberOr(candidate.rle24, numberOr(candidate.count24h, 0))
+    out.push([cause, { lastAt, count }])
+  }
+  return out
 }
 
 /**
  * Pure fold of one state export against the current document.
  * @param state - the parsed `session-revive-v2-state.json`, or `undefined` when
- *   absent/unreadable (quiet — ingest and recovery skip, escalation still runs).
+ *   absent/unreadable (quiet — ingest skips).
  * @param base - the parsed `alert-inbox.json`, or `undefined` when absent.
  * @param now - fold clock (injectable for tests).
- * @returns the next document, or `undefined` when neither input exists (the
+ * @param source - the parsed `restart-alert-source.json` (pull 型信源, 改判 D),
+ *   or `undefined` when absent — quiet, never broken.
+ * @returns the next document, or `undefined` when no input exists (the
  *   plane is not attached — quiet, never broken).
  */
 export function foldAlertInbox(
   state: ReviveV2StateDocument | undefined,
   base: AlertInboxDocument | undefined,
   now: number,
+  source?: RestartAlertSourceDocument,
 ): AlertInboxFoldResult | undefined {
-  if (state === undefined && base === undefined) return undefined
+  if (state === undefined && base === undefined && source === undefined) return undefined
   let entries: readonly AlertInboxEntry[] = base?.entries ?? []
   let seen: Record<string, SeenFact> = { ...(base?.seen ?? {}) }
 
@@ -492,23 +548,20 @@ export function foldAlertInbox(
       return alarming ? deliver(entry, now) : entry
     })
 
-    // --- 客观恢复: every member proves a completed turn → archive (真·解决).
-    entries = entries.map((entry) => {
-      if (entry.archived) return entry
-      const verdict = resolveVerdict(entry, sessions)
-      return verdict === undefined ? entry : archive(entry, verdict, now)
-    })
+    // 客观恢复 auto-archive **retired (改判 C)**: a completed turn is context
+    // for the reader, never a deletion — the entry stays until 已读.
     seen = nextSeen
   }
 
-  // --- 超时升级: unread > 2 cooling windows → escalated; the entry stays (不消失反升红).
-  entries = entries.map((entry) => {
-    if (entry.archived || !entry.unread || entry.escalated) return entry
-    if (entry.deliveredAt !== null && now - entry.deliveredAt > ALERT_ESCALATE_AFTER_MS) {
-      return { ...entry, escalated: true }
+  // --- 信源接入 (改判 D, 信源契约): restart/death facts deliver category entries.
+  if (source !== undefined) {
+    for (const [cause, fact] of readSourceFacts(source)) {
+      entries = deliverSourceFact(entries, cause, fact.lastAt, fact.count, now)
     }
-    return entry
-  })
+  }
+
+  // 超时升级 **retired (改判 C)**: no entry ever flips on its own; the red
+  // clears through 已读 only and re-arms through 恢复.
 
   const changed = canonicalPayload({ seen, entries }) !== canonicalPayload(base ?? EMPTY_DOC)
   const doc: AlertInboxDocument = {
@@ -529,13 +582,30 @@ function sortedFacts(source: Readonly<Record<string, SeenFact>>): Record<string,
   return out
 }
 
-function reportOf(doc: AlertInboxDocument): AlertInboxReport {
+/** 双栏视图窗 (改判 A): the right column is a 24h VIEW, never a storage bound. */
+const REPORT_WINDOW_MS = 24 * 60 * 60 * 1000
+
+function reportOf(doc: AlertInboxDocument, now: number): AlertInboxReport {
   const open = doc.entries.filter(entry => entry.unread && !entry.archived)
+  const cutoff = now - REPORT_WINDOW_MS
+  // 两栏并集（未读全量 ∪ 24h 内全部含已读）按 lastAt 逆序 —— 排序即热度 (改判 B)。
+  const entries = doc.entries
+    .filter(entry => (entry.unread && !entry.archived) || entry.lastAt >= cutoff)
+    .sort((left, right) => right.lastAt - left.lastAt)
+    .map(entry => ({
+      id: entry.id,
+      cause: entry.cause,
+      lastAt: entry.lastAt,
+      count: entry.attempts,
+      unread: entry.unread,
+      archived: entry.archived,
+    }))
   return {
     at: doc.at,
     unread: open.length,
     escalated: open.filter(entry => entry.escalated).length,
     total: doc.entries.length,
+    entries,
   }
 }
 
@@ -577,8 +647,19 @@ export function syncAlertInbox(now = Date.now()): AlertInboxReport | undefined {
   } catch {
     state = undefined
   }
+  // 信源 (改判 D): pull 型事实文档 —— absent/malformed reads as quiet absence
+  // (面消失 ≠ 面变坏), the same discipline as the revive state export.
+  let source: RestartAlertSourceDocument | undefined
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(dshHomePath(RESTART_ALERT_SOURCE_FILE), 'utf8'))
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      source = parsed as RestartAlertSourceDocument
+    }
+  } catch {
+    source = undefined
+  }
 
-  const result = foldAlertInbox(state, base, now)
+  const result = foldAlertInbox(state, base, now, source)
   if (result === undefined) return undefined
   if (result.changed) {
     try {
@@ -590,7 +671,7 @@ export function syncAlertInbox(now = Date.now()): AlertInboxReport | undefined {
       // consistent with it); the badge keeps the fold's truth for this tick.
     }
   }
-  return reportOf(result.doc)
+  return reportOf(result.doc, now)
 }
 
 /**
@@ -649,6 +730,26 @@ export function acknowledgeAlert(
     // Already filed and read — idempotent no-op (never re-opens an archive).
     if (entry.archived && !entry.unread) return undefined
     return { ...entry, unread: false, archived: true, endedAt: at, heal: 'manual' }
+  }, now)
+}
+
+/**
+ * 人工【恢复】channel (改判 A/C): the entry returns to the unread column with
+ * its body intact (结论不能删 — a backfilled `resolution` rides along). The
+ * ONLY way back into the red after 已读: no fold path re-arms `unread`.
+ * @param entryId - family id (`fam-…`).
+ * @param inboxPath - document location (injectable for tests); defaults to the DSH-home single source.
+ * @param now - clock (injectable for tests).
+ * @returns whether the entry was found and restored (idempotent when already open).
+ */
+export function restoreAlert(
+  entryId: string,
+  inboxPath = dshHomePath(ALERT_INBOX_FILE),
+  now = Date.now(),
+): boolean {
+  return patchEntry(entryId, inboxPath, (entry) => {
+    if (!entry.archived && entry.unread) return undefined
+    return { ...entry, unread: true, archived: false, endedAt: null, heal: null }
   }, now)
 }
 

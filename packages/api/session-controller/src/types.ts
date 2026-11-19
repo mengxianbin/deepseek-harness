@@ -985,6 +985,21 @@ export interface ReviveHealthReport {
  * unread 计数 = 未处理数 — and duty-inventory reads the SAME document with the
  * SAME `unread && !archived` predicate, so the two 对账 faces cannot disagree.
  */
+/** One mailbox entry as the signal face publishes it (改版 A 双栏视图的读侧形状). */
+export interface AlertInboxEntryView {
+  readonly id: string
+  /** 分类键 (改判 B): one row per class — `restart-storm` / `zero-token` / … */
+  readonly cause: string
+  /** Class heat (改判 B): the last occurrence — drives both columns' 逆序. */
+  readonly lastAt: number
+  /** Class count (count24h / rle24 for source facts, attempts otherwise). */
+  readonly count: number
+  /** Unread = in the left column (未读). */
+  readonly unread: boolean
+  /** Archived = human 已读 (right column within 24h; never a physical delete). */
+  readonly archived: boolean
+}
+
 export interface AlertInboxReport {
   /** Epoch ms of the inbox document's last content change (0 until the first flip). */
   readonly at: number
@@ -994,6 +1009,13 @@ export interface AlertInboxReport {
   readonly escalated: number
   /** Every entry in the document, archived included (mailbox history length). */
   readonly total: number
+
+  /**
+   * The two columns' union: every unread entry plus every entry whose `lastAt`
+   * falls in the trailing 24h, sorted `lastAt` descending (改判 A: 24h is a
+   * VIEW window, never a storage bound — older read entries simply slide out).
+   */
+  readonly entries: readonly AlertInboxEntryView[]
 }
 
 /** One swept Session's facts exactly as that sweep traversal read them. */

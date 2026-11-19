@@ -32,17 +32,17 @@ const base = {
 
 /** Balanced books + three unread entries — the badge must show exactly 3 (机检1). */
 const pending3: SessionHealthState = {
-  report: { ...base, alertInbox: { at: 1_700_000_000_000, unread: 3, escalated: 0, total: 4 } },
+  report: { ...base, alertInbox: { at: 1_700_000_000_000, unread: 3, escalated: 0, total: 4, entries: [] } },
 }
 
 /** Attached with nothing pending — the quiet white envelope (无件白). */
 const clear: SessionHealthState = {
-  report: { ...base, alertInbox: { at: 1_700_000_000_000, unread: 0, escalated: 0, total: 4 } },
+  report: { ...base, alertInbox: { at: 1_700_000_000_000, unread: 0, escalated: 0, total: 4, entries: [] } },
 }
 
 /** Two unread, one past the escalation window — red stays, wording escalates (超时升级). */
 const escalated: SessionHealthState = {
-  report: { ...base, alertInbox: { at: 1_700_000_000_000, unread: 2, escalated: 1, total: 4 } },
+  report: { ...base, alertInbox: { at: 1_700_000_000_000, unread: 2, escalated: 1, total: 4, entries: [] } },
 }
 
 /** Balanced books with NO alertInbox plane attached (neither document exists) — quiet by design. */

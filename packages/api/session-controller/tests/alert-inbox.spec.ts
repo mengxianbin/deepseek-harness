@@ -1,8 +1,9 @@
 /**
  * The alert-inbox write side (设计档 `session-revival-v2-alert-inbox-1116.md`
  * §七, alert-inbox-signal-face-1116): the fold clusters state-export flips
- * into event families ONCE (机检2: 168 attempts → 1 entry), runs the three
- * channels (客观恢复 / 人工确认 / 超时升级), and keeps the published counts
+ * into event families ONCE (机检2: 168 attempts → 1 entry), folds the pull-型
+ * restart/death source (改判 D), retires the auto channels (改判 C: no entry
+ * ever flips on its own), and keeps the published counts
  * equal to the file's `unread && !archived` predicate (机检1 对账基准 — the
  * badge and duty read the same document). The action-face writers prove归档
  * ≠ 物理删 (机检3) and the `resolution` read/write loop (机检4).
@@ -16,11 +17,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  ALERT_ESCALATE_AFTER_MS,
   PROBE_RED_CAUSE,
   acknowledgeAlert,
   foldAlertInbox,
   linkInvestigationSession,
+  restoreAlert,
   setAlertResolution,
   syncAlertInbox,
   type AlertInboxDocument,
@@ -104,20 +105,20 @@ describe('foldAlertInbox (写侧聚类 + 三通道, 设计档 §七)', () => {
     expect(base?.entries[0]?.deliveredAt).toBeNull()
   })
 
-  it('聚类分族: 同因超窗开新族; 异因即使同时段也分族', () => {
+  it('改判 B 分类聚类: 同因跨时段合成一类（不再按时间窗开新族）; 异因各自一类', () => {
     const start = 1_700_000_000_000
     let base = foldAlertInbox(
       stateOf({ 'sess-1': { lastFailureAt: start, lastFailureForm: 'zero-token', stopped: null, lastSuccessAt: 0 } }),
       undefined,
       start,
     )?.doc
-    // Same cause 7h later (> 6h 同时段 window) → a NEW family.
+    // Same cause 7h later (> 旧 6h 窗) — 分类键下仍是同一类 (改判 B).
     base = foldAlertInbox(
       stateOf({ 'sess-1': { lastFailureAt: start + 7 * 60 * 60 * 1000, lastFailureForm: 'zero-token', stopped: null, lastSuccessAt: 0 } }),
       base,
       start + 7 * 60 * 60 * 1000,
     )?.doc
-    // A different cause inside the window → its own family, even concurrently.
+    // A different cause → its own class, even concurrently.
     base = foldAlertInbox(
       stateOf({
         'sess-1': { lastFailureAt: start + 7 * 60 * 60 * 1000, lastFailureForm: 'zero-token', stopped: null, lastSuccessAt: 0 },
@@ -126,11 +127,15 @@ describe('foldAlertInbox (写侧聚类 + 三通道, 设计档 §七)', () => {
       base,
       start + 7 * 60 * 60 * 1000 + 60_000,
     )?.doc
-    expect(base?.entries).toHaveLength(3)
-    expect(base?.entries.map(entry => entry.cause).sort()).toEqual(['spend-progress', 'zero-token', 'zero-token'])
+    expect(base?.entries).toHaveLength(2)
+    expect(base?.entries.map(entry => entry.cause).sort()).toEqual(['spend-progress', 'zero-token'])
+    // 类内计数随再犯刷新、lastAt 浮顶 (改判 B: 排序即热度).
+    const family = base?.entries.find(entry => entry.cause === 'zero-token')
+    expect(family?.attempts).toBe(2)
+    expect(family?.lastAt).toBe(start + 7 * 60 * 60 * 1000)
   })
 
-  it('客观恢复: 会话复活并完成一个 turn → 自动归档 (heal=auto, 条目不删)', () => {
+  it('改判 C: 会话复活完成 turn 不再自动归档——红由人工已读才消（条目体永在）', () => {
     const start = 1_700_000_000_000
     const delivered = foldAlertInbox(stoppedState(start), undefined, start)?.doc
     expect(delivered?.entries[0]?.unread).toBe(true)
@@ -141,13 +146,13 @@ describe('foldAlertInbox (写侧聚类 + 三通道, 设计档 §七)', () => {
     )?.doc
     expect(recovered?.entries).toHaveLength(1)
     const entry = recovered?.entries[0]
-    expect(entry?.archived).toBe(true)
-    expect(entry?.unread).toBe(false)
-    expect(entry?.heal).toBe('auto')
-    expect(entry?.endedAt).toBe(start + 6_000)
+    expect(entry?.archived).toBe(false)
+    expect(entry?.unread).toBe(true)
+    expect(entry?.heal).toBeNull()
+    expect(entry?.endedAt).toBeNull()
   })
 
-  it('接力恢复: relay 会话完成一个 turn → heal=relay', () => {
+  it('改判 C: 接力完成同样不自动归档——heal 只由人工通道写', () => {
     const start = 1_700_000_000_000
     const delivered = foldAlertInbox(stoppedState(start), undefined, start)?.doc
     const recovered = foldAlertInbox(
@@ -158,20 +163,20 @@ describe('foldAlertInbox (写侧聚类 + 三通道, 设计档 §七)', () => {
       delivered,
       start + 6_000,
     )?.doc
-    expect(recovered?.entries[0]?.archived).toBe(true)
-    expect(recovered?.entries[0]?.heal).toBe('relay')
+    expect(recovered?.entries[0]?.archived).toBe(false)
+    expect(recovered?.entries[0]?.heal).toBeNull()
   })
 
-  it('超时升级: unread 停留 > 2 个冷却周期 → escalated=true 且条目不消失', () => {
+  it('改判 C: 超时不再升级——escalated 恒 false、条目不消失（红只归已读/恢复）', () => {
     const start = 1_700_000_000_000
     const delivered = foldAlertInbox(stoppedState(start), undefined, start)?.doc
-    const late = foldAlertInbox(undefined, delivered, start + ALERT_ESCALATE_AFTER_MS + 1)?.doc
+    const late = foldAlertInbox(undefined, delivered, start + 3 * 60 * 60 * 1000)?.doc
     expect(late?.entries).toHaveLength(1)
     expect(late?.entries[0]?.unread).toBe(true)
-    expect(late?.entries[0]?.escalated).toBe(true)
-    // …and it stays escalated through every later tick (不消失反升红).
-    const later = foldAlertInbox(undefined, late, start + ALERT_ESCALATE_AFTER_MS * 10)?.doc
-    expect(later?.entries[0]?.escalated).toBe(true)
+    expect(late?.entries[0]?.escalated).toBe(false)
+    const later = foldAlertInbox(undefined, late, start + 30 * 60 * 60 * 1000)?.doc
+    expect(later?.entries[0]?.escalated).toBe(false)
+    expect(later?.entries[0]?.archived).toBe(false)
   })
 
   it('探针持续红: probeRedAlarmed 置位一次 → 探针族出生即投递', () => {
@@ -221,7 +226,7 @@ describe('syncAlertInbox (读写 + change-only + 对账基准)', () => {
     expect(syncAlertInbox(1)).toBeUndefined()
     expect(existsSync(inboxPathOf())).toBe(false)
     writeFileSync(join(home, 'session-revive-v2-state.json'), JSON.stringify({ at: 1, sessions: {} }), 'utf8')
-    expect(syncAlertInbox(2)).toEqual({ at: 0, unread: 0, escalated: 0, total: 0 })
+    expect(syncAlertInbox(2)).toEqual({ at: 0, unread: 0, escalated: 0, total: 0, entries: [] })
     // Nothing flipped — change-only writes nothing.
     expect(existsSync(inboxPathOf())).toBe(false)
   })
@@ -325,5 +330,94 @@ describe('三通道写侧 API (人工确认 + 结论回填, §七 行动面回�
     writeFileSync(inboxPathOf(), 'corrupt', 'utf8')
     expect(acknowledgeAlert(id)).toBe(false)
     expect(readFileSync(inboxPathOf(), 'utf8')).toBe('corrupt')
+  })
+})
+
+describe('信源接入 (改判 D, restart-alert-source) + 人工两动作 (改判 C)', () => {
+  const fact = (lastAt: number, extra: Record<string, unknown> = {}) => ({
+    at: lastAt, schema: 'restart-alert-source/1',
+    facts: { 'restart-no-reason': { lastAt, count24h: 5, rle24: 3, ...extra } },
+  })
+
+  it('信源事实 → 分类条目出生即未读（sessionIds 空、计数 = rle24）', () => {
+    const at = 1_700_000_000_000
+    const doc = foldAlertInbox(undefined, undefined, at, fact(at))?.doc
+    const entry = doc?.entries[0]
+    expect(doc?.entries).toHaveLength(1)
+    expect(entry?.cause).toBe('restart-no-reason')
+    expect(entry?.unread).toBe(true)
+    expect(entry?.archived).toBe(false)
+    expect(entry?.sessionIds).toEqual([])
+    expect(entry?.attempts).toBe(3) // rle24 优先于 count24h（信源契约）
+    expect(entry?.lastAt).toBe(at)
+  })
+
+  it('再犯刷新 lastAt 与计数（浮顶），但**不翻 unread**——已读后保持已读、待人工恢复', () => {
+    home = mkdtempSync(join(tmpdir(), 'alert-inbox-src-'))
+    vi.stubEnv('DSH_HOME', home)
+    const at = 1_700_000_000_000
+    let doc = foldAlertInbox(undefined, undefined, at, fact(at))?.doc
+    writeFileSync(inboxPathOf(), `${JSON.stringify(doc)}
+`, 'utf8')
+    const id = doc?.entries[0]?.id as string
+    expect(acknowledgeAlert(id, inboxPathOf(), at + 1)).toBe(true)
+    doc = JSON.parse(readFileSync(inboxPathOf(), 'utf8')) as AlertInboxDocument
+    expect(doc.entries[0]?.unread).toBe(false)
+
+    // 再犯：lastAt/计数刷新，已读位不被信源自动翻回（红归人手）.
+    const later = at + 60 * 60 * 1000
+    doc = foldAlertInbox(undefined, doc, later, fact(later, { rle24: 7 }))?.doc
+    expect(doc?.entries).toHaveLength(1)
+    expect(doc?.entries[0]?.lastAt).toBe(later)
+    expect(doc?.entries[0]?.attempts).toBe(7)
+    expect(doc?.entries[0]?.unread).toBe(false)
+
+    // 恢复 = 第二个人工动作：翻回未读、退出归档位、条目体（含结论）原样.
+    expect(restoreAlert(id, inboxPathOf(), later + 1)).toBe(true)
+    const restored = JSON.parse(readFileSync(inboxPathOf(), 'utf8')) as AlertInboxDocument
+    expect(restored.entries[0]).toMatchObject({ id, unread: true, archived: false, endedAt: null })
+  })
+
+  it('信源缺席 = 安静（fold 只靠 base 也成立），事实只进不删', () => {
+    const at = 1_700_000_000_000
+    const withFact = foldAlertInbox(undefined, undefined, at, fact(at))?.doc
+    const after = foldAlertInbox(undefined, withFact, at + 3_600_000)?.doc // source undefined
+    expect(after?.entries).toHaveLength(1)
+    expect(after?.entries[0]?.lastAt).toBe(at)
+  })
+
+  it('report.entries = 两栏并集（未读全量 ∪ 24h 内含已读），lastAt 逆序', () => {
+    home = mkdtempSync(join(tmpdir(), 'inbox-view-'))
+    vi.stubEnv('DSH_HOME', home)
+    {
+      const now = 1_700_000_000_000
+      writeFileSync(join(home, 'restart-alert-source.json'), JSON.stringify({
+        at: now, schema: 'restart-alert-source/1',
+        facts: {
+          'restart-storm': { lastAt: now - 60_000, count24h: 6 },
+          'host-death-unknown': { lastAt: now - 25 * 60 * 60 * 1000, count24h: 1 }, // 滑出 24h 窗
+        },
+      }), 'utf8')
+      const report = syncAlertInbox(now)
+      expect(report?.unread).toBe(2)
+      const causes = report?.entries.map(entry => entry.cause) ?? []
+      // 左栏 = 未读全量，不受 24h 窗约束（25h 前的未读照样在）.
+      expect(causes).toContain('restart-storm')
+      expect(causes).toContain('host-death-unknown')
+      const stamps = report?.entries.map(entry => entry.lastAt) ?? []
+      expect([...stamps].sort((a, b) => b - a)).toEqual(stamps)
+      // 已读但仍在 24h 内 → 退出未读栏、留在右栏（误点不丢）.
+      const storm = report?.entries.find(entry => entry.cause === 'restart-storm')
+      acknowledgeAlert(storm?.id as string, inboxPathOf(), now)
+      const after = syncAlertInbox(now)
+      expect(after?.unread).toBe(1)
+      expect((after?.entries ?? []).map(entry => entry.cause)).toContain('restart-storm')
+      // 已读且滑出 24h → 两栏皆无（视图窗不截存储，数据层仍可找回）.
+      const old = report?.entries.find(entry => entry.cause === 'host-death-unknown')
+      acknowledgeAlert(old?.id as string, inboxPathOf(), now)
+      const slid = syncAlertInbox(now)
+      expect(slid?.unread).toBe(0)
+      expect((slid?.entries ?? []).map(entry => entry.cause)).not.toContain('host-death-unknown')
+    }
   })
 })
