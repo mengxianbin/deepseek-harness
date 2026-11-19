@@ -20,6 +20,7 @@
     "src/auto-route.ts",
     "src/revive-health.ts",
     "src/alert-inbox.ts",
+    "src/alert-inbox-route.ts",
     "src/history.ts",
     "src/history/controller.ts",
     "src/history/listener.ts",
