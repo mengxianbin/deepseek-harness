@@ -985,6 +985,9 @@ export interface ReviveHealthReport {
  * unread 计数 = 未处理数 — and duty-inventory reads the SAME document with the
  * SAME `unread && !archived` predicate, so the two 对账 faces cannot disagree.
  */
+/** The mailbox panel's HTTP surface (改版 A: 点开信箱的读/动作面). */
+export const ALERT_INBOX_PATH = '/api/session-controller/alert-inbox'
+
 /** One mailbox entry as the signal face publishes it (改版 A 双栏视图的读侧形状). */
 export interface AlertInboxEntryView {
   readonly id: string

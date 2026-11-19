@@ -36,6 +36,7 @@ import { readDutyInventory } from './duty.ts'
 import { readAutoRoutePoll } from './auto-route.ts'
 import { readReviveHealth } from './revive-health.ts'
 import { syncAlertInbox } from './alert-inbox.ts'
+import { alertInboxRequest } from './alert-inbox-route.ts'
 import type {
   ModelCatalog,
   SessionWorkspacePathApplication,
@@ -235,6 +236,17 @@ export class SessionController extends TypertRemoteService {
     ctx.plugin(SessionFileReferences)
     ctx.plugin(SessionMediaReferences)
     ctx.plugin(SessionSkillCatalog)
+    // 告警信箱面板动作面 (改版 A/C): mounted on the connection/request waterfall
+    // — the connection plugin runs admission BEFORE that waterfall, so an
+    // unauthenticated request never reaches this listener (inherits /api auth,
+    // no second unfenced door). 已读/恢复 go through the same single writer as
+    // the fold; the panel itself never writes the box.
+    ctx.inject(['webServer'], (webCtx) => {
+      webCtx.effect(() => {
+        const remove = webCtx.on('connection/request', alertInboxRequest)
+        return () => { remove() }
+      }, 'session-controller: alert-inbox route')
+    })
     // An archived Session, or a subagent descendant of one, runs no model step
     // until it is restored; what it still runs is stopped by the owners that
     // answer the Workspace registry's archive-admission events.
