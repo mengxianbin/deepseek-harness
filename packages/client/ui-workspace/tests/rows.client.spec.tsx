@@ -620,16 +620,30 @@ describe('workspace browser rows', () => {
     <SessionNodeItem node={statusRow(over)} currentId={undefined} now={0} onOpen={vi.fn()} t={translate} />,
   )
 
-  it('wears the gear glyph with its count when live background jobs are the only activity', () => {
+  it('wears the gray ring with its numeric badge when live background jobs are the only activity (五态定稿 §二)', () => {
     const view = renderStatusRow({ activeJobCount: 2 })
     const row = screen.getByRole('treeitem')
     const cell = row.firstElementChild
-    expect(cell?.querySelector('[data-status-glyph="jobs"]')).toBeTruthy()
-    expect(cell?.querySelector('sup')?.textContent).toBe('2')
-    // The count's full sentence is the row's screen-reader label; no dot shares the cell.
+    // The gear + superscript sub-form merged into the ongoing ring's badge:
+    // one number = running subagents + live jobs.
+    expect(cell?.querySelector('[data-state="ongoing"]')).toBeTruthy()
+    expect(cell?.querySelector('[data-busy-count="2"]')?.textContent).toBe('2')
+    // The count's full sentence is the row's screen-reader label.
     expect(screen.getByText('2 个后台任务运行中')).toBeTruthy()
-    expect(row.querySelector('[data-state]')).toBeNull()
+    expect(cell?.querySelector('[data-status-glyph]')).toBeNull()
     view.unmount()
+  })
+
+  it('sums running subagents and live jobs on one badge, and shows none at zero', () => {
+    const both = renderStatusRow({ running: true, runningSubagentCount: 2, activeJobCount: 3 })
+    const cell = screen.getByRole('treeitem').firstElementChild
+    expect(cell?.querySelector('[data-busy-count="5"]')?.textContent).toBe('5')
+    both.unmount()
+
+    // The main turn alone is not a discrete entity: no subagent, no job → no badge.
+    const plain = renderStatusRow({ running: true })
+    expect(screen.getByRole('treeitem').firstElementChild?.querySelector('[data-busy-count]')).toBeNull()
+    plain.unmount()
   })
 
   it('ranks the wake-up glyph over the unread completion, and rings the last-known state when confirmation drops', () => {
@@ -663,25 +677,53 @@ describe('workspace browser rows', () => {
     beat.unmount()
   })
 
-  it('carries the shape channel beside the dot: check for the pass, bang for the failed stop (q3-visual)', () => {
+  it('embeds the glyph in the enlarged dot: ✓ for the pass, ✕ for the failed stop, and no top-right badge (五态定稿 §二)', () => {
     const pass = renderStatusRow({ completed: true })
     let row = screen.getByRole('treeitem')
-    expect(row.querySelector('[data-state="done"]')).not.toBeNull()
-    expect(row.querySelector('[data-status-mark="check"]')?.textContent).toBe('✓')
+    const doneDot = row.querySelector('[data-state="done"]')
+    expect(doneDot).not.toBeNull()
+    expect(doneDot?.textContent).toBe('✓')
+    // The retired statusMark mini-badge channel renders nothing at all.
+    expect(row.querySelector('[data-status-mark]')).toBeNull()
     pass.unmount()
 
     const failed = renderStatusRow({ completed: true, completionOutcome: 'failed' })
     row = screen.getByRole('treeitem')
-    expect(row.querySelector('[data-state="error"]')).not.toBeNull()
-    expect(row.querySelector('[data-status-mark="bang"]')?.textContent).toBe('!')
+    const errorDot = row.querySelector('[data-state="error"]')
+    expect(errorDot).not.toBeNull()
+    // Red uses ✕, not the bang: the bang belongs to the yellow awaiting dot.
+    expect(errorDot?.textContent).toBe('✕')
+    expect(row.querySelector('[data-status-mark]')).toBeNull()
+    expect(screen.getByText('上轮失败')).toBeTruthy()
     failed.unmount()
 
-    // A queued wake-up rides secondary; the shape stays on the primary cell.
+    // The yellow awaiting dot carries the bang inside the dot.
+    const pending = renderStatusRow({ pendingInteraction: 'approval' })
+    row = screen.getByRole('treeitem')
+    const warnDot = row.querySelector('[data-state="warning"]')
+    expect(warnDot).not.toBeNull()
+    expect(warnDot?.textContent).toBe('!')
+    expect(row.querySelector('[data-status-mark]')).toBeNull()
+    pending.unmount()
+
+    // A queued wake-up rides secondary; the glyph stays on the primary cell.
     const wakeup = renderStatusRow({ completed: true, completionOutcome: 'failed', pendingWakeup: true })
     row = screen.getByRole('treeitem')
-    expect(row.querySelector('[data-status-mark="bang"]')).not.toBeNull()
+    expect(row.querySelector('[data-state="error"]')?.textContent).toBe('✕')
     expect(screen.getByText('待唤醒')).toBeTruthy()
     wakeup.unmount()
+  })
+
+  it('names a shutdown-cut stop 停机打断 instead of 上轮失败 (聚合红·子原因入详情)', () => {
+    const cut = renderStatusRow({ completed: true, completionOutcome: 'failed', completionInterrupted: true })
+    expect(screen.getByText('停机打断')).toBeTruthy()
+    expect(screen.queryByText('上轮失败')).toBeNull()
+    cut.unmount()
+
+    // An ordinary turn failure keeps its own wording.
+    const failed = renderStatusRow({ completed: true, completionOutcome: 'failed' })
+    expect(screen.getByText('上轮失败')).toBeTruthy()
+    failed.unmount()
   })
 
   it('shows the row-end 已阅 check while the mark stands (点名不改态, q4-readmark)', () => {
@@ -732,7 +774,9 @@ describe('workspace browser rows', () => {
   it('keeps jobs ahead of the wake-up mark, and both ahead of the unread completion', () => {
     const all = renderStatusRow({ completed: true, activeJobCount: 1, pendingWakeup: true })
     const cell = screen.getByRole('treeitem').firstElementChild
-    expect(cell?.querySelector('[data-status-glyph="jobs"]')).not.toBeNull()
+    // Jobs render as the ongoing ring's badge now, never as a gear glyph.
+    expect(cell?.querySelector('[data-state="ongoing"]')).not.toBeNull()
+    expect(cell?.querySelector('[data-busy-count="1"]')).not.toBeNull()
     expect(cell?.querySelector('[data-state="done"]')).toBeNull()
     // The losing wake-up still reaches assistive technology from the cell.
     expect(screen.getByText('待唤醒')).toBeTruthy()
@@ -818,7 +862,7 @@ describe('workspace browser rows', () => {
     expect(screen.getByRole('treeitem').querySelector('[data-state="done"]')).not.toBeNull()
   })
 
-  it('shows the jobs glyph on a search result row and keeps its roster while shown', () => {
+  it('shows the jobs badge on a search result row and keeps its roster while shown', () => {
     const release = vi.fn()
     const watchSessionJobs = vi.fn(() => release)
     const view = render(<SearchResultItem
@@ -830,7 +874,7 @@ describe('workspace browser rows', () => {
       useSessionAccess={allowAllAccess.useSessionAccess}
       watchSessionJobs={watchSessionJobs} t={t}
     />)
-    expect(screen.getByRole('treeitem').querySelector('[data-status-glyph="jobs"]')).not.toBeNull()
+    expect(screen.getByRole('treeitem').querySelector('[data-busy-count="1"]')).not.toBeNull()
     expect(screen.getByText('1 个后台任务运行中')).toBeTruthy()
     expect(watchSessionJobs).toHaveBeenCalledWith(sid('result-jobs'))
     view.unmount()

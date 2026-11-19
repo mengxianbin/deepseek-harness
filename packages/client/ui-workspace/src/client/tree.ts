@@ -58,6 +58,8 @@ export interface SessionNode {
   completed: boolean
   /** Outcome of that unviewed stop: `'failed'` renders the red error reminder. */
   completionOutcome?: SessionCompletionOutcome
+  /** The stop was a shutdown cut (own turn, killed subagent, or killed job): the red dot names it 停机打断 in its tooltip. */
+  completionInterrupted?: true
   /** Live background jobs this Session owns; omitted while the count is zero. */
   activeJobCount?: number
   /** A durable goal is on the books while the Session is stopped — the wake-up weak mark. */
@@ -132,6 +134,8 @@ export interface SearchResultNode {
   completed: boolean
   /** Outcome of that unviewed stop: `'failed'` renders the red error reminder. */
   completionOutcome?: SessionCompletionOutcome
+  /** The stop was a shutdown cut: the red dot names it 停机打断 in its tooltip. */
+  completionInterrupted?: true
   /** Live background jobs this Session owns; omitted while the count is zero. */
   activeJobCount?: number
   /** A durable goal is on the books while the Session is stopped — the wake-up weak mark. */
@@ -490,6 +494,7 @@ function sessionNode(
   const status = statuses.get(s.id)
   const pendingInteraction = visiblePendingKind(status?.pendingInteraction?.kind)
   const completionOutcome = status?.completionOutcome
+  const completionInterrupted = status?.completionInterrupted
   const activeJobCount = status?.activeJobCount
   const pendingWakeup = status?.pendingWakeup
   const statusStale = status?.statusStale
@@ -505,6 +510,7 @@ function sessionNode(
     runningSubagentCount: runningChildCount(list, s.id, statuses),
     completed: status?.completionUnread === true,
     ...(completionOutcome === undefined ? {} : { completionOutcome }),
+    ...(completionInterrupted === undefined ? {} : { completionInterrupted }),
     ...(activeJobCount === undefined ? {} : { activeJobCount }),
     ...(pendingWakeup === undefined ? {} : { pendingWakeup }),
     ...(statusStale === undefined ? {} : { statusStale }),
@@ -755,6 +761,7 @@ export function deriveSearchResults(
       const status = statuses.get(summary.id)
       const pendingInteraction = visiblePendingKind(status?.pendingInteraction?.kind)
       const completionOutcome = status?.completionOutcome
+      const completionInterrupted = status?.completionInterrupted
       const activeJobCount = status?.activeJobCount
       const pendingWakeup = status?.pendingWakeup
       const statusStale = status?.statusStale
@@ -770,6 +777,7 @@ export function deriveSearchResults(
           : { pendingInteraction }),
         completed: status?.completionUnread === true,
         ...(completionOutcome === undefined ? {} : { completionOutcome }),
+        ...(completionInterrupted === undefined ? {} : { completionInterrupted }),
         ...(activeJobCount === undefined ? {} : { activeJobCount }),
         ...(pendingWakeup === undefined ? {} : { pendingWakeup }),
         ...(statusStale === undefined ? {} : { statusStale }),
