@@ -411,6 +411,14 @@
     - id: unit-scheduler
       name: '@deepseek-ai/dsh-unit-scheduler'
 
+    # Event-loop health watch (design event-loop-monitor-1108): windowed
+    # monitorEventLoopDelay histogram + ELU with a conditional aggregate log
+    # line, a loopback GET /api/event-loop/state probe, slice-overshoot
+    # attribution and a red-state fact file. Defaults live in the plugin;
+    # `disable: true` here (or config.disable) turns the whole watch off.
+    - id: event-loop-monitor
+      name: '@deepseek-ai/dsh-event-loop-monitor'
+
     - id: spill-local
       name: '@deepseek-ai/dsh-spill-local'
 

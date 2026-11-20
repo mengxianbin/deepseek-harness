@@ -372,7 +372,12 @@ describe('Restart server button', () => {
     // The dialog opens from this click, so Enter dispatches the restart.
     expect(document.activeElement).toBe(confirm)
     fireEvent.click(confirm)
-    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(RESTART_PATH, { method: 'POST' })
+    // 3a0ddb507c added the machine-readable reason body; this assertion follows the component.
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(RESTART_PATH, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ reason: 'manual' }),
+    })
     expect(screen.queryByRole('dialog')).toBeNull()
     const status = await screen.findByRole('status')
     expect(status.textContent).toBe(en['restart.accepted'])

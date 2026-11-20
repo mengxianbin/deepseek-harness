@@ -510,6 +510,7 @@
     { "path": "./packages/spill/spill-policy" },
     { "path": "./packages/guard/timeout-policy" },
     { "path": "./packages/guard/unit-scheduler" },
+    { "path": "./packages/guard/event-loop-monitor" },
     { "path": "./packages/test-support/agent-loop-testkit" },
     { "path": "./packages/test-support/tool-testkit" },
     { "path": "./packages/acp/acp" },

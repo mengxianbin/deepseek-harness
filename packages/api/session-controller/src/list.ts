@@ -5,6 +5,9 @@ import { scheduler } from 'node:timers/promises'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type { ImageAttachmentLimits } from '@deepseek-ai/dsh-attachment'
+// Event-loop watch attribution (design event-loop-monitor-1108 §一第二层):
+// book the slice overshoot at the yield checks this loop already runs.
+import { recordOvershoot } from '@deepseek-ai/dsh-event-loop-monitor'
 import type { Session, SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import type { ProjectionSnapshot } from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
@@ -350,6 +353,7 @@ export class ApiSessionList {
         cold.push(record)
       }
       if (performance.now() >= yieldDeadline) {
+        recordOvershoot('list', performance.now() - yieldDeadline)
         await scheduler.yield()
         signal?.throwIfAborted()
         yieldDeadline = performance.now() + this.workSliceMs
@@ -363,6 +367,7 @@ export class ApiSessionList {
       // refold runs on the serial pump below.
       this.cueColdRepair(record)
       if (performance.now() >= yieldDeadline) {
+        recordOvershoot('list', performance.now() - yieldDeadline)
         await scheduler.yield()
         signal?.throwIfAborted()
         yieldDeadline = performance.now() + this.workSliceMs

@@ -36,6 +36,9 @@
   ],
   "references": [
     {
+      "path": "../../guard/event-loop-monitor"
+    },
+    {
       "path": "../gateway/tsconfig.host.json"
     },
     {

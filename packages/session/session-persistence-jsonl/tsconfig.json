@@ -37,6 +37,9 @@
     },
     {
       "path": "../session-format-v3-to-v4"
+    },
+    {
+      "path": "../../guard/event-loop-monitor"
     }
   ]
 }
