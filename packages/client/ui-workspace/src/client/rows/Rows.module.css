@@ -458,24 +458,6 @@
   color: #CFD3D6;
 }
 
-/* 属性缺省弱提示 (collab step3 §6.3, q6-attr): the hover card names the
-   default placement while the attribute plane carries no supply — weak gray,
-   never a ring (属性缺 ≠ 会话态不可信). */
-.hoverAttributes {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  font-size: 12px;
-  line-height: 16px;
-  color: var(--dsw-alias-label-tertiary);
-}
-
-.hoverAttributesNote {
-  font-size: 11px;
-  color: var(--dsw-alias-label-tertiary);
-  opacity: 0.75;
-}
-
 .hoverStatus {
   display: flex;
   align-items: center;
