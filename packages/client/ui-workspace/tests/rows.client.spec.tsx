@@ -1928,11 +1928,12 @@ describe('session row decoration seats', () => {
       expect(renderSlot).toHaveBeenCalledWith('sidebar.session.row.hover', { sessionId: idle.id })
       const section = document.querySelector('[data-seat="sidebar.session.row.hover"]')
       expect(section).toBeTruthy()
-      // The 属性缺省弱提示 line sits between the time and the hover seat
-      // (collab step3 §6.3, q6-attr): default placement named in gray.
-      expect(section?.previousElementSibling?.textContent).toBe('优先级 P2（默认）属性未读到，按默认摆位')
-      expect(section?.previousElementSibling?.previousElementSibling?.textContent).toBe('刚刚')
+      // hover-sessionclass-1121: the priority/attributes placeholder block is
+      // gone — the hover seat follows the relative time directly, ahead of the
+      // trailing status line, and neither placeholder class renders anywhere.
+      expect(section?.previousElementSibling?.textContent).toBe('刚刚')
       expect(section?.nextElementSibling?.textContent).toBe('空闲')
+      expect(document.querySelector('[class*="hoverAttributes"]')).toBeNull()
     } finally {
       vi.useRealTimers()
     }

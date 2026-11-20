@@ -750,13 +750,9 @@ function SessionHoverContent({ node, cwd, now, renderSlot, t }: {
       {/* Same placeholder rule as the row's trailing cell: no timestamp
           before the first prompt. */}
       {!node.blank && <div className={css.hoverTime}>{hoverTimeLabel(node.updatedAt, now, t)}</div>}
-      {/* 属性缺省的 fail-closed 分级 (collab step3 §6.3, q6-attr): the
-          attribute plane carries no supply yet, so the card names the default
-          placement in weak gray — never a ring, since 属性缺 ≠ 会话态不可信. */}
-      <div className={css.hoverAttributes}>
-        <span>{t('row.priorityDefault')}</span>
-        <span className={css.hoverAttributesNote}>{t('row.attributesDefault')}</span>
-      </div>
+      {/* hover-sessionclass-1121: the attribute-plane placeholder block
+          (priority default + gray note) is gone — the plugin hover slot below
+          now owns this position, e.g. the session-origin class line. */}
       {renderSlot('sidebar.session.row.hover', { sessionId: node.id })}
       {statuses.map(status => (
         <div className={css.hoverStatus} key={status.label}>
