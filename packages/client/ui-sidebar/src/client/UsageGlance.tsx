@@ -89,6 +89,19 @@
  * balance row is readings-only again: label + figure, no link, no
  * stopPropagation carve-out. The always-on ruling survives the move — the
  * menu item renders in every balance state and before the first load.
+ * v3.5 (FORK auto-route-1024, 2026-10-25): a current-source status dot rides
+ * left of the window rows — the badge for the auto-routing controller
+ * (`dsh-auto-route`, ruling form 乙). It reads the controller's own policy
+ * state at `GET /api/auto-route/status` (same origin, same cadence; a 404 —
+ * controller not installed — hides it, so the badge degrades together with
+ * the feature), never the overview's `current{provider,model,source}` — that
+ * is last-request-routing semantics and would flap while both sources run
+ * (三层解耦契约「策略层配置化」: the badge is a pure policy-layer consumer).
+ * The dot is quiet secondary at baseline and warn while the policy is
+ * triggered (the controller switched the active set to MiMo official); its
+ * tooltip spells the source name, the phase, and the last decision time. The
+ * dot is a width-only addition — the wide titlebar logo row's 40px height
+ * budget (3 × 12px rows + 4px padding) stays untouched.
  *
  * Clicking the control opens the settings panel on the usage section by
  * replaying the user's own path — the shell owns the panel state and exposes
