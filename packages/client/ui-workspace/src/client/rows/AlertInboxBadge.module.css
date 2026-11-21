@@ -27,7 +27,7 @@
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  /* 改判 A: the seat is a BUTTON now (点开信箱 = 双栏面板) — reset the native
+  /* 改判 A: the seat is a BUTTON now (点开信箱 = 左右 tab 面板) — reset the native
      chrome so the 28×28 seat box metrics above stay byte-identical. */
   background: none;
   border: 0;
@@ -64,36 +64,41 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* ── 双栏面板 (改判 A)：未读 ∪ 最近24h，均 lastAt 逆序；消失只有已读/恢复两条路 ── */
+/* ── 左右 tab 面板 (改判 E, 2026-11-21 取代 A 的双栏)：未读 ∪ 最近24h，均 lastAt
+   逆序；消失只有已读/恢复两条路；单栏渲染当前 tab → 行拿全宽，时间戳不截断 ── */
 
-/* 对话框加宽（2026-11-19 修复）：Modal 原语默认 `width: min(380px, 100%)` +
-   `overflow: hidden`，而 .columns min-width 720px —— 第二栏（最近 24h）起点
-   392px > 380px，整栏被裁到框外，真机只见未读栏。照 PresetGuideDialog 先例
-   （min(640px, …) 同款 className 覆盖）把对话框撑到 768px：内容列
-   768 − 48（body 双侧 24px padding）= 720px，恰合 .columns min-width。 */
+/* 对话框宽度（改判 E 收窄）：双栏时代的 min(768px) 系双栏几何（768 − 48 = 720
+   恰合 .columns min-width），随双栏退役（§十一 历史注记）。单栏行只需放下
+   加粗类名 + 次数·完整时间戳 + 动作按钮，560px 足够且保视口适配。 */
 .panel {
-  width: min(768px, calc(100vw - 48px));
+  width: min(560px, calc(100vw - 48px));
 }
 
-.columns {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  min-width: min(720px, 78vw);
-}
-
-.column {
-  min-width: 0;
+.tabs {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  gap: 4px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--dsw-alias-border-subtle, rgba(128, 128, 128, 0.25));
 }
 
-.heading {
-  margin: 0;
+.tab,
+.tabActive {
+  /* 同构 button 重置（照 .glyph 先例）：native chrome 不参与排版. */
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 4px 10px;
+  font: inherit;
   font-size: 12px;
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+
+.tabActive {
+  color: var(--dsw-alias-label-primary, inherit);
+  border-bottom-color: currentColor;
 }
 
 .list {
