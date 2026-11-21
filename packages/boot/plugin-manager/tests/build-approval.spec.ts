@@ -1,5 +1,5 @@
 /** Pending script permissions survive cleanup and preserve unrelated workspace settings. */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { expect, it, onTestFinished } from 'vitest'
@@ -140,5 +140,34 @@ it('preserves approval keys that are not package names', async () => {
     .toEqual(['native@1.0.0'])
   expect(parse(readFileSync(filename, 'utf8'))).toMatchObject({
     allowBuilds: { 1: true, 'native@1.0.0': 'set this to true or false' },
+  })
+})
+
+it('writes approvals through a junctioned workspace file instead of replacing the link', async () => {
+  const { dir, filename } = fixture('# profile settings\nnodeLinker: hoisted\n')
+  const target = join(dir, 'workspace-target.yaml')
+  writeFileSync(target, readFileSync(filename, 'utf8'))
+  rmSync(filename)
+  symlinkSync(target, filename, 'junction')
+  expect(lstatSync(filename).isSymbolicLink()).toBe(true)
+
+  expect(await recordPendingBuilds(dir, '[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: native@1.0.0\n'))
+    .toEqual(['native@1.0.0'])
+  await approveBuilds(dir, ['native@1.0.0'])
+
+  expect(lstatSync(filename).isSymbolicLink()).toBe(true)
+  expect(parse(readFileSync(target, 'utf8'))).toMatchObject({
+    nodeLinker: 'hoisted',
+    allowBuilds: { 'native@1.0.0': true },
+  })
+})
+
+it('keeps approving through a real workspace file unchanged', async () => {
+  const { dir, filename } = fixture('allowBuilds:\n  decided: true\n')
+  expect(await recordPendingBuilds(dir, '[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: native@1.0.0\n'))
+    .toEqual(['native@1.0.0'])
+  expect(lstatSync(filename).isSymbolicLink()).toBe(false)
+  expect(parse(readFileSync(filename, 'utf8'))).toMatchObject({
+    allowBuilds: { decided: true, 'native@1.0.0': 'set this to true or false' },
   })
 })

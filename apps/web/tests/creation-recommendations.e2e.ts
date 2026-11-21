@@ -35,7 +35,7 @@ describe('creation recommendation after an explicit wish', () => {
     const input = page.locator('[data-composer-input]').first()
     const settled = scaffold.whenTurnSettled()
     await input.fill(fixtureUserPrompts(await readFile(fixture, 'utf8'))[0]!)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     await settled
     const card = page.locator('[data-action-card]')
     await card.waitFor({ state: 'visible' })
@@ -116,7 +116,7 @@ describe('creation recommendation after an explicit wish', () => {
     await compareOrRefreshGolden(join(directory, 'dismissed.expected.md'), await captureStableAria(page, '[data-action-card]', scaffold.workspaceCwd), scaffold.mode)
     const statusSettled = scaffold.whenTurnSettled()
     await input.fill(fixtureUserPrompts(await readFile(fixture, 'utf8'))[1]!)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     await statusSettled
     await page.getByText('The counter proposal was dismissed. Creation never started.', { exact: true }).waitFor()
     expect(await card.count()).toBe(1)

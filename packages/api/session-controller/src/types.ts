@@ -857,6 +857,29 @@ export interface SessionHealthReport {
    * fail-closed, because that collector is mandatory and this one is not).
    */
   readonly autoRoute?: AutoRoutePollReport
+  /**
+   * The revive mechanism-health fold (拍板⑭⑮, ruled 2026-11-15: the shield
+   * reports revive mechanism health ONLY — 插件激活 / mode=live / status 端点
+   * 可读 / 断路器无连跳 / 无 HALT, 正常静默、异常才亮). dsh-session-revive
+   * stamps `<dsh-home>/session-revive-health.json` ONLY when a fact flips
+   * (change-only writer, deliberately no heartbeat), so the sweep reads it by
+   * presence/parse — never by mtime — and folds it into this frame beside
+   * duty and autoRoute (同一数据源同一周期). Absent = the plane is not
+   * attached: the client renders the 「未接线」 quiet line, never broken
+   * (optional plane, the inverse of duty's fail-closed).
+   */
+  readonly reviveHealth?: ReviveHealthReport
+  /**
+   * The alert-inbox fold (设计档 session-revival-v2-alert-inbox-1116.md §七 信号
+   * 面, alert-inbox-signal-face-1116): the SAME 15s tick folds the revive state
+   * machine's export into `<dsh-home>/alert-inbox.json` — clustered on the
+   * write side (同因 + 同时段 → 一个事件族), change-only — and publishes the
+   * counts the envelope badge renders (徽标数 = unread 计数 = 未处理数, the 机检
+   * 对账基准) beside duty and reviveHealth. Optional plane — absent while
+   * neither the state export nor the inbox document exists (面消失, quiet,
+   * never broken; the inverse of duty's fail-closed).
+   */
+  readonly alertInbox?: AlertInboxReport
 }
 
 /** One 值守总账 item exactly as the collector wrote it (清单档 §6.3 三态语义). */
@@ -928,6 +951,74 @@ export interface AutoRoutePollReport {
   readonly error?: string
   /** Seconds since the writer stamped the ledger; the sweep's freshness judgment. */
   readonly ageSec: number
+}
+
+/**
+ * The revive mechanism-health verdict the sweep published (拍板⑭⑮, ruled
+ * 2026-11-15). The dsh-web plugin owns the facts AND the composed `ok`; this
+ * side only echoes them plus the red fact tokens for the detail surface —
+ * 正常静默、异常才亮, and a missing document is 「未接线」 (quiet, never
+ * broken — optional-plugin family, inverse of duty's fail-closed). No mtime
+ * freshness judgment on purpose: a change-only writer's last stamp IS the
+ * current truth until the next flip.
+ */
+export interface ReviveHealthReport {
+  /** The writer's composed verdict (all five facts hold). Only `false` may redden. */
+  readonly ok: boolean
+  /** The configured revival mode; the verdict requires `live` (拍板⑮). */
+  readonly mode: 'shadow' | 'live'
+  /** The status endpoint read; the verdict requires `ok` (拍板⑮). */
+  readonly status: 'ok' | 'error'
+  /** Consecutive breaker trips since the last completed turn (detail surface). */
+  readonly breakerTrips: number
+  /** host-revive is HALTed (拍板⑮; missing host state reads healthy upstream). */
+  readonly halted: boolean
+  /** The red fact tokens exactly as the writer's fields name them (raw, collector language). */
+  readonly failed: readonly string[]
+  /** Epoch ms of the writer's last fact flip (change-only stamp — no freshness judgment). */
+  readonly at: number
+}
+
+/**
+ * The alert-inbox counts the sweep published (设计档 §七 信号面; the write side
+ * lives in alert-inbox.ts). The badge renders `unread` —机检基准: 徽标数 =
+ * unread 计数 = 未处理数 — and duty-inventory reads the SAME document with the
+ * SAME `unread && !archived` predicate, so the two 对账 faces cannot disagree.
+ */
+/** The mailbox panel's HTTP surface (改版 A: 点开信箱的读/动作面). */
+export const ALERT_INBOX_PATH = '/api/session-controller/alert-inbox'
+
+/** One mailbox entry as the signal face publishes it (改版 A 双栏视图的读侧形状). */
+export interface AlertInboxEntryView {
+  readonly id: string
+  /** 分类键 (改判 B): one row per class — `restart-storm` / `zero-token` / … */
+  readonly cause: string
+  /** Class heat (改判 B): the last occurrence — drives both columns' 逆序. */
+  readonly lastAt: number
+  /** Class count (count24h / rle24 for source facts, attempts otherwise). */
+  readonly count: number
+  /** Unread = in the left column (未读). */
+  readonly unread: boolean
+  /** Archived = human 已读 (right column within 24h; never a physical delete). */
+  readonly archived: boolean
+}
+
+export interface AlertInboxReport {
+  /** Epoch ms of the inbox document's last content change (0 until the first flip). */
+  readonly at: number
+  /** Unread, unarchived entries — the badge count (未处理数). */
+  readonly unread: number
+  /** Of those, entries past the 2-cooldown escalation window (超时未确认; never disappears). */
+  readonly escalated: number
+  /** Every entry in the document, archived included (mailbox history length). */
+  readonly total: number
+
+  /**
+   * The two columns' union: every unread entry plus every entry whose `lastAt`
+   * falls in the trailing 24h, sorted `lastAt` descending (改判 A: 24h is a
+   * VIEW window, never a storage bound — older read entries simply slide out).
+   */
+  readonly entries: readonly AlertInboxEntryView[]
 }
 
 /** One swept Session's facts exactly as that sweep traversal read them. */

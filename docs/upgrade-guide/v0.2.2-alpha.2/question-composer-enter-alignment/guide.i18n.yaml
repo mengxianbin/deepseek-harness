@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.2-alpha.2/question-composer-enter-alignment/guide.md
+/:
+  en: ac2cd04d468c64f4
+  zh: 439bd24346e2b6bf
+/question-composer-enter-follows-the-shared-pair:
+  en: 594b949043e405e0
+  zh: 074461eb887e09e7
+/question-composer-enter-follows-the-shared-pair/change:
+  en: 29f4d593ccc2e6ac
+  zh: 4103e4fc2430e801
+/question-composer-enter-follows-the-shared-pair/migration:
+  en: b5d3e7d560e2133f
+  zh: 2b12b4a40dce1e70

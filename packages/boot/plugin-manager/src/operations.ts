@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, open, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { execa } from 'execa'
 import type { EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
-import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
+import { resolveLinkedPath, withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import {
   assertBundlePlatform, UnsupportedBundlePlatformError, bundlePatchPaths, initProfile, readProfileManifest,
   resolveBundleDir, resolveProfileDir, loadOverlayPatches, composeEntries, readProfileVersionExemptions,
@@ -83,7 +83,7 @@ export function bundleManifest(name: string, dir: string, anchor: string): Profi
  * @param manifest Updated document.
  */
 export async function saveManifest(dir: string, manifest: ProfileManifest): Promise<void> {
-  await writeFileAtomic(join(dir, 'package.json'), JSON.stringify(manifest, undefined, 2) + '\n', { mode: 0o600 })
+  await writeFileAtomic(resolveLinkedPath(join(dir, 'package.json')), JSON.stringify(manifest, undefined, 2) + '\n', { mode: 0o600 })
 }
 
 /** Reconcile bundle selection, returning platform denials without saving any selection changes. */
@@ -312,7 +312,7 @@ export async function runProfilePnpm(
     return { exitCode: 1, output: bytes.subarray(Math.max(0, bytes.length - options.outputBytes)).toString('utf8'), truncated: bytes.length > options.outputBytes, logPath }
   }
   const before = readProfileManifest('dsh', dir)
-  const savedFiles = ['package.json', 'pnpm-lock.yaml'].map(name => ({ path: join(dir, name), text: optionalFile(join(dir, name)) }))
+  const savedFiles = ['package.json', 'pnpm-lock.yaml'].map(name => ({ path: resolveLinkedPath(join(dir, name)), text: optionalFile(resolveLinkedPath(join(dir, name))) }))
   const beforeDependencies = directDependencies(before)
   const installedBefore = new Map(Object.keys(beforeDependencies).map(name => [name, optionalFile(join(dir, 'node_modules', name, 'package.json'))]))
   let output = Buffer.alloc(0)

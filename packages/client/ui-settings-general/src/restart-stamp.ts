@@ -17,10 +17,12 @@
  * restart.
  *
  * S_cfg enumeration (design §二): the fixed set of setx environment variables
- * under `HKCU\Environment`, plus each profile's `cordis.yml`,
+ * under `HKCU\Environment`, each profile's `cordis.yml`,
  * `cordis.patch.yml`, and `settings.yaml` (the profile-home settings file the
- * settings package loads). The key list is explicit: a newly setx'd variable
- * must be added here.
+ * settings package loads), plus the program-root `data-root.local.json` /
+ * `data-root.json` contents (F' 配置插层，dsh-home-configfile-1113 —— 改数据根
+ * 配置必须触发重启提示，否则运行中的进程仍读旧根). The key list is explicit:
+ * a newly setx'd variable must be added here.
  * @module @deepseek-ai/dsh-client-ui-settings-general/restart-stamp
  */
 
@@ -29,7 +31,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, readlinkSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { resolveDshHome, findProgramRoot, DATA_ROOT_CONFIG_FILES } from '@deepseek-ai/dsh-home-paths'
 
 /** Directory holding the per-tree build stamp, in both repositories. */
 const STAMP_DIR = '.dsh-build'
@@ -250,18 +252,32 @@ function registryValues(query: string): Map<string, string> {
 }
 
 /**
- * The S_cfg snapshot: fixed HKCU environment keys plus every profile's
- * `cordis.yml`, `cordis.patch.yml`, and `settings.yaml` contents.
+ * The S_cfg snapshot: fixed HKCU environment keys, every profile's
+ * `cordis.yml`, `cordis.patch.yml`, and `settings.yaml` contents, plus the
+ * program-root `data-root*.json` contents (F' 配置插层，dsh-home-configfile-1113
+ * —— 只加不减：data-root 配置变更必须移动 S_cfg 才会触发重启提示).
  * @param dshHome - DSH home holding the profiles.
  * @param registryQuery - HKCU\\Environment query result.
+ * @param programRoot - Program root holding `data-root*.json`; defaults to the discovered root
+ *   (undefined skips the layer, e.g. npm-packaged form).
  * @returns sha256 hex over the sorted enumeration lines.
  */
-export function computeConfigStamp(dshHome: string, registryQuery: string): string {
+export function computeConfigStamp(dshHome: string, registryQuery: string, programRoot?: string): string {
   const lines: string[] = []
   const env = registryValues(registryQuery)
   for (const key of CONFIG_ENV_KEYS) {
     const value = env.get(key)
     if (value !== undefined) lines.push(`env:${key}=${value}`)
+  }
+  const root = programRoot ?? findProgramRoot()
+  if (root !== undefined) {
+    for (const file of DATA_ROOT_CONFIG_FILES) {
+      const path = join(root, file)
+      const content = readConfigFile(path)
+      if (content !== undefined) {
+        lines.push(`file:${path.replace(/\\/g, '/')}=${createHash('sha256').update(content).digest('hex')}`)
+      }
+    }
   }
   for (const profileDir of profileDirectories(dshHome)) {
     for (const file of PROFILE_CONFIG_FILES) {

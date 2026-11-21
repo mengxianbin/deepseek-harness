@@ -24,11 +24,16 @@ export interface NormalizedBinding {
   readonly modifiers: readonly ('control' | 'alt' | 'shift' | 'meta')[]
 }
 
+// FORK dsh-local (ask-ref-rows-1117, 2026-11-17 E 批): PageUp/PageDown join
+// the code table so the ask card's pager keys can be declared as a fixed
+// reference row (normalizeBinding rejects codes outside this table); each
+// label equals its code, so presentation is unchanged.
 const keyNames: Readonly<Record<string, string>> = {
   Slash: '/', Comma: ',', Period: '.', Backslash: '\\', Backquote: '`', Minus: '-', Equal: '=',
   BracketLeft: '[', BracketRight: ']', Semicolon: ';', Quote: "'", Enter: 'Enter',
   Escape: 'Esc', Space: 'Space', Tab: 'Tab', Backspace: 'Backspace', Delete: 'Delete',
   ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→',
+  PageUp: 'PageUp', PageDown: 'PageDown',
 }
 const modifierOrder = ['control', 'alt', 'shift', 'meta'] as const
 
@@ -60,6 +65,19 @@ export function normalizeBinding(binding: ShortcutBinding, platform: ShortcutPla
 export function bindingKey(binding: NormalizedBinding): string {
   const codes = binding.secondCode === undefined ? [binding.code] : [binding.code, binding.secondCode].sort()
   return [...binding.modifiers, ...codes].join('+')
+}
+
+/**
+ * Map a keypad digit onto its main-row twin so every seam downstream of ingestion sees one code family.
+ * `event.code` is NumLock-independent, so the alias holds with NumLock on or off; only `Numpad0`–`Numpad9`
+ * alias — `NumpadEnter`, `NumpadDecimal`, and the arithmetic keys keep their own codes. One binding with
+ * two triggers (main row and keypad) is the deliberate trade.
+ * @param code - raw physical code reported by an ingestion seam.
+ * @returns `Digit0`–`Digit9` for keypad digits, otherwise the input unchanged.
+ */
+export function aliasKeypad(code: string): string {
+  const digit = /^Numpad([0-9])$/u.exec(code)
+  return digit === null ? code : `Digit${digit[1]}`
 }
 
 /**

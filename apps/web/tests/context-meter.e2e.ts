@@ -34,7 +34,7 @@ describe.skipIf(webSnapshotMode() === 'record')('web e2e: context details placem
         const settled = scaffold.whenTurnSettled()
         const input = page.locator('[data-composer-input]').first()
         await input.fill(prompts[0]!)
-        await input.press('Enter')
+        await input.press('Shift+Enter')
         await settled
         const trigger = page.getByRole('button', { name: /% of context used$/ })
         await trigger.waitFor()

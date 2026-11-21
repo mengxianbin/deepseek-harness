@@ -12,7 +12,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
-import type { ShortcutCommandId, ShortcutFixedCommand } from '@deepseek-ai/dsh-client-shortcuts/client'
+import { composerEnterDisplay, composerEnterGestures, type ShortcutCommandId, type ShortcutFixedCommand } from '@deepseek-ai/dsh-client-shortcuts/client'
 import { UiConversation } from './conversation/assembly.ts'
 import { UserText, PlainUserText, SessionReference } from './user-text/UserText.tsx'
 import { sessionReferenceRule } from './user-text/session-reference-rule.ts'
@@ -293,15 +293,19 @@ export function apply(ctx: Context, config: Config = Config({})): void {
   const stopShortcut = createSnapshotStore<readonly string[]>([])
   ctx.inject(['shortcuts'], (scope) => {
     stopWindowMs = scope.shortcuts.stopSequenceMs
+    // The Enter pair rows render from the shared gesture authority — the same
+    // bindings the message input and the question composer classify with — so
+    // the reference cannot drift from what the keys actually do.
     const fixedInputs: readonly ShortcutFixedCommand[] = [
-      { id: 'fixed.send' as ShortcutCommandId, label: () => t('input.send'), keys: ['Enter'],
-        bindings: [{ code: 'Enter', modifiers: [] }], group: 'input' },
+      { id: 'fixed.send' as ShortcutCommandId, label: () => t('input.send'),
+        keys: scope.shortcuts.describeBinding(composerEnterDisplay.submit).keys,
+        bindings: composerEnterGestures.submit, group: 'input' },
       { id: 'fixed.newline' as ShortcutCommandId, label: () => t('shortcut.newline'),
-        keys: scope.shortcuts.describeBinding({ code: 'Enter', modifiers: ['shift'] }).keys,
-        bindings: [{ code: 'Enter', modifiers: ['shift'] }], group: 'input' },
+        keys: scope.shortcuts.describeBinding(composerEnterDisplay.newline).keys,
+        bindings: composerEnterGestures.newline, group: 'input' },
       { id: 'fixed.complementary' as ShortcutCommandId, label: () => t('shortcut.complementary'),
-        keys: scope.shortcuts.describeBinding({ code: 'Enter', modifiers: ['primary'] }).keys,
-        bindings: [{ code: 'Enter', modifiers: ['control'] }, { code: 'Enter', modifiers: ['meta'] }], group: 'input' },
+        keys: scope.shortcuts.describeBinding(composerEnterDisplay.accelerated).keys,
+        bindings: composerEnterGestures.accelerated, group: 'input' },
       { id: 'fixed.slash' as ShortcutCommandId, label: () => t('shortcut.slash'), keys: ['/'],
         bindings: [{ code: 'Slash', modifiers: [] }], group: 'input' },
       { id: 'fixed.mention' as ShortcutCommandId, label: () => t('shortcut.mention'), keys: ['@'],
@@ -344,6 +348,33 @@ export function apply(ctx: Context, config: Config = Config({})): void {
   const focusComposer = (): void => {
     const id = mainSessionId()
     if (id === undefined) return
+    // FORK dsh-local (ask-keys-focus, 2026-11-17 裁定 B): a takeover card
+    // occupying this Session's composer seat owns the keyboard — focus lands
+    // on the card first (its frame takes click-focus, and a question frame's
+    // onFocus lifts an auto-fold), then on the card's first safe target: the
+    // plan review's discussion button, else the question's first enabled
+    // option, else its answer field. A folded card rides the same path — the
+    // frame focus unfolds it and the next frame finds the body mounted.
+    let seat: HTMLElement | null = null
+    for (const occurrence of document.querySelectorAll<HTMLElement>('[data-conversation-session]')) {
+      if (occurrence.dataset.conversationSession === id) {
+        seat = occurrence
+        break
+      }
+    }
+    const card = seat?.querySelector<HTMLElement>('[data-question-key], [data-plan-review-key]') ?? null
+    if (card !== null) {
+      card.focus()
+      requestAnimationFrame(() => {
+        const target = card.dataset.planReviewKey !== undefined
+          ? card.querySelector<HTMLElement>('[data-plan-review-first]')
+          : card.querySelector<HTMLButtonElement>('[data-option-row] button:not([disabled])')
+            ?? card.querySelector<HTMLTextAreaElement>('textarea:not([disabled])')
+        // No target (a stripped-down card): the frame keeps the focus it took.
+        target?.focus()
+      })
+      return
+    }
     const binding = sessions.binding(id)
     if (binding === undefined) return
     inputHub.for(binding.ctx).focus()
@@ -514,6 +545,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
       'conversation.session.header.utilities': { kind: 'list', scope: 'session' },
       'conversation.session.header.corner': { kind: 'single', scope: 'session' },
       'conversation.session.header.views.actions': { kind: 'list', scope: 'root' },
+      'conversation.session.header.views.trailing': { kind: 'list', scope: 'session' },
     },
     store: conversationStore,
     inject: (sessionId: SessionId, actions: BoundActions<typeof conversationStore>): ConversationSessionHeaderInjected => ({
@@ -540,6 +572,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
       'conversation.input.model': { kind: 'single', scope: 'session' },
       'conversation.input.activity': { kind: 'single', scope: 'session' },
       'conversation.composer.dock': { kind: 'list', scope: 'session' },
+      'conversation.composer.dock.trailing': { kind: 'list', scope: 'session' },
     },
     inject: (sessionId: SessionId | undefined): ComposerBarInjected => {
       if (sessionId === undefined) {

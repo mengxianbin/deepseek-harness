@@ -104,7 +104,7 @@ describe('Workspace and Session hover handoff', () => {
     try {
       const workspace = (key: string): GroupNode => ({
         key, workspaceId: wid(key), cwd: `/projects/${key}`, createdAt: 0, label: key,
-        sessionCount: 0, expanded: true, containsCurrent: false, sessions: [],
+        sessionCount: 0, queuedRed: 0, queuedYellow: 0, expanded: true, containsCurrent: false, sessions: [],
       })
       const session: SessionNode = {
         id: sid('session'), title: 'Session', blank: false, running: false,
@@ -167,7 +167,7 @@ describe('native row drag previews', () => {
     const view = render(kind === 'workspace'
       ? <ProjectRowItem group={{
         key: 'workspace', workspaceId: wid('workspace'), cwd: '/workspace', createdAt: 0,
-        label: 'Draggable row', sessionCount: 0, expanded: true, containsCurrent: false, sessions: [],
+        label: 'Draggable row', sessionCount: 0, queuedRed: 0, queuedYellow: 0, expanded: true, containsCurrent: false, sessions: [],
       }} onToggle={vi.fn()} onCreate={vi.fn()} drag={drag} t={t} />
       : <SessionNodeItem node={{
         id: sid('session'), title: 'Draggable row', blank: false, running: false,
@@ -366,7 +366,7 @@ describe('workspace browser rows', () => {
     const onCreate = vi.fn()
     const group: GroupNode = {
       key: 'project', workspaceId: wid('project'), cwd: '/projects/project', createdAt: 0, label: 'Project',
-      sessionCount: 1, expanded: true, containsCurrent: true, sessions: [],
+      sessionCount: 1, queuedRed: 0, queuedYellow: 0, expanded: true, containsCurrent: true, sessions: [],
     }
     render(<ProjectRowItem group={group} onToggle={onToggle} onCreate={onCreate} t={t}
       newShortcut={{ id: 'session.new' as never, label: 'New', aliases: [], binding: null,
@@ -380,6 +380,31 @@ describe('workspace browser rows', () => {
     expect(onToggle).not.toHaveBeenCalled()
     fireEvent.click(screen.getByText('Project'))
     expect(onToggle).toHaveBeenCalledOnce()
+  })
+
+  it('shows the group attention badge red-first with dot-marked counts, hidden at zero (queue-zone-1113)', () => {
+    const group = (queuedRed: number, queuedYellow: number): GroupNode => ({
+      key: 'project', workspaceId: wid('project'), cwd: '/projects/project', createdAt: 0, label: 'Project',
+      sessionCount: 5, queuedRed, queuedYellow, expanded: true, containsCurrent: false, sessions: [],
+    })
+    const view = render(<ProjectRowItem group={group(2, 3)} onToggle={vi.fn()} onCreate={vi.fn()} t={t} />)
+    const badge = screen.getByRole('img', { name: '待裁决 2 · 待回话 3' })
+    // Red leads; both counts ride the solid dot in their tier colour, sized
+    // with the title, and a space separates the pair — the accessible name
+    // spells out the tiers, so colour is not the only channel.
+    expect([...badge.querySelectorAll('[data-attention]')].map(part => part.getAttribute('data-attention')))
+      .toEqual(['failed', 'pending'])
+    expect(badge.querySelector('[data-attention="failed"]')?.textContent).toBe('2')
+    expect(badge.querySelector('[data-attention="pending"]')?.textContent).toBe('3')
+    expect(badge.querySelector('[data-attention="failed"] [class*="attentionDot"]')).toBeTruthy()
+    expect(badge.querySelector('[data-attention="pending"] [class*="attentionDot"]')).toBeTruthy()
+    // A zero colour inside a live pair renders no part of its own…
+    view.rerender(<ProjectRowItem group={group(0, 1)} onToggle={vi.fn()} onCreate={vi.fn()} t={t} />)
+    expect(screen.getByRole('img', { name: '待裁决 0 · 待回话 1' })).toBeTruthy()
+    expect(view.container.querySelector('[data-attention="failed"]')).toBeNull()
+    // …and zero overall removes the badge entirely.
+    view.rerender(<ProjectRowItem group={group(0, 0)} onToggle={vi.fn()} onCreate={vi.fn()} t={t} />)
+    expect(screen.queryByRole('img', { name: /待裁决/ })).toBeNull()
   })
 
   it('renders and opens a selected running Session row', () => {
@@ -596,16 +621,30 @@ describe('workspace browser rows', () => {
     <SessionNodeItem node={statusRow(over)} currentId={undefined} now={0} onOpen={vi.fn()} t={translate} />,
   )
 
-  it('wears the gear glyph with its count when live background jobs are the only activity', () => {
+  it('wears the gray ring with its numeric badge when live background jobs are the only activity (五态定稿 §二)', () => {
     const view = renderStatusRow({ activeJobCount: 2 })
     const row = screen.getByRole('treeitem')
     const cell = row.firstElementChild
-    expect(cell?.querySelector('[data-status-glyph="jobs"]')).toBeTruthy()
-    expect(cell?.querySelector('sup')?.textContent).toBe('2')
-    // The count's full sentence is the row's screen-reader label; no dot shares the cell.
+    // The gear + superscript sub-form merged into the ongoing ring's badge:
+    // one number = running subagents + live jobs.
+    expect(cell?.querySelector('[data-state="ongoing"]')).toBeTruthy()
+    expect(cell?.querySelector('[data-busy-count="2"]')?.textContent).toBe('2')
+    // The count's full sentence is the row's screen-reader label.
     expect(screen.getByText('2 个后台任务运行中')).toBeTruthy()
-    expect(row.querySelector('[data-state]')).toBeNull()
+    expect(cell?.querySelector('[data-status-glyph]')).toBeNull()
     view.unmount()
+  })
+
+  it('sums running subagents and live jobs on one badge, and shows none at zero', () => {
+    const both = renderStatusRow({ running: true, runningSubagentCount: 2, activeJobCount: 3 })
+    const cell = screen.getByRole('treeitem').firstElementChild
+    expect(cell?.querySelector('[data-busy-count="5"]')?.textContent).toBe('5')
+    both.unmount()
+
+    // The main turn alone is not a discrete entity: no subagent, no job → no badge.
+    const plain = renderStatusRow({ running: true })
+    expect(screen.getByRole('treeitem').firstElementChild?.querySelector('[data-busy-count]')).toBeNull()
+    plain.unmount()
   })
 
   it('ranks the wake-up glyph over the unread completion, and rings the last-known state when confirmation drops', () => {
@@ -639,25 +678,53 @@ describe('workspace browser rows', () => {
     beat.unmount()
   })
 
-  it('carries the shape channel beside the dot: check for the pass, bang for the failed stop (q3-visual)', () => {
+  it('embeds the glyph in the enlarged dot: ✓ for the pass, ✕ for the failed stop, and no top-right badge (五态定稿 §二)', () => {
     const pass = renderStatusRow({ completed: true })
     let row = screen.getByRole('treeitem')
-    expect(row.querySelector('[data-state="done"]')).not.toBeNull()
-    expect(row.querySelector('[data-status-mark="check"]')?.textContent).toBe('✓')
+    const doneDot = row.querySelector('[data-state="done"]')
+    expect(doneDot).not.toBeNull()
+    expect(doneDot?.textContent).toBe('✓')
+    // The retired statusMark mini-badge channel renders nothing at all.
+    expect(row.querySelector('[data-status-mark]')).toBeNull()
     pass.unmount()
 
     const failed = renderStatusRow({ completed: true, completionOutcome: 'failed' })
     row = screen.getByRole('treeitem')
-    expect(row.querySelector('[data-state="error"]')).not.toBeNull()
-    expect(row.querySelector('[data-status-mark="bang"]')?.textContent).toBe('!')
+    const errorDot = row.querySelector('[data-state="error"]')
+    expect(errorDot).not.toBeNull()
+    // Red uses ✕, not the bang: the bang belongs to the yellow awaiting dot.
+    expect(errorDot?.textContent).toBe('✕')
+    expect(row.querySelector('[data-status-mark]')).toBeNull()
+    expect(screen.getByText('上轮失败')).toBeTruthy()
     failed.unmount()
 
-    // A queued wake-up rides secondary; the shape stays on the primary cell.
+    // The yellow awaiting dot carries the bang inside the dot.
+    const pending = renderStatusRow({ pendingInteraction: 'approval' })
+    row = screen.getByRole('treeitem')
+    const warnDot = row.querySelector('[data-state="warning"]')
+    expect(warnDot).not.toBeNull()
+    expect(warnDot?.textContent).toBe('!')
+    expect(row.querySelector('[data-status-mark]')).toBeNull()
+    pending.unmount()
+
+    // A queued wake-up rides secondary; the glyph stays on the primary cell.
     const wakeup = renderStatusRow({ completed: true, completionOutcome: 'failed', pendingWakeup: true })
     row = screen.getByRole('treeitem')
-    expect(row.querySelector('[data-status-mark="bang"]')).not.toBeNull()
+    expect(row.querySelector('[data-state="error"]')?.textContent).toBe('✕')
     expect(screen.getByText('待唤醒')).toBeTruthy()
     wakeup.unmount()
+  })
+
+  it('names a shutdown-cut stop 停机打断 instead of 上轮失败 (聚合红·子原因入详情)', () => {
+    const cut = renderStatusRow({ completed: true, completionOutcome: 'failed', completionInterrupted: true })
+    expect(screen.getByText('停机打断')).toBeTruthy()
+    expect(screen.queryByText('上轮失败')).toBeNull()
+    cut.unmount()
+
+    // An ordinary turn failure keeps its own wording.
+    const failed = renderStatusRow({ completed: true, completionOutcome: 'failed' })
+    expect(screen.getByText('上轮失败')).toBeTruthy()
+    failed.unmount()
   })
 
   it('shows the row-end 已阅 check while the mark stands (点名不改态, q4-readmark)', () => {
@@ -708,7 +775,9 @@ describe('workspace browser rows', () => {
   it('keeps jobs ahead of the wake-up mark, and both ahead of the unread completion', () => {
     const all = renderStatusRow({ completed: true, activeJobCount: 1, pendingWakeup: true })
     const cell = screen.getByRole('treeitem').firstElementChild
-    expect(cell?.querySelector('[data-status-glyph="jobs"]')).not.toBeNull()
+    // Jobs render as the ongoing ring's badge now, never as a gear glyph.
+    expect(cell?.querySelector('[data-state="ongoing"]')).not.toBeNull()
+    expect(cell?.querySelector('[data-busy-count="1"]')).not.toBeNull()
     expect(cell?.querySelector('[data-state="done"]')).toBeNull()
     // The losing wake-up still reaches assistive technology from the cell.
     expect(screen.getByText('待唤醒')).toBeTruthy()
@@ -794,7 +863,7 @@ describe('workspace browser rows', () => {
     expect(screen.getByRole('treeitem').querySelector('[data-state="done"]')).not.toBeNull()
   })
 
-  it('shows the jobs glyph on a search result row and keeps its roster while shown', () => {
+  it('shows the jobs badge on a search result row and keeps its roster while shown', () => {
     const release = vi.fn()
     const watchSessionJobs = vi.fn(() => release)
     const view = render(<SearchResultItem
@@ -806,7 +875,7 @@ describe('workspace browser rows', () => {
       useSessionAccess={allowAllAccess.useSessionAccess}
       watchSessionJobs={watchSessionJobs} t={t}
     />)
-    expect(screen.getByRole('treeitem').querySelector('[data-status-glyph="jobs"]')).not.toBeNull()
+    expect(screen.getByRole('treeitem').querySelector('[data-busy-count="1"]')).not.toBeNull()
     expect(screen.getByText('1 个后台任务运行中')).toBeTruthy()
     expect(watchSessionJobs).toHaveBeenCalledWith(sid('result-jobs'))
     view.unmount()
@@ -819,7 +888,7 @@ describe('workspace browser rows', () => {
     const onToggle = vi.fn()
     const group: GroupNode = {
       key: 'project', workspaceId: wid('project'), cwd: '/projects/project', createdAt: 0, label: 'Project',
-      sessionCount: 0, expanded: false, containsCurrent: false, sessions: [],
+      sessionCount: 0, queuedRed: 0, queuedYellow: 0, expanded: false, containsCurrent: false, sessions: [],
     }
     render(<ProjectRowItem
       group={group} onToggle={onToggle} onCreate={vi.fn()}
@@ -846,7 +915,7 @@ describe('workspace browser rows', () => {
   it('workspace row offers only the actions its Workspace access snapshot allows', () => {
     const group: GroupNode = {
       key: 'project', workspaceId: wid('project'), cwd: '/projects/project', createdAt: 0, label: 'Project',
-      sessionCount: 0, expanded: false, containsCurrent: false, sessions: [],
+      sessionCount: 0, queuedRed: 0, queuedYellow: 0, expanded: false, containsCurrent: false, sessions: [],
     }
     const allowed = new Set<string>(['workspace/rename'])
     const useWorkspaceAccess = vi.fn((_workspaceId: WorkspaceId, endpoint: string) => allowed.has(endpoint))
@@ -882,7 +951,7 @@ describe('workspace browser rows', () => {
   it('ungrouped bucket asks the global resource whether it may start a Session', () => {
     const group: GroupNode = {
       key: 'ungrouped', workspaceId: undefined, cwd: undefined, createdAt: undefined, label: '',
-      sessionCount: 0, expanded: false, containsCurrent: false, sessions: [],
+      sessionCount: 0, queuedRed: 0, queuedYellow: 0, expanded: false, containsCurrent: false, sessions: [],
     }
     const useRemoteAccess = vi.fn((action: string) => action !== 'session/create')
     const useWorkspaceAccess = vi.fn(() => true)
@@ -926,7 +995,7 @@ describe('workspace browser rows', () => {
     try {
       const group: GroupNode = {
         key: 'project', workspaceId: wid('project'), cwd: '/projects/project', createdAt: 0, label: 'Project',
-        sessionCount: 0, expanded: false, containsCurrent: false, sessions: [],
+        sessionCount: 0, queuedRed: 0, queuedYellow: 0, expanded: false, containsCurrent: false, sessions: [],
       }
       render(<ProjectRowItem group={group} onToggle={vi.fn()} onCreate={vi.fn()} t={t} />)
       fireEvent.pointerEnter(screen.getByRole('treeitem').parentElement as HTMLElement)
@@ -949,7 +1018,7 @@ describe('workspace browser rows', () => {
     try {
       const group: GroupNode = {
         key: 'project', workspaceId: wid('project'), cwd: '/projects/project', createdAt: 0, label: 'Project',
-        sessionCount: 0, expanded: false, containsCurrent: false, sessions: [],
+        sessionCount: 0, queuedRed: 0, queuedYellow: 0, expanded: false, containsCurrent: false, sessions: [],
       }
       render(<ProjectRowItem group={group} onToggle={vi.fn()} onCreate={vi.fn()} t={t} />)
       const row = screen.getByRole('treeitem')
@@ -982,7 +1051,7 @@ describe('workspace browser rows', () => {
     try {
       const group: GroupNode = {
         key: 'project', workspaceId: wid('project'), cwd: '/projects/project', createdAt: 0, label: 'Project',
-        sessionCount: 0, expanded: false, containsCurrent: false, sessions: [],
+        sessionCount: 0, queuedRed: 0, queuedYellow: 0, expanded: false, containsCurrent: false, sessions: [],
       }
       render(<ProjectRowItem group={group} onToggle={vi.fn()} onCreate={vi.fn()} t={t} />)
       const row = screen.getByRole('treeitem')
@@ -1008,7 +1077,7 @@ describe('workspace browser rows', () => {
     try {
       const group: GroupNode = {
         key: 'project', workspaceId: wid('project'), cwd: '/home/u/Documents/project', createdAt: 0, label: 'Project',
-        sessionCount: 0, expanded: false, containsCurrent: false, sessions: [],
+        sessionCount: 0, queuedRed: 0, queuedYellow: 0, expanded: false, containsCurrent: false, sessions: [],
       }
       render(<ProjectRowItem group={group} home="/home/u" onToggle={vi.fn()} onCreate={vi.fn()} t={t} />)
       fireEvent.pointerEnter(screen.getByRole('treeitem').parentElement as HTMLElement)
@@ -1028,7 +1097,7 @@ describe('workspace browser rows', () => {
     try {
       const group: GroupNode = {
         key: 'project', workspaceId: wid('project'), cwd: undefined, createdAt: 0, label: 'Project',
-        sessionCount: 0, expanded: false, containsCurrent: false, sessions: [],
+        sessionCount: 0, queuedRed: 0, queuedYellow: 0, expanded: false, containsCurrent: false, sessions: [],
       }
       render(<ProjectRowItem group={group} home="/home/u" onToggle={vi.fn()} onCreate={vi.fn()} t={t} />)
       fireEvent.pointerEnter(screen.getByRole('treeitem').parentElement as HTMLElement)
@@ -1046,7 +1115,7 @@ describe('workspace browser rows', () => {
     try {
       const group: GroupNode = {
         key: 'project', workspaceId: wid('project'), cwd: 'C:\\Users\\u\\project', createdAt: 0, label: 'Project',
-        sessionCount: 0, expanded: false, containsCurrent: false, sessions: [],
+        sessionCount: 0, queuedRed: 0, queuedYellow: 0, expanded: false, containsCurrent: false, sessions: [],
       }
       render(<ProjectRowItem group={group} home="C:\\Users\\u" onToggle={vi.fn()} onCreate={vi.fn()} t={t} />)
       fireEvent.pointerEnter(screen.getByRole('treeitem').parentElement as HTMLElement)
@@ -1060,7 +1129,7 @@ describe('workspace browser rows', () => {
   it('ungrouped bucket renders no workspace menu', () => {
     const group: GroupNode = {
       key: '', workspaceId: undefined, cwd: undefined, createdAt: undefined, label: 'Ungrouped',
-      sessionCount: 0, expanded: false, containsCurrent: false, sessions: [],
+      sessionCount: 0, queuedRed: 0, queuedYellow: 0, expanded: false, containsCurrent: false, sessions: [],
     }
     render(<ProjectRowItem group={group} onToggle={vi.fn()} onCreate={vi.fn()} t={t} />)
     expect(screen.queryByRole('button', { name: /工作区/ })).toBeNull()
@@ -1674,6 +1743,78 @@ describe('session row decoration seats', () => {
     expect(onOpen).not.toHaveBeenCalled()
   })
 
+  it('walks focus along the rows with ArrowUp/ArrowDown without opening or selecting', () => {
+    const onOpen = vi.fn()
+    const nodes = (['a', 'b', 'c'] as const).map((key): SessionNode => (
+      { ...idle, id: sid(key), title: `Row ${key}` }
+    ))
+    render(
+      <div role="tree" aria-label="sessions">
+        {nodes.map(node => (
+          <SessionNodeItem key={node.id} node={node} currentId={undefined} now={0} onOpen={onOpen} t={t} />
+        ))}
+      </div>,
+    )
+    const rows = screen.getAllByRole('treeitem')
+    const [first, second, third] = [rows[0]!, rows[1]!, rows[2]!]
+    first.focus()
+    expect(document.activeElement).toBe(first)
+    fireEvent.keyDown(first, { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(second)
+    fireEvent.keyDown(second, { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(third)
+    // The ends hold: focus neither wraps nor escapes the list. Key events land
+    // on the focused row, the way a real keyboard delivers them.
+    fireEvent.keyDown(third, { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(third)
+    fireEvent.keyDown(third, { key: 'ArrowUp' })
+    expect(document.activeElement).toBe(second)
+    fireEvent.keyDown(second, { key: 'ArrowUp' })
+    expect(document.activeElement).toBe(first)
+    fireEvent.keyDown(first, { key: 'ArrowUp' })
+    expect(document.activeElement).toBe(first)
+    // A 案: focus walked, the session never opened, selection never followed.
+    expect(onOpen).not.toHaveBeenCalled()
+    expect(screen.getAllByRole('treeitem').map(row => row.getAttribute('aria-selected')))
+      .toEqual(['false', 'false', 'false'])
+    // Arrows with a modifier stay available to the global shortcuts registry.
+    expect(fireEvent.keyDown(first, { key: 'ArrowDown', ctrlKey: true })).toBe(true)
+    expect(document.activeElement).toBe(first)
+  })
+
+  it('jumps focus to the ends of the row list with Home/End without opening or selecting', () => {
+    const onOpen = vi.fn()
+    const nodes = (['a', 'b', 'c'] as const).map((key): SessionNode => (
+      { ...idle, id: sid(key), title: `Row ${key}` }
+    ))
+    render(
+      <div role="tree" aria-label="sessions">
+        {nodes.map(node => (
+          <SessionNodeItem key={node.id} node={node} currentId={undefined} now={0} onOpen={onOpen} t={t} />
+        ))}
+      </div>,
+    )
+    const rows = screen.getAllByRole('treeitem')
+    const [first, , third] = [rows[0]!, rows[1]!, rows[2]!]
+    rows[1]!.focus()
+    fireEvent.keyDown(rows[1]!, { key: 'Home' })
+    expect(document.activeElement).toBe(first)
+    fireEvent.keyDown(first, { key: 'End' })
+    expect(document.activeElement).toBe(third)
+    // The ends hold: focus neither wraps nor escapes the list.
+    fireEvent.keyDown(third, { key: 'End' })
+    expect(document.activeElement).toBe(third)
+    fireEvent.keyDown(first, { key: 'Home' })
+    expect(document.activeElement).toBe(first)
+    // The jump moves focus only: nothing opened, selection never followed.
+    expect(onOpen).not.toHaveBeenCalled()
+    expect(screen.getAllByRole('treeitem').map(row => row.getAttribute('aria-selected')))
+      .toEqual(['false', 'false', 'false'])
+    // Home/End with a modifier stay available to the global shortcuts registry.
+    expect(fireEvent.keyDown(first, { key: 'Home', ctrlKey: true })).toBe(true)
+    expect(document.activeElement).toBe(first)
+  })
+
   it('offers the leading seat only while the row is idle, and no state dot beside it', () => {
     const renderSlot = seatSpy()
     const view = renderRow(idle, renderSlot)
@@ -1787,11 +1928,12 @@ describe('session row decoration seats', () => {
       expect(renderSlot).toHaveBeenCalledWith('sidebar.session.row.hover', { sessionId: idle.id })
       const section = document.querySelector('[data-seat="sidebar.session.row.hover"]')
       expect(section).toBeTruthy()
-      // The 属性缺省弱提示 line sits between the time and the hover seat
-      // (collab step3 §6.3, q6-attr): default placement named in gray.
-      expect(section?.previousElementSibling?.textContent).toBe('优先级 P2（默认）属性未读到，按默认摆位')
-      expect(section?.previousElementSibling?.previousElementSibling?.textContent).toBe('刚刚')
+      // hover-sessionclass-1121: the priority/attributes placeholder block is
+      // gone — the hover seat follows the relative time directly, ahead of the
+      // trailing status line, and neither placeholder class renders anywhere.
+      expect(section?.previousElementSibling?.textContent).toBe('刚刚')
       expect(section?.nextElementSibling?.textContent).toBe('空闲')
+      expect(document.querySelector('[class*="hoverAttributes"]')).toBeNull()
     } finally {
       vi.useRealTimers()
     }

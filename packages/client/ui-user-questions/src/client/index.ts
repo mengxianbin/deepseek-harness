@@ -35,6 +35,7 @@ import type { UserQuestionPanels, UserQuestionRecord } from '@deepseek-ai/dsh-cl
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { brandString } from '@deepseek-ai/dsh-brand'
+import { composerEnterDisplay, composerEnterGestures, type ShortcutCommandId } from '@deepseek-ai/dsh-client-shortcuts/client'
 import { fileAddressFor } from '@deepseek-ai/dsh-util-workspace-path'
 import {
   createWaterfallRequest, PendingQuestion,
@@ -386,6 +387,42 @@ function publishContinuedQuestions(ctx: ClientContext, cards: QuestionCards): ()
  */
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en, ja, es, fr, de, ru, pt }), 'ui-user-questions: dictionaries')
+  // The answer field consumes the shared composer gesture pair; its advance
+  // row joins the shortcut reference from the same bindings, so the panel
+  // shows what the keys actually do instead of leaving them to experiment.
+  // The selection and paging pairs are not composer gestures, so they join as
+  // literal rows below.
+  ctx.inject(['shortcuts'], (scope) => {
+    const t = ctx.locale.bind(NS)
+    scope.effect(() => scope.shortcuts.registerFixed({
+      id: 'fixed.question-advance' as ShortcutCommandId, label: () => t('shortcut.advance'),
+      keys: scope.shortcuts.describeBinding(composerEnterDisplay.submit).keys,
+      bindings: composerEnterGestures.submit, group: 'input',
+    }), 'ui-user-questions: fixed question advance')
+    // FORK dsh-local (ask-ref-rows-1117, 2026-11-17 E 批): the card's own
+    // selection and paging keys are declared literally for the Ctrl+/
+    // reference (fixed.slash precedent) — Enter/Space press the focused
+    // option, PageUp/PageDown walk the questions and never submit. Plain
+    // Enter is the newline gesture's physical binding (same key, contextual
+    // meaning), so the code literal stays inside the gesture authority.
+    scope.effect(() => scope.shortcuts.registerFixed({
+      id: 'fixed.question-select' as ShortcutCommandId, label: () => t('shortcut.select'),
+      keys: ['Enter', 'Space'],
+      bindings: [...composerEnterGestures.newline, { code: 'Space', modifiers: [] }], group: 'input',
+    }), 'ui-user-questions: fixed question select')
+    scope.effect(() => scope.shortcuts.registerFixed({
+      id: 'fixed.question-pager' as ShortcutCommandId, label: () => t('shortcut.pager'),
+      keys: ['PageUp', 'PageDown'], bindings: [{ code: 'PageUp', modifiers: [] }, { code: 'PageDown', modifiers: [] }], group: 'input',
+    }), 'ui-user-questions: fixed question pager')
+    // FORK dsh-local (ask-arrow-reference-1119, 2026-11-19): the option walk
+    // joins the reference the same literal way — the card owns the keydown,
+    // this row only advertises ↑/↓ (the menus 'move' row already carries the
+    // same codes in another group; no registry command is added).
+    scope.effect(() => scope.shortcuts.registerFixed({
+      id: 'fixed.question-option-nav' as ShortcutCommandId, label: () => t('shortcut.optionNav'),
+      keys: ['↑', '↓'], bindings: [{ code: 'ArrowUp', modifiers: [] }, { code: 'ArrowDown', modifiers: [] }], group: 'input',
+    }), 'ui-user-questions: fixed question option nav')
+  })
   const questionDraftStore = createQuestionDraftStore()
   const inputTriggers = ctx.get('inputTriggers') as InputTriggerServiceContract
   const sessions = ctx.sessions

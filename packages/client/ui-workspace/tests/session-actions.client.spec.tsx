@@ -711,6 +711,7 @@ describe('RowActionToast', () => {
     const showArchived = vi.fn()
     const openForkSource = vi.fn()
     const continueSealedArchive = vi.fn()
+    const retrySealedArchive = vi.fn()
     const runtime = await SlotTestRuntime.create()
     onTestFinished(() => runtime.dispose())
     const locale = new LocaleRuntime(runtime.ctx)
@@ -727,7 +728,7 @@ describe('RowActionToast', () => {
         subscribe: listener => view.subscribe(listener),
       }),
     }, {
-      undoArchive, showArchived, openForkSource, continueSealedArchive,
+      undoArchive, showArchived, openForkSource, continueSealedArchive, retrySealedArchive,
     })
     runtime.slots.register({
       name: 'shell.overlay', id: 'workspace.row-toast',
@@ -739,7 +740,7 @@ describe('RowActionToast', () => {
     const notify = (notice: RowToast): void => {
       act(() => { toast.set({ ...notice, seq: ++seq }) })
     }
-    return { dismissToast, undoArchive, showArchived, openForkSource, continueSealedArchive, notify, locale, view }
+    return { dismissToast, undoArchive, showArchived, openForkSource, continueSealedArchive, retrySealedArchive, notify, locale, view }
   }
 
   it('updates locale and archive actions without restarting the same notice', async () => {

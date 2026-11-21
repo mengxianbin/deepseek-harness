@@ -1,0 +1,26 @@
+/* Server start-time stamp: quiet secondary label, static (no ticking), never
+   shrinks the gear — the row's trailing controls keep their fixed widths. */
+.stamp {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* Visually-hidden full sentence for assistive technology (same technique as
+   SettingsRoot's .hiddenLabel): the visible short form is decorative to AT
+   (aria-hidden), this half carries the complete static fact — never a
+   computed elapsed that could go stale. */
+.full {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

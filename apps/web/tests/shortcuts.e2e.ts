@@ -48,7 +48,7 @@ describe('web e2e: shortcut reference', () => {
       expect(await dialog.boundingBox()).toMatchObject({ width: 480, height: 600 })
       expect(await dialog.getByRole('search').boundingBox()).toMatchObject({ width: 440, height: 36 })
       const rows = dialog.getByRole('listitem')
-      const stopRow = dialog.getByRole('region', { name: locale === 'zh-CN' ? '消息输入' : 'Message input', exact: true })
+      const stopRow = dialog.getByRole('region', { name: locale === 'zh-CN' ? '文本输入' : 'Text input', exact: true })
         .getByRole('listitem').last()
       await stopRow.getByText(locale === 'zh-CN' ? '停止生成' : 'Stop generating', { exact: true }).waitFor()
       const stopButtons = stopRow.getByRole('button')
@@ -315,10 +315,10 @@ describe('web e2e: shortcut reference', () => {
       await page.keyboard.press('Escape')
       await page.getByRole('dialog', { name: settings, exact: true }).waitFor({ state: 'hidden' })
       const sidebar = page.getByRole('button', { name: locale === 'zh-CN' ? '收起侧边栏' : 'Collapse sidebar', exact: true })
-      expect(await sidebar.getAttribute('aria-keyshortcuts')).toBe(key === 'Meta' ? 'Alt+Meta+B' : 'Control+Alt+B')
+      expect(await sidebar.getAttribute('aria-keyshortcuts')).toBe(key === 'Meta' ? 'Alt+Meta+B' : 'Control+Alt+4')
       await page.reload({ waitUntil: 'load' })
       await sidebar.waitFor()
-      expect(await sidebar.getAttribute('aria-keyshortcuts')).toBe(key === 'Meta' ? 'Alt+Meta+B' : 'Control+Alt+B')
+      expect(await sidebar.getAttribute('aria-keyshortcuts')).toBe(key === 'Meta' ? 'Alt+Meta+B' : 'Control+Alt+4')
       expect(console.pageErrors).toEqual([])
       expect(console.warnings).toEqual([])
     } finally { await context.close() }
@@ -384,7 +384,7 @@ describe('web e2e: shortcut reference', () => {
   })
 
   it.each([
-    { platform: 'Win32', modifier: 'Control', defaultBinding: 'Control+Alt+B' },
+    { platform: 'Win32', modifier: 'Control', defaultBinding: 'Control+Alt+4' },
     { platform: 'MacIntel', modifier: 'Meta', defaultBinding: 'Alt+Meta+B' },
     { platform: 'Linux x86_64', modifier: 'Control', defaultBinding: null },
   ])('records, rejects conflicts, persists across reload, and synchronizes stale drafts between tabs on $platform', async ({ platform, modifier, defaultBinding }) => {

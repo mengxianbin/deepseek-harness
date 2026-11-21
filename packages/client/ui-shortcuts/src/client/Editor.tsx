@@ -23,7 +23,7 @@ type EditorProps = InjectFace<EditorInjected> & PropsLocale<'shortcuts'> & {
  * @returns inline command controls; failures retain the draft and allow another recording.
  */
 export function ShortcutEditor({ target, onClose, onSaved, onError, useCatalog, useConfig, useFixedCatalog,
-  edit, recording, describeBinding, runtime, platform, t }:
+  edit, recording, describeBinding, aliasCode, runtime, platform, t }:
 EditorProps) {
   const config = useConfig(value => value)
   const catalog = useCatalog(value => value)
@@ -87,6 +87,8 @@ EditorProps) {
     const reset = (): void => { pending = null; held.clear(); blocked = false; dead = false }
     restart.current = reset
     const down = (event: KeyboardEvent): void => {
+      // Keypad digits record as their main-row twin, so the stored document never carries Numpad*.
+      const code = aliasCode(event.code)
       if (composition.guards(event) || event.getModifierState('AltGraph')) { if (desktopChords) reset(); return }
       if ((!desktopChords || document.activeElement !== recorder.current) && event.key === 'Escape' && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
         event.preventDefault(); event.stopPropagation()
@@ -94,7 +96,7 @@ EditorProps) {
         return
       }
       const commandDeadKey = runtime === 'web' && platform === 'macos' && document.activeElement === recorder.current
-        && event.code === 'KeyN' && event.metaKey && event.altKey && !event.ctrlKey && !event.shiftKey
+        && code === 'KeyN' && event.metaKey && event.altKey && !event.ctrlKey && !event.shiftKey
       if (event.key === 'Dead' && !commandDeadKey) { if (desktopChords) reset(); dead = true; return }
       if (dead) { dead = false; return }
       const modifiers = (['control', 'alt', 'shift', 'meta'] as const).filter(value => ({ control: event.ctrlKey,
@@ -103,31 +105,32 @@ EditorProps) {
       if (document.activeElement !== recorder.current || (event.key === 'Tab' && !recordTab)) return
       event.preventDefault(); event.stopPropagation()
       if (writing.current || event.repeat) return
-      if (/^(Control|Alt|Shift|Meta)(Left|Right)$/u.test(event.code)) {
+      if (/^(Control|Alt|Shift|Meta)(Left|Right)$/u.test(code)) {
         if (desktopChords && pending !== null) { reset(); setCandidate(null); setCaptured(false) }
         return
       }
       if (desktopChords) {
-        held.add(event.code)
+        held.add(code)
         if (blocked) return
         if (held.size > 2) {
           blocked = true; pending = null; handlers.current.report(t('too-many-keys')); return
         }
       }
       try {
-        const codes: [string, ...string[]] = [event.code, ...desktopChords ? [...held].filter(value => value !== event.code) : []]
+        const codes: [string, ...string[]] = [code, ...desktopChords ? [...held].filter(value => value !== code) : []]
         pending = describeBinding({ code: codes[0], ...(codes[1] === undefined ? {} : { secondCode: codes[1] }), modifiers }).binding
         setCandidate(pending); setCaptured(desktopChords); setMessage(''); setRetry(null)
       } catch (_error) { blocked = desktopChords; pending = null; handlers.current.report(t('unsupported-key')) }
     }
     const up = (event: KeyboardEvent): void => {
-      held.delete(event.code)
+      const code = aliasCode(event.code)
+      held.delete(code)
       if (desktopChords && document.activeElement === recorder.current) { event.preventDefault(); event.stopPropagation() }
-      const binding = pending !== null && (pending.code === event.code || pending.secondCode === event.code
-        || pending.modifiers.some(modifier => modifier === event.code.replace(/(Left|Right)$/u, '').toLowerCase())) ? pending : null
+      const binding = pending !== null && (pending.code === code || pending.secondCode === code
+        || pending.modifiers.some(modifier => modifier === code.replace(/(Left|Right)$/u, '').toLowerCase())) ? pending : null
       if (binding !== null) { pending = null; blocked = desktopChords }
       // macOS can omit the character keyup while Command is held.
-      if (desktopChords && (held.size === 0 || platform === 'macos' && /^Meta(Left|Right)$/u.test(event.code))) { held.clear(); blocked = false }
+      if (desktopChords && (held.size === 0 || platform === 'macos' && /^Meta(Left|Right)$/u.test(code))) { held.clear(); blocked = false }
       if (binding === null) return
       handlers.current.capture(binding, targetId)
     }
@@ -150,7 +153,7 @@ EditorProps) {
       document.removeEventListener('compositionstart', blur, true)
       void recording(false).catch(() => { /* The owning window may already be closed. */ })
     }
-  }, [describeBinding, recording, t, targetId, runtime, platform, desktopChords])
+  }, [describeBinding, aliasCode, recording, t, targetId, runtime, platform, desktopChords])
   useEffect(() => {
     const element = recorder.current
     if (nativeReady && element !== null) focusWithoutRing(element)

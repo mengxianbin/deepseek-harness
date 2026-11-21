@@ -34,6 +34,9 @@ import { ArchivedSessionGate } from './archived-session-gate.ts'
 import { reconcileSessionHealth } from './health.ts'
 import { readDutyInventory } from './duty.ts'
 import { readAutoRoutePoll } from './auto-route.ts'
+import { readReviveHealth } from './revive-health.ts'
+import { syncAlertInbox } from './alert-inbox.ts'
+import { alertInboxRequest } from './alert-inbox-route.ts'
 import type {
   ModelCatalog,
   SessionWorkspacePathApplication,
@@ -233,6 +236,17 @@ export class SessionController extends TypertRemoteService {
     ctx.plugin(SessionFileReferences)
     ctx.plugin(SessionMediaReferences)
     ctx.plugin(SessionSkillCatalog)
+    // 告警信箱面板动作面 (改版 A/C): mounted on the connection/request waterfall
+    // — the connection plugin runs admission BEFORE that waterfall, so an
+    // unauthenticated request never reaches this listener (inherits /api auth,
+    // no second unfenced door). 已读/恢复 go through the same single writer as
+    // the fold; the panel itself never writes the box.
+    ctx.inject(['webServer'], (webCtx) => {
+      webCtx.effect(() => {
+        const remove = webCtx.on('connection/request', alertInboxRequest)
+        return () => { remove() }
+      }, 'session-controller: alert-inbox route')
+    })
     // An archived Session, or a subagent descendant of one, runs no model step
     // until it is restored; what it still runs is stopped by the owners that
     // answer the Workspace registry's archive-admission events.
@@ -421,10 +435,23 @@ export class SessionController extends TypertRemoteService {
         // 2026-11-04 ruling: the auto-route poll ledger rides the same fold
         // (optional plane — absent when the plugin is, see auto-route.ts).
         const autoRoute = readAutoRoutePoll()
+        // 拍板⑭⑮: the revive mechanism-health document rides the same fold —
+        // change-only writer, so presence/parse attaches it (no mtime; an old
+        // stamp is still the current truth) and absence stays a quiet
+        // 「未接线」 line, never a break (optional plane, like autoRoute).
+        const reviveHealth = readReviveHealth()
+        // 告警信箱 (设计档 §七, alert-inbox-signal-face-1116): the SAME tick
+        // folds the revive state machine's export into `<dsh-home>/alert-inbox.json`
+        // — clustering and the three channels live on the WRITE side, change-only
+        // (revive-health mount precedent: zero new processes, zero new timers) —
+        // and publishes the unread counts the envelope badge renders beside duty.
+        const alertInbox = syncAlertInbox()
         ctx.emit('api-session/health', {
           ...reconcileSessionHealth(rows),
           duty: readDutyInventory(),
           ...(autoRoute === undefined ? {} : { autoRoute }),
+          ...(reviveHealth === undefined ? {} : { reviveHealth }),
+          ...(alertInbox === undefined ? {} : { alertInbox }),
         })
       }, SESSION_STATUS_SWEEP_MS)
       timer.unref()

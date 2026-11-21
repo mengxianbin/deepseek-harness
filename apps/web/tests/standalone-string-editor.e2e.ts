@@ -59,7 +59,7 @@ describe('web snapshot: standalone string editor through PTC', () => {
     const settled = scaffold.whenTurnSettled()
     const input = page.locator('[data-composer-input]').first()
     await input.fill(prompts[0]!)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     const sessionId = await settled
     const agent = scaffold.ctx.agents.get(sessionId)
     if (agent === undefined) throw new Error('Standalone editor Session has no live Agent')

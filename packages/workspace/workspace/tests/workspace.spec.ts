@@ -11,7 +11,7 @@ import type { DomainChanged } from '@deepseek-ai/dsh-storage-domain'
 import SessionStore, { SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionHeader } from '@deepseek-ai/dsh-session'
 import { SessionPersistenceRevision } from '@deepseek-ai/dsh-session-persistence'
-import type { SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence'
+import type { SessionPersistenceListOptions, SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence'
 import { MemoryMediaPool, MemoryStorageBackend } from '../../../storage/storage-domain/tests/helpers/memory-backend.ts'
 import WorkspaceRegistry, {
   WorkspaceId,
@@ -52,8 +52,13 @@ async function harness(options: HarnessOptions = {}) {
   ctx.provide('storageDomain', facility)
 
   let listed = options.sessions ?? []
-  const list = vi.fn(async (): Promise<SessionPersistenceSnapshot[]> =>
-    listed.map(header => ({ header, revision: SessionPersistenceRevision(`rev-${header.id}`) })))
+  // The peer honours the listing options the registry relies on: an excluded
+  // id never reaches the result (the cascade's freshness probe lists with
+  // every known id excluded; archive-cascade-list-1117).
+  const list = vi.fn(async (listOptions?: SessionPersistenceListOptions): Promise<SessionPersistenceSnapshot[]> =>
+    listed
+      .filter(header => !listOptions?.excludeSessionIds?.has(header.id))
+      .map(header => ({ header, revision: SessionPersistenceRevision(`rev-${header.id}`) })))
   const open = vi.fn(() => { throw new Error('event bodies must not be opened') })
   const stat = vi.fn(() => { throw new Error('per-session stat must not be needed') })
   ctx.provide('sessionPersistence', { list, open, stat } as never)
@@ -149,9 +154,9 @@ function record(path: string, sessionIds: string[], createdAt = '2026-07-24T00:0
 }
 
 /**
- * Media written before archivedSessionIds and pinnedSessionIds existed omit
- * the fields; keeping the fixtures in that shape continuously proves the
- * schema defaults upgrade them.
+ * Media written before archivedSessionIds, pinnedSessionIds and archivedAtById
+ * existed omit the fields; keeping the fixtures in that shape continuously
+ * proves the schema defaults upgrade them.
  */
 type StoredDomainState = z.input<typeof workspaceDomainState>
 
@@ -205,7 +210,13 @@ describe('WorkspaceRegistry lifecycle and bootstrap', () => {
     await fiber.await()
     expect(ctx.workspaceRegistry.list()).toEqual([])
     expect(list).toHaveBeenCalledTimes(1)
-    expect(storedState(pool)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [], pinnedSessionIds: [] })
+    expect(storedState(pool)).toEqual({
+      initialized: true,
+      workspaceIds: [],
+      archivedSessionIds: [],
+      archivedAtById: {},
+      pinnedSessionIds: [],
+    })
   })
 
   it('bootstraps once from list headers only, in workspace/session createdAt order', async () => {
@@ -239,6 +250,7 @@ describe('WorkspaceRegistry lifecycle and bootstrap', () => {
       initialized: true,
       workspaceIds: result.registry.list().map(workspace => workspace.id),
       archivedSessionIds: [],
+      archivedAtById: {},
       pinnedSessionIds: [],
     })
   })
@@ -268,7 +280,13 @@ describe('WorkspaceRegistry lifecycle and bootstrap', () => {
     const second = await harness({ pool, sessions: [header('late', late, 100)] })
     expect(second.list).not.toHaveBeenCalled()
     expect(second.registry.list()).toEqual([])
-    expect(storedState(pool)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [], pinnedSessionIds: [] })
+    expect(storedState(pool)).toEqual({
+      initialized: true,
+      workspaceIds: [],
+      archivedSessionIds: [],
+      archivedAtById: {},
+      pinnedSessionIds: [],
+    })
   })
 
   it('reuses partial records after a bootstrap record write fails', async () => {
@@ -522,7 +540,13 @@ describe('WorkspaceRegistry create and lookup', () => {
     await expect(result.registry.delete(workspace.id)).resolves.toBe(false)
     expect(result.registry.get(workspace.id)).toBeUndefined()
     expect(result.registry.list()).toEqual([])
-    expect(storedState(result.pool)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [], pinnedSessionIds: [] })
+    expect(storedState(result.pool)).toEqual({
+      initialized: true,
+      workspaceIds: [],
+      archivedSessionIds: [],
+      archivedAtById: {},
+      pinnedSessionIds: [],
+    })
     expect(result.pool.media.get('workspace')!.tables.get('workspaces')!.has(workspace.id)).toBe(false)
     await expect(realpath(dir)).resolves.toBe(dir)
     expect(result.list).toHaveBeenCalledTimes(1)
@@ -566,6 +590,7 @@ describe('WorkspaceRegistry create and lookup', () => {
       initialized: true,
       workspaceIds: [],
       archivedSessionIds: [],
+      archivedAtById: {},
       pinnedSessionIds: [],
       pendingMutation: { operation: 'delete', workspaceId: workspace.id },
     })
@@ -575,6 +600,7 @@ describe('WorkspaceRegistry create and lookup', () => {
       initialized: true,
       workspaceIds: [reregistered.id],
       archivedSessionIds: [],
+      archivedAtById: {},
       pinnedSessionIds: [],
     })
     await first.fiber.dispose()
@@ -890,6 +916,42 @@ describe('header-validated membership projection', () => {
     expect(storedRecord(pool, id).sessionIds).toEqual([])
   })
 
+  it('canonicalizes each distinct cwd once per index pass, and re-resolves on the next (archive-header-cwd-dedup-1117)', async () => {
+    // Given two directories shared by five headers (plus one cwd-less header
+    // that never probes the filesystem)
+    const dirA = await makeDir('cwd-dedup-a')
+    const dirB = await makeDir('cwd-dedup-b')
+    const spy = vi.spyOn(workspacePaths, 'realpathNormalize')
+    onTestFinished(() => { spy.mockRestore() })
+
+    // When the boot index pass walks all six headers
+    const result = await harness({
+      sessions: [
+        header('a-one', dirA), header('a-two', dirA), header('a-three', dirA),
+        header('b-one', dirB), header('b-two', dirB),
+        header('no-cwd'),
+      ],
+    })
+    onTestFinished(() => result.ctx.fiber.dispose())
+
+    // Then the pass paid one realpath per distinct cwd, not one per header,
+    // and the membership projection still sees every header's canonical path
+    expect(spy).toHaveBeenCalledTimes(2)
+    const grouped = result.registry.list()
+      .map(entry => [...entry.sessionIds].sort().join(','))
+      .sort()
+    expect(grouped).toEqual(['a-one,a-three,a-two', 'b-one,b-two'])
+
+    // And the memo lives only for that pass: a later index pass over the
+    // same two cwds resolves them again (per-pass, never cross-pass)
+    result.setSessions([
+      header('a-one', dirA), header('a-two', dirA),
+      header('b-one', dirB), header('fresh', dirB),
+    ])
+    await result.registry.pinSession(SessionId('fresh'))
+    expect(spy).toHaveBeenCalledTimes(4)
+  })
+
   it('filters absent headers and invalid cwd facts while retaining only missing-directory candidates', async () => {
     const dir = await makeDir('candidate-validation')
     const elsewhere = await makeDir('candidate-elsewhere')
@@ -1020,7 +1082,13 @@ describe('header-validated membership projection', () => {
     const createRecovery = await harness({ pool: interruptedCreate })
     expect(createRecovery.registry.list()).toEqual([])
     expect(interruptedCreate.media.get('workspace')!.tables.get('workspaces')!.has(createId)).toBe(false)
-    expect(storedState(interruptedCreate)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [], pinnedSessionIds: [] })
+    expect(storedState(interruptedCreate)).toEqual({
+      initialized: true,
+      workspaceIds: [],
+      archivedSessionIds: [],
+      archivedAtById: {},
+      pinnedSessionIds: [],
+    })
 
     const interruptedDelete = storedPool(
       [[deleteId, record(deleteDir, [])]],
@@ -1033,7 +1101,13 @@ describe('header-validated membership projection', () => {
     const deleteRecovery = await harness({ pool: interruptedDelete })
     expect(deleteRecovery.registry.list()).toEqual([])
     expect(interruptedDelete.media.get('workspace')!.tables.get('workspaces')!.has(deleteId)).toBe(false)
-    expect(storedState(interruptedDelete)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [], pinnedSessionIds: [] })
+    expect(storedState(interruptedDelete)).toEqual({
+      initialized: true,
+      workspaceIds: [],
+      archivedSessionIds: [],
+      archivedAtById: {},
+      pinnedSessionIds: [],
+    })
 
     const corruptPending = storedPool(
       [[deleteId, record(deleteDir, [])]],
@@ -1087,12 +1161,19 @@ describe('registry-global session archive', () => {
     // Archiving is a display-set write: the workspace account keeps the id.
     expect(workspace.sessionIds).toContain('gone')
     expect(storedState(result.pool).archivedSessionIds).toEqual(['gone'])
+    // The same durable write stamps the archive moment (archive-at-host-time-1114).
+    const stamped = result.registry.archivedAtById['gone']
+    expect(typeof stamped).toBe('number')
+    expect(stamped!).toBeGreaterThan(0)
+    expect(stamped!).toBeLessThanOrEqual(Date.now())
+    expect(storedState(result.pool).archivedAtById['gone']).toBe(stamped)
     const changesAfterFirst = result.changes.filter(change => change.table === '').length
 
     await result.registry.archiveSession(SessionId('gone'))
     expect(result.registry.archivedSessionIds).toEqual(['gone'])
     // The idempotent repeat neither rewrites the medium nor emits a change.
     expect(result.changes.filter(change => change.table === '').length).toBe(changesAfterFirst)
+    expect(result.registry.archivedAtById['gone']).toBe(stamped)
 
     await result.registry.archiveSession(SessionId('kept'))
     expect(result.registry.archivedSessionIds).toEqual(['gone', 'kept'])
@@ -1243,6 +1324,9 @@ describe('registry-global session unarchive', () => {
     // Unarchiving is a display-set write: the workspace account keeps the id.
     expect(workspace.sessionIds).toContain('two')
     expect(storedState(result.pool).archivedSessionIds).toEqual(['one', 'three'])
+    // The archive moment dies with the archive entry (archive-at-host-time-1114).
+    expect(Object.keys(result.registry.archivedAtById).sort()).toEqual(['one', 'three'])
+    expect(storedState(result.pool).archivedAtById['two']).toBeUndefined()
     const changesAfterFirst = result.changes.filter(change => change.table === '').length
 
     await result.registry.unarchiveSession(SessionId('two'))
@@ -1282,6 +1366,205 @@ describe('registry-global session unarchive', () => {
 
     const second = await harness({ pool, sessions })
     expect(second.registry.archivedSessionIds).toEqual(['kept'])
+    // The stamp survives the restart and drops with the unarchived id.
+    expect(typeof second.registry.archivedAtById['kept']).toBe('number')
+    expect(second.registry.archivedAtById['restored']).toBeUndefined()
+  })
+})
+
+describe('subagent cascade archive', () => {
+  const sub = (id: string, parent: string, dir: string, createdAt: number): SessionHeader => ({
+    ...header(id, dir, createdAt),
+    origin: 'subagent' as const,
+    parentSession: SessionId(parent),
+  })
+
+  it('archives the whole subagent lineage with the parent in one durable batch', async () => {
+    const dir = await makeDir('cascade-lineage')
+    const result = await harness({
+      sessions: [
+        header('root', dir, 100),
+        sub('kid', 'root', dir, 200),
+        sub('grandkid', 'kid', dir, 300),
+        header('bystander', dir, 400),
+      ],
+    })
+    onTestFinished(() => result.ctx.fiber.dispose())
+
+    await result.registry.archiveSession(SessionId('root'))
+    expect(result.registry.archivedSessionIds).toEqual(['root', 'kid', 'grandkid'])
+    expect(storedState(result.pool).archivedSessionIds).toEqual(['root', 'kid', 'grandkid'])
+    for (const id of ['root', 'kid', 'grandkid']) {
+      const stamped = result.registry.archivedAtById[id]
+      expect(typeof stamped).toBe('number')
+      expect(stamped!).toBeGreaterThan(0)
+      expect(storedState(result.pool).archivedAtById[id]).toBe(stamped)
+    }
+    // A top-level sibling stays out of the cascade net.
+    expect(result.registry.archivedSessionIds).not.toContain('bystander')
+  })
+
+  it('skips an already archived child and tolerates the explicit follow-up without duplication', async () => {
+    const dir = await makeDir('cascade-batch')
+    // Child archived first: the parent's cascade finds it archived and skips it.
+    const first = await harness({ sessions: [header('p1', dir, 100), sub('c1', 'p1', dir, 200)] })
+    onTestFinished(() => first.ctx.fiber.dispose())
+    await first.registry.archiveSession(SessionId('c1'))
+    await first.registry.archiveSession(SessionId('p1'))
+    expect(first.registry.archivedSessionIds).toEqual(['c1', 'p1'])
+
+    // Parent archived first: the cascade archives the child, and the
+    // explicit child id afterwards resolves as the documented no-op.
+    const second = await harness({ sessions: [header('p2', dir, 100), sub('c2', 'p2', dir, 200)] })
+    onTestFinished(() => second.ctx.fiber.dispose())
+    await second.registry.archiveSession(SessionId('p2'))
+    await second.registry.archiveSession(SessionId('c2'))
+    expect(second.registry.archivedSessionIds).toEqual(['p2', 'c2'])
+    expect(storedState(second.pool).archivedSessionIds).toEqual(['p2', 'c2'])
+  })
+
+  it('keeps children archived when the parent is unarchived (unarchive never cascades)', async () => {
+    const dir = await makeDir('cascade-unarchive')
+    const result = await harness({ sessions: [header('up', dir, 100), sub('uch', 'up', dir, 200)] })
+    onTestFinished(() => result.ctx.fiber.dispose())
+
+    await result.registry.archiveSession(SessionId('up'))
+    expect(result.registry.archivedSessionIds).toEqual(['up', 'uch'])
+
+    await result.registry.unarchiveSession(SessionId('up'))
+    expect(result.registry.archivedSessionIds).toEqual(['uch'])
+    expect(result.registry.archivedAtById['uch']).toBeGreaterThan(0)
+    expect(storedState(result.pool).archivedSessionIds).toEqual(['uch'])
+  })
+
+  it('does not cascade to an ordinary fork that only carries the parent pointer', async () => {
+    const dir = await makeDir('cascade-fork')
+    const fork = { ...header('forked', dir, 200), parentSession: SessionId('src') }
+    const result = await harness({ sessions: [header('src', dir, 100), fork] })
+    onTestFinished(() => result.ctx.fiber.dispose())
+
+    await result.registry.archiveSession(SessionId('src'))
+    // Presence of parentSession alone never classifies a child (types.ts):
+    // only origin === 'subagent' edges cascade.
+    expect(result.registry.archivedSessionIds).toEqual(['src'])
+  })
+
+  it('keeps the parent archive when a child refuses as active, and reports the child loudly', async () => {
+    const dir = await makeDir('cascade-active')
+    const result = await harness({ sessions: [header('ap', dir, 100), sub('ac', 'ap', dir, 200)] })
+    onTestFinished(() => result.ctx.fiber.dispose())
+    const report = vi.spyOn(result.ctx.logger, 'error').mockImplementation(() => undefined)
+    result.ctx.on('workspace/session-activity', async ({ sessionId }, next) => {
+      const rest = await next()
+      return sessionId === 'ac' ? [{ kind: 'probe' }, ...rest] : rest
+    })
+
+    await expect(result.registry.archiveSession(SessionId('ap'))).resolves.toBeUndefined()
+    // The parent's completed archive stands; the refused child is left for
+    // the idle reaper and its refusal is a loud receipt, not a rollback.
+    expect(result.registry.archivedSessionIds).toEqual(['ap'])
+    expect(storedState(result.pool).archivedSessionIds).toEqual(['ap'])
+    expect(report).toHaveBeenCalledWith(expect.stringContaining("cascade archive of session 'ac' failed"))
+  })
+
+  it('does not rescan for new children on a repeat archive of an already archived parent', async () => {
+    const dir = await makeDir('cascade-repeat')
+    const result = await harness({ sessions: [header('rp', dir, 100)] })
+    onTestFinished(() => result.ctx.fiber.dispose())
+
+    await result.registry.archiveSession(SessionId('rp'))
+    expect(result.registry.archivedSessionIds).toEqual(['rp'])
+
+    // A child that appears after the parent's archive belongs to the reaper,
+    // not to a replay of the parent's archive (design §三: the repeat keeps
+    // its documented no-op and never rescans).
+    result.setSessions([header('rp', dir, 100), sub('late', 'rp', dir, 200)])
+    await result.registry.archiveSession(SessionId('rp'))
+    expect(result.registry.archivedSessionIds).toEqual(['rp'])
+  })
+
+  it('skips the cascade loudly when the header refresh fails, keeping the parent archive', async () => {
+    const dir = await makeDir('cascade-refresh-fault')
+    const result = await harness({ sessions: [header('fp', dir, 100), sub('fc', 'fp', dir, 200)] })
+    onTestFinished(() => result.ctx.fiber.dispose())
+    const report = vi.spyOn(result.ctx.logger, 'error').mockImplementation(() => undefined)
+    // The freshness probe reads persistence before the re-pull does, so a
+    // one-shot failure would be absorbed by the probe and the re-pull would
+    // succeed; the loud-skip path is "the refresh cannot read at all", which
+    // is a persistent backend failure (archive-cascade-list-1117).
+    result.list.mockRejectedValue(new Error('persistence backend down'))
+
+    await expect(result.registry.archiveSession(SessionId('fp'))).resolves.toBeUndefined()
+    expect(result.registry.archivedSessionIds).toEqual(['fp'])
+    expect(report).toHaveBeenCalledWith(expect.stringContaining('header refresh failed'))
+  })
+
+  it('reuses the in-memory snapshot when persistence grew nothing new, without a full re-pull', async () => {
+    const dir = await makeDir('cascade-fresh')
+    const result = await harness({ sessions: [header('qp', dir, 100), sub('qc', 'qp', dir, 200)] })
+    onTestFinished(() => result.ctx.fiber.dispose())
+    const report = vi.spyOn(result.ctx.logger, 'error').mockImplementation(() => undefined)
+
+    await result.registry.archiveSession(SessionId('qp'))
+
+    // The known child is still archived: reusing the snapshot never drops one.
+    expect(result.registry.archivedSessionIds).toEqual(['qp', 'qc'])
+    expect(storedState(result.pool).archivedSessionIds).toEqual(['qp', 'qc'])
+    // Boot listing + one probe with every known id excluded; the full
+    // re-pull (a third, option-less listing) never ran.
+    expect(result.list).toHaveBeenCalledTimes(2)
+    expect(result.list).toHaveBeenLastCalledWith({
+      excludeSessionIds: new Set([SessionId('qp'), SessionId('qc')]),
+    })
+    expect(report).not.toHaveBeenCalledWith(expect.stringContaining('header refresh failed'))
+  })
+
+  it('re-pulls the full listing when a session appears after boot and still cascades to it', async () => {
+    const dir = await makeDir('cascade-stale')
+    const result = await harness({ sessions: [header('sp', dir, 100)] })
+    onTestFinished(() => result.ctx.fiber.dispose())
+
+    // A child materialized in persistence after boot: unknown to the
+    // in-memory index, so the probe surfaces it and forces the full re-pull.
+    result.setSessions([header('sp', dir, 100), sub('sc', 'sp', dir, 200)])
+
+    await result.registry.archiveSession(SessionId('sp'))
+
+    expect(result.registry.archivedSessionIds).toEqual(['sp', 'sc'])
+    expect(storedState(result.pool).archivedSessionIds).toEqual(['sp', 'sc'])
+    // Boot listing + probe + the full re-pull (the re-pull takes no options).
+    expect(result.list).toHaveBeenCalledTimes(3)
+    expect(result.list).toHaveBeenLastCalledWith()
+  })
+
+  it('falls back to the full re-pull when the freshness probe itself fails', async () => {
+    const dir = await makeDir('cascade-probe-fault')
+    const result = await harness({ sessions: [header('zp', dir, 100), sub('zc', 'zp', dir, 200)] })
+    onTestFinished(() => result.ctx.fiber.dispose())
+    const report = vi.spyOn(result.ctx.logger, 'error').mockImplementation(() => undefined)
+    // One-shot failure: the probe absorbs it, and fail-closed sends the
+    // cascade into the full re-pull, which succeeds — the child is archived
+    // and no loud skip fires.
+    result.list.mockRejectedValueOnce(new Error('probe backend blip'))
+
+    await expect(result.registry.archiveSession(SessionId('zp'))).resolves.toBeUndefined()
+
+    expect(result.registry.archivedSessionIds).toEqual(['zp', 'zc'])
+    expect(result.list).toHaveBeenCalledTimes(3)
+    expect(report).not.toHaveBeenCalledWith(expect.stringContaining('header refresh failed'))
+  })
+
+  it('cascades to a child that exists only in the live session store', async () => {
+    const dir = await makeDir('cascade-live')
+    const result = await harness({
+      sessions: [header('lp', dir, 100)],
+      liveSessions: [sub('lc', 'lp', dir, 200)],
+    })
+    onTestFinished(() => result.ctx.fiber.dispose())
+
+    await result.registry.archiveSession(SessionId('lp'))
+    expect(result.registry.archivedSessionIds).toEqual(['lp', 'lc'])
+    expect(result.registry.archivedAtById['lc']).toBeGreaterThan(0)
   })
 })
 

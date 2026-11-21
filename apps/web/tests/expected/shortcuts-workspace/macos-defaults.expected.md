@@ -65,13 +65,17 @@
       - listitem:
         - button "Edit shortcut for Focus session list"
         - text: Focus session list ⌥ ⌘ 1
-  - region "Message input":
-    - heading "Message input" [level=3]
+  - region "Text input":
+    - heading "Text input" [level=3]
     - list:
       - listitem: Use the complementary Queue / Steer action ⌘ Enter
       - listitem: Open reference menu @
-      - listitem: New line ⇧ Enter
-      - listitem: Send message Enter
+      - listitem: New line Enter
+      - listitem: Next / Submit ⇧ Enter
+      - listitem: Switch options ↑ ↓
+      - listitem: Previous / Next question PageUp PageDown
+      - listitem: Select option Enter Space
+      - listitem: Send message ⇧ Enter
       - listitem: Open command menu /
       - listitem: Stop generating Esc Esc
   - region "Menus and dialogs":

@@ -62,6 +62,7 @@ function mount({
   restartConfigured = false,
   restartRunningSessions = 0,
   restartSignal,
+  serverStartedAt,
   rows = [
     { id: 'general', order: 0, label: 'General' },
     { id: 'models', order: 10, label: 'Models' },
@@ -82,6 +83,7 @@ function mount({
   restartConfigured?: boolean
   restartRunningSessions?: number
   restartSignal?: RestartSignalView | undefined
+  serverStartedAt?: string | undefined
   rows?: Row[]
   steps?: Step[]
 } = {}) {
@@ -141,6 +143,7 @@ function mount({
     useRestartConfigured: select => select(restartConfigured),
     useRestartRunningSessions: select => select(restartRunningSessions),
     useRestartSignal: select => select(restartSignal),
+    useServerStartedAt: select => select(serverStartedAt),
     useSections: (select) => {
       const [, force] = useState(0)
       useEffect(() => {
@@ -595,4 +598,52 @@ it('delivers the restart-signal judgment to the collapsed dot-button (FORK rail-
   const dot = screen.getByRole('button', { name: en['restart.signal.needRestart.built'] })
   expect(dot.getAttribute('data-restart-signal')).toBe('NEED_RESTART')
   expect(dot.querySelector('[aria-hidden="true"]')).toBeTruthy()
+})
+
+// server-started-at-1117: the settings row's glanceable start-time stamp.
+// Built from local components so the assertions hold in any test timezone.
+const STAMP_ISO = new Date(2026, 10, 12, 21, 49, 5).toISOString()
+
+it('shows the server start stamp in the wide trigger row, short form for the eye and full sentence for AT', () => {
+  mount({ serverStartedAt: STAMP_ISO, dictionary: zh })
+  expect(screen.getByText('11-12 21:49 起')).toBeTruthy()
+  expect(screen.getByText('服务器启动于 2026-11-12 21:49:05')).toBeTruthy()
+})
+
+it('resolves the full sentence and live elapsed age when the stamp takes focus', () => {
+  vi.useFakeTimers()
+  // 25h30m after the start instant: the tooltip label resolves at show time,
+  // so the age walks with the clock instead of freezing at the last render.
+  vi.setSystemTime(new Date(2026, 10, 13, 23, 19, 5))
+  mount({ serverStartedAt: STAMP_ISO, dictionary: zh })
+  fireEvent.focus(document.querySelector('[data-server-started-at]')!)
+  expect(screen.getByRole('tooltip').textContent)
+    .toBe('服务器启动于 2026-11-12 21:49:05 · 已运行 1 天 1 小时')
+})
+
+it('shows the stamp only while the connection carries a fresh answer', () => {
+  const mounted = mount({ serverStartedAt: STAMP_ISO, dictionary: zh })
+  expect(document.querySelector('[data-server-started-at]')).not.toBeNull()
+  // An outage hides it: the previous instant may already belong to a dead
+  // process, and implying continuity across a restart is the exact lie the
+  // stamp exists to prevent.
+  mounted.setConnectionState('disconnected')
+  expect(document.querySelector('[data-server-started-at]')).toBeNull()
+  mounted.setConnectionState('connecting')
+  expect(document.querySelector('[data-server-started-at]')).toBeNull()
+  mounted.setConnectionState('connected')
+  expect(document.querySelector('[data-server-started-at]')).not.toBeNull()
+})
+
+it('renders nothing without a published instant, in the collapsed rail, or on a damaged instant', () => {
+  mount({ dictionary: zh })
+  expect(document.querySelector('[data-server-started-at]')).toBeNull()
+  cleanup()
+  mount({ wide: false, serverStartedAt: STAMP_ISO, dictionary: zh })
+  expect(document.querySelector('[data-server-started-at]')).toBeNull()
+  cleanup()
+  // The wire validator refuses this already; the render guard is the second
+  // fence — a damaged store must never print a broken time string.
+  mount({ serverStartedAt: 'not-a-time', dictionary: zh })
+  expect(document.querySelector('[data-server-started-at]')).toBeNull()
 })

@@ -260,9 +260,20 @@ describe('QuestionComposer', () => {
     expect(screen.getByRole('checkbox', { name: 'Lint' }).getAttribute('aria-checked')).toBe('false')
     expect(screen.getByRole('checkbox', { name: 'Types' }).getAttribute('aria-checked')).toBe('true')
 
-    fireEvent.keyDown(screen.getByRole('checkbox', { name: 'Lint' }), { key: 'Enter' })
+    // FORK dsh-local (ask-keys-focus 2026-11-17 A3): bare Enter on an option
+    // is not a submit hijack — the event stays unprevented so the button's own
+    // activation toggles the choice (jsdom never performs that activation, so
+    // the click below stands in for it).
+    const lint = screen.getByRole('checkbox', { name: 'Lint' })
+    expect(fireEvent.keyDown(lint, { key: 'Enter' })).toBe(true)
+    expect(screen.getByRole('checkbox', { name: 'Lint' }).getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(lint)
+    expect(screen.getByRole('checkbox', { name: 'Lint' }).getAttribute('aria-checked')).toBe('true')
+
+    // Shift+Enter on the only question continues the flow into a batch submit.
+    fireEvent.keyDown(screen.getByRole('checkbox', { name: 'Lint' }), { key: 'Enter', shiftKey: true })
     expect(answer).toHaveBeenCalledWith(answerBatch([
-      { id: 'checks', selected: ['Unit (Recommended)', 'Types（推荐）'] },
+      { id: 'checks', selected: ['Unit (Recommended)', 'Types（推荐）', 'Lint'] },
     ]))
   })
 
@@ -302,15 +313,50 @@ describe('QuestionComposer', () => {
     expect(screen.getByRole('radio', { name: 'D' }).getAttribute('aria-checked')).toBe('false')
   })
 
-  it('treats Enter on an unselected option as submit, without selecting it', () => {
+  it('classifies Enter on an option: bare selects through native activation, Shift/Ctrl+Enter runs the flow', () => {
+    const { carrier, answer } = wait([
+      { id: 'mode', question: 'Which mode?', options: [{ label: 'Alpha' }, { label: 'Beta' }] },
+      { id: 'next', question: 'Then what?', options: [{ label: 'Gamma' }] },
+    ])
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    const alpha = screen.getByRole('radio', { name: 'Alpha' })
+    // Bare Enter is never prevented and never submits: the button's own
+    // activation runs choose() (jsdom does not perform it; the click below
+    // stands in for the browser's Enter → click default action).
+    expect(fireEvent.keyDown(alpha, { key: 'Enter' })).toBe(true)
+    expect(alpha.getAttribute('aria-checked')).toBe('false')
+    expect(answer).not.toHaveBeenCalled()
+    fireEvent.click(alpha)
+    // Single-select steps to the next question with the choice recorded.
+    expect(screen.getByText('2 / 2')).toBeTruthy()
+
+    // Ctrl+Enter (accelerated) is claimed for the flow, same as Shift+Enter:
+    // it continues only when the current question is answered.
+    const gamma = screen.getByRole('radio', { name: 'Gamma' })
+    expect(fireEvent.keyDown(gamma, { key: 'Enter', ctrlKey: true })).toBe(false)
+    expect(screen.getByRole('status').textContent).toBe('请选择一个选项或填写自定义答案。')
+    fireEvent.click(gamma)
+    expect(screen.getByRole('radio', { name: 'Gamma' }).getAttribute('aria-checked')).toBe('true')
+
+    // The last question's continue gesture submits the whole batch.
+    fireEvent.keyDown(screen.getByRole('radio', { name: 'Gamma' }), { key: 'Enter', shiftKey: true })
+    expect(answer).toHaveBeenCalledWith(answerBatch([
+      { id: 'mode', selected: ['Alpha'] },
+      { id: 'next', selected: ['Gamma'] },
+    ]))
+  })
+
+  it('keeps an IME-composed Enter on an option with the IME', () => {
     const { carrier, answer } = wait([{
       id: 'mode', question: 'Which mode?', options: [{ label: 'Alpha' }, { label: 'Beta' }],
     }])
     render(<QuestionComposer matched={carrier} {...kit} />)
-    const option = screen.getByRole('radio', { name: 'Alpha' })
-    expect(fireEvent.keyDown(option, { key: 'Enter' })).toBe(false)
-    expect(option.getAttribute('aria-checked')).toBe('false')
-    expect(screen.getByRole('status').textContent).toBe('请先完成这道问题。')
+    const alpha = screen.getByRole('radio', { name: 'Alpha' })
+
+    expect(fireEvent.keyDown(alpha, { key: 'Enter', isComposing: true })).toBe(true)
+    expect(alpha.getAttribute('aria-checked')).toBe('false')
+    expect(fireEvent.keyDown(alpha, { key: 'Enter', keyCode: 229 })).toBe(true)
+    expect(alpha.getAttribute('aria-checked')).toBe('false')
     expect(answer).not.toHaveBeenCalled()
   })
 
@@ -337,7 +383,7 @@ describe('QuestionComposer', () => {
     expect(screen.queryByRole('button', { name: '填写答案' })).toBeNull()
     const custom = screen.getByPlaceholderText('输入你的答案')
     fireEvent.change(custom, { target: { value: '要能独立排查线上问题' } })
-    fireEvent.keyDown(custom, { key: 'Enter' })
+    fireEvent.keyDown(custom, { key: 'Enter', shiftKey: true })
 
     expect(screen.getByText('3 / 3')).toBeTruthy()
     // The model's question text renders verbatim — no marker filtering.
@@ -352,7 +398,7 @@ describe('QuestionComposer', () => {
     expect(screen.getByRole('checkbox', { name: '系统设计' }).getAttribute('aria-checked')).toBe('true')
     expect(screen.getByRole('checkbox', { name: '代码质量' }).getAttribute('aria-checked')).toBe('true')
     expect((multiCustom as HTMLInputElement).value).toBe('沟通能力')
-    fireEvent.keyDown(multiCustom, { key: 'Enter' })
+    fireEvent.keyDown(multiCustom, { key: 'Enter', shiftKey: true })
 
     // The domain face encoded the whole batch into one carrier envelope.
     expect(answer).toHaveBeenCalledWith(answerBatch([
@@ -511,7 +557,7 @@ describe('QuestionComposer', () => {
     expect(screen.getByText('2 / 3')).toBeTruthy()
     expect(answer).not.toHaveBeenCalled()
 
-    fireEvent.keyDown(custom, { key: 'Enter' })
+    fireEvent.keyDown(custom, { key: 'Enter', shiftKey: true })
     expect(screen.getByText('3 / 3')).toBeTruthy()
   })
 
@@ -522,9 +568,11 @@ describe('QuestionComposer', () => {
     expect(screen.getByPlaceholderText('输入你的答案')).toBeTruthy()
     fireEvent.click(screen.getByRole('radio', { name: '工程落地型' }))
     const emptyCustom = screen.getByPlaceholderText('输入你的答案')
-    fireEvent.keyDown(emptyCustom, { key: 'Enter', shiftKey: true })
+    // Plain Enter is the newline gesture: it neither advances nor validates.
+    expect(fireEvent.keyDown(emptyCustom, { key: 'Enter' })).toBe(true)
     expect(screen.getByText('2 / 3')).toBeTruthy()
-    fireEvent.keyDown(emptyCustom, { key: 'Enter' })
+    // Shift+Enter runs the flow, which reports the missing answer.
+    fireEvent.keyDown(emptyCustom, { key: 'Enter', shiftKey: true })
     expect(screen.getByText('请选择一个选项或填写自定义答案。')).toBeTruthy()
 
     fireEvent.click(screen.getByLabelText('下一题'))
@@ -537,12 +585,12 @@ describe('QuestionComposer', () => {
     expect(answer).not.toHaveBeenCalled()
   })
 
-  it('answers over multiple lines: both fields grow with the draft and keep Shift+Enter a newline', () => {
+  it('answers over multiple lines: both fields grow with the draft and keep Enter a newline', () => {
     const { carrier, answer } = wait()
     render(<QuestionComposer matched={carrier} {...kit} />)
 
     // Both question shapes answer into a textarea, so the engine soft-wraps a
-    // long answer and Shift+Enter breaks the line natively.
+    // long answer and Enter breaks the line natively.
     const inline = screen.getByPlaceholderText('输入你的答案')
     expect(inline.tagName).toBe('TEXTAREA')
 
@@ -551,19 +599,19 @@ describe('QuestionComposer', () => {
     // The hidden height ruler carries the draft plus the trailing newline the
     // textarea's own last line needs, so the box is as tall as the answer.
     expect(inline.previousElementSibling?.textContent).toBe(`${multiline}\n`)
-    // Shift+Enter belongs to the field, never to the flow.
-    fireEvent.keyDown(inline, { key: 'Enter', shiftKey: true })
+    // Enter belongs to the field, never to the flow: it stays unprevented.
+    expect(fireEvent.keyDown(inline, { key: 'Enter' })).toBe(true)
     expect(screen.getByText('1 / 3')).toBeTruthy()
 
-    fireEvent.keyDown(inline, { key: 'Enter' })
+    fireEvent.keyDown(inline, { key: 'Enter', shiftKey: true })
     const optionless = screen.getByPlaceholderText('输入你的答案')
     expect(optionless.tagName).toBe('TEXTAREA')
     fireEvent.change(optionless, { target: { value: multiline } })
     expect(optionless.previousElementSibling?.textContent).toBe(`${multiline}\n`)
-    fireEvent.keyDown(optionless, { key: 'Enter', shiftKey: true })
+    expect(fireEvent.keyDown(optionless, { key: 'Enter' })).toBe(true)
     expect(screen.getByText('2 / 3')).toBeTruthy()
 
-    fireEvent.keyDown(optionless, { key: 'Enter' })
+    fireEvent.keyDown(optionless, { key: 'Enter', shiftKey: true })
     fireEvent.click(screen.getByRole('checkbox', { name: '系统设计' }))
     fireEvent.click(screen.getByRole('button', { name: '提交' }))
     // Line breaks reach the model verbatim: nothing along the way flattens them.
@@ -605,7 +653,7 @@ describe('QuestionComposer', () => {
     fireEvent.click(screen.getByRole('radio', { name: /工程落地型/ }))
     const custom = screen.getByPlaceholderText('输入你的答案')
     fireEvent.change(custom, { target: { value: 'x' } })
-    fireEvent.keyDown(custom, { key: 'Enter' })
+    fireEvent.keyDown(custom, { key: 'Enter', shiftKey: true })
     fireEvent.click(screen.getByRole('checkbox', { name: '系统设计' }))
     fireEvent.click(screen.getByRole('button', { name: '提交' }))
     expect(second.answer).toHaveBeenNthCalledWith(1, answerBatch([
@@ -678,34 +726,37 @@ describe('PendingQuestion domain face', () => {
     expect(screen.getByText(`1 / ${QUESTIONS.length}`)).toBeTruthy()
   })
 
-  it('collapses the card to the header strip and expands it back', () => {
+  it('folds the card to the header strip on a press outside the frame, and the strip press expands it back', () => {
     const { carrier } = wait()
-    render(<QuestionComposer matched={carrier} {...kit} />)
+    const view = render(<QuestionComposer matched={carrier} {...kit} />)
     // Expanded: the option list is visible.
     expect(screen.getByRole('radiogroup')).toBeTruthy()
-    // Collapse: options leave the tree; the title and minimize toggle stay.
-    fireEvent.click(screen.getByLabelText(zh['nav.minimize']))
+    // The manual minimize toggle is gone (2026-11-17 裁定 A1): close is the
+    // only header control left.
+    expect(screen.queryByLabelText(zh['nav.minimize'])).toBeNull()
+    expect(screen.getByRole('button', { name: zh['nav.cancel'] })).toBeTruthy()
+    // Fold: options leave the tree; the strip keeps the stem readable.
+    fireEvent.pointerDown(view.container.ownerDocument.body, { bubbles: true })
     expect(screen.queryByRole('radiogroup')).toBeNull()
     expect(screen.getByText('选择候选人类型')).toBeTruthy()
-    // Expand: the options return (the toggle label flips while collapsed).
-    fireEvent.click(screen.getByLabelText(zh['nav.maximize']))
+    // Expand: the strip press brings the options back.
+    fireEvent.click(screen.getByText('选择候选人类型'))
     expect(screen.getByRole('radiogroup')).toBeTruthy()
-    // Expanded again: the toggle reports expanded and the option list is back.
-    expect(screen.getByLabelText(zh['nav.minimize']).getAttribute('aria-expanded')).toBe('true')
   })
 
-  it('keeps the collapse toggle out of the cancel path and preserves drafts across collapse', () => {
+  it('keeps the close button out of the fold path and preserves drafts across a fold', () => {
     const { carrier, answer } = wait()
     render(<QuestionComposer matched={carrier} {...kit} />)
     fireEvent.click(screen.getByRole('radio', { name: /工程落地型/ }))
-    // Single-select auto-advances to the second question; collapse and expand
-    // must not lose either the picked option or the current position.
-    fireEvent.click(screen.getByLabelText(zh['nav.minimize']))
-    fireEvent.click(screen.getByLabelText(zh['nav.maximize']))
+    // Single-select auto-advances to the second question; folding and
+    // re-expanding must not lose either the picked option or the position.
+    fireEvent.pointerDown(document.body, { bubbles: true })
+    fireEvent.click(screen.getByText('补充你的要求'))
+    expect(screen.getByRole('radiogroup')).toBeTruthy()
     const custom = screen.getByPlaceholderText(zh['custom.placeholder'])
     fireEvent.change(custom, { target: { value: '要能独立排查线上问题' } })
     // Re-expanding must not steal focus back into the textarea: it was
-    // autofocused on first presentation, so focus stays on the expand toggle.
+    // autofocused on first presentation, so focus stays where it was.
     expect(document.activeElement).not.toBe(custom)
     fireEvent.click(screen.getByLabelText('下一题'))
     fireEvent.click(screen.getByRole('checkbox', { name: '系统设计' }))
@@ -716,13 +767,28 @@ describe('PendingQuestion domain face', () => {
       { id: 'signals', selected: ['系统设计'] },
     ]))
   })
+
+  it('a folded strip does not flash open under its own close button', () => {
+    const { carrier, dismiss } = wait()
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    fireEvent.pointerDown(document.body, { bubbles: true })
+    expect(screen.queryByRole('radiogroup')).toBeNull()
+
+    // Buttons on the strip are excluded from the unfold gesture: the close
+    // action must not light the card up on its way out.
+    fireEvent.click(screen.getByRole('button', { name: zh['nav.cancel'] }))
+
+    expect(dismiss).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('radiogroup')).toBeNull()
+  })
 })
 
-describe('occlusion fold', () => {
-  /** The real seat ancestry: transcript scroller owns the composer seat, so
-   *  the fold sensor's reach test has something to read. jsdom has no layout,
-   *  so the card's share of the viewport is pinned through the frame rect. */
-  function renderInSeatView(card: QuestionComposerProps['matched'], tall = true) {
+describe('attention fold', () => {
+  /** The real seat ancestry, kept for realism: the sensor itself no longer
+   *  reads transcript reach or the card's share of the viewport (2026-11-17
+   *  裁定 A2 — any pointerdown/focusin outside the frame folds), so there is
+   *  no layout left for jsdom to pin down. */
+  function renderInSeatView(card: QuestionComposerProps['matched']) {
     const view = render(
       <div data-conversation-scroll="">
         <div data-composer-seat="">
@@ -731,13 +797,20 @@ describe('occlusion fold', () => {
       </div>,
     )
     const frame = view.container.querySelector('[data-question-key]') as HTMLElement
-    vi.spyOn(frame, 'getBoundingClientRect').mockReturnValue(
-      { height: tall ? 480 : 120, width: 680, top: 0, left: 0, bottom: 0, right: 0, x: 0, y: 0, toJSON: () => ({}) },
-    )
     return { view, frame }
   }
 
-  it('folds a tall card when a press reaches the transcript, and the strip press unfolds it', () => {
+  it('a freshly presented question starts expanded: no fold fires without an outside gesture', () => {
+    const { carrier } = wait()
+    const { frame } = renderInSeatView(carrier)
+
+    // Focus sits wherever it was before the card appeared; presentation alone
+    // folds nothing — the sensor is edge-triggered on a card-external gesture.
+    expect(screen.getByRole('radiogroup')).toBeTruthy()
+    expect(frame.hasAttribute('data-question-folded')).toBe(false)
+  })
+
+  it('folds when a press lands outside the frame, and the strip press unfolds it', () => {
     const { carrier } = wait()
     const { frame } = renderInSeatView(carrier)
     expect(screen.getByRole('radiogroup')).toBeTruthy()
@@ -755,23 +828,16 @@ describe('occlusion fold', () => {
     expect(frame.hasAttribute('data-question-folded')).toBe(false)
   })
 
-  it('leaves a short card alone — only a card that blocks the transcript folds', () => {
-    const { carrier } = wait()
-    renderInSeatView(carrier, false)
-
-    fireEvent.pointerDown(document.querySelector('[data-conversation-scroll]')!, { bubbles: true })
-
-    expect(screen.getByRole('radiogroup')).toBeTruthy()
-  })
-
-  it('ignores presses on composer furniture — the seat is not the transcript', () => {
+  it('folds on a press anywhere outside the frame — composer furniture included', () => {
     const { carrier } = wait()
     renderInSeatView(carrier)
     const seat = document.querySelector('[data-composer-seat]')!
 
+    // Attention left the card: under the 2026-11-17 rule there is no
+    // transcript-reach carve-out and no size gate — the seat counts too.
     fireEvent.pointerDown(seat, { bubbles: true })
 
-    expect(screen.getByRole('radiogroup')).toBeTruthy()
+    expect(screen.queryByRole('radiogroup')).toBeNull()
   })
 
   it('a press inside the card never folds it', () => {
@@ -791,11 +857,11 @@ describe('occlusion fold', () => {
     // (question title, option prose, markdown detail) moves focus to the
     // nearest focusable ancestor. The frame must be it — the alternative is
     // the transcript scrollport (tabIndex 0), whose focusin this sensor
-    // reads as reaching for the conversation and folds the tall card under
-    // the reader's cursor. jsdom never moves focus on click, so the escape
-    // itself is browser-only (real-Chromium probe, 2026-11-12); this pins
-    // the containment — focus arriving on the frame is card engagement: no
-    // fold, and it lifts an auto-fold.
+    // reads as leaving the card and folds it under the reader's cursor.
+    // jsdom never moves focus on click, so the escape itself is browser-only
+    // (real-Chromium probe, 2026-11-12); this pins the containment — focus
+    // arriving on the frame is card engagement: no fold, and it lifts an
+    // auto-fold.
     expect(frame.getAttribute('tabindex')).toBe('-1')
 
     fireEvent.focusIn(frame, { bubbles: true })
@@ -807,36 +873,6 @@ describe('occlusion fold', () => {
 
     fireEvent.focusIn(frame, { bubbles: true })
     expect(screen.getByRole('radiogroup')).toBeTruthy()
-  })
-
-  it('keeps a manual minimize pinned: transcript presses and strip presses do not lift it, only the toggle does', () => {
-    const { carrier } = wait()
-    const { frame } = renderInSeatView(carrier)
-    fireEvent.click(screen.getByLabelText(zh['nav.minimize']))
-    expect(screen.queryByRole('radiogroup')).toBeNull()
-
-    fireEvent.pointerDown(document.querySelector('[data-conversation-scroll]')!, { bubbles: true })
-    fireEvent.click(screen.getByText('选择候选人类型'))
-
-    // Still collapsed, and not flagged as an auto-fold: the pinned choice is
-    // the only reason the strip is up.
-    expect(screen.queryByRole('radiogroup')).toBeNull()
-    expect(frame.hasAttribute('data-question-folded')).toBe(false)
-
-    fireEvent.click(screen.getByLabelText(zh['nav.maximize']))
-    expect(screen.getByRole('radiogroup')).toBeTruthy()
-  })
-
-  it('the toggle lifts both reasons: an auto-folded card expands through the same chevron', () => {
-    const { carrier } = wait()
-    renderInSeatView(carrier)
-    fireEvent.pointerDown(document.querySelector('[data-conversation-scroll]')!, { bubbles: true })
-    expect(screen.queryByRole('radiogroup')).toBeNull()
-
-    fireEvent.click(screen.getByLabelText(zh['nav.maximize']))
-
-    expect(screen.getByRole('radiogroup')).toBeTruthy()
-    expect(screen.getByLabelText(zh['nav.minimize']).getAttribute('aria-expanded')).toBe('true')
   })
 
   it('a busy submission keeps its card up even when the transcript is pressed', async () => {
@@ -862,6 +898,278 @@ describe('occlusion fold', () => {
 
     fireEvent.focusIn(screen.getByText('选择候选人类型'), { bubbles: true })
     expect(screen.getByRole('radiogroup')).toBeTruthy()
+  })
+})
+
+describe('PageUp / PageDown question paging', () => {
+  it('turns the page from anywhere in the card and leaves the boundaries alone', () => {
+    const { carrier, answer } = wait()
+    render(<QuestionComposer matched={carrier} {...kit} />)
+
+    // The keydown bubbles from the focused option up to the frame, which
+    // claims it (prevented) and moves through the pager's own motion.
+    const option = screen.getByRole('radio', { name: /工程落地型/ })
+    expect(fireEvent.keyDown(option, { key: 'PageDown' })).toBe(false)
+    expect(screen.getByText('2 / 3')).toBeTruthy()
+    expect(fireEvent.keyDown(screen.getByPlaceholderText('输入你的答案'), { key: 'PageDown' })).toBe(false)
+    expect(screen.getByText('3 / 3')).toBeTruthy()
+
+    // The last question's PageDown is a plain no-op: nothing submitted, the
+    // key never claimed (native scroll stays the browser's own there).
+    expect(fireEvent.keyDown(screen.getByRole('checkbox', { name: '系统设计' }), { key: 'PageDown' })).toBe(true)
+    expect(screen.getByText('3 / 3')).toBeTruthy()
+    expect(answer).not.toHaveBeenCalled()
+
+    // PageUp walks back the same way; the first question's PageUp is a no-op.
+    expect(fireEvent.keyDown(screen.getByRole('checkbox', { name: '系统设计' }), { key: 'PageUp' })).toBe(false)
+    expect(screen.getByText('2 / 3')).toBeTruthy()
+    expect(fireEvent.keyDown(screen.getByPlaceholderText('输入你的答案'), { key: 'PageUp' })).toBe(false)
+    expect(screen.getByText('1 / 3')).toBeTruthy()
+    const firstOption = screen.getByRole('radio', { name: /工程落地型/ })
+    expect(fireEvent.keyDown(firstOption, { key: 'PageUp' })).toBe(true)
+    expect(screen.getByText('1 / 3')).toBeTruthy()
+    expect(answer).not.toHaveBeenCalled()
+  })
+
+  it('a busy submission does not turn the page', () => {
+    const { carrier, answer } = wait([
+      { id: 'one', question: 'First?', options: [{ label: 'A' }, { label: 'B' }] },
+      { id: 'two', question: 'Second?', options: [{ label: 'C' }] },
+    ])
+    answer.mockReturnValueOnce(new Promise(() => {}))
+    const view = render(<QuestionComposer matched={carrier} {...kit} />)
+    fireEvent.click(screen.getByRole('radio', { name: 'A' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'C' }))
+    fireEvent.click(screen.getByRole('button', { name: '提交' }))
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '正在提交…' }).disabled).toBe(true)
+
+    const frame = view.container.querySelector('[data-question-key]') as HTMLElement
+    expect(fireEvent.keyDown(frame, { key: 'PageUp' })).toBe(true)
+    expect(screen.getByText('2 / 2')).toBeTruthy()
+    expect(fireEvent.keyDown(frame, { key: 'PageDown' })).toBe(true)
+    expect(screen.getByText('2 / 2')).toBeTruthy()
+  })
+
+  it('leaves the page keys to the IME and to a folded card', () => {
+    const { carrier } = wait()
+    const view = render(<QuestionComposer matched={carrier} {...kit} />)
+    const frame = view.container.querySelector('[data-question-key]') as HTMLElement
+
+    // IME composition keeps its keys: not claimed, no page turn.
+    expect(fireEvent.keyDown(frame, { key: 'PageDown', isComposing: true })).toBe(true)
+    expect(screen.getByText('1 / 3')).toBeTruthy()
+    expect(fireEvent.keyDown(frame, { key: 'PageDown', keyCode: 229 })).toBe(true)
+    expect(screen.getByText('1 / 3')).toBeTruthy()
+
+    // A folded card has no body to scroll: the keys are a no-op there too.
+    fireEvent.pointerDown(view.container.ownerDocument.body, { bubbles: true })
+    expect(screen.queryByRole('radiogroup')).toBeNull()
+    expect(fireEvent.keyDown(frame, { key: 'PageDown' })).toBe(true)
+    expect(frame.hasAttribute('data-question-folded')).toBe(true)
+  })
+})
+
+describe('focus follow after a page change', () => {
+  it('hands focus to the new question when the auto-advance unmounts the focused option', () => {
+    const { carrier } = wait([
+      { id: 'one', question: 'First?', options: [{ label: 'One' }, { label: 'Two' }] },
+      { id: 'two', question: 'Second?', options: [{ label: 'Three' }, { label: 'Four' }] },
+    ])
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    const one = screen.getByRole('radio', { name: 'One' })
+    act(() => { one.focus() })
+    fireEvent.focusIn(one, { bubbles: true })
+
+    // Bare Enter → the button's native activation → choose(): the
+    // single-select steps on and the focused option unmounts with its
+    // question, dropping focus to the body. The card held focus, so the new
+    // question's first enabled option takes it back — a run of Enter keeps
+    // flowing.
+    expect(fireEvent.keyDown(one, { key: 'Enter' })).toBe(true)
+    fireEvent.click(one)
+    expect(screen.getByText('2 / 2')).toBeTruthy()
+    expect(document.activeElement).toBe(screen.getByRole('radio', { name: 'Three' }))
+  })
+
+  it('never steals focus parked on the pager', () => {
+    // Both questions carry options, so neither page mounts the optionless
+    // answer field that would legitimately autofocus on first presentation.
+    const { carrier } = wait([
+      { id: 'one', question: 'First?', options: [{ label: 'One' }] },
+      { id: 'two', question: 'Second?', options: [{ label: 'Two' }] },
+    ])
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    const next = screen.getByLabelText<HTMLButtonElement>('下一题')
+    act(() => { next.focus() })
+    fireEvent.focusIn(next, { bubbles: true })
+
+    fireEvent.click(next)
+
+    expect(screen.getByText('2 / 2')).toBeTruthy()
+    expect(document.activeElement).toBe(screen.getByLabelText('下一题'))
+  })
+
+  it('does not grab focus the card never held', () => {
+    const { carrier } = wait([
+      { id: 'one', question: 'First?', options: [{ label: 'One' }] },
+      { id: 'two', question: 'Second?', options: [{ label: 'Two' }] },
+    ])
+    render(<QuestionComposer matched={carrier} {...kit} />)
+
+    // No focus ever entered the card, so a page change must not pull it in
+    // from wherever it currently sits (the body here).
+    fireEvent.click(screen.getByLabelText('下一题'))
+
+    expect(screen.getByText('2 / 2')).toBeTruthy()
+    expect(document.activeElement).not.toBe(screen.getByRole('radio', { name: 'Two' }))
+  })
+})
+
+describe('arrow keys switch the options', () => {
+  it('walks the option buttons with wrap, focus only — the choice and the page stay put', () => {
+    const { carrier, answer } = wait()
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    const first = screen.getByRole('radio', { name: /工程落地型/ })
+    const second = screen.getByRole('radio', { name: /研究潜力型/ })
+    act(() => { first.focus() })
+
+    // ↓ claims the key and moves focus to the next option; the selection
+    // does not follow — a single-select arrow must not choose (choose()
+    // steps the page on), so the recommended default stays the answer and
+    // the card stays on question 1.
+    expect(fireEvent.keyDown(first, { key: 'ArrowDown' })).toBe(false)
+    expect(document.activeElement).toBe(second)
+    expect(first.getAttribute('aria-checked')).toBe('true')
+    expect(second.getAttribute('aria-checked')).toBe('false')
+    expect(screen.getByText('1 / 3')).toBeTruthy()
+
+    // Past the last option it wraps to the first; ArrowUp walks back and
+    // wraps at the top the same way.
+    expect(fireEvent.keyDown(second, { key: 'ArrowDown' })).toBe(false)
+    expect(document.activeElement).toBe(first)
+    expect(fireEvent.keyDown(first, { key: 'ArrowUp' })).toBe(false)
+    expect(document.activeElement).toBe(second)
+    expect(answer).not.toHaveBeenCalled()
+  })
+
+  it('moves a multi-select focus without toggling the choice', () => {
+    const { carrier, answer } = wait([{
+      id: 'checks', question: 'Which checks?', multiSelect: true,
+      options: [{ label: 'Unit' }, { label: 'Lint' }, { label: 'Types' }],
+    }])
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    const unit = screen.getByRole('checkbox', { name: 'Unit' })
+    const lint = screen.getByRole('checkbox', { name: 'Lint' })
+    act(() => { unit.focus() })
+
+    expect(fireEvent.keyDown(unit, { key: 'ArrowDown' })).toBe(false)
+    expect(document.activeElement).toBe(lint)
+    expect(unit.getAttribute('aria-checked')).toBe('false')
+    expect(lint.getAttribute('aria-checked')).toBe('false')
+    expect(answer).not.toHaveBeenCalled()
+  })
+
+  it('leaves modified, composing, and locked keys to the browser', () => {
+    const { carrier, answer } = wait([{
+      id: 'one', question: 'First?',
+      options: [{ label: 'A', description: 'A detail' }, { label: 'B' }],
+    }])
+    answer.mockReturnValueOnce(new Promise(() => {}))
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    const a = screen.getByRole('radio', { name: 'A' })
+    act(() => { a.focus() })
+
+    // Modified keys stay the browser's own — Ctrl/Shift combos are never
+    // claimed and focus does not move.
+    expect(fireEvent.keyDown(a, { key: 'ArrowDown', ctrlKey: true })).toBe(true)
+    expect(document.activeElement).toBe(a)
+    expect(fireEvent.keyDown(a, { key: 'ArrowDown', shiftKey: true })).toBe(true)
+    expect(document.activeElement).toBe(a)
+    expect(fireEvent.keyDown(a, { key: 'Tab', ctrlKey: true })).toBe(true)
+    expect(document.activeElement).toBe(a)
+
+    // IME composition keeps its keys, same as the card's page keys.
+    expect(fireEvent.keyDown(a, { key: 'ArrowDown', isComposing: true })).toBe(true)
+    expect(fireEvent.keyDown(a, { key: 'ArrowDown', keyCode: 229 })).toBe(true)
+    expect(document.activeElement).toBe(a)
+
+    // A busy submission disables every option: the arrow has nowhere to
+    // move focus to, so it stays unclaimed (the card body keeps its own
+    // scroll) and focus parked on the row's still-enabled description
+    // toggle stays put.
+    fireEvent.click(a)
+    fireEvent.click(screen.getByRole('button', { name: '提交' }))
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '正在提交…' }).disabled).toBe(true)
+    const row = a.closest('[data-option-row]') as HTMLElement
+    const rowToggle = row.querySelector('button:not([disabled])') as HTMLButtonElement
+    act(() => { rowToggle.focus() })
+    expect(fireEvent.keyDown(rowToggle, { key: 'ArrowDown' })).toBe(true)
+    expect(document.activeElement).toBe(rowToggle)
+  })
+
+  it('keeps the answer-field arrows out of the option walk', () => {
+    const { carrier } = wait()
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    const field = screen.getByPlaceholderText<HTMLTextAreaElement>('输入你的答案')
+    act(() => { field.focus() })
+
+    // The textarea's ↓ belongs to its own path (caret movement and the
+    // '/' menu arbitration): unclaimed here, focus stays in the field.
+    expect(fireEvent.keyDown(field, { key: 'ArrowDown' })).toBe(true)
+    expect(document.activeElement).toBe(field)
+  })
+})
+
+describe('Tab leaves the option list in one press', () => {
+  it('skips the remaining options forward to the answer field', () => {
+    const { carrier } = wait([{
+      id: 'one', question: 'First?', options: [{ label: 'A' }, { label: 'B' }, { label: 'C' }],
+    }])
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    const a = screen.getByRole('radio', { name: 'A' })
+    act(() => { a.focus() })
+
+    // One press past B and C lands in the answer field: the option buttons
+    // are no longer a walk of their own.
+    expect(fireEvent.keyDown(a, { key: 'Tab' })).toBe(false)
+    expect(document.activeElement).toBe(screen.getByPlaceholderText('输入你的答案'))
+  })
+
+  it('keeps the description toggles in the Tab path and walks back out of the list', () => {
+    const { carrier } = wait([{
+      id: 'one', question: 'First?',
+      options: [{ label: 'A', description: 'A detail' }, { label: 'B', description: 'B detail' }],
+    }])
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    const a = screen.getByRole('radio', { name: 'A' })
+    const b = screen.getByRole('radio', { name: 'B' })
+    const rowToggles = screen.getAllByRole('button', { name: '展开' })
+      .filter(element => element.closest('[data-option-row]') !== null)
+    expect(rowToggles).toHaveLength(2)
+    const toggleA = rowToggles[0] as HTMLElement
+    const toggleB = rowToggles[1] as HTMLElement
+
+    // Tab first visits its own row's description toggle — disclosure stays
+    // reachable — then skips option B to B's toggle, then the field.
+    act(() => { a.focus() })
+    expect(fireEvent.keyDown(a, { key: 'Tab' })).toBe(false)
+    expect(document.activeElement).toBe(toggleA)
+    expect(fireEvent.keyDown(toggleA, { key: 'Tab' })).toBe(false)
+    expect(document.activeElement).toBe(toggleB)
+    expect(fireEvent.keyDown(toggleB, { key: 'Tab' })).toBe(false)
+    expect(document.activeElement).toBe(screen.getByPlaceholderText('输入你的答案'))
+
+    // Shift+Tab walks back over the skipped options to the first row's
+    // toggle; from the first option it leaves the list for the header's
+    // own toggle (the one outside every option row).
+    act(() => { b.focus() })
+    expect(fireEvent.keyDown(b, { key: 'Tab', shiftKey: true })).toBe(false)
+    expect(document.activeElement).toBe(toggleA)
+    const questionToggle = screen.getAllByRole('button', { name: '展开' })
+      .find(element => element.closest('[data-option-row]') === null) as HTMLElement
+    act(() => { a.focus() })
+    expect(fireEvent.keyDown(a, { key: 'Tab', shiftKey: true })).toBe(false)
+    expect(document.activeElement).toBe(questionToggle)
   })
 })
 
@@ -1313,13 +1621,13 @@ describe('QuestionComposer answer-surface wiring', () => {
     // The takeover seats the menu anchor outside the clipping card.
     expect(view.container.querySelector('[class*="triggerAnchor"]')).toBeTruthy()
 
-    // Collapsing unmounts the field: the surface lease releases with it.
-    fireEvent.click(screen.getByLabelText(zh['nav.minimize']))
+    // Folding unmounts the field: the surface lease releases with it.
+    fireEvent.pointerDown(view.container.ownerDocument.body, { bubbles: true })
     expect(harness.detach).toHaveBeenCalledTimes(1)
     expect(harness.target()).toBeNull()
     expect(view.container.querySelector('[class*="triggerAnchor"]')).toBeNull()
 
-    fireEvent.click(screen.getByLabelText(zh['nav.maximize']))
+    fireEvent.click(screen.getByText('选择候选人类型'))
     expect(harness.attach).toHaveBeenCalledTimes(2)
 
     view.unmount()
@@ -1405,7 +1713,7 @@ describe('QuestionComposer answer-surface wiring', () => {
     const harness = triggerFace()
     render(<QuestionComposer matched={carrier} {...kit} answerTriggers={harness.face} />)
     fireEvent.click(screen.getByRole('radio', { name: 'Alpha' }))
-    fireEvent.keyDown(answerField(), { key: 'Enter' })
+    fireEvent.keyDown(answerField(), { key: 'Enter', shiftKey: true })
 
     expect(answer).toHaveBeenCalledOnce()
     expect(harness.track).toHaveBeenLastCalledWith(expect.any(String), expect.any(Number), 'frozen', expect.any(Number))
@@ -1447,7 +1755,7 @@ describe('folded long-content attachment row', () => {
   })
 })
 
-it('retains custom-answer focus across Enter navigation between option questions', () => {
+it('retains custom-answer focus across Shift+Enter navigation between option questions', () => {
   const { carrier } = wait([
     { id: 'one', question: 'First?', options: [{ label: 'One', description: 'First description' }] },
     { id: 'two', question: 'Second?', options: [{ label: 'Two' }] },
@@ -1459,7 +1767,7 @@ it('retains custom-answer focus across Enter navigation between option questions
   const first = screen.getByRole('textbox')
   act(() => { first.focus() })
   fireEvent.change(first, { target: { value: 'first answer' } })
-  fireEvent.keyDown(first, { key: 'Enter' })
+  fireEvent.keyDown(first, { key: 'Enter', shiftKey: true })
   expect(screen.getByRole('heading', { name: 'Second?' })).toBeTruthy()
   const second = screen.getByRole('textbox')
   expect(second).toBe(first)

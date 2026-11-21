@@ -129,8 +129,18 @@ export function ConversationContent(props: ConversationContentProps) {
         },
         onClose: () => { setPickerOpen(false) },
       })}
-      {renderSlot('conversation.hero.agentPreset', {})}
-      {sessionId === undefined ? null : <div className={css.heroOptions}>{renderSlot('conversation.hero.options', {})}</div>}
+      {/* The options wrapper is always a direct child of the row: the
+          git-graph BranchChip portals itself immediately before this marker,
+          which is what keeps the branch chip beside the workspace chip. Slot
+          content renders only with a Session; empty, the group collapses. */}
+      <div className={css.heroOptions}>
+        {sessionId === undefined ? null : renderSlot('conversation.hero.options', {})}
+      </div>
+      {/* Trailing group at the row's right edge: the preset seat is the
+          row's last control. */}
+      <div className={css.heroTrailing}>
+        {renderSlot('conversation.hero.agentPreset', {})}
+      </div>
     </div>
   )
 

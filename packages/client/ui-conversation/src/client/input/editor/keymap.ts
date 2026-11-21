@@ -3,8 +3,14 @@
  * (arrows/escape/enter), space adjudication, the Enter submit gesture, and
  * paste routing. Registered at CRITICAL priority so it decides before
  * @lexical/plain-text's own Enter/paste defaults; a handler returning false
- * falls through to those defaults (Shift+Enter's line break, ordinary
+ * falls through to those defaults (plain Enter's line break, ordinary
  * spaces, text paste the bar routes itself).
+ *
+ * Enter gestures (swapped 2026-11-15): plain Enter breaks the line,
+ * Shift+Enter submits, Ctrl/Cmd+Enter submits accelerated. The pair is
+ * classified by the shared composer gesture authority in the shortcuts
+ * package, so the message input, the question composer, and the shortcut
+ * reference stay one source of truth.
  *
  * IME guard: a composition-closing Enter/Space must not submit or adjudicate.
  * KeyboardEvent.isComposing covers most engines; Safari delivers the closing
@@ -21,6 +27,7 @@ import {
   COMMAND_PRIORITY_CRITICAL, KEY_ARROW_DOWN_COMMAND, KEY_ARROW_UP_COMMAND, KEY_ENTER_COMMAND,
   KEY_ESCAPE_COMMAND, KEY_SPACE_COMMAND, KEY_TAB_COMMAND, PASTE_COMMAND,
 } from 'lexical'
+import { classifyComposerEnter } from '@deepseek-ai/dsh-client-shortcuts/client'
 import { mergeRegister } from '@lexical/utils'
 import type { ArbitrateKey, ArbitrateOutcome } from '../../contract/draft-editor.ts'
 import { $isQuoteNode } from './QuoteNode.tsx'
@@ -35,7 +42,7 @@ export interface ComposerKeymapHandlers {
   dismissPopup(): void
   /** Whether Enter may submit right now (locked/busy states refuse). */
   canSubmit(): boolean
-  /** Plain Enter submits; exactly Ctrl+Enter or Cmd+Enter selects accelerated delivery. */
+  /** Shift+Enter submits; exactly Ctrl+Enter or Cmd+Enter selects accelerated delivery. */
   submit(accelerated: boolean): void
   /**
    * Pasted files with directory metadata supplied by the clipboard entry API.
@@ -259,23 +266,28 @@ export function registerComposerKeymap(editor: LexicalEditor, handlers: Composer
       // the DOM event that application shortcuts need.
       if (event !== null && (event.altKey || event.getModifierState('AltGraph')
         || (event.ctrlKey && event.metaKey) || (event.shiftKey && (event.ctrlKey || event.metaKey)))) return true
-      // Plain Shift+Enter keeps its native line break, including during composition.
-      if (event?.shiftKey === true) return false
       if (event !== null && isComposingEvent(event, recentlyComposing)) {
         // The IME consumes this Enter (candidate pick); neither submit nor
         // break the line. No preventDefault: the browser owns the gesture.
         return true
       }
       // Menu-open Enter picks the highlight through arbitration; a
-      // no-highlight menu passes down to the submit gesture.
+      // no-highlight menu passes down to the shared composer gesture pair.
       if (handlers.arbitrate('enter', false) !== 'pass') {
         event?.preventDefault()
         return true
       }
+      // The shared pair decides: newline falls through to Lexical's line
+      // break (on iOS/Safari the browser's own beforeinput insertion);
+      // combinations outside the pair belong to application shortcuts,
+      // which the modifier guard above has already routed away.
+      const gesture = event === null ? 'submit' : classifyComposerEnter(event)
+      if (gesture === 'newline') return false
+      if (gesture === 'none') return true
       event?.preventDefault()
       if (event?.repeat === true) return true // held-down Enter must not machine-gun sends
       if (!handlers.canSubmit()) return true
-      handlers.submit(event?.ctrlKey === true || event?.metaKey === true)
+      handlers.submit(gesture === 'accelerated')
       return true
     }, COMMAND_PRIORITY_CRITICAL),
     editor.registerCommand(PASTE_COMMAND, (event) => {

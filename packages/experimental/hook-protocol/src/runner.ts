@@ -6,7 +6,7 @@
  * @module @deepseek-ai/dsh-hook-protocol/runner
  */
 
-import type { ShellExecutor } from '@deepseek-ai/dsh-shell'
+import type { ShellExecRequest, ShellExecutor } from '@deepseek-ai/dsh-shell'
 import { parseHookOutput } from './codec.ts'
 import type { CommandHook, HookOutput } from './types.ts'
 
@@ -44,6 +44,17 @@ export interface RunHookOptions {
    * {@link parseHookOutput}). Omit it to apply any block as-is.
    */
   expectedEventName?: string
+  /**
+   * Sandbox policy stamped on the shell request. Hook commands come from
+   * operator-owned config (`hooks.json`), not from the model, so a bridge that
+   * runs trusted config passes an explicit policy here — typically
+   * `mode: 'danger-full-access'` (rooted at the hook's workdir), because the
+   * deployment default (workspace-write) confines the request and a confined
+   * MSYS bash dies at DLL init (`exitCode 3221225794`) while state writes
+   * outside the workspace root (e.g. `~/.dsh/turnend-nudge/`) are denied.
+   * Omitted → the executor stamps its own default policy (pre-fix behavior).
+   */
+  sandboxPolicy?: ShellExecRequest['sandboxPolicy']
 }
 
 /** The {@link HookOutput} plus the wall-clock duration of the run (for `hook/result`). */
@@ -51,6 +62,14 @@ export interface RunHookResult {
   output: HookOutput
   /** Wall-clock duration of the run, from `now` — durable on the `hook/result` event. */
   durationMs: number
+  /**
+   * True when the executor's own deadline killed the hook before it answered.
+   * A timeout can surface as exit code 1 (a *designed* non-blocking-error
+   * outcome), so the exit code alone cannot tell "the hook reported an error"
+   * from "the check never completed" — the bridges' fail-open logging keys
+   * off this flag for the latter.
+   */
+  timedOut: boolean
 }
 
 /**
@@ -81,6 +100,7 @@ export async function runHook(
     signal: options.signal,
     ...options.cwd !== undefined ? { workdir: options.cwd } : {},
     ...options.env !== undefined ? { env: options.env } : {},
+    ...options.sandboxPolicy !== undefined ? { sandboxPolicy: options.sandboxPolicy } : {},
   }
 
   try {
@@ -92,6 +112,7 @@ export async function runHook(
     return {
       output: parseHookOutput(exitCode, result.stdout.text, result.stderr.text, options.expectedEventName),
       durationMs: now() - started,
+      timedOut: result.timedOut,
     }
   } catch (error: unknown) {
     // The executor rejects only on infrastructure faults (unusable workdir,
@@ -101,6 +122,7 @@ export async function runHook(
     return {
       output: parseHookOutput(undefined, '', message),
       durationMs: now() - started,
+      timedOut: false,
     }
   }
 }

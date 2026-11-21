@@ -345,7 +345,7 @@ async function sendPrompt(page: Page, scaffold: WebScaffold): Promise<{ readonly
   const settled = scaffold.whenTurnSettled()
   const composer = page.locator('[data-composer-input]').first()
   await writeComposerDraft(page, composer, prompt)
-  await composer.press('Enter')
+  await composer.press('Shift+Enter')
   return { prompt, settled }
 }
 
@@ -482,7 +482,7 @@ it.skipIf(MODE === 'record')('starts a Session in a worktree before its first me
   const composer = page.locator('[data-composer-input]').first()
   await writeComposerDraft(page, composer, FOLLOW_UP)
   const accepted = page.waitForResponse('**/api/session/prompt')
-  await composer.press('Enter')
+  await composer.press('Shift+Enter')
   const envelope = await (await accepted).json() as { readonly result: unknown }
   expect(envelope.result).toMatchObject({ ok: true })
   const missing = page.locator('[data-forge-missing]')

@@ -10,6 +10,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ArbitrateKey } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { AnswerSurfaceInsert } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
+import { classifyComposerEnter } from '@deepseek-ai/dsh-client-shortcuts/client'
 import { planReviewOf, type QuestionAnswer, type QuestionCardSnapshot, type QuestionComposerProps } from './contract/slots.ts'
 import type { PendingQuestion } from './contract/slots.ts'
 import type { QuestionDraftAnswer, QuestionDraftProgress } from './draft-store.ts'
@@ -77,8 +78,8 @@ function isQuestionDraftProgress(value: unknown, questionCount: number): value i
   })
 }
 
-/** Return whether a text-field key event belongs to an active IME composition. */
-function isComposing(event: KeyboardEvent<HTMLTextAreaElement>): boolean {
+/** Return whether a key event belongs to an active IME composition. */
+function isComposing(event: KeyboardEvent<HTMLElement>): boolean {
   // keyCode 229 is the legacy IME-composition signal engines emit without isComposing.
   return event.nativeEvent.isComposing || Reflect.get(event.nativeEvent, 'keyCode') === 229
 }
@@ -96,15 +97,6 @@ const ARBITRATE_KEYS: Record<string, ArbitrateKey> = {
   Escape: 'escape',
   Tab: 'tab',
 }
-
-/**
- * FORK dsh-local (occlusion-fold): the share of the viewport a takeover must
- * occupy before losing attention folds it. The card's own cap is
- * viewport-relative (`min(60vh, 520px)`), so the line that counts as
- * "blocking the conversation" is too: below it the transcript still has room
- * and a fold would only cost the reader their place.
- */
-const OCCLUSION_FOLD_RATIO = 0.3
 
 /** The free-text answer field shared by both question variants. */
 interface AnswerFieldProps {
@@ -132,7 +124,7 @@ interface AnswerFieldProps {
 
 /**
  * Auto-growing free-text answer: a textarea, so a long answer soft-wraps and
- * Shift+Enter breaks a line, over a hidden mirror that owns the height.
+ * Enter breaks a line, over a hidden mirror that owns the height.
  *
  * The mirror renders the draft plus a trailing newline in normal flow and so
  * sizes the grid row (counting rows by '\n' cannot see soft wraps); the
@@ -279,19 +271,24 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
   const countdown = card.countdown
   // Collapsed to the header strip so the conversation above stays readable
   // while the user decides; answer drafts live in the Session store above.
-  const [minimized, setMinimized] = useState(false)
-  // FORK dsh-local (occlusion-fold, 2026-10-26): a takeover card the user
-  // stepped away from — the press landed outside the frame, or focus left it —
-  // folds to the header strip so the transcript reclaims the space; any
-  // engagement inside unfolds it again. Orthogonal to the manual minimize by
-  // design: `minimized` is the user's pinned choice (only the toggle lifts
-  // it), `autoFolded` yields to attention (any inside press or focus lifts
-  // it), and the card renders collapsed while either holds. A freshly
-  // presented question always starts unfolded — it must be seen. The busy
-  // submission keeps its card up so the state it disabled stays readable.
+  // FORK dsh-local (ask-keys-focus, 2026-11-17 裁定): one fold reason only —
+  // `autoFolded` follows attention. A pointerdown or focusin that lands
+  // outside the card frame folds the open card to its strip; focus back into
+  // the frame, or a press on the strip of an auto-folded card, lifts it. The
+  // manual minimize toggle and its pinned choice are gone with the button
+  // (2026-11-17 裁定 A1/A2). A freshly presented question always starts
+  // unfolded: the fold only ever fires on a card-external gesture, so the
+  // question is seen before it ever loses focus. The busy submission keeps
+  // its card up so the state it disabled stays readable.
   const [autoFolded, setAutoFolded] = useState(false)
-  const collapsed = minimized || autoFolded
+  const collapsed = autoFolded
   const frameRef = useRef<HTMLDivElement>(null)
+  // FORK dsh-local (ask-keys-focus, 2026-11-17 裁定): whether focus was last
+  // held inside this card. An index change that unmounts the focused option
+  // drops `document.activeElement` to the body; the layout effect below only
+  // restores focus into the new question when it was this card that held it,
+  // so focus parked on a pager button or outside the card is never stolen.
+  const focusInCard = useRef(false)
   // The free-form textarea autofocuses on first presentation; re-expanding a
   // collapsed question must not steal focus from the expand toggle back into
   // the input, so focus is granted once per question index.
@@ -382,36 +379,23 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
     }
   }, [pending])
 
-  // FORK dsh-local (occlusion-fold): attention reaching for the conversation —
-  // a press or a focus that lands in the transcript scroller while this card
-  // holds real estate — folds the open card to its header strip so the reader
-  // gets the space back. The seat's own furniture (queue dock, InputBar, the
-  // card itself) is deliberately out of the trigger set: those are interaction
-  // with the composer, not with the transcript, and folding on them would
-  // yank the question away mid-gesture. Edge-triggered on the gesture, not
-  // level-triggered on focus: a freshly presented question that never held
+  // FORK dsh-local (ask-keys-focus, 2026-11-17 裁定 A2, supersedes
+  // occlusion-fold): attention leaving the card — a pointerdown or focusin
+  // that lands anywhere outside the frame — folds the open card to its header
+  // strip so the transcript reclaims the space. There is no viewport-share
+  // gate anymore: the fold is edge-triggered on the gesture, not
+  // level-triggered on focus, so a freshly presented question that never held
   // the keyboard (an options card autofocuses nothing) stays up until someone
-  // actually reaches for the transcript. A busy submission keeps its card.
+  // actually reaches outside it. Any engagement back inside (the frame's own
+  // focus handler below) unfolds it again. A busy submission keeps its card.
   useEffect(() => {
     if (collapsed || busy !== null) return
     const frame = frameRef.current
     if (frame === null) return
-    // The transcript scroller owns the seat as a descendant (`composerSeat`
-    // sits inside `data-conversation-scroll`), so the seat check carves the
-    // composer furniture back out of the transcript reach.
-    const transcriptReach = (target: EventTarget | null): boolean =>
-      target instanceof Element
-      && !frame.contains(target)
-      && target.closest('[data-conversation-scroll]') !== null
-      && target.closest('[data-composer-seat]') === null
-    // Size-gated like the rule it serves: only a card that actually blocks a
-    // meaningful share of the viewport folds, so a two-line question stays put
-    // while the reader picks at the transcript and the layout never jitters
-    // under a card they could already see around.
-    const blocksTheTranscript = (): boolean =>
-      frame.getBoundingClientRect().height > window.innerHeight * OCCLUSION_FOLD_RATIO
+    const outside = (target: EventTarget | null): boolean =>
+      target instanceof Element && !frame.contains(target)
     const onGesture = (event: Event): void => {
-      if (transcriptReach(event.target) && blocksTheTranscript()) setAutoFolded(true)
+      if (outside(event.target)) setAutoFolded(true)
     }
     document.addEventListener('pointerdown', onGesture, true)
     document.addEventListener('focusin', onGesture, true)
@@ -422,10 +406,8 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
   }, [collapsed, busy])
 
   // Unfold paths: focus entering the card, or a press on the header strip of
-  // an auto-folded card. Buttons are excluded — the toggle lifts the fold
-  // through its own handler, and the close action must not flash the card
-  // open on its way out. A manually minimized card ignores the strip press —
-  // the pinned choice lifts only through the toggle, as it always has.
+  // an auto-folded card. Buttons are excluded — the close action must not
+  // flash the card open on its way out.
   const unfoldFromStrip = (event: MouseEvent<HTMLDivElement>): void => {
     if (!autoFolded) return
     if ((event.target as Element).closest('button') !== null) return
@@ -608,7 +590,9 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
 
   // Shared by the inline custom field and the optionless one: a multi-select
   // draft retains checked labels, while a single-select custom answer replaces
-  // its selection. Enter continues the flow, Shift+Enter breaks a line.
+  // its selection. The shared composer gesture pair decides (same authority as
+  // the message input): Enter breaks a line through the browser's own
+  // insertion; Shift/Ctrl+Enter continues the flow.
   const draftCustom = (event: ChangeEvent<HTMLTextAreaElement>): void => {
     const value = event.target.value
     updateDraft(current => ({
@@ -620,14 +604,16 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
   }
 
   const continueFromCustom = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
-    if (event.key !== 'Enter' || event.shiftKey || isComposing(event)) return
+    if (isComposing(event)) return
+    const gesture = classifyComposerEnter(event)
+    if (gesture === 'newline' || gesture === 'none') return
     event.preventDefault()
     continueFlow()
   }
 
   // Menu arbitration first: a key the open '/' menu claims (arrows, Escape,
-  // Tab, or Enter settling the highlight) never reaches the flow's Enter
-  // continuation — a highlighted pick inserts its text instead of advancing.
+  // Tab, or Enter settling the highlight) never reaches the flow's continue
+  // gesture — a highlighted pick inserts its text instead of advancing.
   const answerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
     const composing = isComposing(event)
     const key = ARBITRATE_KEYS[event.key]
@@ -654,6 +640,91 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
     submitDrafts(nextDrafts)
   }
 
+  // FORK dsh-local (ask-keys-focus, 2026-11-17 裁定 A4): PageUp/PageDown walk
+  // the questions from anywhere in the card — the keydown bubbles up from the
+  // focused option, answer field, or the frame itself — through the same
+  // motion the pager buttons use. Out of range is a plain no-op: the last
+  // question's PageDown never submits (the flow advances through its own
+  // gesture), a busy submission does not turn the page, a folded card has no
+  // body to scroll, and IME composition keeps its keys. Only a page we
+  // actually turn prevents the default scroll of the card body / page.
+  const frameKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key !== 'PageUp' && event.key !== 'PageDown') return
+    if (isComposing(event)) return
+    if (collapsed || busy !== null) return
+    const next = event.key === 'PageUp' ? index - 1 : index + 1
+    if (next < 0 || next >= questions.length) return
+    event.preventDefault()
+    replaceProgress(next, drafts)
+    setError(null)
+  }
+
+  // FORK dsh-local (ask-option-arrows-1118, 2026-11-19): option switching
+  // moves off Tab / Shift+Tab — Shift+Tab is awkward to hold and Tab read
+  // like it was about to turn the page — onto ArrowUp / ArrowDown. The
+  // handler sits on the option row so it catches the option button and its
+  // description toggle alike: arrows walk the rows with wrap and move focus
+  // only (a single-select arrow must not select — choose() steps the page
+  // on, so Enter stays the one selection gesture), while Tab / Shift+Tab
+  // leave the option list in one press by skipping the option buttons to
+  // the nearest other control — the description toggle, the answer field,
+  // the header — keeping Tab the way out of the card. Modifier keys and IME
+  // composition stay native, a locked card (busy submission, review) has no
+  // enabled option to hand focus to and lets the key through, and the
+  // answer field never sees this handler: its arrows keep the '/'
+  // arbitration.
+  const optionRowKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (isComposing(event)) return
+    if (event.altKey || event.ctrlKey || event.metaKey) return
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown' && event.key !== 'Tab') return
+    const target = event.target
+    if (!(target instanceof HTMLElement)) return
+    if (event.key === 'Tab') {
+      const frame = frameRef.current
+      if (frame === null) return
+      const focusables = [...frame.querySelectorAll<HTMLElement>('button:not([disabled]), textarea:not([disabled]), a[href]')]
+      const from = focusables.indexOf(target)
+      if (from < 0) return
+      const step = event.shiftKey ? -1 : 1
+      let landing: HTMLElement | undefined
+      for (let cursor = from + step; cursor >= 0 && cursor < focusables.length; cursor += step) {
+        const candidate = focusables[cursor]
+        if (candidate === undefined || candidate.matches('[role="radio"], [role="checkbox"]')) continue
+        landing = candidate
+        break
+      }
+      if (landing === undefined) return
+      event.preventDefault()
+      landing.focus()
+      return
+    }
+    if (event.shiftKey || locked) return
+    const rows = [...(event.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[data-option-row]') ?? [])]
+    const from = rows.indexOf(event.currentTarget)
+    if (from < 0) return
+    const step = event.key === 'ArrowDown' ? 1 : -1
+    const next = rows[(from + step + rows.length) % rows.length]
+    const button = next?.querySelector<HTMLButtonElement>('button:not([disabled])') ?? undefined
+    if (button === undefined) return
+    event.preventDefault()
+    button.focus()
+  }
+
+  // FORK dsh-local (ask-keys-focus, 2026-11-17 裁定 A5): when the page moves
+  // under the keyboard — a single-select choice auto-advancing, or any other
+  // index change — and the option that held focus unmounted with it, focus
+  // falls to the body; hand it to the new question's first enabled option so
+  // a run of Enter keeps flowing. Focus that stayed on a real element (pager
+  // button, answer field, the frame itself) is left alone, and the in-card
+  // lease keeps a card that never held focus from grabbing it.
+  useLayoutEffect(() => {
+    if (!focusInCard.current || collapsed) return
+    const active = document.activeElement
+    if (active !== null && active !== document.body) return
+    const option = frameRef.current?.querySelector<HTMLButtonElement>('[data-option-row] button:not([disabled])')
+    option?.focus()
+  }, [index, collapsed])
+
   return (
     <div
       ref={frameRef}
@@ -667,14 +738,23 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
       // non-focusable copy — question title, option prose, markdown detail —
       // keeps focus HERE. Without it Chrome hands that focus to the nearest
       // focusable ancestor, the transcript scrollport (tabIndex 0), and the
-      // sensor's focusin leg below reads it as reaching for the conversation:
-      // pressing the long text to read/select it folded the tall card under
+      // attention sensor's focusin leg below reads it as leaving the card:
+      // pressing the long text to read/select it would fold the card under
       // the reader's cursor (observed as "the long text toggles itself").
       tabIndex={-1}
-      // Any engagement inside the card lifts an auto-fold; the manually
-      // minimized card ignores it (the strip press below agrees — only the
-      // toggle lifts a pinned choice).
-      onFocus={() => { if (autoFolded) setAutoFolded(false) }}
+      // Any engagement inside the card lifts an auto-fold; focus here also
+      // records the in-card lease the focus-follow effect reads.
+      onFocus={() => {
+        focusInCard.current = true
+        if (autoFolded) setAutoFolded(false)
+      }}
+      // The lease ends only when focus moves to a real element outside: a
+      // focus that fell to the body (the focused option unmounted) keeps it,
+      // which is exactly when the focus-follow effect needs it.
+      onBlur={(event) => {
+        if (event.relatedTarget !== null && !event.currentTarget.contains(event.relatedTarget)) focusInCard.current = false
+      }}
+      onKeyDown={frameKeyDown}
       onClick={unfoldFromStrip}
     >
       {/* Floating slash-menu anchor for the answer field: the card clips its
@@ -690,9 +770,9 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
         <header className={css.header}>
           {/* FORK occlusion-fold-1026: upstream (0.2.2 keep-long-questions-answerable)
               moved the title into the body while expanded and keeps it in the strip
-              only while minimized; here either fold reason shows the same strip, so
-              the title rides `collapsed` — and the section's aria-labelledby keeps
-              resolving while auto-folded. */}
+              only while minimized; here the auto-fold shows the same strip, so the
+              title rides `collapsed` — and the section's aria-labelledby keeps
+              resolving while folded. */}
           {(question.header !== undefined || collapsed) && (
             <div className={css.headingBlock}>
               {question.header !== undefined && <div className={css.eyebrow}>{question.header}</div>}
@@ -723,26 +803,6 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
               <span className={css.waitStatus}>{t('wait.held')}</span>
             )}
             {review !== undefined && <span className={css.waitStatus}>{t('review.status')}</span>}
-            <button
-              type="button" className={css.iconButton}
-              aria-label={t(collapsed ? 'nav.maximize' : 'nav.minimize')}
-              title={t(collapsed ? 'nav.maximize' : 'nav.minimize')}
-              aria-expanded={!collapsed}
-              disabled={busy !== null}
-              // One toggle over the union: expanded → pin a manual minimize;
-              // collapsed by either reason → lift both (an auto-folded card
-              // must not stay folded after the user asks for it back).
-              onClick={() => {
-                if (collapsed) {
-                  setMinimized(false)
-                  setAutoFolded(false)
-                } else {
-                  setMinimized(true)
-                }
-              }}
-            >
-              {collapsed ? <IconChevronUpOutlineRegular /> : <IconChevronDownOutlineRegular />}
-            </button>
             <button
               type="button" className={css.iconButton}
               aria-label={t(pending.dismissal === 'hide' ? 'nav.close' : 'nav.cancel')}
@@ -817,6 +877,7 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
                       )}
                       data-option-row
                       data-expanded={descriptionExpanded || undefined}
+                      onKeyDown={optionRowKeyDown}
                     >
                       <button
                         type="button"
@@ -828,9 +889,20 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
                         disabled={locked}
                         onClick={() => { choose(option.label) }}
                         onKeyDown={(event) => {
-                          if (event.key !== 'Enter') return
+                          // FORK dsh-local (ask-keys-focus, 2026-11-17 裁定 A3):
+                          // an option's Enter is the shared composer gesture pair,
+                          // no longer an any-Enter submit hijack. Bare Enter stays
+                          // unprevented so the button's own activation runs
+                          // `choose()` (single-select selects and steps on;
+                          // multi-select toggles); Shift/Ctrl+Enter is claimed for
+                          // the flow (next question, or the batch submit on the
+                          // last). IME composition keeps Enter to the IME. Space
+                          // is untouched and reaches the same native activation.
+                          if (isComposing(event)) return
+                          const gesture = classifyComposerEnter(event)
+                          if (gesture !== 'submit' && gesture !== 'accelerated') return
                           event.preventDefault()
-                          submitDrafts(drafts)
+                          continueFlow()
                         }}
                       >
                         {question.multiSelect === true

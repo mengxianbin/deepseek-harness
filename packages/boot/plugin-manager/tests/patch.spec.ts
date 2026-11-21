@@ -1,5 +1,5 @@
 /** Profile patch edits preserve user-authored syntax and are idempotent. */
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { expect, it, onTestFinished } from 'vitest'
@@ -159,4 +159,30 @@ it('keeps a switch whose value is an alias', async () => {
   const profile = await fixture('- id: other\n  config: { flag: &flag true }\n- id: tool\n  disabled: *flag\n', [TOOL])
   expect(await writePluginEnabled(profile, 'tool', 'package', true)).toBe(true)
   expect(loadOptionalPatches('test', profile.patchPath)).toEqual([{ id: 'other', config: { flag: true } }, { id: 'tool', disabled: false }])
+})
+
+it('writes through a junctioned patch file instead of replacing the link', async () => {
+  const profile = await fixture('- id: tool\n  disabled: false # availability\n')
+  const target = join(profile.dir, 'patch-target.yml')
+  await writeFile(target, await readFile(profile.patchPath, 'utf8'))
+  await rm(profile.patchPath)
+  await symlink(target, profile.patchPath, 'junction')
+  expect((await lstat(profile.patchPath)).isSymbolicLink()).toBe(true)
+
+  expect(await writePluginEnabled(profile, 'tool', 'package', false)).toBe(true)
+
+  expect((await lstat(profile.patchPath)).isSymbolicLink()).toBe(true)
+  expect(await readFile(target, 'utf8')).toContain('disabled: true')
+  expect(loadOptionalPatches('test', profile.patchPath)).toEqual([
+    { id: 'tool', disabled: true },
+  ])
+  expect(await writePluginEnabled(profile, 'tool', 'package', false)).toBe(false)
+  expect((await lstat(profile.patchPath)).isSymbolicLink()).toBe(true)
+})
+
+it('keeps editing a real patch file unchanged', async () => {
+  const profile = await fixture('- id: tool\n  disabled: false\n')
+  expect(await writePluginEnabled(profile, 'tool', 'package', false)).toBe(true)
+  expect((await lstat(profile.patchPath)).isSymbolicLink()).toBe(false)
+  expect(loadOptionalPatches('test', profile.patchPath)).toEqual([{ id: 'tool', disabled: true }])
 })

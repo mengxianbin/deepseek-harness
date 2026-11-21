@@ -46,7 +46,7 @@ describe.skipIf(webSnapshotMode() === 'record')('web session replay', () => {
       expect(prompts).toHaveLength(1)
       const input = page.locator('[data-composer-input][contenteditable="true"]').first()
       await input.fill(prompts[0]!)
-      await input.press('Enter')
+      await input.press('Shift+Enter')
       const partial = await reached.promise
       const settled = scaffold.whenTurnSettled()
       try {

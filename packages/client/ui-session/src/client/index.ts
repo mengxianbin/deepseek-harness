@@ -117,6 +117,16 @@ export interface SessionStatus {
   /** Outcome of that unread stop; present exactly while `completionUnread` is true. */
   readonly completionOutcome?: SessionCompletionOutcome
   /**
+   * The failed stop was a shutdown cutting work off mid-flight
+   * (session-status-icon-redesign-1118 §三): the Host died with this Session's
+   * own open turn, a subagent child, or a background job still running, so an
+   * all-clean green would report work that is gone. Present exactly while
+   * `completionOutcome` is `'failed'` and the cause is the cut; an ordinary
+   * turn failure omits it and keeps the row's default label — the sub-reason
+   * rides the hover card only, never the dot (红点不带子原因).
+   */
+  readonly completionInterrupted?: true
+  /**
    * Live background jobs this Session owns; present exactly while the count is
    * positive (a roster the row watches supplies it; no watch, no number).
    */
@@ -511,6 +521,31 @@ export class UiSession extends Service {
    */
   private readonly phantomStops = new Set<SessionId>()
   /**
+   * Jobs pinned at the moment the connection went stale
+   * (session-status-icon-redesign-1118 §三, job leg): the roster keeps its
+   * last-known state through an outage, so the way-in snapshot is the only
+   * read of "what was still in flight when the Host could have died". Each
+   * pin holds the roster array it was taken against, so a later fold only
+   * adjudicates once a fresh frame has actually replaced that roster — a
+   * stale pre-rebaseline view never answers for the Host.
+   */
+  private readonly outageJobs = new Map<SessionId, { roster: readonly JobView[]; jobs: Set<JobView['id']> }>()
+  /**
+   * Sessions whose pinned jobs vanished without a settlement after an outage —
+   * the 停机打断 half of the aggregate red (green = turn + subagents + jobs all
+   * clean). Cleared when the Session runs again (a rerun is the legal channel,
+   * same as `unreadStops`) and when the row leaves the catalog. In-memory by
+   * design: the roster that proves the kill lives only while this page does.
+   */
+  private readonly interruptedJobs = new Set<SessionId>()
+  /**
+   * Row-held roster watches per Session (reference-counted through
+   * {@link UiSession.watchSessionJobs}): a roster gap only reads as a killed
+   * job while a rendered row still watches that roster — an unmounted row's
+   * released stream is an unknown, not a verdict.
+   */
+  private readonly rowJobWatches = new Map<SessionId, number>()
+  /**
    * Read marks (已阅勾标): set when a row becomes the main view while showing
    * signals — the pure-observation receipt of collab step3 §四's read-mark
    * ruling (点名不改态; the check is a secondary row-end glyph, never a signal
@@ -625,6 +660,10 @@ export class UiSession extends Service {
       const disposeConnection = this.connectionState?.subscribe(() => {
         const state = this.connectionState?.getSnapshot()
         if (isConnectionStale(state) || isConnectionStale(epochState)) this.lastStatusAt.clear()
+        // Way into an outage: pin the jobs still in flight, so the roster's
+        // post-reconnect refresh can tell a job the Host killed from one that
+        // merely settled while the page was deaf (停机打断, aggregate red).
+        if (isConnectionStale(state) && !isConnectionStale(epochState)) this.snapshotOutageJobs()
         epochState = state
         this.publishStatus()
       })
@@ -671,11 +710,12 @@ export class UiSession extends Service {
     if (this.jobs === jobs) return
     this.jobs = jobs
     this.disposeJobsState?.()
-    this.disposeJobsState = jobs.state.subscribe(() => { this.publishStatus() })
+    this.disposeJobsState = jobs.state.subscribe(() => { this.resolveOutageJobs(); this.publishStatus() })
     for (const pending of [...this.pendingRowWatches]) {
       this.pendingRowWatches.delete(pending)
       if (pending.active) pending.release = jobs.watchRows(pending.sessionId)
     }
+    this.resolveOutageJobs()
     this.publishStatus()
   }
 
@@ -690,19 +730,83 @@ export class UiSession extends Service {
    * @returns the release for this watcher.
    */
   watchSessionJobs(sessionId: SessionId): () => void {
+    this.rowJobWatches.set(sessionId, (this.rowJobWatches.get(sessionId) ?? 0) + 1)
     const jobs = this.jobs
-    if (jobs !== undefined) return jobs.watchRows(sessionId)
-    const pending: PendingRowWatch = { sessionId, active: true, release: undefined }
-    this.pendingRowWatches.add(pending)
+    const stopWatch = jobs !== undefined
+      ? jobs.watchRows(sessionId)
+      : (() => {
+        const pending: PendingRowWatch = { sessionId, active: true, release: undefined }
+        this.pendingRowWatches.add(pending)
+        return () => {
+          const release = pending.release
+          if (release !== undefined) {
+            pending.release = undefined
+            release()
+            return
+          }
+          pending.active = false
+          this.pendingRowWatches.delete(pending)
+        }
+      })()
+    let released = false
     return () => {
-      const release = pending.release
-      if (release !== undefined) {
-        pending.release = undefined
-        release()
-        return
+      if (released) return
+      released = true
+      const count = (this.rowJobWatches.get(sessionId) ?? 1) - 1
+      if (count <= 0) this.rowJobWatches.delete(sessionId)
+      else this.rowJobWatches.set(sessionId, count)
+      stopWatch()
+    }
+  }
+
+  /**
+   * Pin every Session's in-flight jobs at the moment the connection goes
+   * stale (停机打断 job leg): the roster freezes at its last-known state, so
+   * this way-in read is the only record of what a Host restart would kill.
+   */
+  private snapshotOutageJobs(): void {
+    const rows = this.jobs?.state.getSnapshot().rows
+    if (rows === undefined) return
+    for (const [key, views] of Object.entries(rows)) {
+      const id = key as SessionId
+      const active = views.filter(job => countsAsActiveOwnJob(job, id))
+      if (active.length > 0) {
+        this.outageJobs.set(id, { roster: views, jobs: new Set(active.map(job => job.id)) })
       }
-      pending.active = false
-      this.pendingRowWatches.delete(pending)
+    }
+  }
+
+  /**
+   * Settle the pinned jobs against a roster the Host refreshed after the
+   * outage: a fresh frame that still carries the job proves it survived, a
+   * terminal row proves it settled, and a frame that lost it while a rendered
+   * row still watches the roster proves the Host killed it — record the
+   * interruption. Runs only once the connection confirms again and only on a
+   * roster that actually changed since the pin, so neither a stale
+   * pre-rebaseline view nor a released (unwatched) stream ever adjudicates;
+   * every unknown keeps the pin and stays fail-open.
+   */
+  private resolveOutageJobs(): void {
+    if (this.outageJobs.size === 0) return
+    if (isConnectionStale(this.connectionState?.getSnapshot())) return
+    const rows = this.jobs?.state.getSnapshot().rows
+    if (rows === undefined) return
+    for (const [id, pin] of [...this.outageJobs]) {
+      if ((this.rowJobWatches.get(id) ?? 0) <= 0) continue
+      const roster = rows[String(id)]
+      if (roster === pin.roster) continue
+      const remaining = new Set<JobView['id']>()
+      for (const jobId of pin.jobs) {
+        const view = roster?.find(job => job.id === jobId)
+        if (view === undefined) this.interruptedJobs.add(id)
+        else if (view.status === 'running' || view.status === 'stopping') remaining.add(jobId)
+      }
+      // A frame whose roster key is gone proves the same thing as one that
+      // dropped every pinned job (the loop above found no view for any of
+      // them), so it settles the pin instead of re-arming it — and it keeps
+      // the stored roster type honest: `rows[...]` reads `… | undefined`.
+      if (roster === undefined || remaining.size === 0) this.outageJobs.delete(id)
+      else this.outageJobs.set(id, { roster, jobs: remaining })
     }
   }
 
@@ -975,6 +1079,9 @@ export class UiSession extends Service {
       this.unreadStops.delete(sessionId)
       this.observedFailures.delete(sessionId)
       this.phantomStops.delete(sessionId)
+      // A rerun is the legal channel for a shutdown-killed job too: the new
+      // turn supersedes the interruption it may have caused (aggregate red).
+      this.interruptedJobs.delete(sessionId)
     } else {
       // A pre-baseline idle frame observed no turn: the fact still records so
       // the row lights before the catalog lands, but it is marked phantom —
@@ -1102,13 +1209,30 @@ export class UiSession extends Service {
         this.knownMainIds.add(id)
       } else this.knownMainIds.delete(id)
     }
-    if (list.phase === 'ready') {
+    // 剪枝只对已定稿的快照生效 (投影清库窗口, row-status-subagent-1114): a
+    // Host-generation repair discards every projection cut before its re-pull
+    // lands, and until that pull settles `byId` is missing exactly the
+    // catalog-fallback subagent rows whose sessions are still alive — their
+    // parent row survives (it rides `summaries`, which no repair clears), so
+    // pruning here reads "this child is gone" from an incomplete roster and
+    // destroys the running fact the Host already reported for it. The fold
+    // above only walks `list.ids`, so a row that is not a Host-list member is
+    // never rebuilt: the loss lasts until the next status frame (the Host's
+    // 15s sweep), which under a reconnecting link is most of the time. A
+    // pull that failed leaves the same incomplete roster behind, so it
+    // suppresses the prune for the same reason. `state` is absent only in
+    // hand-built fixtures, which read as "no pull activity" and keep the
+    // original always-prune behaviour.
+    const settled = list.state === undefined || list.state === 'idle'
+    if (list.phase === 'ready' && settled) {
       for (const id of this.running.keys()) {
         if (present.has(id)) continue
         this.running.delete(id)
         this.unreadStops.delete(id)
         this.observedFailures.delete(id)
         this.phantomStops.delete(id)
+        this.interruptedJobs.delete(id)
+        this.outageJobs.delete(id)
         this.attention.delete(id)
         this.seals.delete(id)
         this.lastStatusAt.delete(id)
@@ -1208,6 +1332,43 @@ export class UiSession extends Service {
         ? undefined
         : 'completed' as const
       const outcome = remembered ?? durableFailed ?? receiptOutcome ?? durableClean
+      // 整体聚合 (session-status-icon-redesign-1118 §三): green promises
+      // "nothing here left to look at", so it may only stand while every
+      // subagent child also ended clean — an open turn or a failed /
+      // interrupted end on a stopped child is work left behind, and the parent
+      // row is the only place a hidden child row would ever be seen. Missing
+      // child rows and missing projections read as clean (fail-open): an
+      // unknown never invents a red. The gate only tightens green to red — an
+      // already-failed stop keeps its own cause, and a child still running
+      // belongs to the busy tier, not to a verdict.
+      const children = list.projectionsBySession[id]?.values.subagentCatalog
+      let childUnclean = false
+      let childInterrupted = false
+      if (children !== undefined) {
+        for (const child of children) {
+          const childRow = list.byId[child.id]
+          if (childRow === undefined) continue
+          if (this.running.get(child.id) ?? childRow.running) continue
+          if (!listRowStopFailed(childRow)) continue
+          childUnclean = true
+          const childValues = childRow.projectionValues
+          if (childValues?.turnBoundary?.openTurnStartSeq != null
+            || childValues?.lastTurnOutcome?.kind === 'interrupted') childInterrupted = true
+        }
+      }
+      const jobInterrupted = this.interruptedJobs.has(id)
+      const aggregateRed = outcome === 'completed' && (childUnclean || jobInterrupted)
+      const finalOutcome = aggregateRed ? 'failed' as const : outcome
+      // The sub-reason rides the hover card only (红点不带子原因, §三): a
+      // shutdown cut — this row's own open/interrupted turn, a killed child,
+      // or a job the Host took down with it — names itself「停机打断」instead
+      // of the ordinary「上轮失败」, because the recovery differs (resume or
+      // re-dispatch vs retry).
+      const completionInterrupted = finalOutcome === 'failed'
+        && (diedMidTurn || durableKind === 'interrupted' || jobInterrupted
+          || (aggregateRed && childInterrupted))
+        ? true as const
+        : undefined
       const roster = this.jobs?.state.getSnapshot().rows[String(id)]
       const activeJobCount = roster === undefined
         ? 0
@@ -1237,12 +1398,12 @@ export class UiSession extends Service {
       const signature = sessionStatusSignature(
         this.running.get(id),
         this.pendingSnapshot.get(id),
-        outcome,
+        finalOutcome,
         activeJobCount,
         pendingWakeup,
       )
       const signs = this.pendingSnapshot.get(id) !== undefined
-        || outcome !== undefined
+        || finalOutcome !== undefined
         || activeJobCount > 0
       if (this.pendingReadMarks.delete(id)) {
         if (signs) this.readMarks.set(id, signature)
@@ -1254,8 +1415,9 @@ export class UiSession extends Service {
       next.set(id, {
         running: this.running.get(id),
         pendingInteraction: this.pendingSnapshot.get(id),
-        completionUnread: outcome !== undefined,
-        ...(outcome === undefined ? {} : { completionOutcome: outcome }),
+        completionUnread: finalOutcome !== undefined,
+        ...(finalOutcome === undefined ? {} : { completionOutcome: finalOutcome }),
+        ...(completionInterrupted === undefined ? {} : { completionInterrupted }),
         ...(activeJobCount === 0 ? {} : { activeJobCount }),
         ...(pendingWakeup === undefined ? {} : { pendingWakeup }),
         ...(statusStale === undefined ? {} : { statusStale }),
@@ -1485,6 +1647,7 @@ function sameSessionStatus(left: SessionStatusSnapshot, right: SessionStatusSnap
       || candidate.pendingInteraction !== status.pendingInteraction
       || candidate.completionUnread !== status.completionUnread
       || candidate.completionOutcome !== status.completionOutcome
+      || candidate.completionInterrupted !== status.completionInterrupted
       || candidate.activeJobCount !== status.activeJobCount
       || candidate.pendingWakeup !== status.pendingWakeup
       || candidate.statusStale !== status.statusStale

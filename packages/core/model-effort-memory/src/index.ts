@@ -83,7 +83,7 @@ export class ModelEffortMemory extends Service {
       if (!(model in current)) return current
       // Rebuild without the key instead of `delete`: a dynamic delete both
       // trips the lint rule and pushes the object into dictionary mode.
-      return Object.fromEntries(Object.entries(current).filter(([key]) => key !== model)) as EffortMemory
+      return Object.fromEntries(Object.entries(current).filter(([key]) => key !== model))
     })
   }
 

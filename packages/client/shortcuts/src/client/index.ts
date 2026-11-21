@@ -4,7 +4,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import { ShortcutRegistry } from './registry.ts'
 import { detectEnvironment, installKeyboard } from './dom.ts'
-import { bindingIssue, initialShortcutConfig, normalizeBinding, overlappingBindings, presentBinding } from '../protocol.ts'
+import { aliasKeypad, bindingIssue, initialShortcutConfig, normalizeBinding, overlappingBindings, presentBinding } from '../protocol.ts'
 import type { DesktopKeyboardApi, DesktopShortcutsApi, ShortcutSaveResult } from '../protocol.ts'
 import { desktopShortcutStorage, webShortcutStorage } from './storage.ts'
 import type { Shortcuts } from './types.ts'
@@ -15,6 +15,8 @@ import { Config } from '../config.ts'
 export type { ShortcutCatalogEntry, ShortcutCommand, ShortcutContext, ShortcutGesture, Shortcuts } from './types.ts'
 export type { ShortcutFixedInput, ShortcutFixedCommand, ShortcutFixedCatalogEntry } from './types.ts'
 export type { ShortcutBinding, ShortcutCommandId, ShortcutPlatform, ShortcutRuntime } from '../protocol.ts'
+export { classifyComposerEnter, composerEnterDisplay, composerEnterGestures } from './gestures.ts'
+export type { ComposerEnterEvent, ComposerEnterGesture } from './gestures.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -114,6 +116,10 @@ export default class ShortcutsService extends Service implements Shortcuts {
         && overlappingBindings(row.binding, normalized)).map(row => row.id),
       ...this.fixedCatalog.getSnapshot().filter(row => row.bindings.some(binding => overlappingBindings(binding, normalized)))
         .map(row => row.id)] }
+  }
+
+  aliasCode(code: Parameters<Shortcuts['aliasCode']>[0]): ReturnType<Shortcuts['aliasCode']> {
+    return aliasKeypad(code)
   }
 
   private syncDefinitions(): void {

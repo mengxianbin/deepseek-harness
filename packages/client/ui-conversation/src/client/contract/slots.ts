@@ -275,6 +275,13 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     }
     /** Rows of the View tab row's More menu; the header shows More only while this list has registrations. */
     'conversation.session.header.views.actions': { kind: 'list'; scope: 'root'; owner: ConversationViewActionsOwnerProps }
+    /**
+     * Trailing indicators after the View tab row's More launcher (right of ⋯);
+     * rendered only while the tab row itself renders. The header measures this
+     * seat's width and folds tabs before it, so a wide occupant never overflows
+     * the row. Entries receive no owner-specific values.
+     */
+    'conversation.session.header.views.trailing': { kind: 'list'; scope: 'session' }
     /** Registered Conversation target Views, rendered one at a time. */
     'conversation.view': { kind: 'list'; scope: 'session'; owner: ConvViewOwnerProps }
     /** Selector-routed replacements for the current Session's resident composer. */
@@ -285,7 +292,11 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'conversation.hero.brand.mark': { kind: 'single'; scope: 'root'; owner: HeroBrandMarkOwnerProps }
     /** Agent-preset control staged for a New Session. */
     'conversation.hero.agentPreset': { kind: 'single'; scope: 'session-maybe'; owner: HeroAgentPresetOwnerProps }
-    /** Compact options right-aligned in the New Session row after the workspace and preset controls; rendered only with a Session. */
+    /**
+     * Compact New Session options after the workspace slot. The wrapper must stay a
+     * direct child of the hero row: the git-graph BranchChip portals itself right
+     * before this marker; slot content renders only with a Session.
+     */
     'conversation.hero.options': { kind: 'list'; scope: 'session' }
     /** Full-width entries above the composer card. */
     'conversation.input.dock': { kind: 'list'; scope: 'session'; owner: InputZone }
@@ -301,6 +312,13 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'conversation.composer.overlay': { kind: 'list'; scope: 'session' }
     /** Ambient entries below the composer card. */
     'conversation.composer.dock': { kind: 'list'; scope: 'session' }
+    /**
+     * Ambient entries at the right end of the row below the composer card,
+     * after the context meter; rendered only under the same composer states
+     * as `conversation.composer.dock`, so a trailing indicator never outlives
+     * the row it trails. Entries receive no owner-specific values.
+     */
+    'conversation.composer.dock.trailing': { kind: 'list'; scope: 'session' }
     /** Compact controls at the left of the composer tool row. */
     'conversation.input.left': { kind: 'list'; scope: 'session' }
     /** Compact controls before the composer submit action. */
@@ -551,8 +569,8 @@ export interface ComposerBarInjected {
     /** Readable sequence while the fixed Stop command is registered. */
     stopShortcut: ObservableSnapshot<readonly string[]>
     /**
-     * Live busy-state submission preference: the delivery mode plain Enter
-     * and the primary Send button use while the addressed agent is busy.
+     * Live busy-state submission preference: the delivery mode the Shift+Enter
+     * send gesture and the primary Send button use while the addressed agent is busy.
      */
     busyEnter: ObservableSnapshot<BusyEnterBehavior>
     /** Live per-draft upload states for drafts that upload when added. */
@@ -583,7 +601,7 @@ export type ComposerBarProps =
     | 'conversation.input.permission'
     | 'conversation.input.left' | 'conversation.input.plan'
     | 'conversation.input.right' | 'conversation.input.model' | 'conversation.input.activity'
-    | 'conversation.composer.dock'
+    | 'conversation.composer.dock' | 'conversation.composer.dock.trailing'
   >
   & InjectFace<ComposerBarInjected>
   & PropsLocale<'conversation'>
@@ -661,6 +679,7 @@ export type ConversationSessionHeaderSlotProps =
     | 'conversation.session.header.utilities'
     | 'conversation.session.header.corner'
     | 'conversation.session.header.views.actions'
+    | 'conversation.session.header.views.trailing'
   >
   & PropsStore<ConversationStore>
   & InjectFace<ConversationSessionHeaderInjected>

@@ -9,6 +9,7 @@
 import { getDshRuntimeVersion, loadLayeredEnv, StartupError } from '@deepseek-ai/dsh-app-boot'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { parseDshArgs } from './args.ts'
+import { installExitJournal } from './exit-journal.ts'
 import { reportStartupFailure } from './startup-diagnostics.ts'
 import type { RunProfileOptions } from './profile-boot.ts'
 
@@ -30,6 +31,9 @@ export async function runCli(options: RunCliOptions = {}): Promise<void> {
 
   switch (invocation.mode) {
     case 'profile': {
+      // Web-host exit account before anything can fail: one synchronous line
+      // per exit, off the stdout pipe (restart-attribution-inbox-1118 批1 L2).
+      installExitJournal(invocation.profile)
       const { runProfile } = await import('./profile-boot.ts')
       try {
         await runProfile({

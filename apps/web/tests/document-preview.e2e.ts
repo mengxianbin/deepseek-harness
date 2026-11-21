@@ -184,7 +184,7 @@ it.skipIf(MODE === 'record').each(['en-US', 'zh-CN'])('fills the spreadsheet pan
     const settled = scaffold.whenTurnSettled()
     const input = page.locator('[data-composer-input]').first()
     await input.fill(PROMPT)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     const sessionId = await settled
     const cwd = scaffold.ctx.agents.get(sessionId)?.session.header.cwd
     if (cwd === undefined) throw new Error('settled Session has no workspace cwd')
@@ -440,7 +440,7 @@ it.skipIf(MODE === 'record').each([1, 2])('keeps frozen headings without divider
     await connectFreshWorkspace(page, scaffold.workspaceCwd)
     const settled = scaffold.whenTurnSettled()
     await page.locator('[data-composer-input]').first().fill(PROMPT)
-    await page.locator('[data-composer-input]').first().press('Enter')
+    await page.locator('[data-composer-input]').first().press('Shift+Enter')
     const cwd = scaffold.ctx.agents.get(await settled)?.session.header.cwd
     if (cwd === undefined) throw new Error('settled Session has no workspace cwd')
     await writeFile(join(cwd, 'freeze.xlsx'), await excelFreezeFixture())
@@ -618,7 +618,7 @@ else process.exit(1);
     const settled = scaffold.whenTurnSettled()
     const input = page.locator('[data-composer-input]').first()
     await input.fill(PROMPT)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     const sessionId = await settled
     await page.getByText('LIGHTHOUSE', { exact: true }).waitFor({ timeout: 15_000 })
     expect(await page.getByRole('tablist').count()).toBe(0)
@@ -1593,7 +1593,7 @@ describe.skipIf(MODE === 'record')('web e2e: Host Office preview', () => {
     const settled = scaffold.whenTurnSettled()
     const input = page.locator('[data-composer-input]').first()
     await input.fill(PROMPT)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     const sessionId = await settled
     const cwd = scaffold.ctx.agents.get(sessionId)?.session.header.cwd
     if (cwd === undefined) throw new Error('settled Session has no workspace cwd')

@@ -64,7 +64,7 @@ describe('web e2e: PTC program sandbox escalation', () => {
     await expect.poll(() => page.locator('[aria-label="Access mode, current: Read Only"]').count()).toBe(1)
     const settled = scaffold.whenTurnSettled(MODE === 'record' ? 240_000 : 60_000)
     await input.fill(PROMPT)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     const panel = page.locator('[data-approval-key]')
     await panel.waitFor({ timeout: MODE === 'record' ? 180_000 : 60_000 })
     const calls = events.filter(event => event.type === 'tool/call')

@@ -142,7 +142,11 @@
 
 .crumb {
   display: inline-block;
-  max-width: 220px;
+  /* 480px (2026-11-17 header-trailing-seat): the legacy 220px cap idled the
+     row's free space and ellipsized ordinary session titles once the sysmon
+     chip left this row; 480 fits ~33 CJK chars while still bounding a
+     pathological title so it cannot swallow the header. */
+  max-width: 480px;
   overflow: hidden;
   padding: 4px 8px;
   border: none;
@@ -208,7 +212,13 @@
   display: none;
 }
 
-/* The tab row sits above the header paint so the active bar covers its rule. */
+/* The tab row sits above the header paint so the active bar covers its rule.
+   It doubles as the anonymous inline-size container for its trailing
+   occupants (a metrics chip and its kin run their @container degradations
+   against the nearest container, which is this row): CSS modules hash
+   container-names per module, so occupants match the nearest container
+   without sharing a name. The width:100% grid span sizes the row, so
+   inline-size containment cannot collapse it. */
 .tabs {
   grid-column: 1 / -1;
   position: relative;
@@ -222,6 +232,7 @@
   flex-wrap: wrap;
   margin-top: 10px;
   padding-left: 8px;
+  container-type: inline-size;
 }
 
 .viewTabs {
@@ -301,6 +312,30 @@
 .viewsMoreMenu {
   width: 288px;
   max-width: calc(100vw - 24px);
+}
+
+/* Trailing seat after More (conversation.session.header.views.trailing):
+   fixed width so a wide occupant never squeezes the tab share — the fold
+   budget above subtracts this element's measured width instead, and the row
+   wraps (header grows) before anything clips. The -3px matches .viewsMore,
+   centering a 22px box on the 16px text line. margin-left:auto parks the
+   seat on the row's right edge rather than butting against More: it takes
+   only the width the tabs leave over — zero once the row is exactly full —
+   so the border box the budget measures and the wrap point, which counts
+   auto margins as zero, both stay put. */
+.viewsTrailing {
+  flex: none;
+  display: flex;
+  margin-top: -3px;
+  margin-left: auto;
+}
+
+/* An empty seat hides itself so it costs neither its width nor the flex gap
+   after More. The renderSlot outlet anchor is display:contents and always
+   rides the seat, so emptiness is judged on the anchor's children: no
+   registered entry, or an occupant that paints nothing (host off). */
+.viewsTrailing:not(:has(> [data-slot] > *)) {
+  display: none;
 }
 
 .viewArea {
@@ -612,14 +647,25 @@
   padding: 0 16px 0 20px;
 }
 
-/* Plugin options share the row, pushed to its right edge. */
+/* Trailing group pushed to the row's right edge: the agent-preset seat as
+   the row's last control. */
+.heroTrailing {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  margin-left: auto;
+}
+
+/* New Session options grouped after the workspace slot. This wrapper stays a
+   direct child of the row — the git-graph BranchChip portals itself right
+   before this marker, keeping the branch chip beside the workspace chip. */
 .heroOptions {
   display: flex;
   flex: none;
   align-items: center;
   gap: 2px;
   min-width: 0;
-  margin-left: auto;
 }
 
 .heroOptions:empty {

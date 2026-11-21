@@ -45,7 +45,9 @@ async function harness(options: { readonly attachError?: Error } = {}): Promise<
   const timeline: string[] = []
   const sessionIds: SessionId[] = []
   const path = mkdtempSync(join(tmpdir(), 'dsh-attach-publication-'))
-  onTestFinished(() => rmSync(path, { recursive: true, force: true }))
+  onTestFinished(() => {
+    rmSync(path, { recursive: true, force: true })
+  })
   const id = 'workspace-attach-publication' as WorkspaceId
   const workspace = {
     id,

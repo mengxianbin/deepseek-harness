@@ -353,9 +353,11 @@ describe('formatCompactTokens', () => {
 
 describe('formatBalanceFigure', () => {
   it.each([
-    [{ currency: 'CNY', totalBalance: '6.16' }, '¥6.16'],
-    [{ currency: 'USD', totalBalance: '12.00' }, '$12.00'],
-    [{ currency: 'GBP', totalBalance: '1.23' }, '1.23 GBP'],
+    // No currency symbol or code ever; a CNY figure carries the `R` (RMB)
+    // suffix so the right-aligned column ends in a letter like M / B (2026-11-15).
+    [{ currency: 'CNY', totalBalance: '6.16' }, '6.16R'],
+    [{ currency: 'USD', totalBalance: '12.00' }, '12.00'],
+    [{ currency: 'GBP', totalBalance: '1.23' }, '1.23'],
     [{ totalBalance: '2.50' }, '2.50'],
     [{ currency: 'CNY' }, '—'],
     [{}, '—'],
@@ -395,7 +397,7 @@ describe('UsageGlance', () => {
     // Short labels in display order, one tick per row, per-window tooltips.
     // Class selectors match the scoped CSS-module names by substring.
     const labels = [...container.querySelectorAll('[class*="glanceLabel"]')].map((el: Element) => el.textContent)
-    expect(labels).toEqual(['Mo', 'Wk', '5h'])
+    expect(labels).toEqual([t('glance.window.month.label'), t('glance.window.week.label'), t('glance.window.5h.label')])
     expect(container.querySelectorAll('[class*="glanceTick"]')).toHaveLength(3)
     // Both readout columns are figure-space padded to a constant text width
     // (keeps the percent↔pair↔stats gutters uniform across rows); the
@@ -407,7 +409,7 @@ describe('UsageGlance', () => {
     expect(screen.getByTitle(t('glance.window.month.title'))).toBeTruthy()
     expect(screen.getByTitle(t('glance.window.week.title'))).toBeTruthy()
     expect(screen.getByTitle(t('glance.window.5h.title'))).toBeTruthy()
-    // The stats column stacks the 今日/周期/mimo 余额 labeled rows over no stamp
+    // The stats column stacks the Today/Cycle/mimo API labeled rows over no stamp
     // line — the stamp rides the column tooltip with every reading; the shared
     // fixture reports no mimo balance, so its reading degrades to an em dash.
     expect(screen.getByText(formatCompactTokens(rows.length > 0 ? 200_000_000 : 0))).toBeTruthy()
@@ -529,11 +531,11 @@ describe('UsageGlance', () => {
     // lands, so waiting on the label alone would race the fetch. The row is
     // readings-only since the re-login CTA moved to the ⋯ menu (2026-10-30
     // 用户指示), so the parent stacks label + figure alone.
-    expect((await screen.findByText('¥6.16')).parentElement?.textContent)
-      .toBe(`${t('glance.mimoBalance.label')}¥6.16`)
+    expect((await screen.findByText('6.16R')).parentElement?.textContent)
+      .toBe(`${t('glance.mimoBalance.label')}6.16R`)
     // The column tooltip folds the mimo reading between the cycle row and the stamp.
     screen.getByTitle(
-      new RegExp(`^${t('glance.today')} · ${t('glance.cycle')} · ${t('glance.mimoBalance.label')} ¥6\\.16 · ${t('glance.refreshed')} \\d{2}\\.\\d{2}\\.\\d{2} \\d{2}:\\d{2}$`),
+      new RegExp(`^${t('glance.today')} · ${t('glance.cycle')} · ${t('glance.mimoBalance.label')} 6\\.16R · ${t('glance.refreshed')} \\d{2}\\.\\d{2}\\.\\d{2} \\d{2}:\\d{2}$`),
     )
   })
 
@@ -551,18 +553,18 @@ describe('UsageGlance', () => {
     }
     vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => overview })))
     const { container } = render(<UsageGlance t={t} />)
-    const value = await screen.findByText('¥36.87*')
+    const value = await screen.findByText('36.87R*')
     expect(value.className).toContain('glanceStatValueStale')
     // The row is readings-only (the CTA moved to the ⋯ menu, 2026-10-30).
     expect(value.parentElement?.textContent)
-      .toBe(`${t('glance.mimoBalance.label')}¥36.87*`)
+      .toBe(`${t('glance.mimoBalance.label')}36.87R*`)
     // The tooltip swaps in the stale marker and the fact's own probe stamp.
     const probeStamp = formatRefreshStamp(updatedAt)
     screen.getByTitle(
-      new RegExp(`^${t('glance.today')} · ${t('glance.cycle')} · ${t('glance.mimoBalance.label')} ¥36\\.87\\* ${t('glance.mimoBalance.stale')} ${probeStamp.replace(/[.:]/g, '\\$&')} · ${t('glance.refreshed')} \\d{2}\\.\\d{2}\\.\\d{2} \\d{2}:\\d{2}$`),
+      new RegExp(`^${t('glance.today')} · ${t('glance.cycle')} · ${t('glance.mimoBalance.label')} 36\\.87R\\* ${t('glance.mimoBalance.stale')} ${probeStamp.replace(/[.:]/g, '\\$&')} · ${t('glance.refreshed')} \\d{2}\\.\\d{2}\\.\\d{2} \\d{2}:\\d{2}$`),
     )
     // The on-screen figure stays the only asterisked reading.
-    expect(container.textContent).toContain('¥36.87*')
+    expect(container.textContent).toContain('36.87R*')
   })
 
   it('renders nothing while the host half serves no routes', async () => {
@@ -577,7 +579,7 @@ describe('UsageGlance', () => {
     const { container } = render(<UsageGlance t={t} />)
     await flush()
     // No window has been seen, so no rows render — only the column dashes
-    // (今日 / 周期 / mimo 余额, one per stat row).
+    // (Today / Cycle / mimo API, one per stat row).
     expect(container.querySelectorAll('[class*="glanceRow"]:not([class*="glanceRows"])')).toHaveLength(0)
     expect(screen.getAllByText('—')).toHaveLength(3)
   })

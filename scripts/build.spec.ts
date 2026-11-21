@@ -89,20 +89,22 @@ describe('repository build steps', () => {
     expect(graph(buildGates(root, 'artifacts'))).toEqual(artifactGraph)
   })
 
-  it('checks both aggregate programs without artifact predecessors', () => {
+  it('checks both aggregate programs without artifact predecessors, serialized', () => {
     const gates = buildGates(root, 'check')
-    expect(graph(gates)).toEqual({ 'host-check': [], 'client-check': [] })
+    // 双 -p tsc 同闸并发曾打穿 16GB 机器（2026-11-16 complete scope 复发）→ 两聚合串行。
+    expect(graph(gates)).toEqual({ 'host-check': [], 'client-check': ['host-check'] })
     expect(gates.map(gate => gate.args.slice(-2))).toEqual([
       ['-p', 'tsconfig.host.json'],
       ['-p', 'tsconfig.client.json'],
     ])
   })
 
-  it('starts each aggregate check after its own package compilation in the complete build', () => {
+  it('starts each aggregate check after its own package compilation, and Client after Host, in the complete build', () => {
     expect(graph(buildGates(root, 'complete'))).toEqual({
       ...artifactGraph,
       'host-check': ['host-src'],
-      'client-check': ['client-src'],
+      // 同 2026-11-16：complete scope 的双 -p tsc 也须串行。
+      'client-check': ['client-src', 'host-check'],
     })
   })
 
@@ -113,7 +115,7 @@ describe('repository build steps', () => {
       'host-src': ['host-typert'],
       'client-src': ['host-src'],
       'host-check': ['host-src'],
-      // 双 -b tsc（各 8 GiB 堆）同闸并发曾打穿 16GB 机器（2026-11-13）→ 两聚合串行。
+      // 双 -b tsc 同闸并发曾打穿 16GB 机器（2026-11-13 typecheck scope）→ 两聚合串行；2026-11-16 扩至全 scope。
       'client-check': ['client-src', 'host-check'],
     })
     expect(gates.find(gate => gate.id === 'host-typert')?.args.at(-1)).toBe(resolve(root, 'scripts/generate-typert.ts'))

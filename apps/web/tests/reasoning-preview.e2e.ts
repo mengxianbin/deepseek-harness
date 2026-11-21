@@ -59,7 +59,7 @@ it('shows completed paragraph first lines across blank lines with a right-edge f
       const input = page.locator('[data-composer-input]').first()
       const settled = scaffold.whenTurnSettled()
       await writeComposerDraft(page, input, 'Show a streamed reasoning preview.')
-      await input.press('Enter')
+      await input.press('Shift+Enter')
 
       const [first, second, third] = adapter.stages
       if (first === undefined || second === undefined || third === undefined) throw new Error('preview stages are incomplete')

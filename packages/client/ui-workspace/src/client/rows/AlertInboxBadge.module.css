@@ -1,0 +1,142 @@
+/* 设计档 §七 盾旁信封徽标 (alert-inbox-signal-face-1116): the envelope seat
+   beside the 安康盾 — same row, same 同构 rule (state rides a data attribute,
+   color changes ONLY when abnormal), a separate dimension (the shield audits
+   mechanism health; the envelope counts pending alert entries). Signal-only:
+   no pointer, no popover — 行动面 belongs to the 追查会话, not this seat.
+   无件白 = the quiet white envelope (attached, nothing pending); 有件红 + 数量
+   = unread > 0 burns the error token with the count beside it (机检: the count
+   is the fold's `unread`, the same number duty reads). */
+.badge {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* 同排同构 seat box (2026-11-17 用户回报「控件 间距不匀称」): every header
+     control is a 28×28 box with its glyph centered inside, so adjacent glyph
+     edges land at 6+4+6 = 16px under the row's shared 4px gap. A bare 15px
+     svg measured 4px edge-to-edge but only ~10px glyph-to-glyph — the envelope
+     rode 6px tighter than its neighbours. min-width (not width) keeps a
+     multi-digit count able to grow the seat instead of overflowing it. */
+  min-width: 28px;
+  height: 28px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.glyph {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  /* 改判 A: the seat is a BUTTON now (点开信箱 = 左右 tab 面板) — reset the native
+     chrome so the 28×28 seat box metrics above stay byte-identical. */
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* 无件白: present enough to trust, quiet enough to ignore — 没显 = 不用管. */
+.badge.quiet {
+  opacity: 0.55;
+}
+
+/* 有件红: unread > 0 — steady red, never a blink (狼来了经济学: one fact,
+   one alarm surface). Escalated entries stay on the same red; their wording
+   escalates in the tooltip (不消失反升红). */
+.badge.pending {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.envelope {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.count {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 左右 tab 面板 (改判 E, 2026-11-21 取代 A 的双栏)：未读 ∪ 最近24h，均 lastAt
+   逆序；消失只有已读/恢复两条路；单栏渲染当前 tab → 行拿全宽，时间戳不截断 ── */
+
+/* 对话框宽度（改判 E 收窄）：双栏时代的 min(768px) 系双栏几何（768 − 48 = 720
+   恰合 .columns min-width），随双栏退役（§十一 历史注记）。单栏行只需放下
+   加粗类名 + 次数·完整时间戳 + 动作按钮，560px 足够且保视口适配。 */
+.panel {
+  width: min(560px, calc(100vw - 48px));
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--dsw-alias-border-subtle, rgba(128, 128, 128, 0.25));
+}
+
+.tab,
+.tabActive {
+  /* 同构 button 重置（照 .glyph 先例）：native chrome 不参与排版. */
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+
+.tabActive {
+  color: var(--dsw-alias-label-primary, inherit);
+  border-bottom-color: currentColor;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--dsw-alias-border-subtle, rgba(128, 128, 128, 0.25));
+  border-radius: 6px;
+}
+
+.cause {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.meta {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}

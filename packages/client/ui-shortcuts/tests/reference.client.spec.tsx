@@ -7,7 +7,7 @@ import type { ShortcutCatalogEntry, ShortcutCommandId, ShortcutFixedCatalogEntry
 import { ShortcutReference, ShortcutsRow } from '../src/client/Reference.tsx'
 import { createShortcutsStore } from '../src/client/store.ts'
 import { en, zh } from '../src/client/locales.ts'
-import { initialShortcutConfig, bindingIssue, normalizeBinding, presentBinding } from '@deepseek-ai/dsh-client-shortcuts/protocol'
+import { aliasKeypad, initialShortcutConfig, bindingIssue, normalizeBinding, presentBinding } from '@deepseek-ai/dsh-client-shortcuts/protocol'
 import type { ShortcutConfigSnapshot } from '@deepseek-ai/dsh-client-shortcuts/protocol'
 import { ShortcutRegistry } from '../../shortcuts/src/client/registry.ts'
 import { apply as hostApply } from '../src/index.ts'
@@ -71,7 +71,7 @@ it.each(['macos', 'windows'] as const)('shows the reference, filters labels and 
     bindings: [{ code: 'Enter', modifiers: ['primary'] }], group: 'input' })
   const props = { actions: store.actions, useStore: bindSnapshotSelector(store), useCatalog: bindSnapshotSelector(catalog),
     useConfig: bindSnapshotSelector(config), useFixedCatalog: bindSnapshotSelector(registry.fixedCatalog), runtime: 'web', edit: async () => ({ status: 'saved', snapshot: config.getSnapshot() }), recording: async () => {},
-    describeBinding: describe, platform, t: makeTranslate(en) } as Parameters<typeof ShortcutReference>[0]
+    describeBinding: describe, aliasCode: aliasKeypad, platform, t: makeTranslate(en) } as Parameters<typeof ShortcutReference>[0]
   render(<><ShortcutsRow {...props} /><ShortcutReference {...props} /></>)
   expect(screen.queryByRole('dialog')).toBeNull()
   const opener = screen.getByRole('button', { name: en.view }); opener.focus(); fireEvent.click(opener)
@@ -128,7 +128,7 @@ it('saves individual edits and disables changes when configuration cannot be rea
   const edit = vi.fn(async () => ({ status: 'saved' as const, snapshot: config.getSnapshot() }))
   const props = { actions: store.actions, useStore: bindSnapshotSelector(store), useCatalog: bindSnapshotSelector(catalog),
     useConfig: bindSnapshotSelector(config), useFixedCatalog: bindSnapshotSelector(createSnapshotStore([])), runtime: 'web', platform: 'macos', edit, recording: async () => {},
-    describeBinding, t: makeTranslate(en) } as Parameters<typeof ShortcutReference>[0]
+    describeBinding, aliasCode: aliasKeypad, t: makeTranslate(en) } as Parameters<typeof ShortcutReference>[0]
   store.actions.open()
   render(<ShortcutReference {...props} />)
   expect(screen.getByRole('button', { name: en['reset-all'] }).hasAttribute('disabled')).toBe(true)
@@ -167,7 +167,8 @@ function referenceFixture({ runtime = 'web', dictionary = en }: { runtime?: 'web
   store.actions.open()
   const props = { actions: store.actions, useStore: bindSnapshotSelector(store), useCatalog: bindSnapshotSelector(catalog),
     useConfig: bindSnapshotSelector(config), useFixedCatalog: bindSnapshotSelector(fixedCatalog), runtime, platform: 'macos', edit,
-    recording: async () => {}, describeBinding, t: makeTranslate(dictionary) } as Parameters<typeof ShortcutReference>[0]
+    recording: async () => {}, describeBinding, aliasCode: aliasKeypad,
+    t: makeTranslate(dictionary) } as Parameters<typeof ShortcutReference>[0]
   const view = render(<ShortcutReference {...props} />)
   return { store, catalog, fixedCatalog, config, edit, view }
 }

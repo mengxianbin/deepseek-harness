@@ -1,12 +1,12 @@
 /** The CLI and manager share package reconciliation, path anchoring and diagnostics. */
 import { EventEmitter } from 'node:events'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { PassThrough } from 'node:stream'
 import { expect, it, onTestFinished, vi } from 'vitest'
 import { getDshRuntimeVersion, initProfile, readProfileManifest } from '@deepseek-ai/dsh-app-boot'
-import { anchorPathSpec, readProfileRegistry, runPluginCommand, runProfilePnpm, viewProfilePackage } from '../src/operations.ts'
+import { anchorPathSpec, readProfileRegistry, runPluginCommand, runProfilePnpm, saveManifest, viewProfilePackage } from '../src/operations.ts'
 
 /** The manifest fields an inspection prints. */
 const VIEW_FIELDS = ['name', 'version', 'description', 'dsh'] as const
@@ -1008,4 +1008,29 @@ it('uses application-owned executable arguments and environment for package oper
   expect(command.run).toHaveBeenLastCalledWith(runtime.command,
     [...runtime.args, 'view', 'example', 'name', 'version', 'description', 'dsh', '--json', '--config.fetch-retries=0'],
     expect.objectContaining({ env: expect.objectContaining(runtime.env) as unknown }))
+})
+
+it('saves the manifest through a junctioned package.json instead of replacing the link', async () => {
+  const { dir } = fixture()
+  const filename = join(dir, 'package.json')
+  const target = join(dir, 'manifest-target.json')
+  const manifest = readProfileManifest('dsh', dir)
+  writeFileSync(target, readFileSync(filename, 'utf8'))
+  rmSync(filename)
+  symlinkSync(target, filename, 'junction')
+  expect(lstatSync(filename).isSymbolicLink()).toBe(true)
+
+  await saveManifest(dir, { ...manifest, name: 'renamed-profile' })
+
+  expect(lstatSync(filename).isSymbolicLink()).toBe(true)
+  expect(JSON.parse(readFileSync(target, 'utf8'))).toMatchObject({ name: 'renamed-profile' })
+})
+
+it('saves a manifest through a real package.json unchanged', async () => {
+  const { dir } = fixture()
+  const filename = join(dir, 'package.json')
+  const manifest = readProfileManifest('dsh', dir)
+  await saveManifest(dir, { ...manifest, name: 'renamed-profile' })
+  expect(lstatSync(filename).isSymbolicLink()).toBe(false)
+  expect(JSON.parse(readFileSync(filename, 'utf8'))).toMatchObject({ name: 'renamed-profile' })
 })

@@ -53,6 +53,37 @@ const { autoRouteHolder } = vi.hoisted(
 )
 vi.mock('../src/auto-route.ts', () => ({ readAutoRoutePoll: () => autoRouteHolder.autoRoute }))
 
+// 拍板⑭⑮: the revive mechanism-health document rides the SAME fold — mocked
+// like duty's and auto-route's (machine-independent while still proving the
+// CALL SITE: a sweep that stopped reading it would drop the key). Setting
+// `holder.reviveHealth = undefined` = plugin absent → the key must vanish
+// from the frame entirely; the reader's own presence/parse (change-only, no
+// mtime) behavior lives in revive-health.spec.ts.
+const { reviveHolder } = vi.hoisted(
+  (): { reviveHolder: { reviveHealth: Record<string, unknown> | undefined } } => ({
+    reviveHolder: {
+      reviveHealth: { ok: true, mode: 'live', status: 'ok', breakerTrips: 0, halted: false, failed: [], at: 1 },
+    },
+  }),
+)
+vi.mock('../src/revive-health.ts', () => ({ readReviveHealth: () => reviveHolder.reviveHealth }))
+
+// 告警信箱 (设计档 §七, alert-inbox-signal-face-1116): the SAME tick folds the
+// revive state export into the inbox document and publishes the counts — mocked
+// like the other optional planes (machine-independent while still proving the
+// CALL SITE: a sweep that stopped folding it would drop the key). Setting
+// `holder.alertInbox = undefined` = plane not attached → the key must vanish
+// from the frame entirely; the fold's own clustering/three-channel/write
+// behavior lives in alert-inbox.spec.ts.
+const { alertInboxHolder } = vi.hoisted(
+  (): { alertInboxHolder: { alertInbox: Record<string, unknown> | undefined } } => ({
+    alertInboxHolder: {
+      alertInbox: { at: 1, unread: 2, escalated: 1, total: 5 },
+    },
+  }),
+)
+vi.mock('../src/alert-inbox.ts', () => ({ syncAlertInbox: () => alertInboxHolder.alertInbox }))
+
 const defaults = {
   defaultModelSelection: () => ({ provider: 'fixture', model: 'fixture-model' }),
   cwd: '/tmp',
@@ -167,6 +198,10 @@ describe('sweep publishes api-session/health (step2 §4.3 同一数据源同一�
       duty: dutyFixture,
       // 2026-11-04: so does the auto-route poll verdict (同一 fold, 同一 frame).
       autoRoute: autoRouteHolder.autoRoute,
+      // 拍板⑭⑮: and so does the revive mechanism-health verdict.
+      reviveHealth: reviveHolder.reviveHealth,
+      // 告警信箱: and so does the alert-inbox unread count (badge 对账基准).
+      alertInbox: alertInboxHolder.alertInbox,
     })
 
     await vi.advanceTimersByTimeAsync(SESSION_STATUS_SWEEP_MS)
@@ -176,10 +211,16 @@ describe('sweep publishes api-session/health (step2 §4.3 同一数据源同一�
     // Optional plane detaches cleanly: plugin absent → the key is gone from
     // the frame entirely, the rest of the audit is untouched (never broken).
     autoRouteHolder.autoRoute = undefined
+    reviveHolder.reviveHealth = undefined
+    alertInboxHolder.alertInbox = undefined
     await vi.advanceTimersByTimeAsync(SESSION_STATUS_SWEEP_MS)
     expect(health).toHaveBeenCalledTimes(3)
     expect('autoRoute' in (health.mock.calls[2]?.[0] ?? {})).toBe(false)
+    expect('reviveHealth' in (health.mock.calls[2]?.[0] ?? {})).toBe(false)
+    expect('alertInbox' in (health.mock.calls[2]?.[0] ?? {})).toBe(false)
     expect(health.mock.calls[2]?.[0]).toMatchObject({ ok: true, duty: dutyFixture })
     autoRouteHolder.autoRoute = { ok: false, failingSince: 1, failingForSec: 300, sustained: true, error: 'boom', ageSec: 5 }
+    reviveHolder.reviveHealth = { ok: true, mode: 'live', status: 'ok', breakerTrips: 0, halted: false, failed: [], at: 1 }
+    alertInboxHolder.alertInbox = { at: 1, unread: 2, escalated: 1, total: 5 }
   })
 })

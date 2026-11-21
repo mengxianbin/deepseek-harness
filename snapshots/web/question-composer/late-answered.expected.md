@@ -43,7 +43,6 @@
   - time: {{clock}}
 - region "Which color do you prefer?":
   - text: Pick one Answered
-  - button "Collapse the question card" [expanded]
   - button "Close the panel — reopen it from the tool call"
   - heading "Which color do you prefer?" [level=2]
   - group:

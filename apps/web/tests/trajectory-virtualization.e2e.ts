@@ -336,7 +336,7 @@ describe('web e2e: Trajectory virtualization over tail-paged history', () => {
       const settled = scaffold.whenTurnSettled()
       const input = page.locator('[data-composer-input]').first()
       await input.fill('Stream one deterministic response while Trajectory remains visible.')
-      await input.press('Enter')
+      await input.press('Shift+Enter')
       await settled
       await page.getByText('stream fragment 01', { exact: false }).waitFor({ timeout: 30_000 })
       await nextPaint(page)

@@ -240,10 +240,23 @@ type DispatchFetchResponse = { status?: number; body?: unknown; reject?: Error }
  * (default: success creating the Session `fresh`).
  * @returns the fetch mock (its calls cover the routes).
  */
-function stubSealGate(answers: { check?: unknown; overrideStatus?: number; dispatch?: DispatchFetchResponse } = {}) {
+function stubSealGate(
+  answers: { check?: unknown; checks?: readonly unknown[]; overrideStatus?: number; dispatch?: DispatchFetchResponse } = {},
+) {
+  // `checks` (archive-seal-falsered-1116 段3): per-call seal-check answers in
+  // order — the last entry repeats once the queue runs out; `check` stays the
+  // single-answer shorthand every pre-existing test uses.
+  let checkIndex = 0
+  const nextCheck = (): unknown => {
+    const queue = answers.checks
+    if (queue === undefined || queue.length === 0) return answers.check
+    const pick = queue[Math.min(checkIndex, queue.length - 1)]
+    checkIndex += 1
+    return pick
+  }
   const fetchMock = vi.fn(async (input: unknown, init?: unknown): Promise<SealFetchResponse> => {
     if (input === '/api/dsh-session-archive/seal-check') {
-      const check = answers.check
+      const check = nextCheck()
       if (check instanceof Error) throw check
       const payload: unknown = check ?? { results: [] as readonly SealCheckRow[] }
       return { ok: true, status: 200, json: async () => payload }
@@ -404,6 +417,8 @@ describe('ui-workspace apply', () => {
       'defaultWorkspaceFailed', 'shortcutForkFailed', 'createFailed', 'forkRequiresOpen', 'archived', 'stoppedAndArchived',
       // FORK archive-seal-gate-ui-1028: the stale tier's one-line prompt.
       'sealStale',
+      // archive-seal-falsered-1116 段3 灯门对账: the lamp-green × recheck-red retry prompt.
+      'sealEndorseRetry',
       // FORK session-relay-1106: the dispatch failure and the archive-half failure.
       'relayFailed', 'relayArchiveFailed',
     ])
@@ -672,10 +687,22 @@ describe('ui-workspace apply', () => {
   // seal confirmation whose hop writes force with the typed reason.
   describe('archive seal gate (FORK archive-seal-gate-ui-1028)', () => {
     /** The assembled surfaces one gate test drives. */
-    async function gateBench(sessionIds: readonly string[] = ['one']) {
+    async function gateBench(
+      sessionIds: readonly string[] = ['one'],
+      options: { readonly hostSeal?: { readonly verdict: string; readonly detail?: string } } = {},
+    ) {
       const b = await bench()
       b.setSessions(sessionState(sessionIds.map((id, index) => summary(id, index + 1))))
       declare(b.slots, 'sidebar.workspaces', 'shell.overlay')
+      if (options.hostSeal !== undefined) {
+        // archive-seal-falsered-1116 段3: the Host status leg of the row lamp
+        // (mergeHostSeals' Host-wins input). A composition without ui-session
+        // simply lacks it — provided here before apply, as production has it.
+        const statuses = new Map([[sid(sessionIds[0] ?? 'one'), { seal: options.hostSeal }]])
+        b.ctx.provide('uiSession', {
+          sessionStatus: { getSnapshot: () => statuses, subscribe: () => () => {} },
+        } as never)
+      }
       await b.ctx.plugin({ inject: [...inject], apply }).await()
       const archiveSession = vi.spyOn(b.ctx.uiWorkspace, 'archiveSession')
       return {
@@ -864,6 +891,116 @@ describe('ui-workspace apply', () => {
           seal: { verdict: 'UNSEALED', detail: 'sentinel-stale', followUpCount: 2 },
         })
       })
+    })
+
+    // archive-seal-falsered-1116 段3 灯门对账: lamp green × click-time recheck
+    // red on `no-endorsement` (the 2026-11-16 incident's split) raises the
+    // one-line retry notice instead of dropping into the force dialog; the
+    // retry re-runs the gate, and a still-red answer then opens the dialog —
+    // the escape hatch to a forced archive never seals shut.
+    it('lamp green × gate red no-endorsement raises the retry prompt, not the force dialog', async () => {
+      // Given the row lamp's Host leg reads DONE while the recheck answers no-endorsement
+      const { archiveSession, archive, confirm, toast } = await gateBench(['one'], {
+        hostSeal: { verdict: 'DONE', detail: 'sentinel-ok' },
+      })
+      const fetchMock = stubSealGate({
+        checks: [{ results: [{ id: 'one', verdict: 'UNSEALED', detail: 'no-endorsement' }] }],
+      })
+
+      // When the operator clicks archive
+      archive.archiveSession(sid('one'))
+
+      // Then the one-line retry notice appears — no force dialog, no Host call
+      await vi.waitFor(() => {
+        expect(toast.hooks.toast.getSnapshot()).toMatchObject({ kind: 'sealEndorseRetry', sessionId: 'one' })
+      })
+      expect(confirm.hooks.archiveRequest.getSnapshot()).toBeNull()
+      expect(archiveSession).not.toHaveBeenCalled()
+      // And the ask carried the click-time recheck (点击门重探)
+      expect(JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit).body as string)).toEqual({ ids: ['one'], recheck: true })
+    })
+
+    it('the retry re-runs the gate; a green recheck archives quietly', async () => {
+      // Given the split, then a healed recheck (the false red's cure)
+      const { b, archiveSession, archive, confirm, toast } = await gateBench(['one'], {
+        hostSeal: { verdict: 'DONE', detail: 'sentinel-ok' },
+      })
+      stubSealGate({
+        checks: [
+          { results: [{ id: 'one', verdict: 'UNSEALED', detail: 'no-endorsement' }] },
+          { results: [{ id: 'one', verdict: 'DONE' }] },
+        ],
+      })
+
+      archive.archiveSession(sid('one'))
+      await vi.waitFor(() => {
+        expect(toast.hooks.toast.getSnapshot()).toMatchObject({ kind: 'sealEndorseRetry', sessionId: 'one' })
+      })
+      expect(archiveSession).not.toHaveBeenCalled()
+
+      // When the operator takes the notice's retry action
+      const notice = toast.hooks.toast.getSnapshot()
+      if (notice === null || notice.kind !== 'sealEndorseRetry') throw new Error('expected the endorsement-retry notice')
+      const retryEntry = b.slots.entries('workspace.toast').find(row => row.options.key === 'sealEndorseRetry')!
+      const display = faceOf(retryEntry) as ToastDisplayInjected<'sealEndorseRetry'>
+      const dismiss = vi.fn()
+      display.display(notice, b.locale.bind('workspace'), dismiss).actions![0]!.onClick()
+      expect(dismiss).toHaveBeenCalledOnce()
+
+      // Then the fresh check answers green and the archive runs quietly — no dialog
+      await vi.waitFor(() => {
+        expect(toast.hooks.toast.getSnapshot()).toMatchObject({ kind: 'archived', sessionId: 'one' })
+      })
+      expect(archiveSession).toHaveBeenCalledExactlyOnceWith('one')
+      expect(confirm.hooks.archiveRequest.getSnapshot()).toBeNull()
+    })
+
+    it('a still-red retry reaches the force dialog — the escape hatch stays open', async () => {
+      // Given a split that does not heal on the retry (both checks answer red)
+      const { b, archiveSession, archive, confirm, toast } = await gateBench(['one'], {
+        hostSeal: { verdict: 'DONE', detail: 'sentinel-ok' },
+      })
+      stubSealGate({
+        checks: [{ results: [{ id: 'one', verdict: 'UNSEALED', detail: 'no-endorsement' }] }],
+      })
+
+      archive.archiveSession(sid('one'))
+      await vi.waitFor(() => {
+        expect(toast.hooks.toast.getSnapshot()).toMatchObject({ kind: 'sealEndorseRetry', sessionId: 'one' })
+      })
+      const notice = toast.hooks.toast.getSnapshot()
+      if (notice === null || notice.kind !== 'sealEndorseRetry') throw new Error('expected the endorsement-retry notice')
+      const retryEntry = b.slots.entries('workspace.toast').find(row => row.options.key === 'sealEndorseRetry')!
+      const display = faceOf(retryEntry) as ToastDisplayInjected<'sealEndorseRetry'>
+      display.display(notice, b.locale.bind('workspace'), vi.fn()).actions![0]!.onClick()
+
+      // Then the second split (retried) opens the unsealed confirmation as before
+      await vi.waitFor(() => {
+        expect(confirm.hooks.archiveRequest.getSnapshot()).toMatchObject({
+          sessionId: 'one', activity: [],
+          seal: { verdict: 'UNSEALED', detail: 'no-endorsement' },
+        })
+      })
+      expect(archiveSession).not.toHaveBeenCalled()
+    })
+
+    it('a red no-endorsement WITHOUT a green lamp still opens the confirmation directly', async () => {
+      // Given no Host seal leg and no pull value (the lamp is not green)
+      const { archiveSession, archive, confirm, toast } = await gateBench(['one'])
+      stubSealGate({ check: { results: [{ id: 'one', verdict: 'UNSEALED', detail: 'no-endorsement' }] } })
+
+      // When the operator clicks archive
+      archive.archiveSession(sid('one'))
+
+      // Then the original behavior stands: straight to the confirmation, no prompt
+      await vi.waitFor(() => {
+        expect(confirm.hooks.archiveRequest.getSnapshot()).toMatchObject({
+          sessionId: 'one', activity: [],
+          seal: { verdict: 'UNSEALED', detail: 'no-endorsement' },
+        })
+      })
+      expect(toast.hooks.toast.getSnapshot()).toBeNull()
+      expect(archiveSession).not.toHaveBeenCalled()
     })
   })
 

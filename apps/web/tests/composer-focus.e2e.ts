@@ -244,7 +244,7 @@ it('keeps mobile submission keyboard navigation in the composer while retaining 
           const input = page.locator('[data-composer-input][contenteditable="true"]')
           await input.fill('Reply with a one-sentence description of event sourcing, then stop.')
           expect(await input.evaluate(element => document.activeElement === element)).toBe(true)
-          if (submission === 'Enter') await page.keyboard.press('Enter')
+          if (submission === 'Enter') await page.keyboard.press('Shift+Enter')
           else {
             const send = page.getByRole('button', { name: 'Send message', exact: true })
             if (mobile) await send.tap()

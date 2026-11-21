@@ -46,7 +46,7 @@ it('saves language and provider preferences without remounting and restores them
     await speech.configure({ providerId: 'another-provider' as SpeechProviderId })
     expect(speech.snapshot().selection).toEqual({ providerId: 'another-provider', language: 'zh' })
     expect(entry.fiber === fiber).toBe(true)
-    const saved = readFileSync(profile.patchPath, 'utf8')
+    const saved = readFileSync(join(dir, 'cordis.local.patch.yml'), 'utf8')
     expect(saved).toContain('id: speech-to-text')
     expect(saved).toContain('defaultProvider: another-provider')
     expect(saved).toContain('language: zh')

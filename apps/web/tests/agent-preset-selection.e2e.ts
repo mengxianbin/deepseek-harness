@@ -2,10 +2,10 @@
 // own shipped presets; this is the lane that puts them in front of a browser.
 //
 // Two surfaces, one host rule: a session's composition is fixed when the
-// session starts. Before that, the new-session chip stages the choice beside
-// the workspace picker — the only screen where it still works. After it, the
-// session header names what the session runs and offers no control at all,
-// because the host answers `agent-preset-locked` to anything else.
+// session starts. Before that, the new-session chip stages the choice at the
+// right edge of the New Session row — the only screen where it still works.
+// After it, no surface offers a switch, because the host answers
+// `agent-preset-locked` to anything else.
 //
 // Zero model calls: no replay fixture mounts, so a stray stream fails loud.
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -417,7 +417,7 @@ describe('web e2e: agent-preset selection', () => {
     await page.getByRole('button', { name: 'Standard mode' }).waitFor({ timeout: 10_000 })
   })
 
-  it('labels a resumed session with the preset it was created under', async () => {
+  it('carries no preset name or control in the header of a resumed session', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-agent-preset-header'))
     // The seeded session's cwd is the scaffold root rather than the connected
     // workspace, so it lists under Ungrouped; the group collapses by default.
@@ -428,13 +428,11 @@ describe('web e2e: agent-preset selection', () => {
     const snapshot = await captureStableAria(page, '[class*="titleRow"]', scaffold.workspaceCwd)
 
     await compareOrRefreshGolden(HEADER_EXPECTED, snapshot, MODE)
-    expect(snapshot).toContain('Minimal mode')
+    // The host answers `agent-preset-locked` after the session starts, so the
+    // header seats neither the preset's name nor a control for it.
+    expect(snapshot).not.toContain('Minimal mode')
     expect(snapshot).toContain('button "1 subagent"')
-    expect(snapshot.indexOf('Minimal mode')).toBeLessThan(snapshot.indexOf('button "1 subagent"'))
     expect(snapshot.indexOf('button "1 subagent"')).toBeLessThan(snapshot.indexOf('button "More actions"'))
-    // Static chrome, not a control: the header can only report a composition
-    // the host would refuse to change.
-    expect(snapshot).not.toContain('button "Minimal mode"')
   })
 
   it('drove every surface without a page error or a stream warning', () => {

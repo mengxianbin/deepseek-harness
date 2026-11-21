@@ -126,7 +126,7 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
             />
             <span
               class="glanceStats"
-              title="Tokens today · Tokens this plan cycle · Balance —"
+              title="Tokens today · Tokens this plan cycle · API —"
             >
               <span
                 class="glanceStat"
@@ -162,7 +162,7 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
                 <span
                   class="glanceStatLabel"
                 >
-                  Balance
+                  API
                 </span>
                 <span
                   class="glanceStatValue"
@@ -389,7 +389,7 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
             />
             <span
               class="glanceStats"
-              title="Tokens today · Tokens this plan cycle · Balance —"
+              title="Tokens today · Tokens this plan cycle · API —"
             >
               <span
                 class="glanceStat"
@@ -425,7 +425,7 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
                 <span
                   class="glanceStatLabel"
                 >
-                  Balance
+                  API
                 </span>
                 <span
                   class="glanceStatValue"
@@ -525,9 +525,9 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
         class="usageGlance"
       >
         <button
-          aria-label="打开使用统计"
+          aria-label="Open usage statistics"
           class="glanceButton"
-          title="打开使用统计"
+          title="Open usage statistics"
           type="button"
         >
           <span
@@ -538,7 +538,7 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
             />
             <span
               class="glanceStats"
-              title="今日 token 用量 · 套餐周期 token 用量 · 余额 —"
+              title="Tokens today · Tokens this plan cycle · API —"
             >
               <span
                 class="glanceStat"
@@ -546,7 +546,7 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
                 <span
                   class="glanceStatLabel"
                 >
-                  今日
+                  Today
                 </span>
                 <span
                   class="glanceStatValue"
@@ -560,7 +560,7 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
                 <span
                   class="glanceStatLabel"
                 >
-                  周期
+                  Cycle
                 </span>
                 <span
                   class="glanceStatValue"
@@ -574,7 +574,7 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
                 <span
                   class="glanceStatLabel"
                 >
-                  余额
+                  API
                 </span>
                 <span
                   class="glanceStatValue"

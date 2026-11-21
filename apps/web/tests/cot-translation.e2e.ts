@@ -176,7 +176,7 @@ it.skipIf(MODE === 'record')('persists Bing reasoning translation across reopen 
   const settled = scaffold.whenTurnSettled()
   const composer = page.locator('[data-composer-input]').first()
   await composer.fill(prompt)
-  await composer.press('Enter')
+  await composer.press('Shift+Enter')
   const sessionId = await settled
   await page.getByText('LIGHTHOUSE', { exact: true }).waitFor()
   const reasoning = page.locator('[data-variant="think"]').first()

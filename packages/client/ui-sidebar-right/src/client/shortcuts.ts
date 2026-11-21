@@ -31,7 +31,8 @@ export function registerSidebarShortcuts(shortcuts: Pick<Shortcuts, 'register' |
       'desktop:windows': { code: 'KeyB', modifiers: ['primary', 'alt'] },
       'desktop:linux': { code: 'KeyB', modifiers: ['primary', 'alt'] },
       'web:macos': { code: 'KeyB', modifiers: ['primary', 'shift'] },
-      'web:windows': { code: 'KeyB', modifiers: ['primary', 'shift'] },
+      // Local preference: keypad-style left/right pair (left=4, right=6); also frees Chrome's Ctrl+Shift+B.
+      'web:windows': { code: 'Digit6', modifiers: ['primary', 'alt'] },
     },
     regions: ['page', 'editable', 'terminal'], modals: [],
     resolve: () => {

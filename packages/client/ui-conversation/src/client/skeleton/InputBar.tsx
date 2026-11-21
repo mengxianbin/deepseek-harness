@@ -391,7 +391,8 @@ export const InputBar = memo(function InputBar({
 
   // An ordinary running session keeps Stop while the composer is empty or
   // owner-blocked; an actionable draft gets the busy Send action, delivered
-  // through the same mode plain Enter resolves to. The label names that mode
+  // through the same mode the Shift+Enter send gesture resolves to. The label
+  // names that mode
   // only when the click would deliver a plain message right now — an enabled
   // button (no pending upload) over a non-empty draft that is neither a
   // claimed command nor a `/` line headed for adjudication — so it never
@@ -634,6 +635,11 @@ export const InputBar = memo(function InputBar({
           ? renderSlot('conversation.composer.dock', {})
           : null}
         {activity ? null : <ContextMeter useProjection={useProjection} t={t} />}
+        {/* Trailing seat: same guard as the dock itself, so a trailing
+            indicator renders exactly while the row it trails does. */}
+        {variant === 'composer' && input !== undefined && sessionId !== undefined
+          ? renderSlot('conversation.composer.dock.trailing', {})
+          : null}
       </div>
     </div>
   )

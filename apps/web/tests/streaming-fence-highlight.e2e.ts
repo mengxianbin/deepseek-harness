@@ -135,7 +135,7 @@ describe.skipIf(MODE === 'record')('web e2e: streaming code-fence highlighting',
     const input = page.locator('[data-composer-input]').first()
     const settled = scaffold.whenTurnSettled(30_000)
     await writeComposerDraft(page, input, PROMPT)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     await adapter.firstPaused
 
     const streaming = page.locator('[data-streaming="true"]')

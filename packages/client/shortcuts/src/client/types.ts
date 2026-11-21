@@ -111,6 +111,12 @@ export interface Shortcuts {
     conflicts: readonly ShortcutCommandId[]
   }
   /**
+   * Map a keypad digit onto its main-row twin so every ingestion seam shares one code family.
+   * @param code - raw physical code reported by an input event.
+   * @returns `Digit0`–`Digit9` for `Numpad0`–`Numpad9`, otherwise the input unchanged.
+   */
+  aliasCode(code: string): string
+  /**
    * Save a reviewed edit; failures preserve both accepted preferences and the caller's draft.
    * @param edit - set, clear, reset, or reset-all operation.
    * @param revision - accepted revision reviewed by the user.

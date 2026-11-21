@@ -55,7 +55,12 @@ export function PlanReviewPanel({ pending, review, t, renderSlot }: PlanReviewPa
   }, [review.plan])
 
   return (
-    <div className={css.frame} data-plan-review-key={pending.key}>
+    // FORK dsh-local (ask-keys-focus, 2026-11-17 裁定 B/C): the frame takes
+    // click-focus so focus.composer can land the keyboard on the card first
+    // (the same tabIndex -1 pattern the question card frame uses), and the
+    // discussion button carries the first-focus hook — landing on 讨论/要求
+    // changes is the safe default, never a one-Enter approval.
+    <div className={css.frame} data-plan-review-key={pending.key} tabIndex={-1}>
       <section className={css.card} aria-label={review.question} aria-busy={busy}>
         <div className={css.strip}>
           <StateDot state={busy ? 'ongoing' : 'warning'} />
@@ -73,6 +78,7 @@ export function PlanReviewPanel({ pending, review, t, renderSlot }: PlanReviewPa
           <div className={css.actions}>
             <Button
               variant="outline" className={css.discuss} icon={<IconEditOutlineRegular size={14} />}
+              data-plan-review-first=""
               disabled={busy} onClick={() => { settle(() => pending.dismiss()) }}
             >
               {t('plan.discuss')}

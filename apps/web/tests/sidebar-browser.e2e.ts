@@ -62,7 +62,7 @@ describe.skipIf(MODE === 'record')('web e2e: Sidebar Browser', () => {
     const settled = scaffold.whenTurnSettled()
     const composer = page.locator('[data-composer-input]').first()
     await composer.fill(PROMPT)
-    await composer.press('Enter')
+    await composer.press('Shift+Enter')
     await settled
     await page.getByText('LIGHTHOUSE', { exact: true }).waitFor({ timeout: 15_000 })
     const column = page.locator('[data-rightbar-col]')

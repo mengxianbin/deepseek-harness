@@ -96,7 +96,7 @@ fs.appendFileSync(${JSON.stringify(openLog)}, JSON.stringify({ path, action, con
     const settled = scaffold.whenTurnSettled()
     const input = page.locator('[data-composer-input]').first()
     await input.fill(PROMPT)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     sessionId = await settled
     const workspace = scaffold.ctx.agents.get(sessionId)?.session.header.cwd
     if (workspace === undefined) throw new Error('present Session has no workspace')

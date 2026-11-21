@@ -63,7 +63,7 @@ describe.skipIf(MODE === 'record')('web e2e: DeepSeek Messages conversation', ()
     const input = page.locator('[data-composer-input]').first()
     const settled = scaffold.whenTurnSettled()
     await input.fill(prompts[0]!)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     const sessionId = await settled
     const session = scaffold.ctx.sessions.get(sessionId)!
     expect(session.requestHeader()?.config.provider).toBe('deepseek-messages')

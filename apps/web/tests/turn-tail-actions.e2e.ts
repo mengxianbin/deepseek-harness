@@ -134,7 +134,7 @@ describe('web e2e: assistant IconActions wait for the turn to end', () => {
     await input.waitFor({ timeout: 10_000 })
     const settled = scaffold!.whenTurnSettled(timeoutMs)
     await input.fill(PROMPT)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     return { settled }
   }
 

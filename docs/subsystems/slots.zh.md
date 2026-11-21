@@ -132,6 +132,7 @@ root [AppFrame]
       │     ├─ conversation.session.header.actions
       │     ├─ conversation.session.header.utilities
       │     ├─ conversation.session.header.views.actions
+      │     ├─ conversation.session.header.views.trailing
       │     └─ conversation.session.header.corner
       └─ calls Factory: conversation.content
 
@@ -176,6 +177,7 @@ Factory: conversation.content [ConversationContent]
 │  │  └─ conversation.input.model.label
 │  ├─ conversation.input.overlay
 │  ├─ conversation.composer.dock
+│  ├─ conversation.composer.dock.trailing
 │  ├─ conversation.input.left
 │  └─ conversation.input.right
 ├─ conversation.input.dock

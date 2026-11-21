@@ -67,7 +67,7 @@ describe('web e2e: /feedback command acknowledgement', () => {
     // miss the turn/end that settles the recorded turn.
     const settled = scaffold.whenTurnSettled()
     await input.fill(PROMPT)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     const sessionId = await settled
     if (MODE === 'record') {
       await recordFixture(scaffold, sessionId, FIXTURE)
@@ -82,7 +82,7 @@ describe('web e2e: /feedback command acknowledgement', () => {
     await page.getByText('LIGHTHOUSE', { exact: true }).waitFor({ timeout: 15_000 })
     const input = page.locator('[data-composer-input]').first()
     await input.fill('/feedback the diff view is unreadable')
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     await page.getByText(/Feedback recorded for session/).waitFor({ timeout: 10_000 })
     expect(await page.getByText(/Anonymous user: [0-9a-f-]+\.$/i).count()).toBe(1)
     await expect.poll(() => input.textContent(), { timeout: 10_000 }).toBe('')

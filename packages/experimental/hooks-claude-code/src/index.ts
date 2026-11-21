@@ -34,6 +34,7 @@ import {
   mergeHookOutputs,
   runHook,
   selectHookGroups,
+  summarizeStderr,
   type HookOutput,
   type MergedHookOutcome,
 } from '@deepseek-ai/dsh-hook-protocol'
@@ -243,6 +244,7 @@ export function apply(ctx: Context, config: Config): void {
     // workspace (the same dir the hook runs in).
     const projectDir = config.projectDir ?? workdir
     const hookEnv = projectDir !== undefined ? { CLAUDE_PROJECT_DIR: projectDir } : undefined
+    const hookCwd = workdir ?? process.cwd()
     for (const group of groups) {
       for (const hook of group.hooks) {
         const handlerId = nextHandlerId(point)
@@ -253,11 +255,19 @@ export function apply(ctx: Context, config: Config): void {
             matcher: group.matcher,
           })
         }
-        const { output, durationMs } = await runHook(ctx.shell, hook, {
-          payload: { ...payload, cwd: workdir ?? process.cwd() },
+        const { output, durationMs, timedOut } = await runHook(ctx.shell, hook, {
+          payload: { ...payload, cwd: hookCwd },
           defaultTimeoutMs,
           ...hookEnv ? { env: hookEnv } : {},
           ...workdir !== undefined ? { cwd: workdir } : {},
+          // Hooks are trusted operator config (hooks.json), not model-authored
+          // commands: run them full-access like the reference implementations
+          // run hooks. The deployment default (workspace-write) confines the
+          // request, and a confined MSYS bash dies at DLL init — exit code
+          // 3221225794 — while `~/.dsh` state writes outside the workspace
+          // root are denied; both made every guard fail open silently
+          // (dsh-hook-bash-crash-1114).
+          sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: hookCwd },
           signal: opts.signal,
           trailingNewline: true,
           // Discard a `hookSpecificOutput` block whose `hookEventName` names a
@@ -265,6 +275,22 @@ export function apply(ctx: Context, config: Config): void {
           expectedEventName: point,
         }, () => performance.now())
         outputs.push(output)
+        // Phase 4: a hook that produced no usable verdict leaves the turn
+        // unguarded — say so on the host log instead of failing silently
+        // (fail-open stays fail-open; this only makes it loud). An aborted run
+        // is an intentional cancel, not a failure. Exit 0/1/2 are the
+        // protocol's designed outcomes (ok / non-blocking error / block).
+        if (!opts.signal.aborted && (timedOut || output.exitCode === undefined
+          || (output.exitCode !== 0 && output.exitCode !== 1 && output.exitCode !== 2))) {
+          const reason = timedOut ? 'timed out'
+            : output.exitCode === undefined ? 'produced no exit code'
+              : `exited ${output.exitCode}`
+          ctx.logger.warn(
+            `hooks-claude-code: ${point} hook returned no usable verdict (${reason}; fail-open): `
+            + `matcher=${group.matcher ?? 'all'} durationMs=${durationMs} `
+            + `stderr=${summarizeStderr(output.stderr, stderrSummaryMaxChars) ?? '(none)'}`,
+          )
+        }
         if (output.updatedInput !== undefined) {
           ctx.logger.warn(`hooks-claude-code: ${point} hook requested updatedInput, which is not yet honored (ignored)`)
         }

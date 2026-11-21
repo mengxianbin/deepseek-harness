@@ -149,19 +149,13 @@
 }
 
 /* Row-cell status glyphs, drawn where the dot would go and inheriting the
- * slot's tertiary tone: the background-job gear carries its live count as a
- * superscript; the wake-up sleep mark stays a quiet outline. */
+ * slot's tertiary tone: the wake-up sleep mark stays a quiet outline (the
+ * background-job gear retired into the gray ring's numeric badge, 五态定稿 §二). */
 .statusGlyph {
   display: inline-block;
   line-height: 1;
   white-space: nowrap;
   color: var(--dsw-alias-label-tertiary);
-}
-
-.statusGlyphCount {
-  font-size: 8px;
-  font-weight: 600;
-  margin-left: 1px;
 }
 
 .folderActive {
@@ -186,12 +180,15 @@
   transform: rotate(90deg);
 }
 
+/* Title and attention badge on one line: the badge follows the title and uses
+   its own margin as spacing; the title keeps its ellipsis by shrinking
+   (min-width: 0) while the badge holds its width (flex: none). */
 .projectText {
   flex: 1;
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-direction: row;
+  align-items: center;
 }
 
 .title {
@@ -461,24 +458,6 @@
   color: #CFD3D6;
 }
 
-/* 属性缺省弱提示 (collab step3 §6.3, q6-attr): the hover card names the
-   default placement while the attribute plane carries no supply — weak gray,
-   never a ring (属性缺 ≠ 会话态不可信). */
-.hoverAttributes {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  font-size: 12px;
-  line-height: 16px;
-  color: var(--dsw-alias-label-tertiary);
-}
-
-.hoverAttributesNote {
-  font-size: 11px;
-  color: var(--dsw-alias-label-tertiary);
-  opacity: 0.75;
-}
-
 .hoverStatus {
   display: flex;
   align-items: center;
@@ -576,30 +555,128 @@
   color: var(--dsw-alias-label-caption);
 }
 
-/* Shape-channel badge beside the status dot (collab step3 §3.1, q3-visual):
-   a superscript-weight glyph colored by the primary state, so the dot keeps
-   carrying base color while the badge carries the semantic variant. */
-.statusMark {
-  display: inline-block;
+/* 五态定稿 §二: the solid states render as a filled circle at the gray
+   ring's outer diameter with their glyph embedded — ✓ 成了 / ✕ 败了 /
+   ! 等你 — so the red/green pair reads by shape, never by colour alone,
+   and the retired top-right statusMark badge carries nothing extra.
+   done/error keep fills one step deeper than their 500-level tokens so a
+   white glyph clears 4.5:1 (5.0:1 / 5.4:1) while the circle clears ~3:1
+   against both the light and dark row background. warning is the yellow
+   awaiting dot (2026-11-19 改档, 判据源 = session-status-icon-redesign-
+   1118 §六: the old #B45309 deep amber read as red on the dark row): it
+   takes the shared warn-primary amber-500 — the same yellow as the
+   group-header count — with a deep-amber glyph, because white on amber-500
+   is only 2.15:1 while #272420 clears 7.19:1. Trade recorded there: the
+   circle's own edge against a light row background drops to 2.15:1
+   (<3:1); the glyph shape and the row's text label carry the meaning on
+   that theme. */
+.stateDot {
+  display: inline-flex;
   flex: none;
-  position: relative;
-  top: -4px;
-  margin-left: -3px;
-  font-size: 8px;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  /* Full-round corners state their arc back to the universal superellipse
+     (ui-theme corner-shape contract), like every other dot in these rows. */
+  corner-shape: round;
+  color: #FFFFFF;
+  font-size: 9px;
   font-weight: 700;
   line-height: 1;
 }
 
-.statusMark[data-state='done'] {
-  color: var(--dsw-alias-state-success-primary);
+.stateDot[data-state='done'] {
+  background: #1A7F4B;
 }
 
-.statusMark[data-state='error'] {
+.stateDot[data-state='error'] {
+  background: #C0392B;
+}
+
+.stateDot[data-state='warning'] {
+  background: var(--dsw-alias-state-warn-primary);
+  color: var(--dsw-static-amber-900);
+}
+
+/* The ongoing gray ring's wrapper: it holds the ring and lets the numeric
+   badge hang off its top-right corner without changing the 16px cell. */
+.stateDotBusy {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 五态定稿 §二 角标数字 = running subagents + live jobs on one badge
+   (the ◌ⁿ/⚙ⁿ sub-forms merged here; the count data source is unchanged).
+   Inverted pill (near-black on light / near-white on dark) so the number
+   stays legible in both themes; omitted at zero. */
+.busyBadge {
+  position: absolute;
+  top: -3px;
+  right: -4px;
+  min-width: 9px;
+  padding: 0 2px;
+  border-radius: 6px;
+  corner-shape: round;
+  background: var(--dsw-alias-label-primary);
+  color: var(--dsw-alias-label-primary-foreground);
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 10px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Group-header attention counts (queue-zone-1113): the removed global queue
+   segment's cross-workspace counts, now a badge beside the group title. Red
+   (failed stops awaiting a ruling) leads, yellow (rows awaiting the user's
+   reply) follows; both counts ride the solid state dot in their tier colour,
+   a notch under the title's own size but on the title's line — a full-size
+   pair outgrew a lowercase name — and the wider inset keeps the pair reading
+   as status instead of as part of the name; a plain space separates the two
+   counts. */
+.attentionBadges {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  margin-inline-start: 14px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+  vertical-align: middle;
+}
+
+.attentionCount {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.attentionCount[data-attention='failed'] {
   color: var(--dsw-alias-state-error-primary);
 }
 
-.statusMark[data-state='warning'] {
+.attentionCount[data-attention='pending'] {
   color: var(--dsw-alias-state-warn-primary);
+}
+
+.attentionDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  /* Full-round corners state their arc back to the universal superellipse
+     (ui-theme corner-shape contract), like every other dot in these rows. */
+  corner-shape: round;
+  background: currentColor;
+}
+
+.attentionSeparator {
+  color: var(--dsw-alias-label-tertiary);
 }
 
 /* 未知不吞已知 (collab step3 §5.1, q5-failclosed): the last-known state's dot

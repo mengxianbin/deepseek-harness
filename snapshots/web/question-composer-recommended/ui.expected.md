@@ -1,6 +1,5 @@
 - region "Which checks should run before merging?":
   - text: Checks
-  - button "Collapse the question card" [expanded]
   - button "Dismiss all questions"
   - heading "Which checks should run before merging?" [level=2]
   - group:

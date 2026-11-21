@@ -1,6 +1,5 @@
 - banner:
   - navigation "Session hierarchy": Use the ask_user_question tool to
-  - text: Standard mode
   - button "More actions"
   - button "Open right sidebar"
   - tablist:
@@ -16,7 +15,6 @@
 - button "Copy"
 - region "Ready to continue?":
   - text: Checkpoint
-  - button "Collapse the question card" [expanded]
   - button "Dismiss all questions"
   - heading "Ready to continue?" [level=2]
   - radiogroup:

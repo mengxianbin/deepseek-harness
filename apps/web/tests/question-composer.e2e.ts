@@ -388,7 +388,7 @@ describe('web e2e: resident question composer round trip', () => {
     await input.waitFor({ timeout: 10_000 })
     const settled = scaffold.whenTurnSettled(MODE === 'record' ? 180_000 : 30_000)
     await input.fill(PROMPT)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
 
     // The composer takes over the input area while the tool blocks. Its
     // presence is a STABLE waiting state (not a transient): it stays until
@@ -582,7 +582,7 @@ describe('web e2e: resident question composer round trip', () => {
       const snapshot = await captureStableAria(page, '[data-question-key]', scaffold.workspaceCwd)
       await compareOrRefreshGolden(COMPOSED_EXPECTED, snapshot, MODE)
     }
-    await custom.press('Enter')
+    await custom.press('Shift+Enter')
 
     const sessionId = await settled
     if (MODE === 'record') {
@@ -945,7 +945,7 @@ describe('web e2e: resident question composer round trip', () => {
       await composer.getByRole('checkbox', { name: 'Explicit install' }).click()
       const answer = composer.getByRole('textbox')
       await answer.fill('Keep the migration steps explicit.')
-      await answer.press('Enter')
+      await answer.press('Shift+Enter')
       await composer.getByRole('heading', { name: 'Who should own the rollout?' }).waitFor()
       expect(await answer.evaluate(node => document.activeElement === node)).toBe(true)
       await page.keyboard.type('Release owner')
@@ -1051,6 +1051,14 @@ describe('web e2e: resident question composer round trip', () => {
         }).toBe(true)
         return await read()
       }
+      // The attention fold (2026-11-17 裁定 A2) drops the card to its strip on
+      // any press outside its frame — the width-handle drag and the sidebar
+      // toggles below are exactly that gesture — so each one reopens the strip
+      // before the next measurement. Clicking the stem is the strip's own
+      // unfold path and no-ops while the card is already open.
+      const unfoldComposer = async (): Promise<void> => {
+        await heading.click()
+      }
       // The right transcript handle widens the content column by twice its
       // outward travel. The composer seat covers the handle's lower part, so
       // the gesture grabs it beside the transcript.
@@ -1066,6 +1074,7 @@ describe('web e2e: resident question composer round trip', () => {
         } finally {
           await page.mouse.up()
         }
+        await unfoldComposer()
       }
 
       // Expanded copy is the user's choice and survives every width change below.
@@ -1088,9 +1097,11 @@ describe('web e2e: resident question composer round trip', () => {
 
       // The right sidebar narrows the conversation column, and collapsing it restores the wide state.
       await page.getByRole('button', { name: 'Open right sidebar', exact: true }).click()
+      await unfoldComposer()
       const withSidebar = await settle()
       expect(withSidebar.card.width).toBeLessThan(wide.card.width)
       await page.getByRole('button', { name: 'Collapse right sidebar', exact: true }).click()
+      await unfoldComposer()
       expect(await settle()).toEqual(wide)
 
       // A smaller window clamps the dragged width; restoring the window restores it.

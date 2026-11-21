@@ -154,6 +154,19 @@ interface BootstrapGroup {
   readonly newestAt: number
 }
 
+/**
+ * One cwd's filesystem resolution, memoized for the duration of a single
+ * header-index pass (see `indexHeaders`): `directory` carries the canonical
+ * path, `not-directory` a path that exists but is no longer a directory, and
+ * `failed` the original `realpath`/`stat` error so each header sharing the
+ * cwd applies the same ENOENT / invalid-path classification it would have
+ * gotten from its own probe.
+ */
+type CwdResolution =
+  | { readonly kind: 'directory'; readonly path: string }
+  | { readonly kind: 'not-directory' }
+  | { readonly kind: 'failed'; readonly error: unknown }
+
 const sameIds = (left: readonly WorkspaceId[], right: readonly WorkspaceId[]): boolean =>
   left.length === right.length && left.every((id, index) => id === right[index])
 
@@ -346,6 +359,18 @@ export class WorkspaceRegistry extends Service {
   }
 
   /**
+   * The archive moment (epoch ms) of every currently archived session, keyed
+   * by the same native id spellings the archive set mixes (archive-at-host-
+   * time-1114). Written in the same durable write as the archive set, dropped
+   * in the same durable write as unarchiving, so the map always mirrors the
+   * set — the host is the time authority for every archive channel.
+   * @returns a snapshot of the id → archived-at map.
+   */
+  get archivedAtById(): Readonly<Record<string, number>> {
+    return { ...this.requireState().archivedAtById }
+  }
+
+  /**
    * The subagent-origin ids known to the startup/live header index: sessions
    * whose stored or live header carries `origin: 'subagent'`. Derived from
    * the in-memory index on each read (one pass over the index, no I/O), so
@@ -375,34 +400,128 @@ export class WorkspaceRegistry extends Service {
    * to stop the session's work: the durable archive set is what a provider's
    * `agent/pre-step` gate reads, so every wake the stops induce is already
    * blocked. Archiving drops the session's pin in the same durable write
-   * (pinning and archival are mutually exclusive). An already archived id
+   * (pinning and archival are mutually exclusive) and stamps the archive
+   * moment into `archivedAtById` in that same write, so a resolved archive
+   * always carries its time (archive-at-host-time-1114). An already archived id
    * resolves without writing, asking, or stopping.
+   *
+   * A parent archive cascades to its subagent descendants in the same
+   * operation (archive-cascade-reap-1114): the header index is refreshed so
+   * children created after boot stay visible, then every descendant reached
+   * through `origin === 'subagent'` parent links is archived through the same
+   * core write. Children are archived without `stopActivity` — running
+   * subagent work is refused and reported, never killed on the user's
+   * behalf — and a child that refuses or fails is logged loudly while the
+   * parent's completed archive stands; the idle reaper picks such a child up
+   * once it goes quiet. A repeat call on an already archived parent keeps
+   * its documented no-op and does not rescan (historical orphans are the
+   * reaper's job, not a replay's).
    * @param sessionId - The session to archive.
    * @param options - Whether running work is stopped instead of refusing.
    * @returns resolution after durability and, with `stopActivity`, after every stop request was issued.
    */
   archiveSession(sessionId: SessionId, options: ArchiveSessionOptions = {}): Promise<void> {
     return this.enqueueOperation(async () => {
-      // The chain slot serializes against every other registry write, so this
-      // check-then-write pair cannot interleave with another archive.
-      if (this.requireState().archivedSessionIds.includes(sessionId)) return
-      if (!(await this.sessionKnown(sessionId))) {
-        throw new WorkspaceUnknownSessionError(sessionId, 'archive')
-      }
-      if (options.stopActivity !== true) {
-        const activity = await this.ctx.waterfall(
-          'workspace/session-activity', { sessionId }, () => Promise.resolve([]),
-        )
-        if (activity.length > 0) throw new WorkspaceActiveSessionError(sessionId, activity)
-      }
-      const state = this.requireState()
-      await this.setState({
-        ...state,
-        archivedSessionIds: [...state.archivedSessionIds, sessionId],
-        pinnedSessionIds: state.pinnedSessionIds.filter(id => id !== sessionId),
-      })
-      if (options.stopActivity === true) await this.stopSessionActivity(sessionId)
+      const archived = this.requireState().archivedSessionIds.includes(sessionId)
+      await this.archiveOne(sessionId, options)
+      // Cascade only when this call actually archived the parent: an unknown
+      // or active parent throws inside archiveOne before any child is
+      // touched, and a repeat call must stay the documented no-op.
+      if (!archived) await this.cascadeSubagentDescendants(sessionId)
     })
+  }
+
+  /**
+   * The single-id archive write behind {@link archiveSession} and its
+   * cascade: existence and activity checks, then one durable state write.
+   * Runs only inside an already-queued operation and never enqueues itself
+   * (re-entering the serial chain from within would deadlock). An id already
+   * in the archive set resolves without writing.
+   * @param sessionId - The session to archive.
+   * @param options - Whether running work is stopped instead of refusing.
+   * @returns resolution after durability and, with `stopActivity`, after every stop request was issued.
+   */
+  private async archiveOne(sessionId: SessionId, options: ArchiveSessionOptions): Promise<void> {
+    // The chain slot serializes against every other registry write, so this
+    // check-then-write pair cannot interleave with another archive.
+    if (this.requireState().archivedSessionIds.includes(sessionId)) return
+    if (!(await this.sessionKnown(sessionId))) {
+      throw new WorkspaceUnknownSessionError(sessionId, 'archive')
+    }
+    if (options.stopActivity !== true) {
+      const activity = await this.ctx.waterfall(
+        'workspace/session-activity', { sessionId }, () => Promise.resolve([]),
+      )
+      if (activity.length > 0) throw new WorkspaceActiveSessionError(sessionId, activity)
+    }
+    const state = this.requireState()
+    await this.setState({
+      ...state,
+      archivedSessionIds: [...state.archivedSessionIds, sessionId],
+      archivedAtById: { ...state.archivedAtById, [sessionId]: Date.now() },
+      pinnedSessionIds: state.pinnedSessionIds.filter(id => id !== sessionId),
+    })
+    if (options.stopActivity === true) await this.stopSessionActivity(sessionId)
+  }
+
+  /**
+   * Archive every subagent descendant of a freshly archived session,
+   * breadth-first over `parentSession` links (archive-cascade-reap-1114).
+   * The header snapshot is re-pulled first only when it may be stale: a
+   * freshness probe that finds no session beyond the in-memory index reuses
+   * the snapshot, so the common archive stops paying a full persistence
+   * listing per archive (archive-cascade-list-1117) — while any doubt falls
+   * closed toward the re-pull, because a child created after boot must still
+   * be found: a missed child is exactly the leak this cascade closes. A
+   * refresh failure skips the cascade loudly instead of flipping the
+   * parent's completed archive (the idle reaper backstops whatever the skip
+   * leaves behind), and the live session store is always re-indexed because
+   * the probe only sees persistence. Each child is archived individually
+   * without `stopActivity`; a child that refuses or fails is logged and
+   * leaves the rest of the batch archived.
+   * @param rootId - The session whose subagent descendants cascade.
+   */
+  private async cascadeSubagentDescendants(rootId: SessionId): Promise<void> {
+    try {
+      if (!(await this.storedHeaderSnapshotFresh())) await this.indexHeaders(await this.listStoredHeaders())
+      await this.indexLiveSessions()
+    } catch (error) {
+      this.ctx.logger.error(`workspace: cascade archive of session '${rootId}' skipped, header refresh failed: ${String(error)}`)
+      return
+    }
+    const childrenByParent = new Map<SessionId, SessionId[]>()
+    for (const header of this.headers.values()) {
+      if (header.origin !== 'subagent' || header.parentSession === undefined) continue
+      const siblings = childrenByParent.get(header.parentSession)
+      if (siblings === undefined) childrenByParent.set(header.parentSession, [header.id])
+      else siblings.push(header.id)
+    }
+    // Level-order walk with a visited set: lineage cycles fail soft instead
+    // of looping, and each descendant is archived at most once.
+    const visited = new Set<SessionId>([rootId])
+    const descendants: SessionId[] = []
+    let frontier: SessionId[] = [rootId]
+    while (frontier.length > 0) {
+      const next: SessionId[] = []
+      for (const parentId of frontier) {
+        for (const childId of childrenByParent.get(parentId) ?? []) {
+          if (visited.has(childId)) continue
+          visited.add(childId)
+          descendants.push(childId)
+          next.push(childId)
+        }
+      }
+      frontier = next
+    }
+    for (const childId of descendants) {
+      try {
+        await this.archiveOne(childId, {})
+      } catch (error) {
+        // The parent's archive already stands; a child that refuses (active)
+        // or fails is reported loudly and left for the idle reaper.
+        this.ctx.logger.error(`workspace: cascade archive of session '${childId}' failed: ${String(error)}`)
+      }
+    }
   }
 
   /**
@@ -411,7 +530,9 @@ export class WorkspaceRegistry extends Service {
    * returns to its recorded position. Unarchiving runs no session-existence
    * check because removing an id cannot introduce an unknown one, so an
    * entry whose session is gone still resolves. An id that is not archived
-   * resolves without writing.
+   * resolves without writing. Unarchiving also drops the id's `archivedAtById`
+   * entry in the same durable write: a re-archived session stamps a fresh
+   * moment, so the retention clock restarts (archive-at-host-time-1114).
    * @param sessionId - The session to unarchive.
    * @returns resolution after durability.
    */
@@ -421,9 +542,11 @@ export class WorkspaceRegistry extends Service {
       // check-then-write pair cannot interleave with a concurrent archive.
       const state = this.requireState()
       if (!state.archivedSessionIds.includes(sessionId)) return
+      const { [sessionId]: _unarchived, ...archivedAtById } = state.archivedAtById
       await this.setState({
         ...state,
         archivedSessionIds: state.archivedSessionIds.filter(id => id !== sessionId),
+        archivedAtById,
       })
     })
   }
@@ -749,6 +872,7 @@ export class WorkspaceRegistry extends Service {
         initialized: false,
         workspaceIds,
         archivedSessionIds: state.archivedSessionIds,
+        archivedAtById: state.archivedAtById,
         pinnedSessionIds: state.pinnedSessionIds,
       })
     }
@@ -756,6 +880,7 @@ export class WorkspaceRegistry extends Service {
       initialized: true,
       workspaceIds,
       archivedSessionIds: state.archivedSessionIds,
+      archivedAtById: state.archivedAtById,
       pinnedSessionIds: state.pinnedSessionIds,
     })
   }
@@ -820,10 +945,22 @@ export class WorkspaceRegistry extends Service {
   }
 
   private async indexHeaders(headers: readonly SessionHeader[]): Promise<void> {
-    for (const header of headers) await this.indexHeader(header)
+    // Per-pass cwd memo (archive-header-cwd-dedup-1117): one index pass walks
+    // every stored header — the archive cascade does it on every archive, and
+    // the production root held 2141 headers across just 13 distinct cwds
+    // (measured 2026-11-17) — but the filesystem work only varies by cwd.
+    // Resolving each distinct cwd once per pass collapses that to a handful
+    // of realpath+stat calls (the per-header probes cost ~1.4 s per pass).
+    // The memo is scoped to this call on purpose: every later pass still
+    // re-reads the filesystem, so symlink retargets, directory removal or
+    // restoration, and permission changes keep exactly their per-pass
+    // semantics (workspace.spec: missing-path exemption clearing, reattach
+    // after restore, the realpath/stat race).
+    const resolutions = new Map<string, CwdResolution>()
+    for (const header of headers) await this.indexHeader(header, resolutions)
   }
 
-  private async indexHeader(header: SessionHeader): Promise<void> {
+  private async indexHeader(header: SessionHeader, resolutions: Map<string, CwdResolution>): Promise<void> {
     this.headers.set(header.id, header)
     this.sessionPaths.delete(header.id)
     this.missingSessionPaths.delete(header.id)
@@ -831,27 +968,70 @@ export class WorkspaceRegistry extends Service {
       this.invalidSessionPaths.set(header.id, 'header has no cwd')
       return
     }
-    try {
-      const path = await realpathNormalize(header.cwd)
-      if (!(await stat(path)).isDirectory()) {
-        this.invalidSessionPaths.set(header.id, `cwd '${header.cwd}' is not a directory`)
-        return
+    let resolution: CwdResolution
+    const cached = resolutions.get(header.cwd)
+    if (cached !== undefined) {
+      resolution = cached
+    } else {
+      try {
+        const path = await realpathNormalize(header.cwd)
+        resolution = (await stat(path)).isDirectory()
+          ? { kind: 'directory', path }
+          : { kind: 'not-directory' }
+      } catch (error) {
+        resolution = { kind: 'failed', error }
       }
-      this.sessionPaths.set(header.id, path)
+      resolutions.set(header.cwd, resolution)
+    }
+    if (resolution.kind === 'directory') {
+      this.sessionPaths.set(header.id, resolution.path)
       this.invalidSessionPaths.delete(header.id)
-    } catch (error) {
+      return
+    }
+    if (resolution.kind === 'failed') {
+      const error = resolution.error
       if (fullyQualifiedWorkspacePath(header.cwd)
         && error instanceof Error && 'code' in error && error.code === 'ENOENT') {
         this.missingSessionPaths.add(header.id)
       }
       this.invalidSessionPaths.set(header.id, `cwd '${header.cwd}' does not resolve`)
+      return
     }
+    this.invalidSessionPaths.set(header.id, `cwd '${header.cwd}' is not a directory`)
   }
 
   /** Every stored session's header, projected from the persistence snapshot listing. */
   private async listStoredHeaders(): Promise<SessionHeader[]> {
     const snapshots = await this.ctx.sessionPersistence.list()
     return snapshots.map(snapshot => snapshot.header)
+  }
+
+  /**
+   * Whether the in-memory header snapshot provably covers every session the
+   * persistence layer holds (archive-cascade-list-1117). The probe lists
+   * with every known id excluded: the backend skips an excluded session at
+   * the directory enumeration alone, so the probe costs directory walks over
+   * the project roots instead of one header read per stored session — the
+   * full pull the cascade used to run on every archive read all 2141
+   * production headers (hot 1.4 s / cold 3.7 s, measured 2026-11-17). An
+   * empty probe result means no session appeared since the last index pass,
+   * so the cascade reuses `this.headers`. Doubt always falls closed toward
+   * the full re-pull: a failing probe resolves to `false`, and a session the
+   * index does not know surfaces in the probe result — a missed child is the
+   * leak this cascade closes (archive-cascade-reap-1114), while a redundant
+   * pull only costs time. An empty index over an empty root skips a pull
+   * that could not have found anything anyway.
+   * @returns `true` only when skipping the full re-pull cannot hide a child.
+   */
+  private async storedHeaderSnapshotFresh(): Promise<boolean> {
+    try {
+      const unknown = await this.ctx.sessionPersistence.list({
+        excludeSessionIds: new Set(this.headers.keys()),
+      })
+      return unknown.length === 0
+    } catch {
+      return false
+    }
   }
 
   private async indexLiveSessions(): Promise<void> {

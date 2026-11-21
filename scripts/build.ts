@@ -78,13 +78,14 @@ export function parseBuildArguments(args: readonly string[]): BuildArguments {
  * Desktop, and Client artifacts before Web. Native output also precedes Host compilation.
  * The typecheck scope generates Typert before compiling Host and Client packages; it writes no
  * bundle. In complete scope each aggregate check waits only for its own face's package
- * compilation; alone, the
- * checks have no predecessors and read whatever declarations already exist. The typecheck scope
- * serializes its two aggregate checks (`client-check` waits for `host-check`): both run `tsc -b`
- * with an 8 GiB heap, and overlapping them inside one machine-gate hold broke a 16 GB machine
- * (2026-11-13 incident, user-directed fix — source compiles stay chained as before). The typecheck scope
- * checks aggregates in build mode, which skips a program whose tsbuildinfo is current; the other
- * scopes use project mode, which compiles no reference.
+ * compilation; alone, the checks have no predecessors and read whatever declarations already
+ * exist. Every scope serializes its two aggregate checks (`client-check` waits for `host-check`):
+ * both run `tsc` with a heap cap, and overlapping them inside one machine-gate hold broke a
+ * 16 GB machine — twice (2026-11-13 typecheck scope with 8 GiB heaps; 2026-11-16 complete scope
+ * with the same overlap, user-directed fix extending the serial edge to all scopes — source
+ * compiles stay chained as before). The typecheck scope checks aggregates in build mode, which
+ * skips a program whose tsbuildinfo is current; the other scopes use project mode, which compiles
+ * no reference.
  * @param root - Repository root containing the compiler and bundle configurations.
  * @param scope - Steps to include.
  * @param environment - Environment overlay applied to every step; the parent value of a key mapped to `undefined` is removed.
@@ -118,7 +119,9 @@ export function buildGates(
         displayCommand: `tsc ${scope === 'typecheck' ? '-b' : '-p'} tsconfig.${face}.json`,
         command: process.execPath,
         args: scope === 'typecheck' ? aggregateBuildArgs(face) : aggregateCheckArgs(face),
-        needs: scope === 'check' ? [] : scope === 'typecheck' && face === 'client' ? [`${face}-src`, 'host-check'] : [`${face}-src`],
+        needs: scope === 'check'
+          ? (face === 'client' ? ['host-check'] : [])
+          : face === 'client' ? [`${face}-src`, 'host-check'] : [`${face}-src`],
         env,
       })
     }

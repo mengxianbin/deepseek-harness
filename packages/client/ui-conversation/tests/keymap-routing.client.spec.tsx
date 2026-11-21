@@ -44,7 +44,7 @@ describe('keymap keydown routing', () => {
     expect(second.hasAttribute('data-composer-composing')).toBe(false)
   })
 
-  it('routes Enter to the keymap submit handler', () => {
+  it('routes the send gestures to the keymap submit handler', () => {
     const editor = createEditor({ namespace: 'keymap-routing', onError: (e) => { throw e } })
     const root = document.createElement('div')
     root.contentEditable = 'true'
@@ -61,7 +61,10 @@ describe('keymap keydown routing', () => {
       intakeFiles: () => {},
       pasteText: () => {},
     })
+    // Plain Enter is the newline gesture: it never reaches submit.
     fireEvent.keyDown(root, { key: 'Enter' })
+    expect(submit).not.toHaveBeenCalled()
+    fireEvent.keyDown(root, { key: 'Enter', shiftKey: true })
     expect(submit).toHaveBeenCalledWith(false)
     fireEvent.keyDown(root, { key: 'Enter', metaKey: true })
     expect(submit).toHaveBeenCalledWith(true)

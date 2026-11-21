@@ -26,6 +26,7 @@ import type { SettingsRootComponentProps, SettingsSectionRow } from './shell-con
 import css from './SettingsRoot.module.css'
 import { DesktopUpdateIndicator } from './DesktopUpdateIndicator.tsx'
 import { RestartServerButton } from './RestartServerButton.tsx'
+import { ServerStartedAt } from './ServerStartedAt.tsx'
 
 const RECOVERY_CONFIRMATION_MS = 2_000
 
@@ -120,7 +121,7 @@ export function SettingsRoot(props: SettingsRootComponentProps) {
   const {
     wide, reconnect, useConnectionState, useSections, useOnboardingSteps, useSessions, renderSlot, t,
     useDesktopUpdate, openDesktopUpdate, useStore, actions, useShortcuts,
-    useRestartConfigured, useRestartRunningSessions, useRestartSignal,
+    useRestartConfigured, useRestartRunningSessions, useRestartSignal, useServerStartedAt,
   } = props
   const { open, activeId } = useStore(state => state)
   const shortcut = useShortcuts(rows => rows.find(row => row.id === 'settings.open'))
@@ -140,6 +141,7 @@ export function SettingsRoot(props: SettingsRootComponentProps) {
   const restartConfigured = useRestartConfigured(value => value)
   const restartRunningSessions = useRestartRunningSessions(value => value)
   const restartSignal = useRestartSignal(value => value)
+  const serverStartedAt = useServerStartedAt(value => value)
   const previousConnectionState = useRef(connectionState)
   const onboardingSteps = useOnboardingSteps(s => s)
   const onboardingActive = useSessions((state) => {
@@ -242,6 +244,13 @@ export function SettingsRoot(props: SettingsRootComponentProps) {
             {renderSlot('settings.trigger', { wide })}
           </button>
         </Tooltip> })}
+        {/* Server start stamp (server-started-at-1117): wide column only,
+            and only while the connection carries a fresh answer — during an
+            outage the previous instant may already belong to a dead process,
+            so the row hides it rather than implying continuity. */}
+        {wide && connectionState === 'connected' && (
+          <ServerStartedAt t={t} startedAt={serverStartedAt} />
+        )}
         <RestartServerButton
           t={t} wide={wide} configured={restartConfigured} runningSessions={restartRunningSessions}
           signal={restartSignal} />

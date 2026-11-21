@@ -16,8 +16,10 @@
  * amber dashed stale ring the session rows use (step3 §5.1 vocabulary, 自指
  * fail-closed) — the last known verdict stays painted under it (未知不吞已知)
  * while the tooltip counts the interruption up. The 安康位 alarm additionally
- * cuts into the 「要我拿主意」 queue segment at P0/P1 level (the queue health
- * alert below); this badge is the always-on global seat.
+ * renders as a conditional line at the head of the session list (the queue
+ * health alert — since queue-zone-1113 there is no 「要我拿主意」 segment to cut
+ * into; it mounts only while its trigger holds); this badge is the always-on
+ * global seat.
  *
  * 批2 duty-shield-b2-1103 (ruling `shield-entry-ruling` A案 淡绿常驻可点,
  * 2026-11-03): the faint-green平态 is now CLICKABLE — one badge, one detail
@@ -26,7 +28,7 @@
  * is green, without a second badge (一个入口两段内容). `broken` widens to the
  * duty fold: a failed or untrusted 值守总账 paints the shield red exactly like
  * a broken Session reconciliation (三态纪律: healthy quiet / 有意停用 grey /
- * failed red + 逐项明细 + 插队 P0/P1).
+ * failed red + 逐项明细 + 列表头条件行).
  *
  * 2026-11-04 ruling (controller-poll availability): `broken` widens once more
  * to the auto-route plane's SUSTAINED verdict — a meter-poll failure streak
@@ -34,6 +36,15 @@
  * books balance, the controller is blind). Transient misses set nothing here;
  * they live in the glance button tooltip and the detail's third section
  * (三态纪律 + 警报经济学: one fact, one alarm surface, no double meanings).
+ *
+ * 拍板⑭⑮ (selflearn revival, ruled 2026-11-15): `broken` widens a fourth
+ * time to the revive mechanism's own verdict — the health document's `ok`
+ * false (插件激活 / mode=live / status 可读 / 断路器无连跳 / 无 HALT one of
+ * them failing) burns the shield red with the 复活机制 label, never borrowed
+ * from 对账 or the controller. The document is change-only, so an ABSENT
+ * document (plugin disabled / not yet flipped) sets nothing here — the
+ * detail's fourth section carries the quiet 「未接线」 line instead
+ * (正常静默、异常才亮, optional plane).
  */
 import { useState } from 'react'
 import clsx from 'clsx'
@@ -64,12 +75,14 @@ export function HealthShield({ useSessionHealth, t }: HealthShieldProps) {
   const [detailAnchor, setDetailAnchor] = useState<{ left: number; top: number } | undefined>(undefined)
   if (health === undefined) return null
   const report = health.report
-  // Three planes can break the shield: Session invariants, the duty fold (批2),
-  // and — 2026-11-04 ruling — a SUSTAINED auto-route meter-poll failure.
-  // Transient misses never set it (狼来了: the glance tooltip owns those).
+  // Four planes can break the shield: Session invariants, the duty fold (批2),
+  // a SUSTAINED auto-route meter-poll failure (2026-11-04), and — 拍板⑭⑮ —
+  // the revive mechanism's own verdict. Transient misses and an ABSENT revive
+  // document never set it (狼来了 + optional plane: the detail owns those).
   const sessionDutyBroken = report?.ok === false || report?.duty?.ok === false
   const sustained = report?.autoRoute?.sustained === true
-  const broken = sessionDutyBroken || sustained
+  const reviveBroken = report?.reviveHealth?.ok === false
+  const broken = sessionDutyBroken || sustained || reviveBroken
   const stale = health.stale === true
   const label = stale
     ? t('health.stale.label')
@@ -79,7 +92,11 @@ export function HealthShield({ useSessionHealth, t }: HealthShieldProps) {
       ? t('health.broken.label')
       : sustained
         ? t('health.autoRoute.label')
-        : t('health.ok.label')
+        // 拍板⑭⑮: a revive-only break names the revive mechanism, never any
+        // other plane's words (one fact, one label).
+        : reviveBroken
+          ? t('health.revive.label')
+          : t('health.ok.label')
   const tooltip = stale && health.staleSeconds !== undefined
     ? t('health.stale.tooltip').replace('{s}', String(health.staleSeconds))
     : label

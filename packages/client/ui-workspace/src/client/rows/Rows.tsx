@@ -17,7 +17,7 @@ import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   HoverCard, IconArchiveOutlineRegular, IconCheckOutlineRegular, IconEditOutlineRegular,
   IconEllipsisOutlineRegular, IconFolderCloseRegular, IconFolderOpenRegular,
-  IconNewChatOutlineRegular, IconPinFillRegular, IconSettingsOutlineRegular,
+  IconNewChatOutlineRegular, IconPinFillRegular,
   IconSleepOutlineRegular, IconTrashOutlineRegular,
   IconTriangleRightFillRegular, IconUnarchiveOutlineRegular, Menu, relativeTime, StateDot, Tooltip,
   useRowDragPreview,
@@ -219,6 +219,43 @@ function rowHalf(e: { clientY: number; currentTarget: HTMLElement }): 'before' |
   return e.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
 }
 
+/**
+ * Group-header attention counts (queue-zone-1113, 2026-11-13 ruling): the
+ * cross-workspace counts that used to live in the removed global segment's
+ * count bar now ride the group header — red = queued tier p1 rows (unread
+ * failed stops awaiting a ruling), yellow = queued tier p0 rows (awaiting the
+ * user's reply). Red always leads. Both counts ride the solid state dot in
+ * their tier colour, set a notch under the workspace title's size but on the
+ * title's line — a full-size pair outgrew a lowercase name — with a wider
+ * inset keeping the pair apart from the name, and a plain space between the
+ * two counts; the accessible name (role="img")
+ * spells out both tier words, so the tiers stay distinguishable without
+ * colour. Hidden entirely while no member is queued (N+M = 0), and a zero
+ * colour inside a non-empty pair renders no part at all.
+ */
+function AttentionBadges({ red, yellow, t }: { red: number; yellow: number; t: RowTranslate }) {
+  if (red + yellow === 0) return null
+  return (
+    <span className={css.attentionBadges} role="img" aria-label={t('group.attention', { red, yellow })}>
+      {red > 0 && (
+        <span className={css.attentionCount} data-attention="failed">
+          <span className={css.attentionDot} aria-hidden="true" />
+          {red}
+        </span>
+      )}
+      {red > 0 && yellow > 0 && (
+        <span className={css.attentionSeparator} aria-hidden="true">{'\u00A0'}</span>
+      )}
+      {yellow > 0 && (
+        <span className={css.attentionCount} data-attention="pending">
+          <span className={css.attentionDot} aria-hidden="true" />
+          {yellow}
+        </span>
+      )}
+    </span>
+  )
+}
+
 /** Owner props of one Workspace header row; the access Hooks are the browser root's own standard seats. */
 type ProjectRowItemProps = {
   group: GroupNode
@@ -325,6 +362,7 @@ function ProjectRow({
       </span>
       <span className={css.projectText}>
         <span className={css.title}>{label}</span>
+        <AttentionBadges red={row.queuedRed} yellow={row.queuedYellow} t={t} />
       </span>
       <span className={css.rowActions}>
         {actions !== undefined && workspaceMenuItems.length > 0 && (
@@ -398,14 +436,7 @@ function assertNever(value: never): never {
 }
 
 /** One row-cell glyph drawn where the dot would go; secondary statuses never carry one. */
-type StatusGlyph = { kind: 'jobs'; count: number } | { kind: 'wakeup' }
-
-/**
- * Shape-channel badges (collab step3 §3.1, q3-visual): the dot's color carries
- * the base state and this superscript carries the semantic variant — ✓ 待收讫
- * passed, ! awaiting an exception ruling, ✕ reserved for the dead-end state.
- */
-type StatusMark = 'check' | 'bang' | 'cross'
+type StatusGlyph = { kind: 'wakeup' }
 
 /**
  * The unreadable-confirmation overlay (collab step3 §5.1, q5-failclosed):
@@ -421,8 +452,11 @@ interface SessionStatus {
   trailingLabel?: string
   /** Glyph drawn in place of the dot on the row's leading cell. */
   glyph?: StatusGlyph
-  /** Shape-channel badge rendered beside the dot, colored by the primary state. */
-  mark?: StatusMark
+  /**
+   * Busy entities riding the ongoing gray ring (五态定稿 §二): running
+   * subagents plus live jobs on one numeric badge; absent at zero.
+   */
+  busyCount?: number
   /** Confirmation overlay: the dot keeps the last-known state inside a dashed ring. */
   staleRing?: StatusStaleRing
   /** Hover text naming the stale overlay's interruption and the shown last-known state. */
@@ -452,14 +486,20 @@ function ownsLeadingCell(status: SessionStatus): boolean {
  */
 function sessionBaseStatuses(
   node: Pick<SessionNode, 'pendingInteraction' | 'running' | 'runningSubagentCount'
-    | 'completed' | 'completionOutcome' | 'activeJobCount' | 'pendingWakeup'
+    | 'completed' | 'completionOutcome' | 'completionInterrupted' | 'activeJobCount' | 'pendingWakeup'
     | 'statusStale' | 'heartbeatStale' | 'heartbeatStaleSeconds'>,
   t: RowTranslate,
 ): readonly [SessionStatus, ...SessionStatus[]] {
+  // 五态定稿 §二: the gray ring wears one numeric badge = active subagents +
+  // live jobs (the main turn is not a discrete entity and never counts);
+  // zero renders no badge.
+  const busyCount = node.runningSubagentCount + (node.activeJobCount ?? 0)
+  const busyBadge = busyCount > 0 ? { busyCount } : {}
   const subagents: SessionStatus | undefined = node.runningSubagentCount === 0
     ? undefined
     : {
       state: 'ongoing',
+      ...busyBadge,
       label: t(
         node.runningSubagentCount === 1
           ? 'status.subagentsRunning.one'
@@ -471,7 +511,7 @@ function sessionBaseStatuses(
     ? undefined
     : {
       state: 'ongoing',
-      glyph: { kind: 'jobs', count: node.activeJobCount },
+      ...busyBadge,
       label: t(
         node.activeJobCount === 1 ? 'status.jobsRunning.one' : 'status.jobsRunning.other',
         { n: node.activeJobCount },
@@ -516,18 +556,27 @@ function sessionBaseStatuses(
     ...rest.filter((status): status is SessionStatus => status !== undefined),
   ]
   if (pending !== undefined) return ranked(pending, subagents, jobs, wakeup)
-  if (node.running) return ranked({ state: 'ongoing', label: t('status.running') }, subagents, jobs, wakeup)
+  if (node.running) {
+    return ranked({ state: 'ongoing', ...busyBadge, label: t('status.running') }, subagents, jobs, wakeup)
+  }
   if (subagents !== undefined) return ranked(subagents, jobs, wakeup)
   if (jobs !== undefined) return ranked(jobs, wakeup)
   // 失败例外: a failed stop outranks the wake-up weak mark; the mark keeps its
-  // seat in the hover card so the goal is still visible underneath. The bang is
-  // the shape channel of 待收讫·例外 (collab step3 §3.1, q3-visual).
+  // seat in the hover card so the goal is still visible underneath. The red
+  // dot embeds ✕ (勾成了/叹号等你/叉败了, 五态定稿 §二); a shutdown cut — own
+  // turn, killed subagent, or killed job — names itself 停机打断 instead of
+  // the ordinary 上轮失败, because the recovery differs (resume vs retry).
   if (node.completed && node.completionOutcome === 'failed') {
-    return ranked({ state: 'error', label: t('status.turnFailed'), mark: 'bang' }, wakeup)
+    return ranked({
+      state: 'error',
+      label: node.completionInterrupted === true
+        ? t('status.workInterrupted')
+        : t('status.turnFailed'),
+    }, wakeup)
   }
   if (wakeup !== undefined) return ranked(wakeup)
-  // 待收讫·通过 carries the check shape channel (q3-visual).
-  if (node.completed) return [{ state: 'done', label: t('status.completed'), mark: 'check' }]
+  // 待收讫·通过 embeds ✓ in the enlarged green dot (五态定稿 §二).
+  if (node.completed) return [{ state: 'done', label: t('status.completed') }]
   // ④ splits: a confirmed nothing stays blank. Unreadability no longer swaps in
   // here — the wrapper below rings whatever state this chain landed on
   // (未知不吞已知, collab step3 §5.1 q5).
@@ -547,7 +596,7 @@ function sessionBaseStatuses(
  */
 function sessionStatuses(
   node: Pick<SessionNode, 'pendingInteraction' | 'running' | 'runningSubagentCount'
-    | 'completed' | 'completionOutcome' | 'activeJobCount' | 'pendingWakeup'
+    | 'completed' | 'completionOutcome' | 'completionInterrupted' | 'activeJobCount' | 'pendingWakeup'
     | 'statusStale' | 'heartbeatStale' | 'heartbeatStaleSeconds'>,
   t: RowTranslate,
 ): readonly [SessionStatus, ...SessionStatus[]] {
@@ -572,38 +621,64 @@ function sessionStatuses(
 }
 
 /**
- * The row-cell glyph standing where the dot would go: the background-job gear
- * carrying its live count as a superscript, or the wake-up sleep mark. Like the
- * dot it stays aria-hidden — the label rows beside it carry the meaning.
+ * The row-cell glyph standing where the dot would go: the wake-up sleep mark.
+ * Like the dot it stays aria-hidden — the label rows beside it carry the
+ * meaning.
  * @param props.glyph - which glyph to draw.
  * @returns the glyph element.
  */
 function StatusGlyphMark({ glyph }: { glyph: StatusGlyph }) {
-  if (glyph.kind === 'jobs') {
-    return (
-      <span className={css.statusGlyph} data-status-glyph="jobs" aria-hidden="true">
-        <IconSettingsOutlineRegular size={11} />
-        <sup className={css.statusGlyphCount}>{glyph.count}</sup>
-      </span>
-    )
-  }
   return (
-    <span className={css.statusGlyph} data-status-glyph="wakeup" aria-hidden="true">
+    <span className={css.statusGlyph} data-status-glyph={glyph.kind} aria-hidden="true">
       <IconSleepOutlineRegular size={14} />
     </span>
   )
 }
 
-/** Shape-channel characters rendered beside the dot (q3-visual). */
-const STATUS_MARK_GLYPHS: Readonly<Record<StatusMark, string>> = {
-  check: '✓', bang: '!', cross: '✕',
+/**
+ * Embedded glyph per solid state (五态定稿 §二 图形三联语义): ✓ 成了, ✕ 败了,
+ * ! 等你 — the shape channel that keeps the red/green pair readable without
+ * colour, and the reason the retired top-right statusMark badge carried no
+ * information the dot did not already have.
+ */
+const STATE_DOT_GLYPHS: Partial<Record<StateDotState, string>> = {
+  done: '✓', error: '✕', warning: '!',
+}
+
+/**
+ * The row's status dot (五态定稿 §二): solid states render as a filled circle
+ * at the gray ring's outer diameter with their glyph embedded; the ongoing
+ * gray ring wears one numeric badge = running subagents + live jobs (absent
+ * at zero). Idle and stale keep the primitive dot — they are not among the
+ * five states' glyph-bearing faces.
+ * @param props.state - which state to draw.
+ * @param props.busyCount - entities behind the badge; omit for no badge.
+ * @returns the dot element (aria-hidden; the label rows carry the meaning).
+ */
+function RowStateDot({ state, busyCount }: { state: StateDotState; busyCount?: number | undefined }) {
+  const glyph = STATE_DOT_GLYPHS[state]
+  if (glyph !== undefined) {
+    return (
+      <span className={css.stateDot} data-state={state} aria-hidden="true">{glyph}</span>
+    )
+  }
+  const badge = state === 'ongoing' && busyCount !== undefined && busyCount > 0
+    ? <span className={css.busyBadge} data-busy-count={busyCount}>{busyCount}</span>
+    : null
+  if (badge === null) return <StateDot state={state} />
+  return (
+    <span className={css.stateDotBusy}>
+      <StateDot state={state} />
+      {badge}
+    </span>
+  )
 }
 
 /** Primary status dot (or glyph) plus every status's screen-reader label, shared by the search and session rows. */
 function SessionStatusDots({ statuses }: { statuses: readonly [SessionStatus, ...SessionStatus[]] }) {
   const primary = statuses[0]
   const dot = primary.glyph === undefined
-    ? <StateDot state={primary.state} />
+    ? <RowStateDot state={primary.state} busyCount={primary.busyCount} />
     : <StatusGlyphMark glyph={primary.glyph} />
   return (
     <>
@@ -615,16 +690,6 @@ function SessionStatusDots({ statuses }: { statuses: readonly [SessionStatus, ..
             data-stale-kind={primary.staleRing.kind}
             title={primary.staleLabel}
           >{dot}</span>
-        )}
-      {primary.mark === undefined
-        ? null
-        : (
-          <span
-            className={css.statusMark}
-            data-status-mark={primary.mark}
-            data-state={primary.state}
-            aria-hidden="true"
-          >{STATUS_MARK_GLYPHS[primary.mark]}</span>
         )}
       {statuses.map(status => (
         <span className={css.visuallyHidden} key={status.label}>{status.label}</span>
@@ -685,13 +750,9 @@ function SessionHoverContent({ node, cwd, now, renderSlot, t }: {
       {/* Same placeholder rule as the row's trailing cell: no timestamp
           before the first prompt. */}
       {!node.blank && <div className={css.hoverTime}>{hoverTimeLabel(node.updatedAt, now, t)}</div>}
-      {/* 属性缺省的 fail-closed 分级 (collab step3 §6.3, q6-attr): the
-          attribute plane carries no supply yet, so the card names the default
-          placement in weak gray — never a ring, since 属性缺 ≠ 会话态不可信. */}
-      <div className={css.hoverAttributes}>
-        <span>{t('row.priorityDefault')}</span>
-        <span className={css.hoverAttributesNote}>{t('row.attributesDefault')}</span>
-      </div>
+      {/* hover-sessionclass-1121: the attribute-plane placeholder block
+          (priority default + gray note) is gone — the plugin hover slot below
+          now owns this position, e.g. the session-origin class line. */}
       {renderSlot('sidebar.session.row.hover', { sessionId: node.id })}
       {statuses.map(status => (
         <div className={css.hoverStatus} key={status.label}>
@@ -901,6 +962,31 @@ export function SessionNodeItem({
     if (watchSessionJobs === undefined) return
     return watchSessionJobs(node.id)
   }, [node.id, watchSessionJobs])
+  // session-list-arrow-nav-1115 (A 案): the arrows only walk focus across the
+  // rendered session rows of this list — selection never follows, so no
+  // session is opened or loaded here; Enter/Space below open the focused row.
+  // Home/End jump straight to the first/last rendered row of the same list.
+  const walkFocus = (target: -1 | 1 | 'first' | 'last'): void => {
+    const row = rowRef.current
+    if (row === null) return
+    // Both list bodies (grouped and flat) render inside a role="tree" div, so
+    // the nearest one scopes the walk to this list only.
+    const tree = row.closest<HTMLElement>('[role="tree"]')
+    if (tree === null) return
+    const rows = Array.from(tree.querySelectorAll<HTMLElement>('[data-row-key^="session:"]'))
+    const index = rows.indexOf(row)
+    if (index === -1) return
+    if (target === 'first') {
+      rows[0]?.focus()
+      return
+    }
+    if (target === 'last') {
+      rows[rows.length - 1]?.focus()
+      return
+    }
+    // At either end the focus stays put: no wrap, no focus escape.
+    rows[index + target]?.focus()
+  }
   const ownRow = (
     <div
       ref={rowRef}
@@ -916,10 +1002,25 @@ export function SessionNodeItem({
       tabIndex={0}
       onClick={() => { onOpen(node.id) }}
       onKeyDown={(event) => {
-        if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return
+        if (event.target !== event.currentTarget) return
+        if (event.key !== 'Enter' && event.key !== ' '
+          && event.key !== 'ArrowUp' && event.key !== 'ArrowDown'
+          && event.key !== 'Home' && event.key !== 'End') return
         if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
         event.preventDefault()
-        onOpen(node.id)
+        if (event.key === 'Enter' || event.key === ' ') {
+          onOpen(node.id)
+          return
+        }
+        if (event.key === 'Home') {
+          walkFocus('first')
+          return
+        }
+        if (event.key === 'End') {
+          walkFocus('last')
+          return
+        }
+        walkFocus(event.key === 'ArrowUp' ? -1 : 1)
       }}
       onPointerEnter={marquee.enter}
       onPointerLeave={marquee.leave}

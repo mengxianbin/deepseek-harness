@@ -117,18 +117,27 @@ export function ConversationSessionHeader({
   const hasEntryActions = useEntryActions(registered => registered)
   const showTabs = !hideChrome && tabs.length > 1
   const tabRow = useRef<HTMLDivElement>(null)
+  const viewsTrailing = useRef<HTMLDivElement>(null)
   const [visibleViewLimit, setVisibleViewLimit] = useState(1)
-  // Observe only the available row width; individual tabs are not measured.
+  // Observe the available row width and the trailing seat's own width;
+  // individual tabs are not measured. The trailing seat (right of More) is a
+  // fixed-width flex item: while it occupies the row, its width and the 20px
+  // gap before it come off the fold budget — a wide occupant shrinks the tab
+  // share, never overflows. An empty seat hides itself and costs no gap.
   useLayoutEffect(() => {
     const row = tabRow.current
     if (row === null || !hasEntryActions) return
     const updateLimit = (): void => {
-      setVisibleViewLimit(Math.max(1, Math.floor((row.clientWidth - 48) / 120)))
+      const trailingWidth = viewsTrailing.current?.getBoundingClientRect().width ?? 0
+      const reserved = 48 + (trailingWidth > 0 ? 20 + trailingWidth : 0)
+      setVisibleViewLimit(Math.max(1, Math.floor((row.clientWidth - reserved) / 120)))
     }
     updateLimit()
     if (typeof ResizeObserver === 'undefined') return
     const observer = new ResizeObserver(updateLimit)
     observer.observe(row)
+    const trailing = viewsTrailing.current
+    if (trailing !== null) observer.observe(trailing)
     return () => { observer.disconnect() }
   }, [showTabs, hasEntryActions])
   const { visibleTabs, moreTabs } = useMemo(() => {
@@ -245,6 +254,12 @@ export function ConversationSessionHeader({
               renderSlot={renderSlot}
             />
           )}
+          {/* data-conversation-views-trailing: the trailing seat after More
+              (or after the tabs when More has no registrations); the fold
+              budget above reserves this element's measured width. */}
+          <div ref={viewsTrailing} className={css.viewsTrailing} data-conversation-views-trailing="">
+            {renderSlot('conversation.session.header.views.trailing', {})}
+          </div>
         </div>
       )}
     </>

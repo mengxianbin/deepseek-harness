@@ -15,7 +15,13 @@
   align-items: center;
   justify-content: center;
   gap: 12px;
+  /* Full row width (the parent centers its content anyway) so the dock can
+     act as an inline-size query container: occupants degrade against the row
+     they sit in, and the explicit width keeps containment from collapsing a
+     shrink-to-fit box to zero. */
+  width: 100%;
   max-width: 100%;
+  container-type: inline-size;
   padding-top: 4px;
 }
 

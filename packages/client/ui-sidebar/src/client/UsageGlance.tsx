@@ -25,7 +25,7 @@
  * 2026-10-15): that column stacks vertically — the token total above, and
  * below it a small data-refresh stamp (`26.10.15 21:30`) carrying the local
  * wall-clock time the overview last loaded. FORK dsh-local (v2.3, 2026-10-22):
- * the column becomes two labeled rows — `今日 321.7M` above `周期 4.21B`, each
+ * the column becomes two labeled rows — `Today 321.7M` above `Cycle 4.21B`, each
  * a single-key locale label plus its compact total — and the refresh stamp
  * moves into the column tooltip. The second row is plan-cycle, not calendar
  * (2026-10-22 ruling): it sums the trend series over the pickWindow main
@@ -63,7 +63,7 @@
  * / seven days / five hours before the reset.
  *
  * mimo balance row (FORK usage-glance-mimo-balance, 2026-10-25): the stats
- * column gains a third labeled row — `余额` below the 今日/周期 readings —
+ * column gains a third labeled row — `API` below the Today/Cycle readings —
  * carrying the MiMo official pay-as-you-go balance the host reports on the
  * `mimo` route (`providers[].mimo.balance = { currency, totalBalance,
  * updatedAt }`). Copy ruling (2026-10-25 用户裁定): the label drops the
@@ -74,10 +74,11 @@
  * deepseek-official's `-0.18 CNY`, which must not answer for mimo's row. A
  * host that reports no mimo balance (adapter absent, cookie expired, probe
  * failed) degrades this row alone to an em dash — the v2.3 single-column
- * degrade contract, the rest of the control untouched. The figure prints as
- * `¥6.16` / `$12.00` for the known symbols, `1.23 XXX` otherwise, and the
- * column tooltip folds the reading in alongside 今日/周期 and the refresh
- * stamp (v2.3 tooltip precedent).
+ * degrade contract, the rest of the control untouched. The figure prints the
+ * total with no currency symbol or code — a CNY total gains the `R` (RMB)
+ * suffix, `6.16R` (FORK usage plugin 全英文, 2026-11-15) — and the column
+ * tooltip folds the reading in alongside Today/Cycle and the refresh stamp
+ * (v2.3 tooltip precedent).
  *
  * mimo re-login CTA (FORK mimo-login-cta, 2026-10-29; always-on since
  * 2026-10-30 用户裁定「不论 cookie 过期与否，CTA 行为相同」; MOVED 2026-10-30
@@ -88,6 +89,19 @@
  * balance row is readings-only again: label + figure, no link, no
  * stopPropagation carve-out. The always-on ruling survives the move — the
  * menu item renders in every balance state and before the first load.
+ * v3.5 (FORK auto-route-1024, 2026-10-25): a current-source status dot rides
+ * left of the window rows — the badge for the auto-routing controller
+ * (`dsh-auto-route`, ruling form 乙). It reads the controller's own policy
+ * state at `GET /api/auto-route/status` (same origin, same cadence; a 404 —
+ * controller not installed — hides it, so the badge degrades together with
+ * the feature), never the overview's `current{provider,model,source}` — that
+ * is last-request-routing semantics and would flap while both sources run
+ * (三层解耦契约「策略层配置化」: the badge is a pure policy-layer consumer).
+ * The dot is quiet secondary at baseline and warn while the policy is
+ * triggered (the controller switched the active set to MiMo official); its
+ * tooltip spells the source name, the phase, and the last decision time. The
+ * dot is a width-only addition — the wide titlebar logo row's 40px height
+ * budget (3 × 12px rows + 4px padding) stays untouched.
  *
  * Clicking the control opens the settings panel on the usage section by
  * replaying the user's own path — the shell owns the panel state and exposes
@@ -202,8 +216,22 @@ const WINDOW_TITLE_KEY = {
  */
 const MIMO_ROUTE_ID = 'mimo'
 
-/** Currency symbols the balance row knows; others print `1.23 XXX`. */
-const BALANCE_SYMBOL: Record<string, string> = { CNY: '¥', USD: '$' }
+/**
+ * Balance figure for the glance's mimo row (`6.16R` — total + unit marker).
+ * The host already formats the total for display (a numeric string), and the
+ * row prints NO currency symbol or code (FORK usage plugin 全英文, 2026-11-15
+ * 用户指示: a `¥`/`$`/`CNY` marker would read as money at a glance). A CNY
+ * total gains an `R` suffix instead (R = RMB, same 2026-11-15 指示) so every
+ * figure in the right-aligned column ends in a letter — M / B / R flush
+ * right. A missing total prints the em dash.
+ * @param balance - one mimo balance fact.
+ * @returns the figure string.
+ */
+export function formatBalanceFigure(balance: BalanceView): string {
+  const total = balance.totalBalance
+  if (total === undefined || total === '') return '—'
+  return balance.currency === 'CNY' ? `${total}R` : total
+}
 
 /**
  * Stable selector for the usage nav row. The settings shell stamps each nav
@@ -591,23 +619,6 @@ export function formatCompactTokens(tokens: number): string {
 }
 
 /**
- * Balance figure for the glance's mimo row (`¥6.16`, `$12.00`, `1.23 GBP`).
- * The host already formats the total for display (a numeric string, no
- * symbol), so this only prepends the known currency symbol; an unknown or
- * missing currency prints the bare total, a missing total the em dash.
- * @param balance - one mimo balance fact.
- * @returns the figure string.
- */
-export function formatBalanceFigure(balance: BalanceView): string {
-  const total = balance.totalBalance
-  if (total === undefined || total === '') return '—'
-  const currency = balance.currency
-  if (currency === undefined || currency === '') return total
-  const symbol = BALANCE_SYMBOL[currency]
-  return symbol === undefined ? `${total} ${currency}` : `${symbol}${total}`
-}
-
-/**
  * Local-time data-refresh stamp (`26.10.15 21:30`), carried in the stats
  * column's tooltip since v2.3. Two-digit year, zero-padded month/day and a
  * 24-hour clock, read in the viewer's own time zone — it is when the payload
@@ -739,7 +750,7 @@ export interface UsageGlanceProps {
 /**
  * Render the plan glance (FORK v2.4, v3, usage-glance-mimo-balance): one row per on-screen quota window —
  * short label, usage fill with the time-progress tick (overrun in warn), and
- * the right-aligned percent and time-pair columns — plus the 今日/周期 token rows and the mimo
+ * the right-aligned percent and time-pair columns — plus the Today/Cycle token rows and the mimo
  * balance row in their own column (every reading in that column's tooltip,
  * refresh stamp included). A v3 triggered row (water line
  * >= 85%) reds its percent figure; the week/month rows also paint the fill

@@ -706,7 +706,7 @@
    FORK dsh-local (usage glance v2.4, 2026-10-22): the glance body is the
    quota-window rows' column (one row per on-screen window — short label,
    track with the usage fill and time tick, merged read-out) plus the
-   今日/周期 token rows in their own column to the right; every track keeps
+   Today/Cycle token rows in their own column to the right; every track keeps
    the same fixed width and sits left-aligned. Rows stack GAPLESS — each
    12px line box carries its 6px track with 3px lead, so three rows plus the
    button's 4px padding total exactly 40px, the height the Windows titlebar
@@ -900,28 +900,32 @@
 }
 
 /* FORK dsh-local (usage glance v2.3, 2026-10-22): the stats column stacks two
-   labeled rows — a muted 10px locale label (今日 / 周期) beside a 12px compact
+   labeled rows — a muted 10px locale label (Today / Cycle / API) beside a 12px compact
    total — in their own sub-column to the right of the window rows; the cycle
    row rides pickWindow's main window (month preferred — the window row it
    aliases; re-affirmed when v2.4 split the bars per window). The v2.2
    refresh-stamp line moved into this column's tooltip, so no third line exists
-   and the column stays inside the rows' height. */
+   and the column stays inside the rows' height.
+   FORK (usage plugin 全英文, 2026-11-15 用户指示): the column is a GRID of two
+   columns — labels start-aligned left, figures end-aligned right — so a
+   longer or shorter label never shifts the figure column, and the trailing
+   unit letters (M / B / R) sit flush right. */
 .glanceStats {
   flex: none;
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
+  display: grid;
+  grid-template-columns: max-content max-content;
+  align-items: baseline;
+  column-gap: 4px;
+  row-gap: 1px;
 }
 
+/* The per-row wrapper dissolves into the grid: its label and figure become
+   the grid items of their own column (DOM stays label-then-figure). */
 .glanceStat {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
+  display: contents;
 }
 
 .glanceStatLabel {
-  flex: none;
   font-size: 10px;
   line-height: 13px;
   font-weight: 400;
@@ -934,6 +938,7 @@
   font-weight: 600;
   letter-spacing: 0;
   font-variant-numeric: tabular-nums;
+  text-align: right;
   color: var(--dsw-alias-label-primary);
 }
 

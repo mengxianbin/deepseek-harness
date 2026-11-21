@@ -1136,11 +1136,13 @@ export class PluginManager extends TypertRemoteService {
     }
   }
 
-  /** The profile files an installation may rewrite, as they are now; absent files read as undefined. */
+  /** The profile files an installation may rewrite, as they are now; absent files read as undefined.
+   * Resolved first: a junction-to-file does not read (ENOENT), which would look like an absent file
+   * and make the restore below remove the link instead of putting the content back. */
   private async readRestoredFiles(): Promise<Map<string, string | undefined>> {
     const files = new Map<string, string | undefined>()
     for (const name of RESTORED_FILES) {
-      const path = join(this.profile.dir, name)
+      const path = resolveLinkedPath(join(this.profile.dir, name))
       files.set(path, existsSync(path) ? await readFile(path, 'utf8') : undefined)
     }
     return files
@@ -1150,7 +1152,7 @@ export class PluginManager extends TypertRemoteService {
   private async restoreFiles(files: Map<string, string | undefined>): Promise<void> {
     for (const [path, content] of files) {
       if (content === undefined) await rm(path, { force: true })
-      else await writeFileAtomic(path, content, { mode: 0o600 })
+      else await writeFileAtomic(resolveLinkedPath(path), content, { mode: 0o600 })
     }
   }
 

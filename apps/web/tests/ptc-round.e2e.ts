@@ -86,7 +86,7 @@ describe('web e2e: PTC mode round renders nested sub-calls', () => {
     const observePreparation = async () => {
       try {
         await input.fill(PROMPT)
-        await input.press('Enter')
+        await input.press('Shift+Enter')
         await waiting.promise
         await page.getByRole('tab', { name: 'Trajectory', exact: true }).click()
         const request = page.getByRole('table').getByRole('button', { name: 'Request #1', exact: true })

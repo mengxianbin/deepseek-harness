@@ -44,7 +44,7 @@ it('replays highlighted Python stubs, PowerShell and CSV reads with their docume
     const settled = scaffold.whenTurnSettled()
     const input = page.locator('[data-composer-input]').first()
     await input.fill(prompt)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     const sessionId = await settled
     const session = scaffold.ctx.agents.get(sessionId)?.session
     if (session === undefined) throw new Error('read turn has no Session')

@@ -62,6 +62,19 @@ describe('requestSealCheck (contract C1)', () => {
     expect(seals!.get(sid('two'))).toEqual({ verdict: 'DONE' })
   })
 
+  it('marks the click-time ask with recheck so the server re-probes the git red (archive-seal-falsered-1116 段2)', async () => {
+    const fetchMock = vi.fn(async () => okResponse({ results: [{ id: 'one', verdict: 'DONE' }] }))
+    vi.stubGlobal('fetch', fetchMock)
+    const seals = await requestSealCheck([sid('one')], { recheck: true })
+    // The recheck flag rides the body; the default ask (the lamp pull) stays { ids } verbatim.
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+      '/api/dsh-session-archive/seal-check',
+      expect.objectContaining({ body: JSON.stringify({ ids: ['one'], recheck: true }) }),
+    )
+    expect(seals).not.toBeNull()
+    expect(seals!.get(sid('one'))).toEqual({ verdict: 'DONE' })
+  })
+
   it('drops malformed rows instead of guessing, keeping what is still well-formed', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => okResponse({ results: [
       { id: 'one', verdict: 'TELEPORTED' },

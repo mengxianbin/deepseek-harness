@@ -248,7 +248,7 @@ it.skipIf(webSnapshotMode() === 'record')('guides voice setup, records from stan
   expect(messages).toBe(0)
   await compareOrRefreshGolden(expected, await captureStableAria(page, '[class*="centerCol"]', scaffold.workspaceCwd), webSnapshotMode())
   const settled = scaffold.whenTurnSettled()
-  await input.press('Enter')
+  await input.press('Shift+Enter')
   await settled
   await page.getByText('DONE', { exact: true }).waitFor()
   const meter = page.getByRole('button', { name: /% of context used/ })

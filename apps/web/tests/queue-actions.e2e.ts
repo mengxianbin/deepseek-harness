@@ -109,7 +109,7 @@ describe('web e2e: queue row actions', () => {
     const input = page.locator('[data-composer-input]').first()
     const firstSettled = scaffold.whenTurnSettled()
     await input.fill(ACTIVE_PROMPT)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     await expect.poll(() => existsSync(readyFile), { timeout: 15_000 }).toBe(true)
 
     const admitted = page.waitForResponse('**/api/session/prompt')
@@ -122,7 +122,7 @@ describe('web e2e: queue row actions', () => {
     }, { times: 1 })
     try {
       await input.fill(REMOVE)
-      await input.press('Enter')
+      await input.press('Shift+Enter')
       await received.promise
       // The composer keeps the message, read-only, until the Host accepts it; the queue shows nothing yet.
       const sendingButton = page.getByRole('button', { name: 'Sending message', exact: true })
@@ -141,7 +141,7 @@ describe('web e2e: queue row actions', () => {
     expect(await page.locator('[data-queue-dock] [data-submission-echo]').count()).toBe(0)
     expect(await page.locator('[data-queue-dock]').getByRole('status').count()).toBe(0)
     await input.fill(EDIT)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     // The Host queue row can arrive before the prompt reply that clears the composer.
     await expect.poll(() => input.textContent(), { timeout: 10_000 }).toBe('')
     const queueHeader = page.getByRole('button', { name: '2 queued messages' })
@@ -244,7 +244,7 @@ describe('web e2e: queue row actions', () => {
       })
     }, { times: 1 })
     await input.fill(FAILED)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     const failure = page.getByRole('alert').filter({ hasText: 'Queue submission failed' })
     await failure.waitFor()
     await expect.poll(() => input.textContent()).toBe(FAILED)
@@ -269,7 +269,7 @@ describe('web e2e: queue row actions', () => {
         },
       })
     }, { times: 1 })
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     const writerHeld = page.getByRole('alert').filter({ hasText: 'This session is already in use' })
     await writerHeld.waitFor()
     await expect.poll(() => input.textContent()).toBe(FAILED)
@@ -279,7 +279,7 @@ describe('web e2e: queue row actions', () => {
     ].join('\n'), MODE)
 
     await input.fill(TAIL)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     await expect.poll(
       () => page.getByRole('button', { name: 'Remove queued message', disabled: false }).count(),
       { timeout: 10_000 },
@@ -313,7 +313,7 @@ describe('web e2e: queue row actions', () => {
 
     const settled = scaffold.whenTurnSettled()
     await input.fill(WAKE)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     await settled
     await expect.poll(() => turnEndReasons(sessionEvents), { timeout: 15_000 })
       .toEqual(['aborted', 'completed', 'completed', 'completed'])
@@ -346,7 +346,7 @@ describe('web e2e: queue row actions', () => {
     const settled = scaffold.whenTurnSettled()
     await page.locator('[data-composer-input][contenteditable="true"]').first().waitFor({ timeout: 10_000 })
     await input.fill('/goal Keep the composer context panels aligned')
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     await expect.poll(() => existsSync(readyFile), { timeout: 15_000 }).toBe(true)
     await page.locator('[data-goal-bar]').waitFor({ timeout: 10_000 })
 
@@ -363,7 +363,7 @@ describe('web e2e: queue row actions', () => {
     for (const text of ['Layout queue first', 'Layout queue second']) {
       await page.locator('[data-composer-input][contenteditable="true"]').first().waitFor({ timeout: 10_000 })
       await input.fill(text)
-      await input.press('Enter')
+      await input.press('Shift+Enter')
       // The composer keeps a sent message, still editable, until the Host accepts it.
       await expect.poll(() => input.textContent(), { timeout: 10_000 }).toBe('')
     }
@@ -447,13 +447,13 @@ describe('web e2e: queue row actions', () => {
     const stop = page.getByRole('button', { name: 'Stop generating', exact: true })
     await editable.waitFor({ timeout: 10_000 })
     await input.fill('/goal Keep working after Stop')
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     await expect.poll(() => existsSync(roundReady), { timeout: 15_000 }).toBe(true)
 
     // Human work queued behind the running round survives the first Stop.
     await editable.waitFor({ timeout: 10_000 })
     await input.fill(REMOVE)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     await page.getByRole('button', { name: 'Remove queued message', disabled: false }).waitFor({ timeout: 10_000 })
     await stop.click()
     await page.getByRole('button', { name: 'Resume goal' }).waitFor({ timeout: 10_000 })
@@ -470,7 +470,7 @@ describe('web e2e: queue row actions', () => {
     const settled = scaffold.whenTurnSettled()
     await editable.waitFor({ timeout: 10_000 })
     await input.fill(WAKE)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     await settled
     await expect.poll(() => turnEndReasons(sessionEvents), { timeout: 15_000 })
       .toEqual(['aborted', 'aborted', 'completed'])

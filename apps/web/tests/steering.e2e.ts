@@ -126,7 +126,7 @@ describe('web e2e: mid-turn steering lands durably and visibly', () => {
     const settled = scaffold.whenTurnSettled(MODE === 'record' ? 180_000 : 30_000)
     await page.locator('[data-composer-input][contenteditable="true"]').first().waitFor({ timeout: 10_000 })
     await input.fill(PROMPT)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     await expect.poll(
       () => sessionEvents.some(event => event.type === 'request/context'),
       { timeout: 10_000 },
@@ -136,7 +136,7 @@ describe('web e2e: mid-turn steering lands durably and visibly', () => {
     // atomically moves this exact occurrence into the current turn's steering outbox.
     await page.locator('[data-composer-input][contenteditable="true"]').first().waitFor({ timeout: 10_000 })
     await input.fill(STEER)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     const queuedRow = page.getByRole('listitem').filter({ hasText: STEER })
     await queuedRow.waitFor({ timeout: 10_000 })
     const steerButton = queuedRow.getByRole('button', { name: 'Steer queued message' })
@@ -164,7 +164,7 @@ describe('web e2e: mid-turn steering lands durably and visibly', () => {
     // the steer as user/message, and the steered continuation runs the
     // final model call.
     await composer.getByRole('radio', { name: 'Yes' }).click()
-    await composer.getByRole('radio', { name: 'Yes' }).press('Enter')
+    await composer.getByRole('radio', { name: 'Yes' }).press('Shift+Enter')
     await settled
 
     if (MODE === 'record') {
@@ -281,7 +281,7 @@ describe.skipIf(MODE === 'record')('web e2e: retained steering and a post-stop m
     onTestFailed(() => saveFailureShot(page, 'web-e2e-trajectory-input-order'))
     const input = page.locator('[data-composer-input][contenteditable="true"]').first()
     await input.fill(PROMPT)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     await questionStarted.promise
     await expect.poll(() => requestInputs.length, { timeout: 10_000 }).toBe(1)
     await input.fill(STEER)
@@ -301,7 +301,7 @@ describe.skipIf(MODE === 'record')('web e2e: retained steering and a post-stop m
       async execute() { return null },
     }))
     await input.fill(FOLLOWUP)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     await expect.poll(() => sessionEvents.filter(event => event.type === 'turn/end').length, { timeout: 10_000 }).toBe(2)
     const first = claimedMessages(sessionEvents, STEER)
     const second = claimedMessages(sessionEvents, FOLLOWUP)
@@ -403,7 +403,7 @@ describe.each(['reconnect', 'delayed-inbox'] as const)('web e2e: composer shortc
     const settled = scaffold.whenTurnSettled(30_000)
     await page.locator('[data-composer-input][contenteditable="true"]').first().waitFor({ timeout: 10_000 })
     await input.fill(PROMPT)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     await page.getByRole('button', { name: 'Stop generating' }).waitFor({ timeout: 10_000 })
     await expect.poll(() => sessionEvents.some(event => event.type === 'request/context'), { timeout: 10_000 }).toBe(true)
 
@@ -429,7 +429,7 @@ describe.each(['reconnect', 'delayed-inbox'] as const)('web e2e: composer shortc
     try {
       holdInbox = handoff === 'delayed-inbox'
       await composer.getByRole('radio', { name: 'Yes' }).click()
-      await composer.getByRole('radio', { name: 'Yes' }).press('Enter')
+      await composer.getByRole('radio', { name: 'Yes' }).press('Shift+Enter')
       await expect.poll(() => claimed, { timeout: 10_000 }).toBe(true)
       await page.evaluate(() => new Promise<void>((resolve) => {
         requestAnimationFrame(() => requestAnimationFrame(() => { resolve() }))
@@ -506,7 +506,7 @@ describe('web e2e: composer shortcut follows the swapped busy behavior', () => {
     const settled = scaffold.whenTurnSettled(30_000)
     await page.locator('[data-composer-input][contenteditable="true"]').first().waitFor({ timeout: 10_000 })
     await input.fill(PROMPT)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     await page.getByRole('button', { name: 'Stop generating' }).waitFor({ timeout: 10_000 })
 
     const queuedText = 'Queued by the complementary Cmd+Enter shortcut.'
@@ -524,7 +524,7 @@ describe('web e2e: composer shortcut follows the swapped busy behavior', () => {
     const composer = page.locator('[data-question-key]')
     await composer.waitFor({ timeout: 30_000 })
     await composer.getByRole('radio', { name: 'Yes' }).click()
-    await composer.getByRole('radio', { name: 'Yes' }).press('Enter')
+    await composer.getByRole('radio', { name: 'Yes' }).press('Shift+Enter')
     await settled
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
@@ -591,17 +591,17 @@ describe('web e2e: empty-draft Cmd+Enter steers the whole queue', () => {
     // question-composer takeover cannot race queue publication or the shortcut.
     await page.locator('[data-composer-input][contenteditable="true"]').first().waitFor({ timeout: 10_000 })
     await input.fill(PROMPT)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     // The turn must report busy before the next two sends: Enter's queue gesture
     // resolved against a not-yet-running agent admits the message into the turn
     // instead of publishing a Queue row.
     await page.getByRole('button', { name: 'Stop generating' }).waitFor({ timeout: 10_000 })
     await page.locator('[data-composer-input][contenteditable="true"]').first().waitFor({ timeout: 10_000 })
     await input.fill(STEER_ONE)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     await page.locator('[data-composer-input][contenteditable="true"]').first().waitFor({ timeout: 10_000 })
     await input.fill(STEER_TWO)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     const dock = page.locator('[data-queue-dock]')
     // Both messages queued: the two-row dock is collapsed, so it renders the
     // count header and no rows. Expand it through the header, then assert each
@@ -647,7 +647,7 @@ describe('web e2e: empty-draft Cmd+Enter steers the whole queue', () => {
     const composer = page.locator('[data-question-key]')
     await composer.waitFor({ timeout: 30_000 })
     await composer.getByRole('radio', { name: 'Yes' }).click()
-    await composer.getByRole('radio', { name: 'Yes' }).press('Enter')
+    await composer.getByRole('radio', { name: 'Yes' }).press('Shift+Enter')
     await settled
 
     const first = claimedMessages(sessionEvents, STEER_ONE)

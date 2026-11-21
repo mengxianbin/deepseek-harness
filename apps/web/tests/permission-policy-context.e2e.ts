@@ -149,25 +149,25 @@ describe('web e2e: current sandbox policy reaches the model before tools', () =>
     let sessionId: Awaited<ReturnType<WebScaffold['whenTurnSettled']>> | undefined
     for (const [index, preset] of ['read-only', 'danger-full-access', 'workspace-write'].entries()) {
       await writeComposerDraft(page, input, `/permission ${preset}`)
-      await input.press('Enter')
+      await input.press('Shift+Enter')
       await page.getByRole('button', { name: `Access mode, current: ${PRESET_LABELS[index]}` })
         .waitFor({ timeout: 10_000 })
 
       const settled = scaffold.whenTurnSettled()
       await writeComposerDraft(page, input, PROMPTS[index] as string)
-      await input.press('Enter')
+      await input.press('Shift+Enter')
       sessionId = await settled
       await input.waitFor({ timeout: 10_000 })
       await verifyUserTerminal(preset)
     }
 
     await writeComposerDraft(page, input, '/permission read-only')
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     await page.getByRole('button', { name: 'Access mode, current: Read Only' }).waitFor({ timeout: 10_000 })
     await verifyUserTerminal('read-only')
     const settled = scaffold.whenTurnSettled()
     await writeComposerDraft(page, input, PROMPTS[3])
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     sessionId = await settled
 
     if (sessionId === undefined) throw new Error('permission-policy scenario completed no model turn')

@@ -386,6 +386,14 @@ export type RowToast =
    * never as a dialog.
    */
   | { kind: 'sealStale'; sessionId: SessionId; followUpCount?: number }
+  /**
+   * archive-seal-falsered-1116 段3 灯门对账: the row lamp paints green while
+   * the click-time endorsement recheck answered `no-endorsement` — a split
+   * (the 2026-11-16 false red). The one-line notice offers a retry instead of
+   * opening the unsealed force-archive dialog straight away; the retry's
+   * action re-runs the gate.
+   */
+  | { kind: 'sealEndorseRetry'; sessionId: SessionId }
   | { kind: 'sessionIdCopied' }
   | { kind: 'sessionIdCopyFailed' }
   | { kind: 'pinFailed' }
@@ -607,6 +615,12 @@ export interface RowToastActions {
    * confirmation still names the chatter count the notice showed.
    */
   continueSealedArchive: (sessionId: SessionId, followUpCount?: number) => void
+  /**
+   * Re-run the archive gate the endorsement-retry notice paused (archive-seal-falsered-1116 段3):
+   * the fresh check re-probes git; green archives quietly, a still-red answer
+   * then opens the force dialog (the retry never seals the escape hatch shut).
+   */
+  retrySealedArchive: (sessionId: SessionId) => void
 }
 
 /** Props of the rename dialog entry in `shell.overlay`. */

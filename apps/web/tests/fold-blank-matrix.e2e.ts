@@ -763,7 +763,7 @@ async function run(world: World, scenario: Case): Promise<RunResult> {
         }
         await placeReader(page, root, scenario.reader)
         await composerOf(world).fill(NEXT_INPUT)
-        await composerOf(world).press('Enter')
+        await composerOf(world).press('Shift+Enter')
         const steerButton = page.getByRole('button', { name: 'Steer queued message' })
         await steerButton.waitFor({ timeout: 15_000 })
         if (scenario.origin === 'steer') {

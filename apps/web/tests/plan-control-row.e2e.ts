@@ -130,7 +130,7 @@ describe('web e2e: plan chip click area at the narrow viewport', () => {
     const input = page.locator('[data-composer-input]').first()
     await input.waitFor({ timeout: 10_000 })
     await input.fill('/plan ')
-    await input.press('Enter')
+    await input.press('Shift+Enter')
 
     // The command handler commits plan/mode active immediately (no model
     // round), so the chip renders and the composer control row — the surface
@@ -193,7 +193,7 @@ describe('web e2e: plan chip click area at the narrow viewport', () => {
     await page.evaluate(async () => { await document.fonts.ready })
     await resizeControls(page, 1680)
     await input.fill('/plan ')
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     await chip.waitFor({ timeout: 15_000 })
     await selectModel(page, LONG_MODEL)
     await expectControlLayout(page, false)
@@ -235,7 +235,7 @@ describe('web e2e: plan chip click area at the narrow viewport', () => {
     await expectControlLayout(page, false)
     const withoutPlan = await controlLayout(page)
     await input.fill('/plan ')
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     await chip.waitFor({ timeout: 15_000 })
     await expectControlLayout(page, true)
     await chip.click()

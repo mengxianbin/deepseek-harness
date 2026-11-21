@@ -10,7 +10,7 @@ import { configurationFixture } from './configuration-fixture.ts'
 it('shares composition for entries without config overrides while retaining group and insert inheritance', async () => {
   const { ctx, profile, start } = await configurationFixture({ hmr: false })
   await ctx.fiber.dispose()
-  writeFileSync(profile.patchPath, JSON.stringify([
+  writeFileSync(join(profile.dir, 'cordis.local.patch.yml'), JSON.stringify([
     { id: 'first', config: { ordinary: 'fixed', count: 8 } },
     { id: 'first', config: { ordinary: 'fixed', count: 9 } },
     { id: 'second', disabled: false },
@@ -75,7 +75,7 @@ it.each([0, 13, 190])('bounds composition work for 190 entries with %i config ov
   }))
   patches[0]!.insert.push(...entries)
   writeFileSync(bundlePath, JSON.stringify(patches))
-  writeFileSync(profile.patchPath, JSON.stringify(patches[0]!.insert.slice(0, overrideCount).map(entry => ({
+  writeFileSync(join(profile.dir, 'cordis.local.patch.yml'), JSON.stringify(patches[0]!.insert.slice(0, overrideCount).map(entry => ({
     id: entry.id, config: entry.config ?? {},
   }))))
   const restored = await start()

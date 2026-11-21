@@ -16,14 +16,14 @@ import type { ConversationSettings } from '../../submission-settings.ts'
 export { DEFAULT_BUSY_ENTER_BEHAVIOR } from '../../submission-settings.ts'
 
 /**
- * Resolve one submission gesture against the busy-Enter preference. Plain
- * Enter and the primary Send button share the `enter` gesture, so the button
- * delivers exactly what Enter would. Direct `steer` is intentionally
- * best-effort: AgentLoop turns a closed-window submission into the next waking
- * Queue item.
+ * Resolve one submission gesture against the busy-Enter preference. The
+ * Shift+Enter send gesture and the primary Send button share the `enter`
+ * gesture, so the button delivers exactly what the send gesture would. Direct
+ * `steer` is intentionally best-effort: AgentLoop turns a closed-window
+ * submission into the next waking Queue item.
  * @param preferred - the live busy-Enter preference.
  * @param running - whether the addressed agent currently reports busy.
- * @param gesture - plain Enter (or the Send button) or the Cmd/Ctrl-accelerated chord.
+ * @param gesture - the Shift+Enter send gesture (or the Send button) or the Cmd/Ctrl-accelerated chord.
  * @param steeringAvailable - whether this session transport supports steering.
  * @returns Queue outside steer-capable busy state; otherwise the preferred mode or its opposite.
  */

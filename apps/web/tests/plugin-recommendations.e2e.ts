@@ -49,7 +49,7 @@ describe('official plugin recommendation in a conversation', () => {
     const settled = scaffold.whenTurnSettled()
     const prompts = fixtureUserPrompts(await readFile(fixture, 'utf8'))
     await input.fill(prompts[0]!)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     await settled
     const card = page.locator('[data-action-card]')
     await card.waitFor({ state: 'visible' })
@@ -79,7 +79,7 @@ describe('official plugin recommendation in a conversation', () => {
     await compareOrRefreshGolden(join(directory, 'dismissed.expected.md'), await captureStableAria(page, '[data-action-card]', scaffold.workspaceCwd), scaffold.mode)
     const statusSettled = scaffold.whenTurnSettled()
     await input.fill(prompts[1]!)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     await statusSettled
     await page.getByText('Voice input is not enabled: you dismissed the card.', { exact: true }).waitFor()
     expect(await card.count()).toBe(1)

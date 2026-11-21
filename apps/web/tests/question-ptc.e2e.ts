@@ -71,7 +71,7 @@ describe.skipIf(webSnapshotMode() === 'record')('web e2e: PTC answered question'
     const settled = scaffold!.whenTurnSettled(60_000)
     const input = page.locator('[data-composer-input]').first()
     await input.fill('Ask me which color to retain.')
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     const composer = page.locator('[data-question-key]')
     await composer.getByRole('radio', { name: 'Blue', exact: true }).click()
     await composer.getByRole('button', { name: 'Submit', exact: true }).click()

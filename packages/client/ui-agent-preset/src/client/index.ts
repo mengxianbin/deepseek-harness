@@ -1,16 +1,15 @@
 /**
- * Agent-preset surface plugin, browser half — three surfaces over one roster:
- * a chip on the new-session screen for the session about to start, a
- * read-only label in the session header, and a settings section that lists
- * the roster (selection, the new-task default, a read-only view of each
- * declared composition, and the way into Creator mode).
+ * Agent-preset surface plugin, browser half — two surfaces over one roster:
+ * a chip on the new-session screen for the session about to start, and a
+ * settings section that lists the roster (selection, the new-task default, a
+ * read-only view of each declared composition, and the way into Creator mode).
  *
  * A running session keeps the composition it began with (the host switches a
- * session's preset only before its first turn). That is what splits
- * the choice from the display: the hero chip is before-the-fact, while the
- * header only reports what a session already runs. The default preset is
- * edited where the roster is visible — the settings section's "make default"
- * — so General settings carries no duplicate control for the same field.
+ * session's preset only before its first turn), so the chip is
+ * before-the-fact and the session header carries no preset control at all.
+ * The default preset is edited where the roster is visible — the settings
+ * section's "make default" — so General settings carries no duplicate
+ * control for the same field.
  *
  * Coding Tools (General settings) hide PTC and Minimal from the hero menu
  * and Settings roster when off. Hidden saved defaults fall back to Standard;
@@ -33,9 +32,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
-import { AgentPresetLabel } from './AgentPresetLabel.tsx'
 import { CreatePluginMenuItem } from './CreatePluginMenuItem.tsx'
-import type { AgentPresetLabelInjected } from './AgentPresetLabel.tsx'
 import { AgentPresetSeat } from './AgentPresetSeat.tsx'
 import type { AgentPresetSeatInjected } from './AgentPresetSeat.tsx'
 import { AgentPresetSection } from './AgentPresetSection.tsx'
@@ -53,7 +50,6 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 }
 
-export type { AgentPresetLabelInjected, AgentPresetLabelProps } from './AgentPresetLabel.tsx'
 export type { AgentPresetSeatInjected, AgentPresetSeatProps } from './AgentPresetSeat.tsx'
 export type { AgentPresetSectionInjected, AgentPresetSectionProps } from './AgentPresetSection.tsx'
 export type { AgentPresetSeatState } from './seat-store.ts'
@@ -67,7 +63,7 @@ export const inject = [
 ]
 
 /**
- * Mount the roster surfaces: hero chip, session-header label, settings section.
+ * Mount the roster surfaces: hero chip, settings section.
  * @param ctx - the browser plugin context.
  */
 export function apply(ctx: ClientContext): void {
@@ -208,11 +204,6 @@ export function apply(ctx: ClientContext): void {
       }
     }
 
-    const labelInjected = (): AgentPresetLabelInjected => ({
-      hooks: { agentPresets: controller.store },
-      load: () => controller.load(),
-    })
-
     const startCreatorDraft = () => {
       // The Host composes the reused draft or new Session; the stage only drives the chip's display and introduction.
       // Navigation opens another blank when the main blank lists a different preset, so that blank is not staged.
@@ -228,20 +219,11 @@ export function apply(ctx: ClientContext): void {
         locale: 'settings.agentPreset',
         inject: seatInjected,
       }, AgentPresetSeat)
-      const label = scope.slots.register({
-        name: 'conversation.session.header.actions',
-        id: 'agent-preset',
-        // Static session context occupies the header's leading negative-order band.
-        order: -10,
-        locale: 'settings.agentPreset',
-        inject: labelInjected,
-      }, AgentPresetLabel)
       return () => {
         creatorDraft = undefined
         chip()
-        label()
       }
-    }, 'ui-agent-preset: new-session chip and header label')
+    }, 'ui-agent-preset: new-session chip')
 
     scope.slots.inject('plugins.add.actions', () => scope.slots.register({
       name: 'plugins.add.actions',

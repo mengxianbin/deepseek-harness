@@ -1,5 +1,5 @@
 /** Persistent manager behavior through a real profile Include and Loader. */
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { realpath } from 'node:fs/promises'
 import { once } from 'node:events'
 import { createServer } from 'node:http'
@@ -928,6 +928,32 @@ it('restores the manifest and lockfile after a failed package run, classifying t
   expect(readFileSync(lockPath, 'utf8')).toBe('original lockfile\n')
   expect((await manager.listBundles()).some(row => row.name === 'partial')).toBe(false)
   expect(install).toHaveBeenCalledTimes(4)
+})
+
+it('restores a junctioned lockfile through its target instead of removing the link', async () => {
+  const { manager, dir } = await fixture()
+  const lockPath = join(dir, 'pnpm-lock.yaml')
+  const target = join(dir, 'lockfile-target.yaml')
+  writeFileSync(target, 'original lockfile\n')
+  symlinkSync(target, lockPath, 'junction')
+  expect(lstatSync(lockPath).isSymbolicLink()).toBe(true)
+  const install = vi.spyOn(operations, 'runProfilePnpm').mockImplementation(async () => {
+    const manifest = readProfileManifest('test', dir)
+    manifest.dependencies = { ...manifest.dependencies, partial: '1' }
+    writeFileSync(join(dir, 'package.json'), JSON.stringify(manifest))
+    writeFileSync(target, 'partial lockfile\n')
+    return { exitCode: 42, output: 'ERR_PNPM_META_FETCH_FAIL  GET https://registry/partial: ENOTFOUND', truncated: false, logPath: join(dir, 'pnpm.log') }
+  })
+  onTestFinished(() => { install.mockRestore() })
+  const before = readFileSync(join(dir, 'package.json'), 'utf8')
+  expect(await manager.installBundle('partial')).toMatchObject({
+    changed: false, application: 'failed', stage: 'install', target: 'partial',
+    error: { code: 'operation-error', diagnostic: expect.stringContaining('ENOTFOUND') as string },
+  })
+  expect(readFileSync(join(dir, 'package.json'), 'utf8')).toBe(before)
+  // The link survives and its target holds the original content again.
+  expect(lstatSync(lockPath).isSymbolicLink()).toBe(true)
+  expect(readFileSync(target, 'utf8')).toBe('original lockfile\n')
 })
 
 it('keeps saved changes after activation failure and allows a corrected configuration to retry', async () => {

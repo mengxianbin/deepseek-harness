@@ -51,7 +51,7 @@ describe('web e2e: prompt admission', () => {
     const held = Promise.withResolvers<Route>()
     await page.route('**/api/session/prompt', (route) => { held.resolve(route) }, { times: 1 })
     await input.fill(HELD)
-    await input.press('Enter')
+    await input.press('Shift+Enter')
     const prompt = await held.promise
     const sending = page.getByRole('button', { name: 'Sending message', exact: true })
     await expect.poll(() => sending.getAttribute('aria-busy')).toBe('true')

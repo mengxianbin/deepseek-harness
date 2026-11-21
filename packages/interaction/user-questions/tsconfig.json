@@ -37,6 +37,9 @@
     },
     {
       "path": "../../core/tool-executor-ptc"
+    },
+    {
+      "path": "../../util/home-paths"
     }
   ]
 }

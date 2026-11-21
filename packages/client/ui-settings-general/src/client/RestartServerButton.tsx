@@ -4,6 +4,7 @@ import clsx from 'clsx'
 import { Button, IconRefreshOutlineMedium, Modal, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { RESTART_PATH, type RestartSignalView } from '../restart.ts'
+import { restartDispatchReason } from './restart-reason.ts'
 import css from './RestartServerButton.module.css'
 
 /** Copy seat plus the page's restart capability as plain data (no sources). */
@@ -159,7 +160,13 @@ export function RestartServerButton({ t, configured, runningSessions, wide, sign
   const closeConfirm = (): void => { setConfirming(false) }
   const dispatch = (): void => {
     setConfirming(false)
-    fetch(RESTART_PATH, { method: 'POST' })
+    fetch(RESTART_PATH, {
+      method: 'POST',
+      // Machine-readable motive for the audit line: lit lamp → signal-<state|reason>,
+      // dark → manual (restart-attribution-inbox-1118 批1 L3; server reads it unchanged).
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ reason: restartDispatchReason(signal) }),
+    })
       .then((response) => {
         // 409 = in-flight claim refusal (D): another dispatch owns the slot —
         // report it honestly as "busy" instead of a fake success or a false failure.

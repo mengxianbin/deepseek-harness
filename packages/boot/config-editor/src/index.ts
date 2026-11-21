@@ -7,7 +7,10 @@ import { entryListSchema, type PatchOptions } from '@deepseek-ai/cordis-plugin-i
 import yaml from 'js-yaml'
 import type { Entry, EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-hmr'
-import { composeEntries, loadProfileDirectory, readProfilePatches, reconcileProfilePatches } from '@deepseek-ai/dsh-app-boot'
+import {
+  composeEntries, loadOptionalPatches, loadProfileDirectory, LOCAL_PATCH_FILENAME, PROFILE_PATCH_FILENAME,
+  readProfilePatches, reconcileProfilePatches,
+} from '@deepseek-ai/dsh-app-boot'
 import { resolveLinkedPath, withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { auditLine } from '@deepseek-ai/dsh-audit-line'
 import { isMap, isSeq, parseDocument, Scalar, visit } from 'yaml'
@@ -53,8 +56,10 @@ export class ConfigEditor extends Service {
     super(ownerContext, 'configEditor')
   }
 
-  /** The profile patch edited by this service. */
-  get documentPath(): string { return resolveLinkedPath(this.ownerContext.profileContext.patchPath) }
+  /** The local patch document edited by this service: the volatile layer above home. */
+  get documentPath(): string {
+    return resolveLinkedPath(join(this.ownerContext.profileContext.dir, LOCAL_PATCH_FILENAME))
+  }
 
   /** Addressable profile rows; nested Includes have independent configuration ownership.
    * @returns Active entries with unique profile patch ids.
@@ -66,39 +71,49 @@ export class ConfigEditor extends Service {
     return candidates.filter(entry => counts.get(entry.options.id) === 1)
   }
 
-  /** Read inherited and explicit profile values for the active entries.
+  /** Read inherited and explicit values for the active entries across every file layer.
    * @returns Detached layer values alongside their Loader entries.
    */
   configuration(): Array<{ entry: Entry; inherited: Record<string, unknown>; override: Record<string, unknown> }> {
     const profile = this.ownerContext.profileContext
     const loaded = loadProfileDirectory('dsh', profile.dir, profile.installAnchor)
+    const home = loadOptionalPatches('dsh', join(profile.home, PROFILE_PATCH_FILENAME)) ?? []
+    const local = loadOptionalPatches('dsh', join(profile.dir, LOCAL_PATCH_FILENAME)) ?? []
     const entries = this.entries()
     // An own config key can replace inherited config even when its value is undefined.
-    const overridden = new Set(loaded.patches.filter(patch => patch.insert === undefined && Object.hasOwn(patch, 'config')).map(patch => patch.id))
+    // The local document is the edited layer, so only its own keys count as overrides.
+    const overridden = new Set(local.filter(patch => patch.insert === undefined && Object.hasOwn(patch, 'config')).map(patch => patch.id))
     const composed = new Map<string, EntryOptions>()
     if (entries.some(entry => !overridden.has(entry.options.id))) {
-      for (const row of flatten(composeEntries([...loaded.layers.map(layer => layer.patches), loaded.patches]))) {
+      for (const row of flatten(composeEntries([...loaded.layers.map(layer => layer.patches), loaded.patches, home, local]))) {
         if (!composed.has(row.id)) composed.set(row.id, row)
       }
     }
     return entries.map(entry => ({
       entry,
       inherited: overridden.has(entry.options.id)
-        ? this.inherited(entry, loaded)
+        ? this.inherited(entry, loaded, home, local)
         : structuredClone((composed.get(entry.options.id)?.config ?? {}) as Record<string, unknown>),
-      override: structuredClone((loaded.patches.findLast(
+      override: structuredClone((local.findLast(
         row => row.id === entry.options.id && row.config !== undefined,
       )?.config ?? {}) as Record<string, unknown>),
     }))
   }
 
-  private inherited(entry: Entry, loaded: ReturnType<typeof loadProfileDirectory>): Record<string, unknown> {
-    const patches = loaded.patches.map((patch) => {
+  /** Compose the layers beneath the local document: bundle, profile, and home, then the local layer minus this entry's own config. */
+  private inherited(
+    entry: Entry,
+    loaded: ReturnType<typeof loadProfileDirectory>,
+    home: PatchOptions[],
+    local: PatchOptions[],
+  ): Record<string, unknown> {
+    const patches = local.map((patch) => {
       if (patch.id !== entry.options.id || patch.insert !== undefined) return patch
       const rest = { ...patch }; Reflect.deleteProperty(rest, 'config')
       return rest
     })
-    const row = flatten(composeEntries([...loaded.layers.map(layer => layer.patches), patches])).find(row => row.id === entry.options.id)
+    const row = flatten(composeEntries([...loaded.layers.map(layer => layer.patches), loaded.patches, home, patches]))
+      .find(row => row.id === entry.options.id)
     return structuredClone((row?.config ?? {}) as Record<string, unknown>)
   }
 
@@ -123,7 +138,11 @@ export class ConfigEditor extends Service {
         await reconcileProfilePatches(this.ownerContext.root, beforePatches, 'dsh')
         if (!this.entries().includes(entry)) throw new Error('Configuration entry changed during reload')
         const current = structuredClone((entry.options.config ?? {}) as Record<string, unknown>)
-        const inherited = this.inherited(entry, loadProfileDirectory('dsh', this.ownerContext.profileContext.dir, this.ownerContext.profileContext.installAnchor))
+        const profile = this.ownerContext.profileContext
+        const loaded = loadProfileDirectory('dsh', profile.dir, profile.installAnchor)
+        const home = loadOptionalPatches('dsh', join(profile.home, PROFILE_PATCH_FILENAME)) ?? []
+        const local = loadOptionalPatches('dsh', join(profile.dir, LOCAL_PATCH_FILENAME)) ?? []
+        const inherited = this.inherited(entry, loaded, home, local)
         const next = change(current, inherited)
         const fiber = entry.fiber
         if (fiber.state !== FiberState.ACTIVE) throw new Error('Configuration plugin is no longer active')
@@ -158,12 +177,13 @@ export class ConfigEditor extends Service {
           expression.tag = 'tag:yaml.org,2002:js'
           return expression
         } })
-        const profile = this.ownerContext.profileContext
-        const loaded = loadProfileDirectory('dsh', profile.dir, profile.installAnchor)
-        const patches = readProfilePatches('dsh', profile, { ...loaded, patches: yaml.load(String(document), { schema: entryListSchema }) as PatchOptions[] })
+        // The document sits in the local slot, above bundle, profile, and home:
+        // only a `--patch` overlay applied after it can still change the outcome.
+        const documentPatches = yaml.load(String(document), { schema: entryListSchema }) as PatchOptions[]
+        const patches = readProfilePatches('dsh', profile, loaded, documentPatches)
         const effective = flatten(composeEntries([patches])).find(row => row.id === entry.options.id)
         if (!isDeepStrictEqual(effective?.config ?? {}, next)) {
-          throw new Error(`Configuration for "${entry.options.id}" is overridden by a home patch or command-line overlay`)
+          throw new Error(`Configuration for "${entry.options.id}" is overridden by a command-line overlay`)
         }
         await writeFileAtomic(path, String(document), { mode: 0o600 })
         try {
