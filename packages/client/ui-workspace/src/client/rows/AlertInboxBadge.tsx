@@ -1,20 +1,24 @@
 /**
- * The alert-inbox envelope badge + 双栏面板 (设计档 `session-revival-v2-alert-inbox-1116.md`
- * §七, alert-inbox-signal-face-1116 + **2026-11-18 改版裁定 A/C**): the 工作区
- * section header's sibling seat AFTER the 安康盾 — two dimensions, two seats
- * (盾灯 = mechanism health, 信封 = pending alert entries), never one slot.
+ * The alert-inbox envelope badge + 左右 tab 面板 (设计档 `session-revival-v2-alert-inbox-1116.md`
+ * §七, alert-inbox-signal-face-1116 + **2026-11-18 改版裁定 A/C** +
+ * **2026-11-21 改判 E**): the 工作区 section header's sibling seat AFTER the
+ * 安康盾 — two dimensions, two seats (盾灯 = mechanism health, 信封 = pending
+ * alert entries), never one slot.
  *
- * **改判 A supersedes the old "signal-only, no click" note**: the envelope is
- * now a button that opens the two-column mailbox —
- *   未读栏  = every unread entry (the badge predicate `unread && !archived`),
+ * **改判 A supersedes the old "signal-only, no click" note; 改判 E supersedes A's
+ * two-column presentation**: the envelope opens a LEFT-RIGHT TAB panel —
+ *   未读 tab = every unread entry (the badge predicate `unread && !archived`),
  *             `lastAt` descending, 【已读】 flips it out;
- *   最近24h = every entry whose `lastAt` fell in the trailing 24h (read ones
+ *   最近24h tab = every entry whose `lastAt` fell in the trailing 24h (read ones
  *             included — 误点不丢 / 过夜可见), `lastAt` descending, 【恢复】
  *             flips it back into 未读.
- * 24h is a VIEW window, never a storage bound; neither column auto-clears
- * (改判 C: 已读 / 恢复 are the only two moves).
+ * One list at a time = each row gets the full width and the timestamp never
+ * truncates. Tab labels carry BOTH counts (切走也能看到另一维状态); the default
+ * tab is decided AT OPEN from the current state (有未读 → 未读, else → 最近 24h),
+ * manual switching is immediate. 24h is a VIEW window, never a storage bound;
+ * neither tab auto-clears (改判 C: 已读 / 恢复 are the only two moves).
  *
- * Data rides the health frame (`report.alertInbox.entries` = the two columns'
+ * Data rides the health frame (`report.alertInbox.entries` = the two tabs'
  * union, sorted `lastAt` desc — the fold's write side already clustered). After
  * a successful action the response's fresh report replaces the local draft, so
  * the panel and badge flip immediately instead of waiting for the next 15s
@@ -61,7 +65,7 @@ function stampOf(at: number): string {
 
 type PanelAction = (id: string, action: 'read' | 'restore') => void
 
-/** One row of either column: the class name, its window count + last hit, one action. */
+/** One row of either tab: the class name, its window count + last hit, one action. */
 function AlertInboxRow(
   { entry, t, onAction }: { entry: AlertInboxEntryView; t: WorkspaceBrowserProps['t']; onAction: PanelAction },
 ) {
@@ -85,7 +89,7 @@ function AlertInboxRow(
   )
 }
 
-/** The two columns (改判 A): 未读 ∪ 最近24h, both `lastAt` descending. */
+/** The two tabs (改判 E): 未读 ∪ 最近24h, both `lastAt` descending; one list at a time. */
 function AlertInboxPanel(
   { entries, t, onAction, onClose }: {
     entries: readonly AlertInboxEntryView[]
@@ -98,6 +102,11 @@ function AlertInboxPanel(
   const unread = entries.filter(entry => entry.unread && !entry.archived).sort(byRecency)
   const cutoff = Date.now() - VIEW_WINDOW_MS
   const recent = entries.filter(entry => entry.lastAt >= cutoff).sort(byRecency)
+  // 改判 E: default tab judged AT OPEN (每次打开按当前 unread 状态); 打开后手动切换即时生效.
+  const [tab, setTab] = useState<'unread' | 'recent'>(unread.length > 0 ? 'unread' : 'recent')
+  const shown = tab === 'unread' ? unread : recent
+  const tabLabel = (key: 'alertInbox.column.unread' | 'alertInbox.column.recent', count: number) =>
+    `${t(key)} (${count})`
   return (
     <Modal
       open
@@ -106,24 +115,37 @@ function AlertInboxPanel(
       title={unread.length > 0 ? t('alertInbox.unread').replace('{n}', String(unread.length)) : t('alertInbox.clear')}
       closeLabel={t('alertInbox.close')}
     >
-      <div className={css.columns}>
-        <section className={css.column} data-alert-inbox-column="unread">
-          <h4 className={css.heading}>{t('alertInbox.column.unread')}</h4>
-          {unread.length === 0
-            ? <p className={css.empty}>{t('alertInbox.empty.unread')}</p>
-            : <ul className={css.list}>{unread.map(entry => (
-              <AlertInboxRow key={entry.id} entry={entry} t={t} onAction={onAction} />
-            ))}</ul>}
-        </section>
-        <section className={css.column} data-alert-inbox-column="recent">
-          <h4 className={css.heading}>{t('alertInbox.column.recent')}</h4>
-          {recent.length === 0
-            ? <p className={css.empty}>{t('alertInbox.empty.recent')}</p>
-            : <ul className={css.list}>{recent.map(entry => (
-              <AlertInboxRow key={entry.id} entry={entry} t={t} onAction={onAction} />
-            ))}</ul>}
-        </section>
+      <div className={css.tabs} role="tablist">
+        <button
+          type="button"
+          role="tab"
+          id="alert-inbox-tab-unread"
+          className={tab === 'unread' ? css.tabActive : css.tab}
+          aria-selected={tab === 'unread'}
+          data-alert-inbox-tab="unread"
+          onClick={() => { setTab('unread') }}
+        >
+          {tabLabel('alertInbox.column.unread', unread.length)}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          id="alert-inbox-tab-recent"
+          className={tab === 'recent' ? css.tabActive : css.tab}
+          aria-selected={tab === 'recent'}
+          data-alert-inbox-tab="recent"
+          onClick={() => { setTab('recent') }}
+        >
+          {tabLabel('alertInbox.column.recent', recent.length)}
+        </button>
       </div>
+      <section data-alert-inbox-tabpanel={tab}>
+        {shown.length === 0
+          ? <p className={css.empty}>{tab === 'unread' ? t('alertInbox.empty.unread') : t('alertInbox.empty.recent')}</p>
+          : <ul className={css.list}>{shown.map(entry => (
+            <AlertInboxRow key={entry.id} entry={entry} t={t} onAction={onAction} />
+          ))}</ul>}
+      </section>
     </Modal>
   )
 }
