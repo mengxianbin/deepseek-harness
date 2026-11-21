@@ -206,6 +206,11 @@ describe('heavy-io gate wiring', () => {
       ['heavy:test:coverage:partitioned', 'pnpm run test:coverage:partitioned'],
       ['heavy:test:gui', 'vitest run packages/client packages/host'],
       ['heavy:install', 'pnpm install'],
+      // 0d25c4d66c (2026-11-19) wrapped 3 bare heavy keys but trailed this
+      // list — reverse completeness went red; assertions only, no script changes.
+      ['heavy:typecheck:contracts-ready', 'tsc -b tsconfig.client.json'],
+      ['heavy:lint:contracts-ready', 'tsx scripts/run-oxlint.ts .'],
+      ['heavy:lint:fix:contracts-ready', 'tsx scripts/run-oxlint.ts --config .oxlintrc.staged.json packages/typert/generator/tests/fixtures/type-model --fix && tsx scripts/run-oxlint.ts . --fix'],
       // B-case bare-path closure: `test` and `test:coverage` previously sat
       // ungated behind these twins, so a direct `pnpm run test` raced queued
       // jobs. Now wrapped in place. FORK dsh-local (fastlane-2s-1101): `test`
