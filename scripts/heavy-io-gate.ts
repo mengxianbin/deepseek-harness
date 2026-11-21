@@ -13,14 +13,20 @@
  * the queue until a human kills it (watchdog alarms at 45 min of hold time).
  *
  * Usage: `tsx scripts/heavy-io-gate.ts "<shell command>"`.
- * CI (`CI=true`), `DSH_HEAVY_IO=0`, and nested calls that already hold the gate
- * (`DSH_HEAVY_IO_HELD=1`) pass the command straight through.
+ * CI (`CI=true`) passes straight through. Full-cold commands (full-repo lint /
+ * test matrices, 三级准入) require the `DSH_FULLCHECK_OK=1` token and are
+ * refused *before* queueing without it (default-deny, 2026-11-14
+ * fullcheck-token — design: m-note content/tech/ai/dsh/fullcheck-token-1114.md);
+ * that check runs BEFORE the `DSH_HEAVY_IO=0` / `DSH_HEAVY_IO_HELD=1`
+ * passthroughs, because a leaked held-env in a persistent shell once ran two
+ * full lints unserialized for 2 h (2026-11-14 17:12/17:18). Hot commands keep
+ * the off/held passthrough semantics unchanged.
  *
  * Every transition also appends one observation line to a history.log kept
  * outside the lock directory (acquire / waiting / stale-break / release /
- * passthrough, each with ISO time, pid and command). Pure observation: no gate
- * decision reads it and every write failure is swallowed, so a full disk costs
- * at most the log line, never the gate.
+ * passthrough / refused, each with ISO time, pid and command). Pure observation:
+ * no gate decision reads it and every write failure is swallowed, so a full disk
+ * costs at most the log line, never the gate.
  */
 import { spawn, spawnSync } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
@@ -91,7 +97,7 @@ const OWNERLESS_READ_BACKOFF_MS = 100
  * Every failure path (full disk, missing permission, bad override path) is
  * swallowed here: history is pure observation and must never affect the gate.
  * @param file - History file path.
- * @param event - Event name (acquire / waiting / stale-break / release / passthrough).
+ * @param event - Event name (acquire / waiting / stale-break / release / passthrough / refused).
  * @param command - The gated command.
  * @param fields - Extra key=value fields, rendered before `cmd`.
  */
@@ -295,6 +301,58 @@ function passthroughReason(env: NodeJS.ProcessEnv): 'ci' | 'off' | 'held' | unde
 }
 
 /**
+ * Full-cold command patterns (三级准入 · fullcheck-token, 2026-11-14).
+ * 全-冷 = full-repository check matrices that historically flooded the queue
+ * (2026-11-13: 27 full-lint acquires ≈ 9 h of hold time in one day). The list
+ * mirrors guard-core's `_FULL_COLD_KEYS` (m-note `scripts/guard/guard-core.py`);
+ * the two implementations are deliberately independent across repos — the
+ * semantic source is `content/tech/ai/dsh/fullcheck-token-1114.md` §二, and a
+ * new full-cold entry must land on both sides in the same batch.
+ * Patterns match the *gated command string* (inner command of package.json
+ * wrappers, lefthook forms, and the run-oxlint sink's argv join), not script
+ * keys, so inner keys like `npm run lint:contracts-ready` are covered together
+ * with the outer `pnpm run lint` form. Targeted forms (staged lint with a
+ * config + file list, `vitest run --config …`, `vitest run <path>`) intentionally
+ * do NOT match — they stay hot-path queue citizens.
+ */
+const FULL_COLD_PATTERNS: readonly RegExp[] = [
+  // pnpm|npm|yarn run lint[:…] / pnpm lint — the lint family (outer + inner keys)
+  /\b(?:pnpm|npm|yarn)\s+(?:run\s+)?lint(?::|[\s]|$)/i,
+  // full-repository oxlint sink: `run-oxlint.ts .` (bare dot = repo root arg)
+  /run-oxlint\.ts\s+\./,
+  // pnpm run test:all key form; the wrapper's expanded inner form
+  // (`… && vitest run`) is caught by the bare-vitest pattern below
+  /\b(?:pnpm|npm|yarn)\s+(?:run\s+)?test:all(?::|[\s]|$)/i,
+  // bare full suite: `… && vitest run` / `vitest run --coverage` — a following
+  // --config flag or path argument means targeted (hot), so the lookahead
+  // only accepts end-of-command or a trailing `&&` chain
+  /vitest\s+run(?:\s+--coverage)?(?=\s*(?:&&|$))/,
+  // check:all key form / run-gates.ts check-all (local full matrix)
+  /\b(?:pnpm|npm|yarn)\s+(?:run\s+)?check:all(?::|[\s]|$)/i,
+  /run-gates\.ts\s+check-all\b/,
+]
+
+/**
+ * Classify a gated command as full-cold (requires the fullcheck token).
+ * @param command - The command string the gate is about to queue.
+ * @returns true when the command belongs to the cold full-repo check tier.
+ */
+export function isFullColdCommand(command: string): boolean {
+  return FULL_COLD_PATTERNS.some(pattern => pattern.test(command))
+}
+
+/**
+ * Whether the fullcheck token authorizes full-cold execution.
+ * Static env by design — no rotation, no state, one string comparison
+ * (decision record Q3: m-note content/tech/ai/dsh/fullcheck-token-1114.md).
+ * @param env - Environment of this process.
+ * @returns true when DSH_FULLCHECK_OK=1 is present.
+ */
+export function fullcheckAuthorized(env: NodeJS.ProcessEnv): boolean {
+  return env.DSH_FULLCHECK_OK === '1'
+}
+
+/**
  * Queue for the machine-wide heavy lock and hold it until the lease is released.
  * Pure queue (2026-11-12 定稿): no wait bound, no fail-open — a waiter polls
  * until every live holder has released; only a dead owner breaks early.
@@ -308,6 +366,25 @@ export async function enterHeavyIoGate(
   command: string,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<{ release: () => Promise<void> } | undefined> {
+  // CI = 授权环境：全量检查是 CI 本职，一律透传（token 不适用）。
+  if (env.CI === 'true') {
+    recordHistory(historyFile(env), 'passthrough', command, { reason: 'ci' })
+    return undefined
+  }
+  // 三级准入（fullcheck-token 2026-11-14）：全-冷命令 default-deny——排队前
+  // 拒绝（不是排队），history 留 refused 行供审计。**置于 off/held 透传之前**：
+  // 2026-11-14 17:12/17:18 实证，持久壳 DSH_HEAVY_IO_HELD 泄漏曾让两棵全量
+  // lint 以 reason=held 绕闸并发跑 2 小时（free 0.2G 打穿）——HELD/OFF 不得绕证；
+  // 合法嵌套不受影响（持证父生出的子树继承 DSH_FULLCHECK_OK，决策记录 Q2）。
+  if (isFullColdCommand(command) && !fullcheckAuthorized(env)) {
+    recordHistory(historyFile(env), 'refused', command, { reason: 'fullcheck-token' })
+    throw new Error(
+      `heavy-io-gate: full-cold command refused (DSH_FULLCHECK_OK missing): ${command}\n`
+      + 'Full-repo checks are cold-path only (design: m-note content/tech/ai/dsh/fullcheck-token-1114.md). '
+      + 'Iterate with staged lint / targeted tests; run full checks only via an authorized runner, '
+      + 'or after explicit approval prefix DSH_FULLCHECK_OK=1.',
+    )
+  }
   const reason = passthroughReason(env)
   if (reason !== undefined) {
     recordHistory(historyFile(env), 'passthrough', command, { reason })
@@ -389,7 +466,15 @@ async function waitForHeavyIoLock(directory: string, command: string, env: NodeJ
 async function main(): Promise<void> {
   const command = process.argv.slice(2).join(' ')
   if (command === '') throw new Error('heavy-io-gate: expected a shell command argument after --.')
-  const lease = await enterHeavyIoGate(command, process.env)
+  let lease: { release: () => Promise<void> } | undefined
+  try {
+    lease = await enterHeavyIoGate(command, process.env)
+  } catch (error) {
+    // Full-cold refusal (and any enter failure): print the message without a
+    // stack dump and exit 2 — the queue was never entered.
+    process.stderr.write(`${(error as Error).message}\n`)
+    process.exit(2)
+  }
   if (lease === undefined) {
     // Passthrough was recorded by enterHeavyIoGate — the "was this gated?"
     // question the history exists to answer.

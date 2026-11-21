@@ -3,7 +3,7 @@
  * cases keep the default.
  */
 import { spawn, spawnSync } from 'node:child_process'
-import { readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -14,6 +14,7 @@ import {
   breakStaleHeavyIoLock,
   defaultHistoryFile,
   defaultLockDirectory,
+  isFullColdCommand,
   isProcessAlive,
   readHeavyIoLock,
   releaseHeavyIoLock,
@@ -205,6 +206,11 @@ describe('heavy-io gate wiring', () => {
       ['heavy:test:coverage:partitioned', 'pnpm run test:coverage:partitioned'],
       ['heavy:test:gui', 'vitest run packages/client packages/host'],
       ['heavy:install', 'pnpm install'],
+      // 0d25c4d66c (2026-11-19) wrapped 3 bare heavy keys but trailed this
+      // list — reverse completeness went red; assertions only, no script changes.
+      ['heavy:typecheck:contracts-ready', 'tsc -b tsconfig.client.json'],
+      ['heavy:lint:contracts-ready', 'tsx scripts/run-oxlint.ts .'],
+      ['heavy:lint:fix:contracts-ready', 'tsx scripts/run-oxlint.ts --config .oxlintrc.staged.json packages/typert/generator/tests/fixtures/type-model --fix && tsx scripts/run-oxlint.ts . --fix'],
       // B-case bare-path closure: `test` and `test:coverage` previously sat
       // ungated behind these twins, so a direct `pnpm run test` raced queued
       // jobs. Now wrapped in place. FORK dsh-local (fastlane-2s-1101): `test`
@@ -538,6 +544,161 @@ describe('heavy-io gate history log', () => {
     } finally {
       await rm(directory, { recursive: true, force: true })
       rmSync(blocker, { force: true })
+    }
+  }, 90_000)
+})
+
+describe('heavy-io gate fullcheck token', () => {
+  it('classifies full-cold commands and keeps hot/targeted forms queueable', () => {
+    // 全-冷（无 token 必拒）：lint 家族 / 全仓 oxlint sink / 裸全量 vitest / 全量矩阵
+    expect(isFullColdCommand('pnpm run lint')).toBe(true)
+    expect(isFullColdCommand('pnpm lint')).toBe(true)
+    expect(isFullColdCommand('tsx scripts/compile-referenced-projects.ts host-contracts && npm run lint:contracts-ready')).toBe(true)
+    expect(isFullColdCommand('npm run lint:fix')).toBe(true)
+    expect(isFullColdCommand('run-oxlint.ts .')).toBe(true)
+    expect(isFullColdCommand('pnpm run build:native-system && vitest run')).toBe(true)
+    expect(isFullColdCommand('vitest run --coverage')).toBe(true)
+    expect(isFullColdCommand('tsx scripts/run-gates.ts check-all')).toBe(true)
+    expect(isFullColdCommand('pnpm run check:all')).toBe(true)
+    // 重-热 / 定向（无 token 照常排队）：typecheck/build/fast-config/单文件/staged
+    expect(isFullColdCommand('pnpm run typecheck')).toBe(false)
+    expect(isFullColdCommand('tsx scripts/build.ts --scope typecheck')).toBe(false)
+    expect(isFullColdCommand('pnpm run build:native-system && vitest run --config vitest.fast.config.ts')).toBe(false)
+    expect(isFullColdCommand('vitest run packages/client/ui-session/tests/ui-session.client.spec.ts')).toBe(false)
+    expect(isFullColdCommand('run-oxlint.ts --config .oxlintrc.staged.json --fix apps/web/foo.ts')).toBe(false)
+    expect(isFullColdCommand('node -e "process.exit(7)"')).toBe(false)
+  })
+
+  it('refuses a full-cold command before queueing and records a refused line', async () => {
+    const directory = lockDir('fullcold-refuse')
+    const history = historyPath('fullcold-refuse')
+    try {
+      await rm(directory, { recursive: true, force: true })
+      await rm(history, { force: true })
+      const result = runGate(['echo npm run lint'], {
+        DSH_HEAVY_IO_LOCK_DIR: directory,
+        DSH_HEAVY_IO_HISTORY: history,
+        DSH_FULLCHECK_OK: '',
+        DSH_HEAVY_IO_POLL_MS: '100',
+      })
+
+      expect(result.error).toBeUndefined()
+      expect(result.status).toBe(2)
+      expect(`${result.stdout}${result.stderr}`).toContain('full-cold command refused')
+      expect(`${result.stdout}${result.stderr}`).toContain('DSH_FULLCHECK_OK')
+      // 排队前拒绝：锁目录从未被创建，history 只有 refused 行、无 acquire
+      expect(existsSync(directory)).toBe(false)
+      const text = readFileSync(history, 'utf8')
+      expect(text).toMatch(/ refused pid=\d+ reason=fullcheck-token cmd=echo npm run lint/)
+      expect(text).not.toContain(' acquire ')
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+      await rm(history, { force: true })
+    }
+  }, 90_000)
+
+  it('admits a full-cold command carrying DSH_FULLCHECK_OK=1', async () => {
+    const directory = lockDir('fullcold-token')
+    const history = historyPath('fullcold-token')
+    try {
+      await rm(directory, { recursive: true, force: true })
+      await rm(history, { force: true })
+      const result = runGate(['echo npm run lint'], {
+        DSH_HEAVY_IO_LOCK_DIR: directory,
+        DSH_HEAVY_IO_HISTORY: history,
+        DSH_FULLCHECK_OK: '1',
+        DSH_HEAVY_IO_POLL_MS: '100',
+      })
+
+      expect(result.error).toBeUndefined()
+      expect(result.status).toBe(0)
+      expect(result.stdout.trim()).toBe('npm run lint')
+      const text = readFileSync(history, 'utf8')
+      expect(text).toMatch(/ acquire pid=\d+ cmd=echo npm run lint/)
+      expect(text).not.toContain(' refused ')
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+      await rm(history, { force: true })
+    }
+  }, 90_000)
+
+  it('queues hot commands without the token (three-tier boundary)', async () => {
+    const directory = lockDir('fullcold-hot')
+    const history = historyPath('fullcold-hot')
+    try {
+      await rm(directory, { recursive: true, force: true })
+      await rm(history, { force: true })
+      const result = runGate(['node -e "process.stdout.write(\'hot\')"'], {
+        DSH_HEAVY_IO_LOCK_DIR: directory,
+        DSH_HEAVY_IO_HISTORY: history,
+        DSH_FULLCHECK_OK: '',
+        DSH_HEAVY_IO_POLL_MS: '100',
+      })
+
+      expect(result.error).toBeUndefined()
+      expect(result.status).toBe(0)
+      expect(result.stdout).toBe('hot')
+      const text = readFileSync(history, 'utf8')
+      expect(text).toMatch(/ acquire pid=\d+ cmd=node -e /)
+      expect(text).not.toContain(' refused ')
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+      await rm(history, { force: true })
+    }
+  }, 90_000)
+
+  it('refuses full-cold even under a leaked DSH_HEAVY_IO_HELD (2026-11-14 17:12 incident)', async () => {
+    // 持久壳 HELD 泄漏实证：两棵全量 lint 以 reason=held 绕闸并发跑 2h。
+    // 持证检查必须排在 held/off 透传之前——泄漏的 HELD 不得连证一起绕过。
+    const directory = lockDir('fullcold-held-refuse')
+    const history = historyPath('fullcold-held-refuse')
+    try {
+      await rm(directory, { recursive: true, force: true })
+      await rm(history, { force: true })
+      const result = runGate(['echo npm run lint'], {
+        DSH_HEAVY_IO_LOCK_DIR: directory,
+        DSH_HEAVY_IO_HISTORY: history,
+        DSH_HEAVY_IO_HELD: '1',
+        DSH_FULLCHECK_OK: '',
+        DSH_HEAVY_IO_POLL_MS: '100',
+      })
+
+      expect(result.error).toBeUndefined()
+      expect(result.status).toBe(2)
+      expect(`${result.stdout}${result.stderr}`).toContain('full-cold command refused')
+      const text = readFileSync(history, 'utf8')
+      expect(text).toMatch(/ refused pid=\d+ reason=fullcheck-token cmd=echo npm run lint/)
+      expect(text).not.toContain(' reason=held cmd=echo npm run lint')
+      expect(text).not.toContain(' acquire ')
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+      await rm(history, { force: true })
+    }
+  }, 90_000)
+
+  it('passes nested full-cold carrying both HELD and the token (authorized parent tree)', async () => {
+    const directory = lockDir('fullcold-held-token')
+    const history = historyPath('fullcold-held-token')
+    try {
+      await rm(directory, { recursive: true, force: true })
+      await rm(history, { force: true })
+      const result = runGate(['echo npm run lint'], {
+        DSH_HEAVY_IO_LOCK_DIR: directory,
+        DSH_HEAVY_IO_HISTORY: history,
+        DSH_HEAVY_IO_HELD: '1',
+        DSH_FULLCHECK_OK: '1',
+        DSH_HEAVY_IO_POLL_MS: '100',
+      })
+
+      expect(result.error).toBeUndefined()
+      expect(result.status).toBe(0)
+      expect(result.stdout.trim()).toBe('npm run lint')
+      const text = readFileSync(history, 'utf8')
+      expect(text).toMatch(/ passthrough pid=\d+ reason=held cmd=echo npm run lint/)
+      expect(text).not.toContain(' refused ')
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+      await rm(history, { force: true })
     }
   }, 90_000)
 })
