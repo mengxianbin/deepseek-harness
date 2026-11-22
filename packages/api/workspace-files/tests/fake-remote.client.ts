@@ -36,6 +36,9 @@ export class Source<T> implements AsyncIterable<T> {
 
   /** Resolve after the consumer processes this frame and asks for the next one. */
   deliver(value: T): Promise<void> {
+    // A source the spec already disposed has no consumer left to take the
+    // frame; resolving keeps a late delivery from hanging its producer.
+    if (this.aborted) return Promise.resolve()
     return new Promise((resolve) => {
       this.queue.push({ kind: 'value', value, delivered: resolve })
       this.wake?.()
@@ -72,6 +75,11 @@ export class Source<T> implements AsyncIterable<T> {
       }
     } finally {
       this.signal.removeEventListener('abort', this.abort)
+      // The consumer is gone with the iterator: a queued handoff can never be
+      // taken now, so release its producer instead of stranding the promise.
+      for (const item of this.queue.splice(0)) {
+        if (item.kind === 'value') item.delivered?.()
+      }
     }
   }
 }
