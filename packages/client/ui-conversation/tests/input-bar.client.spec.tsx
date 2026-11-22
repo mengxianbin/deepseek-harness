@@ -14,6 +14,7 @@ import type { InboxState } from '@deepseek-ai/dsh-agent/types'
 import type { GlobalStandardProps } from '@deepseek-ai/dsh-client-ui-slots'
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { act, cleanup, fireEvent, render } from '@testing-library/react'
+import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { $getRoot, $isTextNode } from 'lexical'
 import {
@@ -22,7 +23,6 @@ import {
 } from '@deepseek-ai/dsh-client-test-runtime'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { SessionListState, SessionSnapshot } from '@deepseek-ai/dsh-api-session-controller/client'
-import type { ContextPressureProjection } from '@deepseek-ai/dsh-token-meter/client'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
@@ -104,9 +104,6 @@ interface BenchOptions {
   leftItems?: React.ReactNode
   rightItems?: React.ReactNode
   activityEntry?: (owner: InputActivityOwnerProps) => React.ReactNode
-  contextPressure?: ContextPressureProjection
-  footer?: React.ReactNode
-  footerTrailing?: React.ReactNode
   attachments?: readonly ComposerAttachment[]
   /** Upload states served for file-kind drafts (absent = every file is ready). */
   fileUploads?: DraftFileUploads
@@ -124,6 +121,21 @@ function row(id: string): InboxState['next-turn'][number] {
     id: id as never, role: 'user', source: { kind: 'user' },
     content: [{ type: 'text', text: id }],
   }
+}
+
+/** The bar's props without the seat-owned activity pair (see BenchBar). */
+type BenchBarProps = Omit<InputBarProps, 'activity' | 'onActiveChange'>
+
+/**
+ * The seat-level host the real ConversationContent is for the bar: the
+ * toolbar activity's state lives above the bar with the dock row it hides
+ * (ask-dock-row-1122), so benches render through this wrapper — the same
+ * state-up wiring the seat performs — instead of the bar alone.
+ */
+function BenchBar(props: BenchBarProps) {
+  const [activity, setActivity] = useState(false)
+  useEffect(() => { setActivity(false) }, [props.sessionId])
+  return <InputBar {...props} activity={activity} onActiveChange={setActivity} />
 }
 
 /** Real machine behind the bar entry: sink spy, no slash pipeline (plain text goes straight to the sink). */
@@ -175,15 +187,13 @@ function bench(over?: BenchOptions) {
     if (key === 'conversation.input.overlay') return over?.overlay ?? null
     if (key === 'conversation.input.left') return over?.leftItems ?? null
     if (key === 'conversation.input.right') return over?.rightItems ?? null
-    if (key === 'conversation.composer.dock') return over?.footer ?? null
-    if (key === 'conversation.composer.dock.trailing') return over?.footerTrailing ?? null
     if (key === 'conversation.input.plan') return over?.planEntry ?? null
     if (key === 'conversation.input.permission') return over?.permissionEntry ?? null
     if (key === 'conversation.input.model') return over?.modelEntry ?? null
     if (key === 'conversation.input.activity') return over?.activityEntry?.(owner as InputActivityOwnerProps) ?? null
     return null
   }) as never
-  const props: InputBarProps = {
+  const props: BenchBarProps = {
     usePanelInfo: selector => selector({ activePanelId: null }),
     sessionId: SID,
     SessionProvider: ({ children }) => children,
@@ -206,7 +216,7 @@ function bench(over?: BenchOptions) {
         ? over?.plan
         : key === 'goal' ? over?.goal
           : key === 'imageLimits' ? over?.imageLimits
-            : key === 'contextPressure' ? over?.contextPressure : undefined)),
+            : undefined)),
     useInput: bindSnapshotSelector(shell.state),
     inputActions: shell.actions,
     keyboard: shell,
@@ -237,7 +247,7 @@ function bench(over?: BenchOptions) {
     ...(over?.placeholder !== undefined ? { placeholder: over.placeholder } : {}),
     ...(over?.accessory !== undefined ? { accessory: over.accessory } : {}),
   }
-  const view = render(<InputBar {...props} />)
+  const view = render(<BenchBar {...props} />)
   const textarea = view.container.querySelector<HTMLDivElement>('[data-composer-input]')!
   const sendableDraft = (over?.draft?.trim() ?? '') !== '' || (over?.attachments?.length ?? 0) > 0
   const primaryStops = over?.running === true && over.subagent === undefined
@@ -446,7 +456,7 @@ describe('composer placeholder visibility', () => {
     await act(async () => {})
     expect(sink).not.toHaveBeenCalled()
     fireEvent.blur(textarea)
-    view.rerender(<InputBar {...props} />)
+    view.rerender(<BenchBar {...props} />)
     fireEvent.focus(textarea)
     expect(placeholder()).toBeNull()
     writeDraft(shell, '')
@@ -469,7 +479,7 @@ describe('composer placeholder visibility', () => {
     fireEvent.compositionStart(textarea)
     writeDraft(shell, ' ')
     expect(view.container.querySelector('[data-composer-placeholder]')).toBeNull()
-    view.rerender(<InputBar {...props} />)
+    view.rerender(<BenchBar {...props} />)
     fireEvent.compositionEnd(textarea, { data: ' ' })
     expect(view.container.querySelector('[data-composer-placeholder]')).toBeNull()
     writeDraft(shell, '')
@@ -1318,7 +1328,7 @@ describe('running and lock semantics', () => {
   it('a composer whose access has no answer yet keeps its ordinary Send', () => {
     const { view, props } = bench({ draft: 'hello' })
     // Without a bound Session the Session-scope Hook answers undefined, which denies nothing.
-    view.rerender(<InputBar {...props} useAccess={() => undefined} />)
+    view.rerender(<BenchBar {...props} useAccess={() => undefined} />)
     expect(view.getByLabelText('发送消息')).toBeTruthy()
   })
 
@@ -1416,9 +1426,9 @@ describe('running and lock semantics', () => {
   it('file action availability follows mount and live composer state', () => {
     const { props, view, shell } = bench({ addFiles: () => null })
     expect(shell.canPickFiles()).toBe(true)
-    view.rerender(<InputBar {...props} disabled />)
+    view.rerender(<BenchBar {...props} disabled />)
     expect(shell.canPickFiles()).toBe(false)
-    view.rerender(<InputBar {...props} />)
+    view.rerender(<BenchBar {...props} />)
     expect(shell.canPickFiles()).toBe(true)
     view.unmount()
     expect(shell.canPickFiles()).toBe(false)
@@ -1590,7 +1600,7 @@ describe('running and lock semantics', () => {
     const { view, textarea, props } = bench({ draft: 'line one' })
     const focused: (boolean | undefined)[] = []
     textarea.focus = (options?: FocusOptions) => { focused.push(options?.preventScroll) }
-    act(() => { view.rerender(<InputBar {...props} sessionId={'s2' as SessionId} />) })
+    act(() => { view.rerender(<BenchBar {...props} sessionId={'s2' as SessionId} />) })
     expect(focused).toEqual([true])
   })
 
@@ -1622,11 +1632,11 @@ describe('running and lock semantics', () => {
     const { view, textarea, props, shell, button, sink } = bench({ draft: 'draft' })
     expect(document.activeElement).toBe(automatic ? textarea : outside)
     act(() => { outside.focus() })
-    act(() => { view.rerender(<InputBar {...props} sessionId={'s2' as SessionId} />) })
+    act(() => { view.rerender(<BenchBar {...props} sessionId={'s2' as SessionId} />) })
     expect(document.activeElement).toBe(automatic ? textarea : outside)
     act(() => { outside.focus() })
-    act(() => { view.rerender(<InputBar {...props} disabled />) })
-    act(() => { view.rerender(<InputBar {...props} />) })
+    act(() => { view.rerender(<BenchBar {...props} disabled />) })
+    act(() => { view.rerender(<BenchBar {...props} />) })
     expect(document.activeElement).toBe(automatic ? textarea : outside)
 
     act(() => { outside.focus() })
@@ -2070,24 +2080,18 @@ describe('strips and variants', () => {
     expect(view.container.querySelector('[class*="hero"]')).not.toBeNull()
   })
 
-  it('renders overlay, left/right, footer, and trailing-footer slots at their layout positions', () => {
+  it('renders overlay and left/right slots at their layout positions', () => {
+    // The dock row's own halves (footer + trailing seat) left the bar for the
+    // composer seat with ask-dock-row-1122; their order is asserted on the
+    // seat-level row in skeleton.client.spec.tsx.
     const { view } = bench({
       overlay: <i data-testid="ov" />,
       leftItems: <i data-testid="li" />,
       rightItems: <i data-testid="ri" />,
-      footer: <i data-testid="foot" />,
-      footerTrailing: <i data-testid="trail" />,
     })
     expect(view.getByTestId('ov')).toBeTruthy()
     expect(view.getByTestId('li')).toBeTruthy()
     expect(view.getByTestId('ri')).toBeTruthy()
-    expect(view.getByTestId('foot')).toBeTruthy()
-    expect(view.getByTestId('trail')).toBeTruthy()
-    // The trailing seat sits after the dock row's own entries in document
-    // order: it trails what the dock renders, never precedes it.
-    const foot = view.getByTestId('foot')
-    const trail = view.getByTestId('trail')
-    expect(foot.compareDocumentPosition(trail) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 })
 
@@ -2103,7 +2107,6 @@ describe('command launcher chrome and control seats', () => {
       'conversation.input.overlay', 'conversation.input.attachments',
       'conversation.input.permission', 'conversation.input.plan', 'conversation.input.left',
       'conversation.input.right', 'conversation.input.model', 'conversation.input.activity',
-      'conversation.composer.dock', 'conversation.composer.dock.trailing',
     ])
     expect(view.queryByLabelText('Plan mode')).toBeNull()
     expect(view.queryByLabelText('Model')).toBeNull()
@@ -2127,12 +2130,12 @@ describe('command launcher chrome and control seats', () => {
     expect(view.getByLabelText('停止生成')).toBeTruthy()
 
     // The access snapshot now excludes the Session's writes: the bar offers neither Stop nor Send.
-    view.rerender(<InputBar {...props} useAccess={() => false} />)
+    view.rerender(<BenchBar {...props} useAccess={() => false} />)
     expect(view.queryByLabelText('停止生成')).toBeNull()
     expect(view.queryByLabelText('发送消息')).toBeNull()
 
     // The answers return: the bar offers the action the page holds again.
-    view.rerender(<InputBar {...props} />)
+    view.rerender(<BenchBar {...props} />)
     expect(view.getByLabelText('停止生成')).toBeTruthy()
   })
 
@@ -2196,28 +2199,6 @@ it('lets a toolbar activity replace accessories without replacing the draft edit
   expect(view.getByRole('button', { name: '发送消息' })).toBeTruthy()
   fireEvent.click(view.getByRole('button', { name: 'close activity' }))
   expect(view.getByRole('button', { name: 'model choice' })).toBeTruthy()
-})
-
-it('places context usage below the composer and hides it until the activity closes', () => {
-  const { view } = bench({ draft: 'draft', contextPressure: { pressureTokens: 32_000, contextWindow: 128_000 },
-    activityEntry: owner => <>
-      <button onClick={() => { owner.onActiveChange(true) }}>microphone</button>
-      <button onClick={() => { owner.onActiveChange(false) }}>close activity</button>
-    </>,
-  })
-  const meter = view.getByRole('button', { name: '上下文已用 25%' })
-  const microphone = view.getByRole('button', { name: 'microphone' })
-  expect(microphone.compareDocumentPosition(meter) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-  fireEvent.click(meter)
-  expect(view.getByRole('dialog', { name: '上下文已用' })).toBeTruthy()
-  fireEvent.click(microphone)
-  expect(view.queryByRole('dialog', { name: '上下文已用' })).toBeNull()
-  expect(view.queryByRole('button', { name: '上下文已用 25%' })).toBeNull()
-  expect(view.getByRole('button', { name: '发送消息' })).toBeTruthy()
-  fireEvent.click(view.getByRole('button', { name: 'close activity' }))
-  fireEvent.click(view.getByRole('button', { name: '上下文已用 25%' }))
-  expect(view.getByRole('dialog', { name: '上下文已用' })).toBeTruthy()
-  expect(view.getByRole('button', { name: '发送消息' })).toBeTruthy()
 })
 
 describe('swallowed-click feedback', () => {

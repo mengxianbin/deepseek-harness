@@ -21,6 +21,7 @@ import { createConversationStore } from '../src/client/stores.ts'
 import { SessionInputShell } from '../src/client/input/facade.ts'
 import { en, zh } from '../src/client/locales.ts'
 import { ConversationContent } from '../src/client/skeleton/ConversationContent.tsx'
+import css from '../src/client/skeleton/ConversationRoot.module.css'
 import { ConversationHeader } from '../src/client/skeleton/ConversationHeader.tsx'
 import { ConversationMainPanel } from '../src/client/skeleton/ConversationMainPanel.tsx'
 import { ConversationSession, ConversationSessionHeader } from '../src/client/skeleton/ConversationSession.tsx'
@@ -33,8 +34,9 @@ import type { InputBarProps } from '../src/client/skeleton/InputBar.tsx'
 import type {
   ComposerBarOwnerProps, ConversationContentInputProps, ConversationContentProps,
   ConversationHeaderLineageOwnerProps, ConversationSessionHeaderSlotProps, ConversationSessionSlotProps, ConversationSlotProps,
-  ConversationViewActionsOwnerProps, ConversationViewsProps,
+  ConversationViewActionsOwnerProps, ConversationViewsProps, InputActivityOwnerProps,
 } from '../src/client/contract/slots.ts'
+import type { ContextPressureProjection } from '@deepseek-ai/dsh-token-meter/client'
 import type { ViewTab } from '../src/client/contract/views.ts'
 
 // Every session-scope fixture carries the resource hook the resources plugin merges into GlobalStandardProps.
@@ -147,6 +149,10 @@ function mount(
     entryActions?: boolean
     /** Isolate header capability checks from the composer's required layout observers. */
     headerOnly?: boolean
+    /** Context-pressure projection the seat-level dock row's meter reads. */
+    contextPressure?: ContextPressureProjection
+    /** Render expand/close controls in the bar's activity seat (drives the seat-owned activity state). */
+    activityEntry?: boolean
   } = {},
 ) {
   const sessionId = 'sessionId' in options ? options.sessionId : SID
@@ -319,6 +325,17 @@ function mount(
             // The bar's own seats: recorded so a case can assert what share
             // each tool-row control received.
             seatOwners.push({ key, owner: seatOwner })
+            if (key === 'conversation.input.activity' && options.activityEntry === true) {
+              // The activity seat drives the state the dock row reads: the
+              // expansion rides onActiveChange up to ConversationContent.
+              const activity = seatOwner as InputActivityOwnerProps
+              return (
+                <>
+                  <button type="button" onClick={() => { activity.onActiveChange(true) }}>expand activity</button>
+                  <button type="button" onClick={() => { activity.onActiveChange(false) }}>close activity</button>
+                </>
+              )
+            }
             return null
           }) as InputBarProps['renderSlot']}
           {...bar}
@@ -389,7 +406,12 @@ function mount(
     useResource,
     useWorkspaces: bindSnapshotSelector(workspaces),
     ...allowAllAccess,
-    useProjection: (() => undefined),
+    // The seat-level dock row's meter reads contextPressure through this kit;
+    // every other key stays absent, as the default did.
+    useProjection: ((key: string, selector?: (value: unknown) => unknown) =>
+      (selector ?? ((value: unknown) => value))(
+        key === 'contextPressure' ? options.contextPressure : undefined,
+      )),
     useInput,
     inputActions,
   }
@@ -437,12 +459,14 @@ describe('ConversationRoot resident composer', () => {
 
   it('does not redispatch composer child slots for an unrelated Session publication', () => {
     const b = mount(sessionSnapshotOf())
+    // The dock row's halves are no longer composer children: they dispatch
+    // from the seat layer and re-dispatch with every ConversationContent
+    // render by design (ask-dock-row-1122). What stays stable across an
+    // unrelated publication is the bar's own tool-row seats.
     const childKeys = new Set([
       'conversation.input.overlay',
       'conversation.input.left',
       'conversation.input.right',
-      'conversation.composer.dock',
-      'conversation.composer.dock.trailing',
     ])
     const dispatchCount = () => b.slotCalls.filter(key => childKeys.has(key)).length
     const before = dispatchCount()
@@ -559,6 +583,84 @@ describe('ConversationRoot resident composer', () => {
     const fallback = b.view.container.querySelector('[data-chain-overlay-fallback="conversation.composer"]')
     expect(seat?.contains(takeover)).toBe(true)
     expect(seat?.contains(fallback)).toBe(true)
+  })
+
+  it('keeps the dock row as one seat-level sibling after the chain output', () => {
+    const b = mount(sessionSnapshotOf())
+    const rows = b.view.container.querySelectorAll('[data-composer-dock]')
+    // Exactly one row on the page — the seat-level copy, never a second one
+    // inside the bar or the ask card.
+    expect(rows).toHaveLength(1)
+    const row = rows[0]!
+    const seat = b.view.container.querySelector('[data-composer-seat]')
+    expect(seat?.contains(row)).toBe(true)
+    // The resident stack (chain output) precedes the row: the row is its
+    // sibling, not its child.
+    const stack = row.previousElementSibling
+    expect(stack).not.toBeNull()
+    expect(stack?.contains(b.view.getByRole('textbox'))).toBe(true)
+    // Both halves render inside the row, entries first and the trailing seat
+    // after them (the order the dock contract promises).
+    const entries = b.view.getByTestId('view-conversation.composer.dock')
+    const trailing = b.view.getByTestId('view-conversation.composer.dock.trailing')
+    expect(row.contains(entries)).toBe(true)
+    expect(row.contains(trailing)).toBe(true)
+    expect(entries.compareDocumentPosition(trailing) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('shows the dock row while an elected takeover hides the fallback — one row, never two', () => {
+    const b = mount(sessionSnapshotOf(), undefined, undefined, { overlayTakeover: true })
+    const rows = b.view.container.querySelectorAll('[data-composer-dock]')
+    expect(rows).toHaveLength(1)
+    const row = rows[0]!
+    const seat = b.view.container.querySelector('[data-composer-seat]')!
+    const fallback = b.view.container.querySelector('[data-chain-overlay-fallback="conversation.composer"]')!
+    expect(seat.contains(row)).toBe(true)
+    // The row lives OUTSIDE the display:none fallback the takeover wraps —
+    // this is the whole point of the lift: the ask card hides the resident
+    // bar, not the row that both panels share.
+    expect(fallback.contains(row)).toBe(false)
+    // The row sits right after the takeover in the seat (the seat renders the
+    // chain output first, the row second).
+    expect(b.view.getByTestId('composer-takeover').compareDocumentPosition(row)
+      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('places the context meter in the seat-level row and folds it away while a toolbar activity is expanded', () => {
+    const b = mount(sessionSnapshotOf(), undefined, undefined, {
+      contextPressure: { pressureTokens: 32_000, contextWindow: 128_000 },
+      activityEntry: true,
+    })
+    const row = b.view.container.querySelector('[data-composer-dock]')!
+    const meter = b.view.getByRole('button', { name: '上下文已用 25%' })
+    expect(row.contains(meter)).toBe(true)
+    const expand = b.view.getByRole('button', { name: 'expand activity' })
+    // The bar's activity seat precedes the row its expansion hides.
+    expect(expand.compareDocumentPosition(meter) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    fireEvent.click(meter)
+    expect(b.view.getByRole('dialog', { name: '上下文已用' })).toBeTruthy()
+    fireEvent.click(expand)
+    expect(b.view.queryByRole('button', { name: '上下文已用 25%' })).toBeNull()
+    expect(b.view.queryByRole('dialog', { name: '上下文已用' })).toBeNull()
+    // The editor and the send action stay put while the meter folds away.
+    expect(b.view.getByRole('textbox')).toBeTruthy()
+    expect(b.view.getByRole('button', { name: '发送消息' })).toBeTruthy()
+    fireEvent.click(b.view.getByRole('button', { name: 'close activity' }))
+    expect(b.view.getByRole('button', { name: '上下文已用 25%' })).toBeTruthy()
+  })
+
+  it('carries the hero marker on the empty dock row without rendering its halves', () => {
+    const b = mount(sessionSnapshotOf(), [], undefined, { sessionId: undefined })
+    const rows = b.view.container.querySelectorAll('[data-composer-dock]')
+    expect(rows).toHaveLength(1)
+    const row = rows[0]!
+    // The hero wrapper collapses the empty row through this marker class
+    // (`.dockHero:empty`), the same rule `.hero .dock:empty` was in the bar.
+    expect(row.className).toContain(css.dockHero)
+    expect(row.className).toContain(css.dock)
+    // No composer-variant halves before a Session exists.
+    expect(b.view.container.querySelector('[data-testid="view-conversation.composer.dock"]')).toBeNull()
+    expect(b.view.container.querySelector('[data-testid="view-conversation.composer.dock.trailing"]')).toBeNull()
   })
 
   it('hero phase: keeps sidebar controls accessible while hiding conversation chrome', () => {

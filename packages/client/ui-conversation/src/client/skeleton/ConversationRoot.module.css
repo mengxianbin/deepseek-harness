@@ -448,6 +448,38 @@
   gap: var(--dsh-composer-stack-gap);
 }
 
+/* The dock row (statistics pills + context meter + trailing seat): a sibling
+   of the composer chain output inside the seat, so an elected takeover
+   (the ask card) hides the resident bar without hiding the row
+   (ask-dock-row-1122; moved here from InputBar.module.css, bands and all —
+   the bar's root used to own the bottom 4px). */
+.dock {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  /* Full row width (the seat stretches its children anyway) so the dock can
+     act as an inline-size query container: occupants degrade against the row
+     they sit in, and the explicit width keeps containment from collapsing a
+     shrink-to-fit box to zero. */
+  width: 100%;
+  max-width: 100%;
+  container-type: inline-size;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+/* The hero wrapper keeps its own centered rhythm with no band under the row
+   (was `.hero .dock:empty` in the bar's sheet; the row carries the marker
+   itself now). An empty hero row stays collapsed. */
+.dockHero {
+  padding-bottom: 0;
+}
+
+.dockHero:empty {
+  display: none;
+}
+
 /* Common seat for the composer chain (fallback + elected overlay siblings). */
 .composerSeat {
   display: flex;

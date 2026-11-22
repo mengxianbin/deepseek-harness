@@ -398,6 +398,25 @@ describe('web e2e: resident question composer round trip', () => {
     await expect.poll(() => composer.getByText('Which color do you prefer?').count(), { timeout: 10_000 }).toBeGreaterThan(0)
     expect(await page.locator('[data-question-reply]').count()).toBe(0)
 
+    // ask-dock-row-1122: the shared dock row stays on screen while the ask
+    // card owns the composer — ONE seat-level row (never a second copy inside
+    // the card), sitting right after the takeover in the same seat the input
+    // panel uses, with the statistics pills keeping their single page-wide
+    // instance.
+    const dock = page.locator('[data-composer-dock]')
+    await expect.poll(() => dock.count()).toBe(1)
+    expect(await dock.evaluate(element => element.closest('[data-composer-seat]') !== null)).toBe(true)
+    // The takeover sits immediately before the row (the question card IS the
+    // chain entry's root, so match the element itself as well as descendants).
+    const askCardBeforeRow = await dock.evaluate((element) => {
+      const previous = element.previousElementSibling
+      return previous !== null
+        && (previous.matches('[data-question-key]') || previous.querySelector('[data-question-key]') !== null)
+    })
+    expect(askCardBeforeRow).toBe(true)
+    expect(await composer.locator('[data-composer-dock]').count()).toBe(0)
+    expect(await page.locator('[data-composer-stat]').count()).toBe(1)
+
     const selectedRow = page.locator('[role="treeitem"][aria-selected="true"]')
     await expect.poll(() => selectedRow.locator('[data-state="warning"]').count(), { timeout: 10_000 }).toBe(1)
     await expect.poll(() => selectedRow.getByText('Waiting for answer', { exact: true }).count(), { timeout: 10_000 }).toBe(1)

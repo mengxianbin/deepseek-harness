@@ -310,13 +310,20 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * fallback InputBar.
      */
     'conversation.composer.overlay': { kind: 'list'; scope: 'session' }
-    /** Ambient entries below the composer card. */
+    /**
+     * Ambient entries in the row below the composer card. The row is a
+     * sibling of the composer chain output at the composer seat, so an
+     * elected takeover (the question card) hides the resident bar without
+     * hiding the row: one row serves both panel states.
+     */
     'conversation.composer.dock': { kind: 'list'; scope: 'session' }
     /**
      * Ambient entries at the right end of the row below the composer card,
-     * after the context meter; rendered only under the same composer states
-     * as `conversation.composer.dock`, so a trailing indicator never outlives
-     * the row it trails. Entries receive no owner-specific values.
+     * after the context meter. The row renders for the resident bar and for
+     * an elected takeover alike; the trailing seat renders under exactly the
+     * same guard as `conversation.composer.dock`, so a trailing indicator
+     * never outlives the row it trails. Entries receive no owner-specific
+     * values.
      */
     'conversation.composer.dock.trailing': { kind: 'list'; scope: 'session' }
     /** Compact controls at the left of the composer tool row. */
@@ -354,6 +361,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
         'conversation.session': { kind: 'single'; scope: 'session' }
         'conversation.composer': { kind: 'chain'; scope: 'session' }
         'conversation.composer.bar': { kind: 'single'; scope: 'session-maybe' }
+        'conversation.composer.dock': { kind: 'list'; scope: 'session' }
+        'conversation.composer.dock.trailing': { kind: 'list'; scope: 'session' }
         'conversation.input.dock': { kind: 'list'; scope: 'session' }
         'conversation.hero.brand.mark': { kind: 'single'; scope: 'root' }
         'conversation.hero.workspace': { kind: 'single'; scope: 'root' }
@@ -526,6 +535,14 @@ export interface ConversationSessionHeaderInjected {
 export interface ComposerBarOwnerProps {
   /** Hero uses centered placement; composer uses the active bottom placement. */
   variant: 'hero' | 'composer'
+  /**
+   * Whether the toolbar activity has expanded across the tool row. The state
+   * lives at the composer seat with the dock row the expansion hides, so the
+   * seat passes it down rather than keeping a second copy in the bar.
+   */
+  activity: boolean
+  /** Reports the toolbar activity's expanded state up to the seat layer. */
+  onActiveChange: (active: boolean) => void
   /** A feature-owned reason that makes message input inert while leaving model selection live. */
   blocked?: { readonly reason: string }
   /** Lock all message actions while preserving the resident composer surface. */
@@ -587,7 +604,11 @@ export interface InputControlOwnerProps {
   locked: boolean
 }
 
-/** A toolbar activity hides ordinary accessory controls while expanded; its occupant must release expansion on unmount. */
+/**
+ * A toolbar activity hides ordinary accessory controls and the seat-level
+ * context meter while expanded; its occupant must release expansion on
+ * unmount.
+ */
 export interface InputActivityOwnerProps extends InputControlOwnerProps {
   /** @param active - whether the occupant needs the toolbar width before the submit action. */
   onActiveChange: (active: boolean) => void
@@ -601,7 +622,6 @@ export type ComposerBarProps =
     | 'conversation.input.permission'
     | 'conversation.input.left' | 'conversation.input.plan'
     | 'conversation.input.right' | 'conversation.input.model' | 'conversation.input.activity'
-    | 'conversation.composer.dock' | 'conversation.composer.dock.trailing'
   >
   & InjectFace<ComposerBarInjected>
   & PropsLocale<'conversation'>
