@@ -108,10 +108,11 @@ it('decodes every generated and shipped icon with its full artwork and opaque co
   } finally { await browser.close() }
 })
 
-it('ships fixed-color favicons selected by document media queries', async () => {
+it('ships fixed-color favicon files but no document icon links', async () => {
   const index = await readFile(join(DIST_ROOT, 'index.html'), 'utf8')
-  expect(index).toContain('<link rel="icon" type="image/svg+xml" href="./favicon-dark.svg" media="(prefers-color-scheme: dark)" />')
-  expect(index).toContain('<link rel="icon" type="image/svg+xml" href="./favicon.svg" media="(prefers-color-scheme: light)" />')
+  // whale-icon-strip-1122: the tab icon <link rel="icon"> references are
+  // stripped from the document; the favicon files stay for manifest/tests.
+  expect(index).not.toContain('<link rel="icon"')
   const light = await readFile(join(DIST_ROOT, 'favicon.svg'), 'utf8')
   const dark = await readFile(join(DIST_ROOT, 'favicon-dark.svg'), 'utf8')
   expect(light).not.toContain('<style>')

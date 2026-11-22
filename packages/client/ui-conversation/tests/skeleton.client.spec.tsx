@@ -435,15 +435,10 @@ describe('Hero chrome', () => {
     const view = render(<HeroShell t={makeTranslate(en, commonEn)} renderSlot={renderSlot} />)
     expect(view.getByText('What can I do for you?')).toBeTruthy()
     expect(view.queryByText('Preview')).toBeNull()
-    expect(renderSlot).toHaveBeenCalledOnce()
-    expect(renderSlot.mock.calls[0]?.[0]).toBe('conversation.hero.brand.mark')
-    const brandMarkOwner = renderSlot.mock.calls[0]?.[1]
-    if (brandMarkOwner === undefined || !('size' in brandMarkOwner) || !('className' in brandMarkOwner)) {
-      throw new Error('hero brand-mark owner must provide size and className')
-    }
-    expect(brandMarkOwner.size).toBe(34)
-    expect(brandMarkOwner.className).toBeTypeOf('string')
-    expect(renderSlot.mock.calls[0]?.[2]?.fallback).toBeTruthy()
+    // whale-icon-strip-1122: the headline leads with no mark — the hero must
+    // not dispatch the brand-mark slot and must render zero svg icons.
+    expect(renderSlot).not.toHaveBeenCalled()
+    expect(view.container.querySelector('svg')).toBeNull()
   })
 })
 
