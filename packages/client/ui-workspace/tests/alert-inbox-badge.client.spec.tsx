@@ -120,6 +120,26 @@ describe('AlertInboxBadge', () => {
     expect(view.container.textContent).toBe('')
   })
 
+  it('首帧占位: health source present, first frame pending → envelope seat paints immediately (盾灯同构)', () => {
+    // The host sweep folds a health frame only every 15s and never replays on
+    // connect — before it lands the seat must not stay empty (2026-11-23 用户
+    // 回报「信封图标卡几秒才出现」).
+    const firstFrame: SessionHealthState = { report: undefined }
+    const view = render(<AlertInboxBadge useSessionHealth={selector => selector(firstFrame)} t={t} />)
+    const badge = badgeOf()
+    expect(badge.getAttribute('data-alert-inbox-state')).toBe('loading')
+    // 占位是带可访问名的信封 span，不是按钮：首帧前没有数据可开 (no phantom click).
+    expect(badge.querySelector('button')).toBeNull()
+    expect(badge.querySelector('[data-alert-inbox-open]')).toBeNull()
+    expect(badge.querySelector('svg')).not.toBeNull()
+    expect(screen.getByLabelText('告警信箱加载中')).not.toBeNull()
+    // 首帧落地即换真徽标：占位退出渲染，未读计数接管同一 seat.
+    view.rerender(<AlertInboxBadge useSessionHealth={selector => selector(pending3)} t={t} />)
+    expect(document.querySelector('[data-alert-inbox-state="loading"]')).toBeNull()
+    expect(badgeOf().getAttribute('data-alert-inbox-state')).toBe('unread')
+    expect(document.querySelector('[data-alert-inbox-count]')?.textContent).toBe('3')
+  })
+
   it('改判 E: 信封是按钮——点开左右两 tab（标签带计数），默认 = 有未读 → 未读 tab', () => {
     render(<AlertInboxBadge useSessionHealth={selector => selector(panel)} t={t} />)
     fireEvent.click(document.querySelector('[data-alert-inbox-open]') as HTMLElement)

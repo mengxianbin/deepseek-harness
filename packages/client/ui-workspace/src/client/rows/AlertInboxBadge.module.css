@@ -37,6 +37,14 @@
   cursor: pointer;
 }
 
+/* 首帧占位 (2026-11-23): the pre-frame seat is a labeled span, not the button —
+   same 28×28 box and faint quiet paint, but there is no report to open yet, so
+   the pointer must not promise a click. Declared after .glyph so it wins the
+   cursor cascade. */
+.placeholder {
+  cursor: default;
+}
+
 /* 无件白: present enough to trust, quiet enough to ignore — 没显 = 不用管. */
 .badge.quiet {
   opacity: 0.55;
