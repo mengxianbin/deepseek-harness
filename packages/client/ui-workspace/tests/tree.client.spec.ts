@@ -559,6 +559,20 @@ describe('deriveGroups', () => {
     expect(groups[0]!.sessionCount).toBe(1)
   })
 
+  it('counts each Workspace group on its own for the header total (session-count-badge-1122)', () => {
+    // Per-workspace counting: every group reports only its own visible members,
+    // never a cross-workspace total — the badge reads this number as given.
+    const sessions = list(summary('a1', 4), summary('a2', 3), summary('b1', 2), summary('loose', 1))
+    const groups = deriveGroups(
+      sessions,
+      [workspace('first', ['a1', 'a2']), workspace('second', ['b1'])],
+      noRows, noAttention, view(['first', 'second', UNGROUPED_KEY]),
+    )
+    expect(groups.map(group => [group.key, group.sessionCount])).toEqual([
+      ['first', 2], ['second', 1], [UNGROUPED_KEY, 1],
+    ])
+  })
+
   it('leads expanded groups with pinned rows in the supplied order', () => {
     const sessions = list(summary('a', 4), summary('b', 3), summary('c', 2), summary('d', 1))
     const groups = deriveGroups(

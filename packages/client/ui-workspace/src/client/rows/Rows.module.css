@@ -679,6 +679,29 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
+/* Group-header session total (session-count-badge-1122): the count of this
+   group's visible sessions, riding the title's line left of the attention
+   pair. A plain fact rather than an attention signal — red/yellow stay
+   reserved for 待裁决/待回话 — so it takes the secondary label grey at a
+   notch under the pair's weight (500 vs 600) while sharing the 12px size.
+   The dot reuses .attentionDot's geometry (currentColor inherits the grey);
+   tabular figures keep the number from jittering as sessions come and go.
+   Zero stays on show: an empty group's zero is information, the opposite of
+   the attention pair's hide-at-zero. */
+.sessionCount {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  margin-inline-start: 14px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 20px;
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+}
+
 /* 未知不吞已知 (collab step3 §5.1, q5-failclosed): the last-known state's dot
    stays painted inside an amber dashed ring — the unreadable overlays, never
    replaces, the known. */

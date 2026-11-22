@@ -220,6 +220,34 @@ function rowHalf(e: { clientY: number; currentTarget: HTMLElement }): 'before' |
 }
 
 /**
+ * The group's total visible session count, riding the title's line just left
+ * of the attention pair (session-count-badge-1122). A plain grey fact, not an
+ * attention signal: red and yellow stay reserved for 待裁决/待回话, so the
+ * total takes the secondary label grey and drops a weight level (500 under
+ * the pair's 600) while sharing its 12px size. The dot reuses the attention
+ * pair's dot geometry (css.attentionDot, 7px round; currentColor inherits the
+ * grey) rather than a second circle definition, and the number is tabular so
+ * the row never jitters as sessions come and go. Zero shows: an empty group's
+ * zero is information — the opposite of the attention pair's hide-at-zero.
+ * The count is read from GroupNode.sessionCount as given; the tree's
+ * sessionVisible already applies the per-workspace / unarchived / non-subagent
+ * filters, so this row never recounts. The accessible name (role="img") spells
+ * the count from the existing sessions.count plural keys — no new key.
+ */
+function SessionCount({ count, t }: { count: number; t: RowTranslate }) {
+  return (
+    <span
+      className={css.sessionCount}
+      role="img"
+      aria-label={t(count === 1 ? 'sessions.count.one' : 'sessions.count.other', { n: count })}
+    >
+      <span className={css.attentionDot} aria-hidden="true" />
+      {count}
+    </span>
+  )
+}
+
+/**
  * Group-header attention counts (queue-zone-1113, 2026-11-13 ruling): the
  * cross-workspace counts that used to live in the removed global segment's
  * count bar now ride the group header — red = queued tier p1 rows (unread
@@ -362,6 +390,7 @@ function ProjectRow({
       </span>
       <span className={css.projectText}>
         <span className={css.title}>{label}</span>
+        <SessionCount count={row.sessionCount} t={t} />
         <AttentionBadges red={row.queuedRed} yellow={row.queuedYellow} t={t} />
       </span>
       <span className={css.rowActions}>

@@ -3070,7 +3070,11 @@ describe('Workspace tree grouping', () => {
     fireEvent.dragEnd(source)
     expect(b.props.insertWorkspaceBefore).toHaveBeenCalledExactlyOnceWith(root.workspaceId, undefined)
     rerender(b, { useWorkspaces: hook(workspaceState([team, child, other, outside, root])) })
-    expect(screen.getAllByRole('treeitem').map(row => row.textContent)).toEqual([
+    // The title span, not the whole row: every group row now carries its
+    // session total to the right of the label (session-count-badge-1122), so
+    // textContent alone would read "Projects1" and this order check is about
+    // the labels.
+    expect(screen.getAllByRole('treeitem').map(row => row.querySelector('[class*="title"]')?.textContent)).toEqual([
       'outside', 'Projects', 'Team', 'Child', 'other',
     ])
     expect(within(section('Team')).getByText('Child')).toBeTruthy()

@@ -203,4 +203,23 @@ describe('WorkspaceBrowser.module.css list', () => {
     expect(rowDeclarations(".attentionCount[data-attention='pending']")?.get('color'))
       .toBe('var(--dsw-alias-state-warn-primary)')
   })
+
+  it('sizes the group session total with the attention pair, one weight notch lighter and grey (session-count-badge-1122)', () => {
+    // The total rides the same 12px/20px line as the pair it precedes, at
+    // weight 500 (reference information, not an attention target) in the
+    // secondary label grey, tabular so the number never jitters. Its dot is
+    // the pair's own geometry — no second circle rule may exist.
+    const total = rowDeclarations('.sessionCount')
+    expect(total?.get('font-size')).toBe(rowDeclarations('.attentionBadges')?.get('font-size'))
+    expect(total?.get('font-size')).toBe('12px')
+    expect(total?.get('line-height')).toBe('20px')
+    expect(total?.get('font-weight')).toBe('500')
+    expect(total?.get('font-variant-numeric')).toBe('tabular-nums')
+    expect(total?.get('color')).toBe('var(--dsw-alias-label-secondary)')
+    expect(total?.get('margin-inline-start')).toBe('14px')
+    // Dot geometry rides .attentionDot (7px, currentColor inherits the grey).
+    expect(total?.get('width')).toBeUndefined()
+    expect(total?.get('border-radius')).toBeUndefined()
+    expect(rowDeclarations('.attentionDot')?.get('width')).toBe('7px')
+  })
 })

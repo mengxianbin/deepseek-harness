@@ -407,6 +407,28 @@ describe('workspace browser rows', () => {
     expect(screen.queryByRole('img', { name: /待裁决/ })).toBeNull()
   })
 
+  it('shows the session total left of the attention counts, dot-marked, zero kept visible (session-count-badge-1122)', () => {
+    const group = (sessionCount: number, queuedRed: number, queuedYellow: number): GroupNode => ({
+      key: 'project', workspaceId: wid('project'), cwd: '/projects/project', createdAt: 0, label: 'Project',
+      sessionCount, queuedRed, queuedYellow, expanded: true, containsCurrent: false, sessions: [],
+    })
+    const view = render(<ProjectRowItem group={group(28, 2, 3)} onToggle={vi.fn()} onCreate={vi.fn()} t={t} />)
+    const total = screen.getByRole('img', { name: '28 个会话' })
+    const attention = screen.getByRole('img', { name: '待裁决 2 · 待回话 3' })
+    // DOM order is visual order: the total rides left of the red/yellow pair,
+    // its accessible name spelled from the existing sessions.count keys.
+    const siblings = [...(total.parentElement?.children ?? [])]
+    expect(siblings.indexOf(total)).toBeGreaterThan(-1)
+    expect(siblings.indexOf(total)).toBeLessThan(siblings.indexOf(attention))
+    // The dot reuses the attention pair's geometry rather than a second circle.
+    expect(total.querySelector('[class*="attentionDot"]')).toBeTruthy()
+    // Zero total stays on show — an empty group's zero is information — while
+    // the attention pair still hides at zero overall.
+    view.rerender(<ProjectRowItem group={group(0, 0, 0)} onToggle={vi.fn()} onCreate={vi.fn()} t={t} />)
+    expect(screen.getByRole('img', { name: '0 个会话' })).toBeTruthy()
+    expect(screen.queryByRole('img', { name: /待裁决/ })).toBeNull()
+  })
+
   it('renders and opens a selected running Session row', () => {
     const node: SessionNode = {
       id: sid('session'), title: 'Session', blank: false, running: true,
