@@ -15,7 +15,7 @@ import {
   fixtureUserPrompts, launchWebScaffold, recordFixture, watchConsole,
   webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { openSettings, connectFreshWorkspaceZh, expandOwningTurnProcess, ZH_BROWSER_LOCALE } from './support.ts'
+import { openSettings, connectFreshWorkspaceZh, expandOwningTurnProcess, ZH_BROWSER_LOCALE, viewSelectTrigger } from './support.ts'
 
 const DIR = fileURLToPath(new URL('../../../snapshots/web/changed-files-turn', import.meta.url))
 const FIXTURE = join(DIR, 'session.v3.jsonl')
@@ -208,7 +208,9 @@ describe('web e2e: a git workspace turn ends with its changed files', () => {
     const card = page.locator('[data-changed-files]')
     expect(await card.count()).toBe(0)
     const header = page.locator('header').filter({ has: page.locator('[data-conversation-header-leading]') })
-    expect(await header.getByRole('tablist').count()).toBe(0)
+    await viewSelectTrigger(page).click()
+    expect(await page.getByRole('menuitem', { name: 'Trajectory' }).count()).toBe(0)
+    await page.keyboard.press('Escape')
     const compactHeight = await header.evaluate(element => element.getBoundingClientRect().height)
     expect(compactHeight).toBeLessThan(60)
     await openSettings(page, 'zh')
@@ -216,8 +218,9 @@ describe('web e2e: a git workspace turn ends with its changed files', () => {
     await settings.getByRole('switch', { name: '显示代码工作视图' }).click()
     await expect.poll(() => settings.getByRole('switch', { name: '显示代码工作视图' }).getAttribute('aria-checked')).toBe('true')
     await settings.getByRole('button', { name: '关闭', exact: true }).click()
-    await header.getByRole('tablist').waitFor({ state: 'visible' })
-    expect(await header.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThan(compactHeight)
+    await viewSelectTrigger(page).click()
+    await page.getByRole('menuitem', { name: 'Trajectory' }).waitFor({ state: 'visible' })
+    await page.keyboard.press('Escape')
     await card.waitFor({ state: 'visible' })
     expect(await card.getByText('已编辑 4 个文件', { exact: true }).count()).toBe(1)
     expect(await card.getByRole('listitem').count()).toBe(4)

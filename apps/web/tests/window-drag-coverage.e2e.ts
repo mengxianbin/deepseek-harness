@@ -386,7 +386,7 @@ describe('web e2e: macOS window drag coverage', () => {
       const regions = await collectedRegions(page, INTERACTIVE_SELECTOR)
       const strip = await rectOf(page, '[data-dockkit-strip]')
       const panel = await rectOf(page, '[data-sidebar-right-panel]')
-      const tabs = await rectOf(page, '[data-conversation-tabs]')
+      const select = await rectOf(page, '[data-conversation-view-select]')
       const header = await rectOf(page, '[data-slot="conversation.header"] > header')
       const seat = await rectOf(page, '[data-shell-leading]')
       // The sidebar column drags through its own rows (ui-sidebar), so its
@@ -408,10 +408,11 @@ describe('web e2e: macOS window drag coverage', () => {
         },
         {
           row: 'conversation header',
-          what: 'the blank run right of the view tabs, on the tab strip row',
-          // The last tab's press target overhangs the tablist by 10px and the
-          // More launcher starts 20px past it; probe the run between them.
-          at: () => [tabs.x + tabs.width + 15, tabs.y + tabs.height / 2],
+          what: 'the blank run below the view dropdown, inside the header block',
+          // The dropdown trigger anchors the probe (the retired tab strip's
+          // marker is gone); the header's own padding below the title row
+          // stays part of its drag surface, outside every no-drag cluster.
+          at: () => [select.x + select.width / 2, header.y + header.height - 4],
           drag: true,
         },
         {

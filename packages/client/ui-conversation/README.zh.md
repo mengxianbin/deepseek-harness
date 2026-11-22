@@ -46,7 +46,7 @@ shell 选择解析出 target 或 target source 收到首个 subscriber 时，该
 
 `UiConversation.groups` 为每个已注册目标注册一个可选的业务 Group Definition。它在节点物化后消费投影后的节点变化、变化轮次及已索引的目标位置，覆盖首次激活，并拥有全部分段规则与组数据。按索引读取 Turn 时保留相邻 Node 造成的分隔，使业务更新可以限制在受影响轮次和组内。assembler 先校验并安装根引用和按键索引的组快照，再发布 Node、Group 和 Location 数据来源。未分组目标保持原有路径。[分组](../../../docs/subsystems/conversation.zh.md#group-definitions)定义输入有效期、类型化注册、原子更新及渲染器职责。
 
-Group 注册时缺少 View 目标会报错。已注册的 View Definition 被移除后，其分组计算暂停并清空已发布结果，但保留 Group Definition；重新注册该 View 后，沿现有替换流程从当前已加载时间线重建。切换 View 页签不会移除 View Definition。
+Group 注册时缺少 View 目标会报错。已注册的 View Definition 被移除后，其分组计算暂停并清空已发布结果，但保留 Group Definition；重新注册该 View 后，沿现有替换流程从当前已加载时间线重建。切换 View 不会移除 View Definition。
 
 target package 通过 declaration merge 扩展 snapshot 与 Location data map，再调用 `ctx.uiConversation.events.register(...)` 和 `ctx.uiConversation.views.register(...)`。target 通过 `ctx.uiConversation.binding(binding).target(targetId)` 读取其 Session-owned source。注册属于 Cordis effect，返回的 disposer 从同一个 registry 移除 contribution。共享的请求检查服务于每个 target：`ctx.uiConversation.inspectSystemPrompt(previous, event)` 将系统消息与位置替换解释为不可变的已加载 surface 状态。它按 surface 顺序选择最后一个非空的存活系统节点，为连续重写只保留存活的替换位置；遇到未建立索引的更早端点后，提示词保持不可用，直到向前补页回放提供其顺序。target 自有的 Definition 独立保留历史卡片。`ctx.uiConversation.inspectRequestPrompt(previous, header, system)` 根据该有效提示词分类请求变更；普通消息与流式分片无需处理系统状态。
 
@@ -80,9 +80,9 @@ composer 在挂载、切换 Session 和解除锁定时使用共享的[文字输�
 
 上下文占用按钮在输入卡片下方、会话统计右侧显示圆环和百分比。点击按钮可在视口内的面板查看 token 构成，没有统计项时面板也不会越界；上下文用量和容量尚不可用时，按钮保持隐藏。整行（统计、水位表与尾座指示器）是 composer 座位层里 composer 链输出的兄弟节点，因此在当选的 composer 接管卡（问题卡）在位时同样显示，不只跟随常驻输入卡片。
 
-关闭代码工作工具时，外壳仅隐藏 Trajectory；其他插件贡献的 View 仍然可用。可用 View 少于两个时隐藏 View 标签栏。在 Trajectory 激活时关闭代码工作工具会返回 Chat；已保存的 View 偏好和 Session 记录保持不变。开启后，Trajectory 恢复可用。View 所有者接收可用列表，使导航操作跟随相同的可见性。
+关闭代码工作工具时，外壳仅隐藏 Trajectory；其他插件贡献的 View 仍然可用。视图下拉列出全部可用 View；仅剩一个 View 时触发器仍然显示。在 Trajectory 激活时关闭代码工作工具会返回 Chat；已保存的 View 偏好和 Session 记录保持不变。开启后，Trajectory 恢复可用。View 所有者接收可用列表，使导航操作跟随相同的可见性。
 
-root 作用域的 `conversation.session.header.views.actions` list 有注册项时，标签行中的 View 标签之后显示带提示框的**更多会话视图**按钮。它打开的菜单以该 list 的注册项为菜单行。每个注册项接收 `entries`（按注册顺序的头部之外的 View，含 `id`、`label`、`pinned` 与 `active`；不含 Chat）、在本 Session 选择 View 的 `onOpen(id)`、`onPinnedChange(id, pinned)`，以及关闭菜单的 `onDismiss()`。头部在内存中保存所有 Session 共用的已收起 View id 列表；标签栏不显示已收起的 View，并将已注册的 Chat 放在首位，确保它始终留在更多菜单外。插件重新加载时 Pin 选择重置，不读取旧 localStorage 值。标签栏是否显示按可用 View 计算，不按已固定的 View 计算，因此其他 View 全部收起时，标签栏和“更多”仍然显示。收起当前激活的 View 会立即隐藏其标签，但不会切走其内容。更多菜单仅包含头部之外的 View，通过 `active` 标识当前 View。头部读取当前行可用宽度，为更多按钮与内边距预留 48px，每个标签估算 120px，其余 View 按注册顺序进入更多。单个 ResizeObserver 观察标签行，使窗口缩放和侧栏展开能够更新分组；当前选中项变化不改变顺序。标签行移除时断开观察。如果环境没有 ResizeObserver，仍按初始宽度计算，但不继续观察。当前 View 收起时，更多按钮高亮。每个标签按字符宽度估算文本宽度；只有估算结果超过 88px 单元格时，才通过提示框提供全名。至少保留一个优先展示的外部标签。未注册 View 的 id 保留在内存 Pin 列表中，直到插件重新加载。session 作用域的 `conversation.session.header.views.trailing` list 渲染在同一行的 More 之后（More 无注册项时直接跟在标签之后），auto 左外边距将座位钉在该行最右缘：标签用剩的行宽聚在 More 与座位之间，而不是散在指示器之后。该座位占据标签行期间，头部量取其宽度与它前面的 20px 间距并从折入预算中一并扣除，使宽指示器压缩可见标签份额而不是撑破行；不绘制内容的座位会自我隐藏，预算回到仅预留 More 与内边距。该座位只随标签行存在：空会话与单 View 头部把环境指示器留给常驻头部的 leading 单元格。
+会话头部在其 actions 席渲染带标签的视图下拉 —— `view-select` 条目，席位最左项。触发器以 caret 标示当前 View，点击展开菜单，菜单列出全部已注册 View（Chat 置首）；当前 View 行带 `aria-current="page"` 与行尾对勾，选择某行即在本 Session 激活该 View 并关闭菜单。头部持有的 `conversation.session.header.views.actions` 注册行渲染在同一菜单的 View 行之后：头部经 actions 席的 `renderViewsActions` owner 回调把该槽交给条目，回调携带下拉的 `onDismiss()` 与空 `entries` 数组 —— 下拉自行列出全部 View —— 同时为需要的行保留 `onOpen(id)` 与 `onPinnedChange(id, pinned)`。随标签行退役的还有其机械：Pin 折入、48px 加每标签 120px 的宽度预算、ResizeObserver 分组、88px 单元格宽度提示框与**更多会话视图**启动器。未注册 View 的 id 仍保留在内存 Pin 列表直到插件重载，但不再隐藏任何内容；session 作用域的 `conversation.session.header.views.trailing` list 保留声明，头部不再渲染它 —— 它原来的座位只存在于标签行。
 
 输入框注册「文件」命令动作，负责其标题、可用性和原生文件选择器回调。菜单可用性与实际调用都读取已挂载输入框当前的附件接收策略。输入框卸载或锁定后该动作不可用，插件 dispose（资源释放）时移除注册。回调绑定留在输入模块内部。
 
@@ -96,13 +96,13 @@ root 作用域的 `conversation.session.header.views.actions` list 有注册项�
 
 工作区选择使用 `uiWorkspace.openWorkspace` 准备目标并提交导航。草稿内容（包括结构化引用）和附件仅在该请求仍为当前请求、且没有在途提交时，通过它的同步准备回调搬移；后续导航、所有者释放或在途提交都会把原草稿留在它的 Session 中。
 
-本包占据 root 作用域 `main` 中的 `conversation` key。其 `main.conversation` 外壳将常驻的 `conversation.header` 放在可选 Session 的 `conversation.content` Component Factory 外。未选中 Session 时，头部仍承载根作用域导航；标题、操作和 View 标签保留在严格 Session 子组件中。Factory 拥有共享正文与 Composer，通过其标准 Hook 读取当前 Session，并公开 strict-Session `views` 与 root-scoped `widthControls` 两个局部位置。默认 adapter 渲染现有 `conversation.session` entry，主 occurrence 选择宽度拖拽条；嵌入式 occurrence 可以替换 `views`、省略拖拽条，且不渲染主 Header。共享正文与 Composer 注册 queue dock 和 Todo dock。Todo dock 在 composer 上方使用共享面板 elevation；其中的行分别以共享 idle、ongoing 与 done 标记表示待处理、进行中与已完成。`ctx.uiSession.provide()` 从同一个 Session binding 物化 Conversation 与 input source，并将 `inputActions` 作为稳定标准 prop 提供。
+本包占据 root 作用域 `main` 中的 `conversation` key。其 `main.conversation` 外壳将常驻的 `conversation.header` 放在可选 Session 的 `conversation.content` Component Factory 外。未选中 Session 时，头部仍承载根作用域导航；标题、操作与视图下拉保留在严格 Session 子组件中。Factory 拥有共享正文与 Composer，通过其标准 Hook 读取当前 Session，并公开 strict-Session `views` 与 root-scoped `widthControls` 两个局部位置。默认 adapter 渲染现有 `conversation.session` entry，主 occurrence 选择宽度拖拽条；嵌入式 occurrence 可以替换 `views`、省略拖拽条，且不渲染主 Header。共享正文与 Composer 注册 queue dock 和 Todo dock。Todo dock 在 composer 上方使用共享面板 elevation；其中的行分别以共享 idle、ongoing 与 done 标记表示待处理、进行中与已完成的项。`ctx.uiSession.provide()` 从同一个 Session binding 物化 Conversation 与 input source，并将 `inputActions` 作为稳定标准 prop 提供。
 
-blank Session 保留 header 的 leading 与 corner 控件，包括右侧栏展开入口，同时隐藏标题、actions、utilities 和 View tabs。选择 Workspace 会创建这些控件所需的 Session，无需先发送消息。没有选中 Session 时，strict header 不挂载；常驻 header 在 macOS 桌面保留 40px 的窗口顶条，由它自己作为拖拽行持有，在 Web、Windows 或 Linux 上不预留空白高度。侧栏各入口仍遵循自身的数据与执行环境要求。 已开始的 Session 在可用 View 少于两个时使用单行标题栏，仅在渲染标签行时保留其高度。标题与 actions 放不下时，标题区域会裁剪它们，并在 utilities 之前渐隐其末端；utilities 始终完整可见且可点击；标题与 actions slot 中的浮层通过 portal 渲染，不受该裁剪影响。
+blank Session 保留 header 的 leading 与 corner 控件，包括右侧栏展开入口，同时隐藏标题、actions、utilities 与视图下拉。选择 Workspace 会创建这些控件所需的 Session，无需先发送消息。没有选中 Session 时，strict header 不挂载；常驻 header 在 macOS 桌面保留 40px 的窗口顶条，由它自己作为拖拽行持有，在 Web、Windows 或 Linux 上不预留空白高度。侧栏各入口仍遵循自身的数据与执行环境要求。已开始的 Session 使用单行标题栏；退役的视图标签行已并入其中。标题与 actions 放不下时，标题区域会裁剪它们，并在 utilities 之前渐隐其末端；utilities 始终完整可见且可点击；标题与 actions slot 中的浮层通过 portal 渲染，不受该裁剪影响。
 
 View 选择规则固定：有效且已注册的持久化选择优先，其次是已注册的 `chat`，否则不渲染 View；绝不选择第一个已注册 View。Shell phase 只组合 Session lifecycle 与 active-target set，不读取任何 target-specific 快照。
 
-Session 首次绑定或缓存的 Session 成为 current 时，shell 会在渲染前读取持久化 View 偏好，激活已注册的偏好 View 或 Chat fallback，并在后续 tab 或 focus 选择写入 store 前先激活对应 target。blank Session 仍不渲染 `conversation.view` slot；未选中的 target 不会激活。
+Session 首次绑定或缓存的 Session 成为 current 时，shell 会在渲染前读取持久化 View 偏好，激活已注册的偏好 View 或 Chat fallback，并在后续视图或 focus 选择写入 store 前先激活对应 target。blank Session 仍不渲染 `conversation.view` slot；未选中的 target 不会激活。
 
 主 occurrence 的活跃 transcript 只在未被内容覆盖的两侧沟槽中提供正文宽度拖拽条；嵌入式 occurrence 省略这些拖拽条。View 如果绘制进沟槽，只将具体的可见元素提到拖拽条上方；透明的全宽包装层保持在下方，不会占用空白沟槽。该规则要求此元素与 Conversation body 之间不能引入中间堆叠上下文；浏览器场景固定了交付 Chromium 的行为。Chat 将该规则用于表格元素，其限定在阅读列内的工具卡片无需提高层级。指针位于拖拽条上时，滚轮仍会滚动 transcript，Ctrl+滚轮则保留为浏览器缩放手势。粘滞 composer 刻意拥有完整的底部区带，该区域不是宽度调整目标；已捕获的拖拽会将指示线提高到松开为止（[拖动手柄样式](src/client/skeleton/ConversationRoot.module.css)）。
 

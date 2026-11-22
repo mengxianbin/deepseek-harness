@@ -1,11 +1,8 @@
 - banner:
   - navigation "Session hierarchy": Reply with a one-sentence description
+  - button "Chat"
   - button "More actions"
   - button "Open right sidebar"
-  - tablist:
-    - tab "Chat" [selected]
-    - tab "Trajectory"
-  - button "More conversation views"
 - text: Reply with a one-sentence description of event sourcing, then stop. {{clock}}
 - button "Copy"
 - paragraph: partial

@@ -17,7 +17,7 @@ import {
   compareOrRefreshGolden, fixtureUserPrompts,
   launchWebScaffold, recordFixture, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { openSettings, connectFreshWorkspace, newEnglishPage, pinBrowserClock, pinHostClock, saveFailureShot } from './support.ts'
+import { openSettings, connectFreshWorkspace, newEnglishPage, pinBrowserClock, pinHostClock, saveFailureShot, selectConversationView } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('../../../snapshots/web/steering', import.meta.url))
 const FIXTURE = join(SNAPSHOT_DIR, 'session.v3.jsonl')
@@ -202,7 +202,7 @@ describe('web e2e: mid-turn steering lands durably and visibly', () => {
       scaffold.workspaceCwd,
     )
     await compareOrRefreshGolden(SETTLED_EXPANDED_EXPECTED, expanded, MODE)
-    await page.getByRole('tab', { name: 'Trajectory', exact: true }).click()
+    await selectConversationView(page, 'Trajectory')
     await page.locator('[data-trajectory-row-key]').filter({ hasText: STEER }).waitFor({ timeout: 10_000 })
     await compareOrRefreshGolden(
       TRAJECTORY_EXPECTED,
@@ -332,7 +332,7 @@ describe.skipIf(MODE === 'record')('web e2e: retained steering and a post-stop m
     }
     await page.getByText(RESPONSE, { exact: true }).waitFor()
     await expectOrder('[class*="centerCol"]')
-    await page.getByRole('tab', { name: 'Trajectory', exact: true }).click()
+    await selectConversationView(page, 'Trajectory')
     await expectOrder('[data-trajectory-scroll]', true)
     await compareOrRefreshGolden(
       RETAINED_TRAJECTORY_EXPECTED,
@@ -341,7 +341,7 @@ describe.skipIf(MODE === 'record')('web e2e: retained steering and a post-stop m
     )
     const warningStart = tripwire.warnings.length
     await page.reload({ waitUntil: 'load' })
-    await page.getByRole('tab', { name: 'Trajectory', exact: true }).click()
+    await selectConversationView(page, 'Trajectory')
     await expectOrder('[data-trajectory-scroll]', true)
     acknowledgeReloadConnectionLoss(tripwire, warningStart)
     expect(tripwire.pageErrors).toEqual([])

@@ -24,7 +24,7 @@ import {
   webSnapshotMode,
   type WebScaffold,
 } from './scaffold.ts'
-import { expandOwningTurnProcess, newEnglishPage, openSettings, saveFailureShot } from './support.ts'
+import { expandOwningTurnProcess, newEnglishPage, openSettings, saveFailureShot, selectConversationView, viewSelectTrigger } from './support.ts'
 
 const MODE = webSnapshotMode()
 const HISTORY_SESSION_ID = 'chat-scroll-history-e2e'
@@ -352,7 +352,7 @@ async function openSeed(page: Page, fixture: ChatScrollFixture, tailMarker?: str
   const results = page.getByRole('tree', { name: 'Search results' }).getByRole('treeitem')
   await expect.poll(() => results.count(), { timeout: 60_000 }).toBe(1)
   await results.click()
-  await page.getByRole('tab', { name: 'Chat', exact: true }).waitFor({ timeout: 30_000 })
+  await viewSelectTrigger(page).waitFor({ timeout: 30_000 })
   if (tailMarker !== undefined) {
     await page.getByText(tailMarker, { exact: false }).last().waitFor({ timeout: 30_000 })
   }
@@ -1735,13 +1735,13 @@ describe('web e2e: long Chat scroll contract', () => {
       await wheelTranscript(world.page, 1_300)
       const sessionAnchor = await visibleFlowAnchor(world.page)
 
-      await world.page.getByRole('tab', { name: 'Trajectory', exact: true }).click()
+      await selectConversationView(world.page, 'Trajectory')
       await world.page.getByLabel('Trajectory timeline').waitFor({ timeout: 30_000 })
       await world.page.setViewportSize({ width: 700, height: 900 })
       // The narrow breakpoint auto-collapses the sidebar. Re-open it because
       // this scenario switches sessions while pinning the narrow Chat scroll owner.
       await world.page.getByRole('button', { name: 'Open sidebar', exact: true }).click()
-      await world.page.getByRole('tab', { name: 'Chat', exact: true }).click()
+      await selectConversationView(world.page, 'Chat')
       await nextPaint(world.page)
       await expectSameFlowTop(world.page, sessionAnchor, RESPONSIVE_REFLOW_TOLERANCE)
 
@@ -1757,18 +1757,37 @@ describe('web e2e: long Chat scroll contract', () => {
 
       const backToBottom = world.page.getByRole('button', { name: 'Back to bottom', exact: true })
       await backToBottom.waitFor({ timeout: 15_000 })
-      await backToBottom.evaluate((button) => {
+      await backToBottom.evaluate(async (button) => {
         if (!(button instanceof HTMLElement)) throw new Error('Back-to-bottom control is not an HTML element')
         button.click()
-        const trajectory = [...document.querySelectorAll<HTMLElement>('[role="tab"]')]
-          .find(tab => tab.textContent?.trim() === 'Trajectory')
+        // The dropdown menu is a portal that renders a frame after the trigger
+        // click, so poll for it instead of assuming same-tick availability.
+        const deadline = Date.now() + 15_000
+        const until = async (match: () => HTMLElement | undefined): Promise<HTMLElement | undefined> => {
+          for (;;) {
+            const found = match()
+            if (found !== undefined) return found
+            if (Date.now() > deadline) return undefined
+            await new Promise(resolve => setTimeout(resolve, 50))
+          }
+        }
+        const viewTrigger = await until(() => {
+          const element = document.querySelector<HTMLElement>('[data-conversation-view-select]')
+          return element instanceof HTMLElement ? element : undefined
+        })
+        if (!(viewTrigger instanceof HTMLElement)) {
+          throw new Error('view dropdown is unavailable during pinned remount')
+        }
+        viewTrigger.click()
+        const trajectory = await until(() => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+          .find(item => item.textContent?.trim() === 'Trajectory'))
         if (!(trajectory instanceof HTMLElement)) {
-          throw new Error('Trajectory tab is unavailable during pinned remount')
+          throw new Error('Trajectory view is unavailable during pinned remount')
         }
         trajectory.click()
       })
       await world.page.getByLabel('Trajectory timeline').waitFor({ timeout: 30_000 })
-      await world.page.getByRole('tab', { name: 'Chat', exact: true }).click()
+      await selectConversationView(world.page, 'Chat')
       await expectBottom(world.page)
       await openSeed(
         world.page,

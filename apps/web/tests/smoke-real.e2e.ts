@@ -27,7 +27,7 @@ import type { Browser, Page } from 'playwright'
 import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import WebSocket from 'ws'
-import { REPO_ROOT, connectFreshWorkspace, newEnglishPage, probeFreePort, requireDist, saveFailureShot } from './support.ts'
+import { REPO_ROOT, connectFreshWorkspace, newEnglishPage, probeFreePort, requireDist, saveFailureShot, selectConversationView } from './support.ts'
 
 const WEB_SURFACE_PROMPT = fileURLToPath(new URL('./expected/web-runtime-context/web-surface-prompt.expected.md', import.meta.url))
 /** Framed user text that marks the auxiliary title request's own messages. */
@@ -808,13 +808,13 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY || notReady.length > 0)('web smoke
     await screen(page, '04-round-complete')
   }, 150_000)
 
-  it('view tabs: Chat and Trajectory switch', async () => {
+  it('view dropdown: Chat and Trajectory switch', async () => {
     onTestFailed(() => saveFailureShot(page, 'w5-tabs'))
-    await page.locator('button', { hasText: /Trajectory/i }).first().click()
+    await selectConversationView(page, 'Trajectory')
     await screen(page, '05-trajectory-tab')
     await page.getByLabel('Trajectory timeline').waitFor()
     await expect.poll(() => page.getByRole('tab', { name: 'Waterfall' }).count()).toBe(0)
-    await page.locator('button', { hasText: /^Chat$/i }).first().click()
+    await selectConversationView(page, 'Chat')
     await screen(page, '07-back-to-chat')
   })
 

@@ -87,7 +87,10 @@ it('renders durable record images in the Trajectory details panel from the share
   const chatSrc = document.querySelector('[data-align="end"] img')?.getAttribute('src')
   if (chatSrc === null || chatSrc === undefined) throw new Error('chat gallery image missing')
 
-  fireEvent.click(screen.getByRole('tab', { name: 'Trajectory' }))
+  const viewTrigger = document.querySelector('[data-conversation-view-select]')
+  if (viewTrigger === null) throw new Error('view dropdown trigger not rendered')
+  fireEvent.click(viewTrigger)
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Trajectory' }))
   const userRow = await scrollRowIntoWindow('历史用户图片')
   fireEvent.click(userRow)
 

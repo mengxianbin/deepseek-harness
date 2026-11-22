@@ -340,6 +340,31 @@ export function conversationContextKey(kind: string, id: string): string {
   return `${kind.length}:${kind}${id}`
 }
 
+/**
+ * The conversation header's view dropdown trigger — the retired view tab
+ * strip's replacement (the `view-select` entry, leftmost header action). The
+ * data hook is name-independent: the trigger's text tracks the current View.
+ * @param page - browser page with a Session header mounted.
+ * @returns the trigger locator.
+ */
+export function viewSelectTrigger(page: Page): Locator {
+  return page.locator('[data-conversation-view-select]')
+}
+
+/**
+ * Open the view dropdown and choose one View by its visible label — the
+ * migration of a direct tab-strip press.
+ * @param page - browser page with a Session header mounted.
+ * @param name - the View's label in the page's current UI language.
+ */
+export async function selectConversationView(page: Page, name: string | RegExp): Promise<void> {
+  await viewSelectTrigger(page).click()
+  const row = typeof name === 'string'
+    ? page.getByRole('menuitem', { name, exact: true })
+    : page.getByRole('menuitem', { name })
+  await row.click()
+}
+
 /** Open Settings by clicking the sidebar settings button.
  * @param page - browser page with the mounted sidebar.
  * @param locale - current UI language.

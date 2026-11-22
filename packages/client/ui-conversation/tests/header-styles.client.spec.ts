@@ -7,11 +7,6 @@ const css = readFileSync(new URL('../src/client/skeleton/ConversationRoot.module
 describe('conversation header geometry', () => {
   it('keeps the single-line header at the shared 76px height', () => {
     expect(css.match(/\.header\s*\{([^}]*)\}/)?.[1]).toContain('min-height: 76px')
-    expect(css.match(/\.viewTabs\s*\{([^}]*)\}/)?.[1]).toContain('min-height: 25px')
-    // The tab's 35px press target sits 10px above its 25px row through a negative top margin.
-    expect(css.match(/\.tab\s*\{([^}]*)\}/)?.[1]).toContain('min-height: 35px')
-    expect(css.match(/\.tab\s*\{([^}]*)\}/)?.[1]).toContain('margin: -10px calc(-1 * var(--dsh-tab-hit-inline)) 0')
-    expect(css.match(/\.tab\s*\{([^}]*)\}/)?.[1]).toContain('padding: 10px var(--dsh-tab-hit-inline) 9px')
   })
 
   it('clips overflowing title actions and fades them inside the gap before the next control', () => {
@@ -26,16 +21,16 @@ describe('conversation header geometry', () => {
     expect(css.match(/^\.headerCorner\s*\{([^}]*)\}/m)?.[1]).toContain('margin-left: 8px')
   })
 
-  it('uses 32px between view labels without changing the action gap', () => {
-    expect(css.match(/\.viewTabs\s*\{([^}]*)\}/)?.[1]).toContain('gap: 32px')
-    expect(css.match(/\.tabs\s*\{([^}]*)\}/)?.[1]).toContain('gap: 16px 20px')
-  })
-
-  it('pins the trailing seat to the right edge of the tab row', () => {
-    // The auto margin absorbs only the row's leftover width, so the fold
-    // budget — which measures the border box — and the wrap point, which
-    // counts auto margins as zero, both keep their exact meaning.
-    const seat = css.match(/^\.viewsTrailing\s*\{([^}]*)\}/m)?.[1]
-    expect(seat).toContain('margin-left: auto')
+  it('sizes the view dropdown trigger, its caret, and its menu on the header row', () => {
+    // The trigger keeps the header's single-row rhythm; the caret rotates with
+    // the menu's open state and the menu stays anchored to the trigger width.
+    const trigger = css.match(/^\.viewSelect\s*\{([^}]*)\}/m)?.[1]
+    expect(trigger).toContain('gap: 4px')
+    expect(trigger).toContain('font-size: 13px')
+    expect(css.match(/^\.viewSelectCaret\s*\{([^}]*)\}/m)?.[1]).toContain('transition: transform 120ms ease')
+    expect(css.match(/^\.viewSelect\[aria-expanded='true'\] \.viewSelectCaret\s*\{([^}]*)\}/m)?.[1])
+      .toContain('transform: rotate(180deg)')
+    expect(css.match(/^\.viewSelectMenu\s*\{([^}]*)\}/m)?.[1]).toContain('width: 288px')
+    expect(css.match(/^\.viewSelectCheck\s*\{([^}]*)\}/m)?.[1]).toContain('margin-left: auto')
   })
 })

@@ -1,7 +1,7 @@
-/** In-memory pin choices for the Conversation View tabs. */
+/** In-memory pin choices for the Conversation Views. */
 import { createSnapshotStore, type ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 
-/** View whose tab always shows and never enters the customization list. */
+/** The fixed View: always listed first and never enters the customization list. */
 export const FIXED_VIEW_ID = 'chat'
 
 const NO_VIEWS: readonly string[] = []
@@ -11,10 +11,9 @@ export interface ViewPins {
   /** Unpinned View ids; ids of Views that are not registered stay listed. */
   readonly unpinned: ObservableSnapshot<readonly string[]>
   /**
-   * Pin or unpin one View tab; the fixed View is ignored. A pinned tab still
-   * enters More when the header's width budget cannot hold it.
+   * Pin or unpin one View; the fixed View is ignored.
    * @param id - View id.
-   * @param pinned - Whether the tab is manually pinned.
+   * @param pinned - Whether the View is manually pinned.
    */
   readonly setPinned: (id: string, pinned: boolean) => void
 }

@@ -4,15 +4,14 @@
     - text: /
     - 'button "Switch subagent: event-sourcing researcher"': event-sourcing researcher
     - button "1 subagent"
+  - button "Chat"
   - button "More actions"
   - button "Open right sidebar"
-  - tablist:
-    - tab "Chat" [selected]
-    - tab "Trajectory"
-  - button "More conversation views"
+- button "Previous stop"
 - navigation "Turn navigation":
   - button "Jump to turn 1"
   - button "Jump to turn 2"
+- button "Next stop"
 - text: "Explain event sourcing in one sentence.Your parent agent id is \"session-{{uuid}}\". Before you finish, send your result to that agent with send_message({ agent_id: \"session-{{uuid}}\", message: \"<self-contained result>\" }). The parent shares your workspace but does not automatically receive your transcript, tool output, or reasoning. Send earlier messages as well when a finding changes what the parent should do next; sending a message does not end your turn. {{clock}}"
 - button "Copy"
 - status: Completed

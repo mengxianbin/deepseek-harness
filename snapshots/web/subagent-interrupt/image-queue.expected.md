@@ -3,15 +3,14 @@
     - button "Ask a research subagent to"
     - text: /
     - 'button "Switch subagent: event-sourcing researcher"': event-sourcing researcher
+  - button "Chat"
   - button "More actions"
   - button "Open right sidebar"
-  - tablist:
-    - tab "Chat" [selected]
-    - tab "Trajectory"
-  - button "More conversation views"
+- button "Previous stop"
 - navigation "Turn navigation":
   - button "Jump to turn 1"
   - button "Jump to turn 2"
+- button "Next stop"
 - text: "Explain event sourcing in one sentence.Your parent agent id is \"session-{{uuid}}\". Before you finish, send your result to that agent with send_message({ agent_id: \"session-{{uuid}}\", message: \"<self-contained result>\" }). The parent shares your workspace but does not automatically receive your transcript, tool output, or reasoning. Send earlier messages as well when a finding changes what the parent should do next; sending a message does not end your turn. {{clock}}"
 - button "Copy"
 - status: Stopped
@@ -23,11 +22,14 @@
 - paragraph: partial
 - text: Stopped
 - time: {{clock}}
+- status:
+  - text: Task stoppedThis turn was stopped by you — the model did not finish a complete reply.
+  - code: USER_STOPPED
 - button "Copy"
 - button "Good response"
 - button "Bad response"
-- button "Branch into a new conversation"
-- text: {{clock}} Keep working until I stop you again. {{clock}}
+- button "Branch into a new conversation" [disabled]
+- text: Available only on the last message of a completed turn {{clock}} Keep working until I stop you again. {{clock}}
 - button "Copy"
 - paragraph: partial
 - status: Deep diving

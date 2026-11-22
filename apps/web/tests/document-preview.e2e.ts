@@ -14,7 +14,7 @@ import { excelDrawingFixture } from '../../../packages/client/ui-sidebar-documen
 import { xlsFixture } from '../../../packages/client/ui-sidebar-documentpreview/tests/xls-fixture.ts'
 import { pdfFixture, selectionPdfFixture } from '../../../packages/client/ui-sidebar-documentpreview/tests/pdf-fixture.ts'
 import { assertFixtureInventory, compareOrRefreshGolden, launchWebScaffold, watchConsole, webSnapshotMode, type WebScaffold } from './scaffold.ts'
-import { openSettings, connectFreshWorkspace, connectFreshWorkspaceZh, newEnglishPage, saveFailureShot, scrollIntoView } from './support.ts'
+import { openSettings, connectFreshWorkspace, connectFreshWorkspaceZh, newEnglishPage, saveFailureShot, scrollIntoView, selectConversationView, viewSelectTrigger } from './support.ts'
 
 const FIXTURE = fileURLToPath(new URL('../../../snapshots/web/lifecycle-chrome/session.v3.jsonl', import.meta.url))
 const SNAPSHOT_DIR = fileURLToPath(new URL('../../../snapshots/web/document-preview', import.meta.url))
@@ -621,7 +621,9 @@ else process.exit(1);
     await input.press('Shift+Enter')
     const sessionId = await settled
     await page.getByText('LIGHTHOUSE', { exact: true }).waitFor({ timeout: 15_000 })
-    expect(await page.getByRole('tablist').count()).toBe(0)
+    await viewSelectTrigger(page).click()
+    expect(await page.getByRole('menuitem', { name: 'Trajectory' }).count()).toBe(0)
+    await page.keyboard.press('Escape')
     const cwd = scaffold.ctx.agents.get(sessionId)?.session.header.cwd
     if (cwd === undefined) throw new Error('settled Session has no workspace cwd')
     if (outsideRoot === undefined) throw new Error('outside fixture directory is unavailable')
@@ -890,9 +892,11 @@ else process.exit(1);
     await writeFile(join(cwd, 'local.js'), 'document.getElementById("local-result").textContent="LOCAL_JS_REFRESHED";')
     await expect.poll(() => html.locator('#local-result').innerText()).toBe('LOCAL_JS_REFRESHED')
     expect(await iframe.getAttribute('src')).not.toBe(beforeScriptSave)
-    await page.getByRole('tab', { name: /Trajectory/ }).click()
+    await selectConversationView(page, /Trajectory/)
     await scaffold.ctx.settings.update('ui-settings', { enabled: false })
-    await expect.poll(() => page.getByRole('tab', { name: /Trajectory/ }).count()).toBe(0)
+    await viewSelectTrigger(page).click()
+    await expect.poll(() => page.getByRole('menuitem', { name: /Trajectory/ }).count()).toBe(0)
+    await page.keyboard.press('Escape')
     await expect.poll(() => iframe.getAttribute('sandbox')).toBe('')
     expect(await page.getByText('LIGHTHOUSE', { exact: true }).count()).toBeGreaterThan(0)
     await scaffold.ctx.settings.update('ui-settings', { enabled: true })
