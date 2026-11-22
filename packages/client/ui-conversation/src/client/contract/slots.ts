@@ -273,13 +273,16 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
       scope: 'session'
       owner: ConversationHeaderCornerOwnerProps
     }
-    /** Rows of the View tab row's More menu; the header shows More only while this list has registrations. */
+    /**
+     * Rows that ride inside the conversation header's view dropdown; the
+     * header declares the slot and hands it to the leftmost actions entry
+     * through that entry's `renderViewsActions` owner callback.
+     */
     'conversation.session.header.views.actions': { kind: 'list'; scope: 'root'; owner: ConversationViewActionsOwnerProps }
     /**
-     * Trailing indicators after the View tab row's More launcher (right of ⋯);
-     * rendered only while the tab row itself renders. The header measures this
-     * seat's width and folds tabs before it, so a wide occupant never overflows
-     * the row. Entries receive no owner-specific values.
+     * Declared but not rendered: the seat lived in the View tab row, which the
+     * view dropdown replaced. Kept as a declaration so external registrations
+     * keep compiling; entries receive no owner-specific values.
      */
     'conversation.session.header.views.trailing': { kind: 'list'; scope: 'session' }
     /** Registered Conversation target Views, rendered one at a time. */
@@ -401,8 +404,15 @@ export interface HeroAgentPresetOwnerProps {
 
 /** Header actions derive their state from standard Session props. */
 export interface ConversationHeaderActionOwnerProps {
-  /** Marker field: entries receive no owner-specific values. */
+  /** Marker field: the view dropdown composes rows from the header's view-actions slot, not from `children`. */
   children?: never
+  /**
+   * Render the view-actions rows (`conversation.session.header.views.actions`)
+   * inside the view dropdown's menu. The header owns the slot and hands it to
+   * the dropdown entry here; `onDismiss` closes the menu alongside whatever the
+   * chosen row does.
+   */
+  renderViewsActions?: (onDismiss: () => void) => ReactNode
 }
 
 /** The header corner's occupant derives its state from standard Session props. */
@@ -469,21 +479,21 @@ export interface ConversationSessionInjected {
   openView: (view: string, focus: string) => void
 }
 
-/** One customizable View tab listed in the More menu. */
+/** One customizable View row the view actions can contribute to the dropdown menu. */
 export interface ConversationViewActionEntry {
   /** View id. */
   readonly id: string
   /** Resolved View label. */
   readonly label: string
-  /** False while the View is manually unpinned. A pinned View still enters More when the header's width budget cannot hold it. */
+  /** False while the View is manually unpinned; pin state no longer changes what the dropdown lists. */
   readonly pinned: boolean
   /** Whether this View is selected in this Session, independently of its pin state. */
   readonly active?: boolean
 }
 
-/** Owner share of the View tab row's More menu rows. */
+/** Owner share of the view dropdown rows contributed by `conversation.session.header.views.actions`. */
 export interface ConversationViewActionsOwnerProps {
-  /** Views outside the header in registration order. */
+  /** Views the header parked outside its tab row; always empty now — the dropdown lists every View itself. */
   readonly entries: readonly ConversationViewActionEntry[]
   /**
    * Select a View in this Session without changing its pin state.
@@ -493,10 +503,10 @@ export interface ConversationViewActionsOwnerProps {
   /**
    * Pin or unpin a View in every Session.
    * @param id - Listed View id.
-   * @param pinned - Whether the View is manually pinned; the width budget can still fold it into More.
+   * @param pinned - Whether the View is manually pinned.
    */
   readonly onPinnedChange: (id: string, pinned: boolean) => void
-  /** Close the More menu. */
+  /** Close the view dropdown. */
   readonly onDismiss: () => void
 }
 
@@ -505,15 +515,15 @@ export interface ConversationSessionHeaderInjected {
   /** Package-owned View roster source bound only for the Conversation header. */
   readonly hooks: {
     readonly conversationViews: ObservableSnapshot<readonly ViewTab[]>
-    /** Ids of unpinned View tabs held in memory and shared by every Session until plugin reload. */
+    /** Ids of unpinned Views held in memory and shared by every Session until plugin reload. */
     readonly entryPins: ObservableSnapshot<readonly string[]>
     /** Whether `conversation.session.header.views.actions` has registrations. */
     readonly entryActions: ObservableSnapshot<boolean>
   }
   /**
-   * Pin or unpin one View tab in every Session; Chat is ignored.
+   * Pin or unpin one View in every Session; Chat is ignored.
    * @param id - View id.
-   * @param pinned - Whether the View is manually pinned; the width budget can still fold it into More.
+   * @param pinned - Whether the View is manually pinned.
    */
   setPinned: (id: string, pinned: boolean) => void
   /** Select a Session through the Session Controller. */

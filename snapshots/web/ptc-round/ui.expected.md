@@ -1,11 +1,8 @@
 - banner:
   - navigation "Session hierarchy": "Using ONE run_code program: run"
+  - button "Chat"
   - button "More actions"
   - button "Open right sidebar"
-  - tablist:
-    - tab "Chat" [selected]
-    - tab "Trajectory"
-  - button "More conversation views"
 - text: "Using ONE run_code program: run bash `echo CODE_ROUND_OK`, then read the file missing.txt catching its error in the program. Return an object with both outcomes. Then reply DONE and stop. {{clock}}"
 - button "Copy"
 - status: Completed
@@ -24,7 +21,7 @@
 - text: CODE_ROUND_OK
 - button "Inspect"
 - text: Failed
-- 'button "Read Error: cannot read \"{{cwd}}/workspace/missing.txt\": not found"'
+- 'button "Read Error: cannot read \"C:\\Users\\mengx\\AppData\\Local\\Temp\\dsh-win-bash-14680-74bda493\\dsh-web-e2e-ws-b3jfjW\\workspace\\missing.txt\": not found"'
 - button "Think The program ran successfully. Let me now reply DONE as instructed."
 - paragraph: DONE
 - button "Copy"

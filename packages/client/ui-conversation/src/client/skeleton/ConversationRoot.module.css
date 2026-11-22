@@ -9,10 +9,10 @@
 
 /* 76px with its rule: the height of the Sidebar's tab strip and header row
    (ui-dockkit `.tabStrip` 38px + the pane header's 38px), so the two rules
-   meet at the column edge. The rows add up to it — 10px top inset, the 30px
-   title row, the tab strip's 10px margin, and a 25px view row. When the views
-   and the More launcher do not fit on one row, the row wraps and the header
-   grows past 76px. */
+   meet at the column edge. The rows used to add up to it — 10px top inset,
+   the 30px title row, the view tab strip's 10px margin and 25px view row —
+   but the strip retired into the single title row, so the live header falls
+   to the :where override below and only the authored 76px remains. */
 .header {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -49,12 +49,13 @@
 }
 
 /* macOS hiddenInset titlebar: the header block owns the window drag over its
-   own box — title row plus the view tab strip, so the draggable geometry is the
-   header's geometry and no frame band has to match its height. The header marks
-   itself `data-window-drag` (ConversationHeader); below it the title-row clusters
-   subtract their whole boxes, and individual controls are covered by the base.css
-   interactive-element rule. A covering overlay lives beside #root
-   (ui-settings-general), which puts it after this row in document order. */
+   own box — the title row (the retired view tab strip folded into it), so the
+   draggable geometry is the header's geometry and no frame band has to match
+   its height. The header marks itself `data-window-drag` (ConversationHeader);
+   below it the title-row clusters subtract their whole boxes, and individual
+   controls are covered by the base.css interactive-element rule. A covering
+   overlay lives beside #root (ui-settings-general), which puts it after this
+   row in document order. */
 :global([data-platform='darwin']) .headerLeading,
 :global([data-platform='darwin']) .headerActions,
 :global([data-platform='darwin']) .headerUtilities,
@@ -212,130 +213,62 @@
   display: none;
 }
 
-/* The tab row sits above the header paint so the active bar covers its rule.
-   It doubles as the anonymous inline-size container for its trailing
-   occupants (a metrics chip and its kin run their @container degradations
-   against the nearest container, which is this row): CSS modules hash
-   container-names per module, so occupants match the nearest container
-   without sharing a name. The width:100% grid span sizes the row, so
-   inline-size containment cannot collapse it. */
-.tabs {
-  grid-column: 1 / -1;
-  position: relative;
-  z-index: 1;
-  display: flex;
-  gap: 16px 20px;
-  width: 100%;
-  min-width: 0;
-  box-sizing: border-box;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  margin-top: 10px;
-  padding-left: 8px;
-  container-type: inline-size;
-}
-
-.viewTabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 32px;
-  min-width: 0;
-  min-height: 25px;
-}
-
-/* The 16px text line retains 9px below it. The press target extends 10px
-   above the text into the strip's top margin and 10px to each side, matching
-   the inline padding of the Sidebar tab chips (ui-dockkit `.tab`); negative
-   margins keep the layout box at its 25px row and text width. The active bar
-   spans the text and reaches 1px past the tab box to sit over the header
-   rule. */
-.tab {
-  --dsh-tab-hit-inline: 10px;
-
-  position: relative;
-  box-sizing: border-box;
-  min-height: 35px;
-  margin: -10px calc(-1 * var(--dsh-tab-hit-inline)) 0;
-  padding: 10px var(--dsh-tab-hit-inline) 9px;
-  border: none;
-  background: transparent;
-  font-size: 13px;
-  line-height: 16px;
-  font-weight: 500;
-  color: var(--dsw-alias-label-tertiary);
-  cursor: pointer;
-}
-
-.tab::after {
-  content: '';
-  position: absolute;
-  right: var(--dsh-tab-hit-inline);
-  bottom: -1px;
-  left: var(--dsh-tab-hit-inline);
-  height: 2px;
-  border-radius: 2px;
-  background: transparent;
-}
-
-/* Selected tab is blue, not ink: brand-primary resolves to neutral black in
-   this token sheet, so the selected state rides the business blue — the
-   nearest semantic token that stays blue in both themes. */
-.tabActive {
-  color: var(--dsw-alias-state-business-primary);
-}
-
-.tabActive::after {
-  background: var(--dsw-alias-state-business-primary);
-}
-
-/* The More launcher centers its 22px box on the tab's 16px text line. */
-.viewsMoreAnchor {
+/* The view dropdown (conversation.session.header.actions entry `view-select`):
+   the retired tab row's replacement. The trigger names the current View with a
+   caret; it sits in the actions seat, so the header's own no-drag cluster and
+   the base.css interactive rule already keep it off the window drag. */
+.viewSelectAnchor {
   flex: none;
 }
 
-.viewsMore {
-  width: 22px;
-  height: 22px;
-  margin-top: -3px;
-  padding: 0;
+.viewSelect {
+  gap: 4px;
+  padding: 3px 6px;
+  font-size: 13px;
+  line-height: 16px;
+  font-weight: 500;
   color: var(--dsw-alias-label-secondary);
 }
 
-.viewsMoreActive { color: var(--dsw-alias-state-business-primary); }
-
-.tabLabel { display: block; max-width: 88px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.viewsMore[aria-expanded='true'] {
+.viewSelect[aria-expanded='true'] {
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
-.viewsMoreMenu {
+.viewSelectLabel {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewSelectCaret {
+  transition: transform 120ms ease;
+}
+
+.viewSelect[aria-expanded='true'] .viewSelectCaret {
+  transform: rotate(180deg);
+}
+
+.viewSelectMenu {
   width: 288px;
   max-width: calc(100vw - 24px);
 }
 
-/* Trailing seat after More (conversation.session.header.views.trailing):
-   fixed width so a wide occupant never squeezes the tab share — the fold
-   budget above subtracts this element's measured width instead, and the row
-   wraps (header grows) before anything clips. The -3px matches .viewsMore,
-   centering a 22px box on the 16px text line. margin-left:auto parks the
-   seat on the row's right edge rather than butting against More: it takes
-   only the width the tabs leave over — zero once the row is exactly full —
-   so the border box the budget measures and the wrap point, which counts
-   auto margins as zero, both stay put. */
-.viewsTrailing {
-  flex: none;
+/* Menu row: label with the current View's check pushed to the row end. */
+.viewSelectRow {
   display: flex;
-  margin-top: -3px;
-  margin-left: auto;
+  align-items: center;
+  gap: 8px;
 }
 
-/* An empty seat hides itself so it costs neither its width nor the flex gap
-   after More. The renderSlot outlet anchor is display:contents and always
-   rides the seat, so emptiness is judged on the anchor's children: no
-   registered entry, or an occupant that paints nothing (host off). */
-.viewsTrailing:not(:has(> [data-slot] > *)) {
-  display: none;
+.viewSelectRow > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.viewSelectCheck {
+  flex: none;
+  margin-left: auto;
 }
 
 .viewArea {

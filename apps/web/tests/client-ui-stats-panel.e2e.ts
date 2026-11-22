@@ -19,6 +19,7 @@ import {
 } from './scaffold.ts'
 import {
   connectFreshWorkspace, newEnglishPage, pinBrowserClock, pinHostClock, saveFailureShot,
+  selectConversationView,
 } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('./snapshots/client-ui-stats-panel', import.meta.url))
@@ -128,7 +129,7 @@ describe('web e2e: Statistics view', () => {
 
   it('renders the measured context, timing, cache, and tool columns', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-client-ui-stats-panel'))
-    await page.getByRole('tab', { name: 'Statistics', exact: true }).click()
+    await selectConversationView(page, 'Statistics')
     const table = page.locator('table[aria-label="Statistics"]')
     await table.waitFor({ timeout: 10_000 })
     expect(await table.getByRole('columnheader', { name: 'Context', exact: true }).count()).toBe(1)

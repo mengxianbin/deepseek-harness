@@ -22,7 +22,7 @@ import {
   assertFixtureInventory, captureStableAria, compareOrRefreshGolden, fixtureUserPrompts,
   launchWebScaffold, recordFixture, seedSession, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { expandOwningTurnProcess, newEnglishPage, saveFailureShot } from './support.ts'
+import { expandOwningTurnProcess, newEnglishPage, saveFailureShot, selectConversationView, viewSelectTrigger } from './support.ts'
 import { expectWrappedTerminalCommand } from './terminal-command-browser.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('../../../snapshots/web/navigation-panes', import.meta.url))
@@ -73,7 +73,7 @@ async function ensureSeedOpen(page: Page): Promise<void> {
     await welcome.getByRole('button').click()
     await welcome.waitFor({ state: 'detached', timeout: 15_000 })
   }
-  const chat = page.getByRole('tab', { name: 'Chat', exact: true })
+  const chat = viewSelectTrigger(page)
   // Search is a collapsed header action; expand it so the input is actionable.
   const searchButton = page.getByRole('button', { name: 'Search sessions' })
   if (await searchButton.getAttribute('aria-expanded') !== 'true') await searchButton.click()
@@ -85,7 +85,7 @@ async function ensureSeedOpen(page: Page): Promise<void> {
     await result.click()
     await chat.waitFor({ timeout: 15_000 })
   }
-  await chat.click()
+  await selectConversationView(page, 'Chat')
   await page.getByText('FIRST_DONE', { exact: true }).waitFor({ timeout: 15_000 })
   if (await search.inputValue() !== '') {
     await search.fill('')
@@ -269,7 +269,7 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
   it.skipIf(MODE === 'record')('renders the trajectory ledger and opens its local record inspector', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-navigation-trajectory'))
     await ensureSeedOpen(page)
-    await page.getByRole('tab', { name: 'Trajectory' }).click()
+    await selectConversationView(page, 'Trajectory')
     await page.waitForTimeout(100)
     const overlayLayout = await page.getByRole('table').evaluate((table) => {
       const host = table.closest('[data-conversation-scroll]')
@@ -325,7 +325,7 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
   it.skipIf(MODE === 'record')('restores Assistant timing from recorded history', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-navigation-timing'))
     await ensureSeedOpen(page)
-    await page.getByRole('tab', { name: 'Trajectory' }).click()
+    await selectConversationView(page, 'Trajectory')
     await page.getByRole('button', { name: 'Request #1', exact: true }).click()
     const details = page.getByRole('complementary', { name: 'Event details' })
     await details.getByRole('tab', { name: 'Timing', exact: true }).click()
@@ -498,7 +498,7 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
   it.skipIf(MODE === 'record')('focuses the ledger by dragging an overview interval', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-navigation-timeline'))
     await ensureSeedOpen(page)
-    await page.getByRole('tab', { name: 'Trajectory' }).click()
+    await selectConversationView(page, 'Trajectory')
     const plot = page.getByLabel('Timeline overview; drag horizontally to focus events')
     await plot.waitFor({ timeout: 15_000 })
     const before = await page.locator('tr[data-kind]').count()
@@ -672,7 +672,7 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
       expect((await observed.next()).value).toEqual({ available: true, value: { answer: 42 } })
     } finally { abort.abort(); await observed.return?.() }
 
-    await page.getByRole('tab', { name: 'Trajectory' }).click()
+    await selectConversationView(page, 'Trajectory')
     await page.locator('tr[data-kind="tool"]').filter({ hasText: 'live_result_probe' }).click()
     const details = page.getByRole('complementary', { name: 'Event details' })
     await details.getByRole('tab', { name: 'Result', exact: true }).click()
@@ -763,7 +763,7 @@ describe('web e2e: navigation & panes over a rich seeded session', () => {
       turn: 3, step: 1, callId, name: 'run_code',
       arguments: JSON.stringify({ code: 'console.log("PTC output")', description: 'Long program output' }),
     })
-    await page.getByRole('tab', { name: 'Trajectory' }).click()
+    await selectConversationView(page, 'Trajectory')
     await page.locator('tr[data-kind="tool"]').filter({ hasText: 'Long program output' }).click()
     const details = page.getByRole('complementary', { name: 'Event details' })
     await details.getByRole('tab', { name: 'Result', exact: true }).click()

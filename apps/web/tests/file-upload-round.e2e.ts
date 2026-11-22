@@ -18,7 +18,7 @@ import {
   acknowledgeReloadConnectionLoss, assertFixtureInventory, captureStableAria, compareOrRefreshGolden, fixtureUserPrompts,
   launchWebScaffold, recordFixture, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
+import { connectFreshWorkspace, newEnglishPage, saveFailureShot, selectConversationView } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('../../../snapshots/web/file-upload-round', import.meta.url))
 const FIXTURE = fileURLToPath(new URL('../../../snapshots/web/file-upload-round/session.v3.jsonl', import.meta.url))
@@ -120,12 +120,12 @@ describe('web e2e: generic file upload through the real assembly', () => {
     if (userMessage?.type !== 'user/message') throw new Error('the replayed turn recorded no user message')
     const content = userMessage.data.content
     const imageName = IMAGE_NAMES[0]!
-    await page.getByRole('tab', { name: 'Chat', exact: true }).click()
+    await selectConversationView(page, 'Chat')
     const chatImage = page.getByRole('img', { name: imageName, exact: true })
     await expect.poll(() => chatImage.getAttribute('src'), { timeout: 10_000 }).toMatch(/^blob:/)
     const chatImageUrl = await chatImage.getAttribute('src')
 
-    await page.getByRole('tab', { name: 'Trajectory', exact: true }).click()
+    await selectConversationView(page, 'Trajectory')
     await page.getByLabel('Trajectory timeline').waitFor({ timeout: 30_000 })
     const row = page.getByRole('row', { name: `USER, Images ×1 · Files ×1 · ${PROMPT}`, exact: true })
     await row.waitFor({ timeout: 10_000 })
@@ -401,7 +401,7 @@ describe('web e2e: generic file upload through the real assembly', () => {
       const warningStart = tripwire.warnings.length
       await page.reload({ waitUntil: 'load' })
       acknowledgeReloadConnectionLoss(tripwire, warningStart)
-      await page.getByRole('tab', { name: 'Trajectory', exact: true }).click()
+      await selectConversationView(page, 'Trajectory')
       await page.getByRole('row', { name: `USER, Images ×1 · Files ×1 · ${PROMPT}`, exact: true }).click()
       await page.getByRole('tab', { name: 'Preview', exact: true }).click()
       const panel = page.getByRole('tabpanel')

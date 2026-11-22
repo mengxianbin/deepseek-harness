@@ -42,6 +42,7 @@ import { ConversationContent } from './skeleton/ConversationContent.tsx'
 import { ConversationPanel } from './skeleton/ConversationPanel.tsx'
 import { ConversationHeader } from './skeleton/ConversationHeader.tsx'
 import { ConversationSession, ConversationSessionHeader } from './skeleton/ConversationSession.tsx'
+import { ViewSelect, type ViewSelectInjected } from './skeleton/ViewSelect.tsx'
 import { InputBar } from './skeleton/InputBar.tsx'
 import { todoDockEntry } from './skeleton/TodoPanel.tsx'
 import { installStopShortcut } from './stop-shortcut.ts'
@@ -559,6 +560,21 @@ export function apply(ctx: Context, config: Config = Config({})): void {
     }),
   }, ConversationSessionHeader)
 
+  const registerViewSelect = () => slots.register({
+    name: 'conversation.session.header.actions',
+    id: 'view-select',
+    // The view switcher leads the header actions band, left of every other entry.
+    order: -30,
+    store: conversationStore,
+    inject: (sessionId: SessionId, actions: BoundActions<typeof conversationStore>): ViewSelectInjected => ({
+      hooks: { conversationViews },
+      selectView: (view) => {
+        activateView(sessionId, view)
+        actions.setView(view)
+      },
+    }),
+  }, ViewSelect)
+
   const registerComposerBar = () => slots.register({
     name: 'conversation.composer.bar',
     locale: NS,
@@ -687,6 +703,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
     yield registerConversationSession()
     yield registerHeader()
     yield registerSessionHeader()
+    yield registerViewSelect()
     yield registerComposerBar()
   })
 

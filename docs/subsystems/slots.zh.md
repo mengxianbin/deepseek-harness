@@ -10,7 +10,7 @@ Slots 是 Web Client 的类型化 React 组合系统。[`dsh-client-ui-slots`](.
 
 插件目录声明 `plugins.add.actions`，它是 root 作用域的 list，在添加插件菜单的安装项之后提供 `MenuItemButton` 行。owner 提供 `onDismiss()`，用于开始动作前关闭菜单。该 slot 遵循所属插件页面声明的生命周期。
 
-root 作用域的 list `sidebar.panellist.actions`、`conversation.session.header.views.actions` 和 `sidebar.right.tab.guide.actions` 提供面板行、View 标签和右侧栏引导卡片之后“更多”菜单的菜单行。区域只在其 list 有注册项时画“更多”按钮与菜单，并传入可自定义的入口及其 Pin 状态、`onOpen`、`onPinnedChange` 与 `onDismiss`。面板和 View 入口还通过可选的 `active` 状态标识当前选中项，该状态独立于 Pin 状态。各区域在内存中维护已收起的入口 id；[`ui-entry-customization`](../../packages/client/ui-entry-customization/README.zh.md) 注册随产品提供的菜单行。
+root 作用域的 list `sidebar.panellist.actions` 与 `sidebar.right.tab.guide.actions` 在面板行与引导卡片之后提供侧栏和右侧栏“更多”菜单的菜单行；这些区域只在其 list 有注册项时画“更多”按钮与菜单，并传入可自定义的入口及其 Pin 状态、`onOpen`、`onPinnedChange` 与 `onDismiss`。root 作用域的 `conversation.session.header.views.actions` list 提供骑乘在会话头部视图下拉菜单内的菜单行：头部拥有该槽，并通过最左侧 actions 席条目（`view-select`）的 `renderViewsActions` owner 回调把它交出去——回调携带下拉的 `onDismiss()` 与空 `entries` 数组（全部 View 由下拉自行列出）——同时为需要的行接好 `onOpen(id)` 与 `onPinnedChange(id, pinned)`。面板和引导入口还通过可选的 `active` 状态标识当前选中项，该状态独立于 Pin 状态。各侧栏区域在内存中维护自己的已收起入口 id；[`ui-entry-customization`](../../packages/client/ui-entry-customization/README.zh.md) 注册随产品提供的菜单行。
 
 [ui-workspace](../../packages/client/ui-workspace/README.zh.md#understand-the-implementation) 记录 Session 行的扩展位置、显示条件和键盘行为。
 

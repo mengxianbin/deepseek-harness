@@ -23,7 +23,7 @@ import {
   acknowledgeReloadConnectionLoss, assertFixtureInventory, captureStableAria, compareOrRefreshGolden,
   launchWebScaffold, readPersistedEvents, seedSession, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { newEnglishPage, saveFailureShot } from './support.ts'
+import { newEnglishPage, saveFailureShot, viewSelectTrigger } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('../../../snapshots/web/workspace-management', import.meta.url))
 // The seed is another scenario's committed fixture, reused read-only: this
@@ -1057,7 +1057,7 @@ describe('web e2e: New Session after an outdated blank cache', () => {
       expect(startupBlank).toBeDefined()
       // The declined Session's projections are reloaded, so its stale blank row reappears.
       await page.getByRole('treeitem', { name: /^Use the read tool twice/ }).click()
-      await page.getByRole('tab', { name: 'Chat', exact: true }).waitFor()
+      await viewSelectTrigger(page).waitFor()
       await expect.poll(() => selected.innerText()).not.toBe('New Session')
       const previous = (await selected.innerText()).split('\n')[0]!
       const before = await captureStableAria(page, '[role="tree"]', scaffold.workspaceCwd)
@@ -1075,7 +1075,7 @@ describe('web e2e: New Session after an outdated blank cache', () => {
       expect(created.request().postDataJSON()).toHaveProperty('payload.args.request.sessionId', startupBlank)
       expect(await created.json()).toMatchObject({ result: { ok: true, value: { sessionId: startupBlank } } })
       await expect.poll(() => selected.innerText()).toBe('New Session')
-      await page.getByRole('tab', { name: 'Chat', exact: true }).waitFor({ state: 'hidden' })
+      await viewSelectTrigger(page).waitFor({ state: 'hidden' })
       expect(workspace.sessionIds).toHaveLength(2)
       expect(workspace.sessionIds).toContain(id)
       await page.getByRole('treeitem').filter({ hasText: previous }).waitFor()
