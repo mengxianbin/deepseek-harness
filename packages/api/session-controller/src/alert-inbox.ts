@@ -190,10 +190,13 @@ function readSessions(state: ReviveV2StateDocument): Record<string, unknown> {
   return sessions as Record<string, unknown>
 }
 
-function asSession(raw: unknown): ReviveV2SessionState | undefined {
+/** Shape guard for one state-export session record (the fold reads what it can). */
+function isSessionState(raw: unknown): raw is ReviveV2SessionState {
   return typeof raw === 'object' && raw !== null && !Array.isArray(raw)
-    ? raw as ReviveV2SessionState
-    : undefined
+}
+
+function asSession(raw: unknown): ReviveV2SessionState | undefined {
+  return isSessionState(raw) ? raw : undefined
 }
 
 /** Canonical entry spelling — the change-only compare is order-independent of the writer's key order. */
@@ -468,7 +471,7 @@ function readSourceFacts(source: RestartAlertSourceDocument): Array<[string, { l
   const raw = source.facts
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return []
   const out: Array<[string, { lastAt: number; count: number }]> = []
-  for (const cause of Object.keys(raw as Record<string, unknown>).sort()) {
+  for (const cause of Object.keys(raw).sort()) {
     const fact = (raw as Record<string, unknown>)[cause]
     if (typeof fact !== 'object' || fact === null || Array.isArray(fact)) continue
     const candidate = fact as RestartAlertSourceFact
@@ -609,6 +612,16 @@ function reportOf(doc: AlertInboxDocument, now: number): AlertInboxReport {
   }
 }
 
+/** Shape guard for the sibling task's state export (absence/malformed reads quiet). */
+function isReviveStateDoc(value: unknown): value is ReviveV2StateDocument {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Shape guard for the restart/death source document (pull 型信源, same quiet discipline). */
+function isRestartSourceDoc(value: unknown): value is RestartAlertSourceDocument {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 /**
  * One sweep tick: read both documents, fold, write `alert-inbox.json` only on a
  * content flip (temp + rename, revive-health writer style), publish the counts.
@@ -641,9 +654,7 @@ export function syncAlertInbox(now = Date.now()): AlertInboxReport | undefined {
   let state: ReviveV2StateDocument | undefined
   try {
     const parsed: unknown = JSON.parse(readFileSync(dshHomePath(REVIVE_V2_STATE_FILE), 'utf8'))
-    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-      state = parsed as ReviveV2StateDocument
-    }
+    if (isReviveStateDoc(parsed)) state = parsed
   } catch {
     state = undefined
   }
@@ -652,9 +663,7 @@ export function syncAlertInbox(now = Date.now()): AlertInboxReport | undefined {
   let source: RestartAlertSourceDocument | undefined
   try {
     const parsed: unknown = JSON.parse(readFileSync(dshHomePath(RESTART_ALERT_SOURCE_FILE), 'utf8'))
-    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-      source = parsed as RestartAlertSourceDocument
-    }
+    if (isRestartSourceDoc(parsed)) source = parsed
   } catch {
     source = undefined
   }
@@ -693,13 +702,13 @@ function patchEntry(
   } catch {
     return false
   }
-  let found = false
+  // Existence is a pure id predicate over the base: checked up front so the
+  // rewrite callback stays side-effect free (an unknown id writes nothing).
+  if (!base.entries.some(entry => entry.id === entryId)) return false
   const entries = base.entries.map((entry) => {
     if (entry.id !== entryId) return entry
-    found = true
     return apply(entry, now) ?? entry
   })
-  if (!found) return false
   const next: AlertInboxDocument = { at: now, seen: base.seen, entries }
   // Already in the target state (idempotent re-ack) — no content flip, no write.
   if (canonicalPayload(next) === canonicalPayload(base)) return true

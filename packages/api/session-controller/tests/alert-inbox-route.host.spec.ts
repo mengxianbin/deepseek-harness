@@ -18,6 +18,36 @@ import { alertInboxRequest } from '../src/alert-inbox-route.ts'
 import { syncAlertInbox } from '../src/alert-inbox.ts'
 import { ALERT_INBOX_PATH } from '../src/types.ts'
 
+/** One row of the report's two-column union (the fold's published entry view). */
+interface ReportEntry {
+  id: string
+  cause: string
+  lastAt: number
+  count: number
+  unread: boolean
+  archived: boolean
+}
+
+/** The refreshed report the action face answers with (`reportOf` shape). */
+interface Report {
+  at: number
+  unread: number
+  escalated: number
+  total: number
+  entries: ReportEntry[]
+}
+
+/** The success envelope of GET/POST (`{ ok, report }` — read side of the route). */
+interface Envelope {
+  ok: boolean
+  report: Report
+}
+
+/** The on-disk document this test reads (the single writer's `alert-inbox.json`). */
+interface InboxFile {
+  entries: ReportEntry[]
+}
+
 let home: string | undefined
 
 afterEach(() => {
@@ -113,20 +143,20 @@ describe('alertInboxRequest', () => {
 
   it('已读 → 200 + refreshed report (unread flips out); 恢复 → flips back — single writer both ways', async () => {
     seedInbox()
-    const inbox = () => JSON.parse(readFileSync(join(home as string, 'alert-inbox.json'), 'utf8'))
+    const inbox = (): InboxFile => JSON.parse(readFileSync(join(home as string, 'alert-inbox.json'), 'utf8')) as InboxFile
     const id = inbox().entries[0]?.id as string
     expect(inbox().entries[0]?.unread).toBe(true)
 
     const read = await call('POST', ALERT_INBOX_PATH, JSON.stringify({ id, action: 'read' }))
     expect(read.status).toBe(200)
-    const readReport = JSON.parse(read.body ?? '{}').report
+    const { report: readReport } = JSON.parse(read.body ?? '{}') as Envelope
     expect(readReport.unread).toBe(0)
     expect(readReport.entries[0]).toMatchObject({ id, unread: false, archived: true })
     expect(inbox().entries[0]).toMatchObject({ id, unread: false, archived: true })
 
     const restore = await call('POST', ALERT_INBOX_PATH, JSON.stringify({ id, action: 'restore' }))
     expect(restore.status).toBe(200)
-    const restoreReport = JSON.parse(restore.body ?? '{}').report
+    const { report: restoreReport } = JSON.parse(restore.body ?? '{}') as Envelope
     expect(restoreReport.unread).toBe(1)
     expect(inbox().entries[0]).toMatchObject({ id, unread: true, archived: false })
   })
@@ -135,9 +165,9 @@ describe('alertInboxRequest', () => {
     seedInbox()
     const result = await call('GET', ALERT_INBOX_PATH)
     expect(result.status).toBe(200)
-    const report = JSON.parse(result.body ?? '{}').report
+    const { report } = JSON.parse(result.body ?? '{}') as Envelope
     expect(report.unread).toBe(1)
     expect(report.entries).toHaveLength(1)
-    expect(report.entries[0].cause).toBe('restart-storm')
+    expect(report.entries[0]?.cause).toBe('restart-storm')
   })
 })
