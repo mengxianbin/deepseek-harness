@@ -49,8 +49,11 @@ function inboxPathOf(): string {
   return join(home ?? '', 'alert-inbox.json')
 }
 
-function readInbox(): { at: number; seen: Record<string, unknown>; entries: Record<string, unknown>[] } {
-  return JSON.parse(readFileSync(inboxPathOf(), 'utf8'))
+/** The persisted document as the writer leaves it (JSON round-trip read view). */
+type InboxFile = { at: number; seen: Record<string, unknown>; entries: Record<string, unknown>[] }
+
+function readInbox(): InboxFile {
+  return JSON.parse(readFileSync(inboxPathOf(), 'utf8')) as InboxFile
 }
 
 afterEach(() => {
