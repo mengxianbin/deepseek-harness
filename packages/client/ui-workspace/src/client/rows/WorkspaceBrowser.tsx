@@ -1740,7 +1740,10 @@ export function WorkspaceBrowser({
             seat AFTER the shield — mechanism health and pending alert entries
             are two dimensions, each with its own seat (不抢一槽). Signal-only:
             it renders the fold's unread count (徽标数 = unread 计数) and takes
-            no click action (行动面 = 追查会话). */}
+            no click action (行动面 = 追查会话). 首帧占位 (2026-11-23): until
+            the first health frame lands (≤ one 15s sweep after connect, no
+            replay) the seat paints a placeholder envelope instead of staying
+            empty — 盾灯同构, see AlertInboxBadge's JSDoc. */}
         {wide && <AlertInboxBadge useSessionHealth={useSessionHealth} t={t} />}
         {/* Add flow + its error dialog (same package — direct composition). */}
         <WorkspacePickFlow
