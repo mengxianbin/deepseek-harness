@@ -4,6 +4,7 @@ import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import { workspaceDisplayTitle } from '@deepseek-ai/dsh-api-workspace-controller/default-workspace'
 import type { ConversationContentProps, ConversationViewsProps, InputZone } from '../contract/slots.ts'
 import { HeroShell, WorkspaceChip, workspaceLabel } from './EmptyHero.tsx'
+import { ContextMeter } from './ContextMeter.tsx'
 import css from './ConversationRoot.module.css'
 
 function ConversationSessionView({ renderSlot }: ConversationViewsProps) {
@@ -23,7 +24,7 @@ export function ConversationContent(props: ConversationContentProps) {
   const {
     sessionId, phase, hero, useSession, useSessions, useSessionStatus,
     useWorkspaces, useInput, useComposerBlock, renderSlot, renderSlotChain,
-    selectWorkspace, t, useFactorySlot,
+    selectWorkspace, t, useFactorySlot, useProjection,
   } = props
   const session = useSession(snapshot => snapshot)
   const Views = useFactorySlot('views', ConversationSessionView)
@@ -41,6 +42,24 @@ export function ConversationContent(props: ConversationContentProps) {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [pendingWorkspaceId, setPendingWorkspaceId] = useState<WorkspaceId | undefined>()
   const pickerAnchor = useRef<HTMLButtonElement>(null)
+
+  // The toolbar activity (`conversation.input.activity` expansion) lives at
+  // the seat layer with the dock row it hides: the row is no longer inside
+  // InputBar, so the bar reports expansion up through its owner props
+  // (onActiveChange) and the row reads it here. Reset on Session switch, as
+  // the state did when it lived inside the bar.
+  const [activity, setActivity] = useState(false)
+  useEffect(() => { setActivity(false) }, [sessionId])
+  // A takeover landing while the toolbar is expanded would strand that state
+  // on a bar the chain has hidden: release it the moment a pending
+  // interaction arrives, the same spirit as the activity seat's
+  // release-on-unmount contract.
+  const hadPendingInteraction = useRef(pendingInteraction !== undefined)
+  useEffect(() => {
+    const pending = pendingInteraction !== undefined
+    if (pending && !hadPendingInteraction.current) setActivity(false)
+    hadPendingInteraction.current = pending
+  }, [pendingInteraction])
 
   // Publishes the two live measurements floating View chrome reads off the
   // scroll body: the seat's height as --dsh-composer-height, so controls clear
@@ -156,6 +175,8 @@ export function ConversationContent(props: ConversationContentProps) {
   const blocked = !inert && composerBlock !== undefined
   const inputBar = renderSlot('conversation.composer.bar', {
     variant: hero ? 'hero' : 'composer',
+    activity,
+    onActiveChange: setActivity,
     ...(inert
       ? {
         disabled: true,
@@ -186,13 +207,37 @@ export function ConversationContent(props: ConversationContentProps) {
     { fallback: composerBar, fallbackOnly: sessionId === undefined, overlay: true },
   )
 
+  // The dock row (statistics pills + context meter + trailing seat) is a
+  // SIBLING of the chain output, not a descendant of the resident bar: an
+  // elected takeover (the ask card) hides the fallback with display:none, and
+  // the row has to outlive it — one row serves the input and ask states alike
+  // (ask-dock-row-1122). The guards mirror the bar's old composer-variant
+  // seat: the two slot halves render exactly when the resident bar would have
+  // rendered them, and the meter still folds away while a toolbar activity is
+  // expanded.
+  const dockRow = (
+    <div className={clsx(css.dock, hero && css.dockHero)} data-composer-dock>
+      {hero || inputState === undefined || sessionId === undefined
+        ? null
+        : renderSlot('conversation.composer.dock', {})}
+      {activity ? null : <ContextMeter useProjection={useProjection} t={t} />}
+      {/* Trailing seat: same guard as the dock itself, so a trailing
+          indicator renders exactly while the row it trails does. */}
+      {hero || inputState === undefined || sessionId === undefined
+        ? null
+        : renderSlot('conversation.composer.dock.trailing', {})}
+    </div>
+  )
+
   // Sticky wraps the whole chain output (fallback + elected overlay), not
   // only `.composerStack`: overlay:true renders those as siblings, and sticky
   // on the fallback alone would leave a business-owned takeover at the content
-  // end off-screen when the user is not pinned to the floor.
+  // end off-screen when the user is not pinned to the floor. The dock row
+  // rides the seat for the same reason: it sticks with whichever panel won.
   const composerSeat = (
     <div ref={seatResizeRef} className={css.composerSeat} data-composer-seat="" data-conversation-region="composer">
       {composer}
+      {dockRow}
     </div>
   )
 

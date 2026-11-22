@@ -6,27 +6,11 @@
   /* Side pads ride the shared clearance (figma Input_Bottom drew L32/R32/B8;
      the sides narrow with the shared width axis); the bottom gradient mask
      is owned by the chat scroller. No top pad: the composer stack's gap owns
-     the space above; the status strip still carries its own margin. */
-  padding: 0 var(--dsh-composer-side-clearance) 4px;
-}
-
-.dock {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  /* Full row width (the parent centers its content anyway) so the dock can
-     act as an inline-size query container: occupants degrade against the row
-     they sit in, and the explicit width keeps containment from collapsing a
-     shrink-to-fit box to zero. */
-  width: 100%;
-  max-width: 100%;
-  container-type: inline-size;
-  padding-top: 4px;
-}
-
-.hero .dock:empty {
-  display: none;
+     the space above; the status strip still carries its own margin. No bottom
+     pad either: the dock row left this component for the composer seat
+     (ask-dock-row-1122) and carries both 4px bands itself, so the bar ends
+     flush with the card. */
+  padding: 0 var(--dsh-composer-side-clearance) 0;
 }
 
 .hero {

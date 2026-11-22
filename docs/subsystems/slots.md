@@ -174,10 +174,10 @@ Factory: conversation.content [ConversationContent]
 │  ├─ conversation.input.model
 │  │  └─ conversation.input.model.label
 │  ├─ conversation.input.overlay
-│  ├─ conversation.composer.dock
-│  ├─ conversation.composer.dock.trailing
 │  ├─ conversation.input.left
 │  └─ conversation.input.right
+├─ conversation.composer.dock
+├─ conversation.composer.dock.trailing
 ├─ conversation.input.dock
 │  └─ id=queue [QueueDock]
 │     └─ calls Factory: conversation.user.text

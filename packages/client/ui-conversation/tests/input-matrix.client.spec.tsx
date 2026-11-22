@@ -91,6 +91,10 @@ function mountBar(shell: SessionInputShell, over?: { running?: boolean; disabled
     renderSlot: (() => null) as InputBarProps['renderSlot'],
     stop: vi.fn(),
     t: makeTranslate(zh, commonZh),
+    // The seat owns this pair in production (ask-dock-row-1122); this bare
+    // bar mount has no seat above it, so the activity stays closed.
+    activity: false,
+    onActiveChange: () => {},
     variant: 'composer',
   }
   return render(<InputBar {...props} />)

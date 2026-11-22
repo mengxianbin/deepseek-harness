@@ -447,6 +447,11 @@ export function apply(ctx: Context, config: Config = Config({})): void {
       'conversation.session': { kind: 'single', scope: 'session' },
       'conversation.composer': { kind: 'chain', scope: 'session' },
       'conversation.composer.bar': { kind: 'single', scope: 'session-maybe' },
+      // The dock row is a sibling of the chain output at this factory's seat,
+      // not a child of the bar: an elected takeover hides the bar's subtree
+      // and the row must outlive it (moved with ask-dock-row-1122).
+      'conversation.composer.dock': { kind: 'list', scope: 'session' },
+      'conversation.composer.dock.trailing': { kind: 'list', scope: 'session' },
       'conversation.input.dock': { kind: 'list', scope: 'session' },
       'conversation.hero.brand.mark': { kind: 'single', scope: 'root' },
       'conversation.hero.workspace': { kind: 'single', scope: 'root' },
@@ -571,8 +576,6 @@ export function apply(ctx: Context, config: Config = Config({})): void {
       'conversation.input.right': { kind: 'list', scope: 'session' },
       'conversation.input.model': { kind: 'single', scope: 'session' },
       'conversation.input.activity': { kind: 'single', scope: 'session' },
-      'conversation.composer.dock': { kind: 'list', scope: 'session' },
-      'conversation.composer.dock.trailing': { kind: 'list', scope: 'session' },
     },
     inject: (sessionId: SessionId | undefined): ComposerBarInjected => {
       if (sessionId === undefined) {

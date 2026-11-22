@@ -40,13 +40,16 @@ describe.skipIf(webSnapshotMode() === 'record')('web e2e: context details placem
         await trigger.waitFor()
         expect(await trigger.textContent()).toMatch(/^\d+%$/)
         expect(await page.getByRole('button', { name: /tok · Cache hit/ }).count()).toBe(withStats ? 1 : 0)
-        expect(await card.evaluate((element) => {
-          const dock = element.nextElementSibling!
-          return {
-            above: getComputedStyle(dock).paddingTop,
-            below: getComputedStyle(element.parentElement!).paddingBottom,
-          }
-        })).toEqual({ above: '4px', below: '4px' })
+        // The row is a seat-level sibling of the composer chain output now
+        // (ask-dock-row-1122), so it is no longer the card's next sibling:
+        // address it directly — exactly one row, inside the composer seat,
+        // carrying both 4px bands (the card→row band above, the row→seat band
+        // below) the bar's root used to own as padding-bottom.
+        const dock = page.locator('[data-composer-dock]')
+        expect(await dock.count()).toBe(1)
+        expect(await dock.evaluate(element => element.closest('[data-composer-seat]') !== null)).toBe(true)
+        expect(await dock.evaluate(element => getComputedStyle(element).paddingTop)).toBe('4px')
+        expect(await dock.evaluate(element => getComputedStyle(element).paddingBottom)).toBe('4px')
         await trigger.click()
         const panel = page.getByRole('dialog', { name: 'of context used', exact: true })
         await panel.waitFor()

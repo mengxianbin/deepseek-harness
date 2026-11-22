@@ -38,7 +38,6 @@ import {
 import { resolveSubmitMode } from '../input/submission-policy.ts'
 import { attachmentErrorText, imageSizeText } from '../image-labels.ts'
 import { isImageMediaType } from '../service.ts'
-import { ContextMeter } from './ContextMeter.tsx'
 import { observeControlRow } from './control-row-layout.ts'
 import css from './InputBar.module.css'
 
@@ -52,7 +51,7 @@ export const InputBar = memo(function InputBar({
   useAccess,
   useProjection, sessionId, variant, disabled: inert = false, blocked,
   workspacePickerOpen = false, onRequestWorkspace,
-  placeholder, accessory,
+  placeholder, accessory, activity, onActiveChange,
 }: InputBarProps) {
   const input = useInput(s => s)
   const notice = useNotices(s => s)
@@ -67,8 +66,9 @@ export const InputBar = memo(function InputBar({
   const stopAction = cancelDenied ? undefined : stop
   void useLexicon // hook seat stays bound by the inject compartment; text-ref decoration rides the shell's editor transforms
   const commandMenuOpen = useMenuLauncher(source => source === 'command')
-  const [activity, setActivity] = useState(false)
-  useEffect(() => { setActivity(false) }, [sessionId])
+  // The toolbar activity's state lives at the seat layer with the dock row it
+  // hides (the row left this component, ask-dock-row-1122): the expansion
+  // arrives through the owner props and reports back through onActiveChange.
   const promptError = useSession(s => s.promptError) ?? null
   const running = useSession(s => s.running) ?? false
   const subagent = useSession(s => s.subagent) ?? null
@@ -580,7 +580,7 @@ export const InputBar = memo(function InputBar({
               {sessionId === undefined ? null : renderSlot('conversation.input.model', { locked: modelSeatLocked })}
             </div>
             {input === undefined || sessionId === undefined ? null : <div className={activity ? css.activityExpanded : css.activity}>
-              {renderSlot('conversation.input.activity', { locked, onActiveChange: setActivity })}
+              {renderSlot('conversation.input.activity', { locked, onActiveChange })}
             </div>}
             {interruptible && !cancelDenied && (
               <Tooltip label={t('input.stop')} shortcutKeys={stopKeys} side="top" delayMs={500} disabled={stopAction === undefined}>
@@ -629,17 +629,6 @@ export const InputBar = memo(function InputBar({
             )}
           </div>
         </div>
-      </div>
-      <div className={css.dock} data-composer-dock>
-        {variant === 'composer' && input !== undefined && sessionId !== undefined
-          ? renderSlot('conversation.composer.dock', {})
-          : null}
-        {activity ? null : <ContextMeter useProjection={useProjection} t={t} />}
-        {/* Trailing seat: same guard as the dock itself, so a trailing
-            indicator renders exactly while the row it trails does. */}
-        {variant === 'composer' && input !== undefined && sessionId !== undefined
-          ? renderSlot('conversation.composer.dock.trailing', {})
-          : null}
       </div>
     </div>
   )

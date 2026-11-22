@@ -202,6 +202,10 @@ async function scopedBench(register?: (inputTriggers: InputTriggerService) => vo
     stop: vi.fn(),
     useStopShortcut: bindSnapshotSelector(createSnapshotStore<readonly string[]>([])),
     t: makeTranslate(zh, commonZh),
+    // The seat owns this pair in production (ask-dock-row-1122); this bare
+    // bar mount has no seat above it, so the activity stays closed.
+    activity: false,
+    onActiveChange: () => {},
     variant: 'composer',
   }
   const view = render(<InputBar {...barProps} />)
