@@ -12,9 +12,14 @@
  * `./overshoot.ts`) so a spike can be attributed.
  *
  * Layer 2 (who): histogram spike + slice overshoot in the same window =
- * attributed; spike with no slice overshoot = unattributed, which triggers
- * the light `process.report.getReport()` dump into `.tmp/loop-report/`
- * (cooldown-bounded so a hot loop cannot flood the disk).
+ * attributed; spike with no slice overshoot = unattributed, which runs the
+ * loop-report-sign-1123 output scheme (see `./signature.ts`): a cheap
+ * signature (worst-ms bucket × slice attribution state) dedups the
+ * phenomenon — the first sighting in a process writes one full
+ * `process.report` into `.tmp/loop-report/`, every repeat appends one line
+ * to the hot-layer event JSONL with an occurrence count, and the cold layer
+ * stays capped on disk (≤3 per signature, ≤50 global, re-asserted by a
+ * sweep at load). Output scales with distinct phenomena, not with time.
  *
  * Layer 3 (don't misread): the state probe serves the same numbers the log
  * line reports, so the settings card can place this histogram next to the
@@ -42,6 +47,15 @@ import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { isLoopbackProbeRequest } from '@deepseek-ai/dsh-unit-scheduler'
 import z from '@deepseek-ai/schemastery'
 import { overshootDelta, snapshotOvershoots, type SliceName } from './overshoot.ts'
+import {
+  appendLoopEvent,
+  COLD_GLOBAL_LIMIT,
+  COLD_PER_SIGNATURE_LIMIT,
+  dumpFileName,
+  readColdLayer,
+  spikeSignature,
+  sweepColdLayer,
+} from './signature.ts'
 
 /**
  * Slice-overshoot accounting, re-exported for the three cooperative-yield
@@ -52,6 +66,32 @@ import { overshootDelta, snapshotOvershoots, type SliceName } from './overshoot.
  */
 export { recordOvershoot, resetOvershoots, snapshotOvershoots } from './overshoot.ts'
 export type { SliceName, SliceOvershootStats } from './overshoot.ts'
+
+/**
+ * The loop-report-sign-1123 output stop-bleed (方案 = m-note
+ * `loop-report-mode-critique-1123.md` §三, user ruling「签名+计数 方案 采纳」):
+ * cheap spike signatures (worst-ms bucket × slice attribution), the
+ * hot-layer event JSONL, the bounded cold layer (per-signature + global
+ * caps) and the first-scan sweep that takes over pre-signature stock.
+ * Re-exported so consumers and tests reach them through the package entry.
+ */
+export {
+  appendLoopEvent,
+  COLD_GLOBAL_LIMIT,
+  COLD_PER_SIGNATURE_LIMIT,
+  dumpFileName,
+  EVENT_JSONL_FILE,
+  EVENT_JSONL_LIMIT,
+  isDumpFile,
+  LEGACY_SIGNATURE,
+  parseDumpSignature,
+  readColdLayer,
+  spikeSignature,
+  sweepColdLayer,
+  WORST_BUCKETS,
+  worstBucket,
+} from './signature.ts'
+export type { ColdLayerCount, LoopEventRecord, SweepResult, WorstBucket } from './signature.ts'
 
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'event-loop-monitor'
@@ -97,13 +137,12 @@ export const EVENTS_LIMIT = 100
 export const DUMP_DIR = join('.tmp', 'loop-report')
 
 /**
- * Cooldown between `process.report` dumps. The design asks for a dump "at the
- * moment the threshold trips"; without a floor a sustained unattributed loop
- * would write one multi-hundred-KB report per window, so the first unattributed
- * spike of a window still dumps and the next ones wait out this floor
- * (availability gate Q3: bounded output, memory and disk).
+ * The old time-based dump throttle (`DUMP_COOLDOWN_MS = 10 min`) is
+ * retired by loop-report-sign-1123: it bounded the flood but never the
+ * backlog (≈3.7 MB/day, zero retention). Structure replaces it — first
+ * sighting of a signature dumps, repeats count, and the cold layer's
+ * per-signature/global caps are the hard bound (see `./signature.ts`).
  */
-export const DUMP_COOLDOWN_MS = 10 * 60_000
 
 /** Channel-b fact file under the DSH home (auto-route poll-state shape: pure facts, one writer). */
 export const ALERT_STATE_FILE = 'event-loop-watch-state.json'
@@ -343,18 +382,21 @@ function slicesOvershot(
 
 /**
  * Write the unattributed-spike forensics dump (`process.report.getReport()`,
- * the design's light option) into {@link DUMP_DIR}. Fail-soft by contract:
+ * the design's light option) into {@link DUMP_DIR}, tagged with the spike's
+ * signature so the cold layer's caps can count it across restarts
+ * (`loop-report-<stamp>-sig-<bucket>-<attr>.json`). Fail-soft by contract:
  * a dump failure is logged by the caller and never breaks the watch.
+ * @param sig - the spike signature the report is filed under.
  * @returns the file path, or `undefined` when the report or the write failed.
  */
-function writeLoopReport(): string | undefined {
+function writeLoopReport(sig: string): string | undefined {
   try {
     // `process.report` types as always present; a runtime absence (or any
     // throw below) lands in the catch and degrades to the same undefined.
     const report = process.report.getReport()
     mkdirSync(DUMP_DIR, { recursive: true })
     const stamp = new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-')
-    const file = join(DUMP_DIR, `loop-report-${stamp}.json`)
+    const file = join(DUMP_DIR, dumpFileName(stamp, sig))
     writeFileSync(file, JSON.stringify(report))
     return file
   } catch {
@@ -401,10 +443,28 @@ export function apply(ctx: Context, config: Config): void {
   let lightState: LightState = INITIAL_LIGHT_STATE
   let overWindows = 0
   let redSince: number | undefined
-  let lastDumpAt = 0
   let alertWarned = false
   let prevEluSample = performance.eventLoopUtilization()
   let prevOvershoots = snapshotOvershoots()
+  /** Per-signature occurrence/dump tally for this process (the dedup half of the output scheme). */
+  const signatures = new Map<string, { count: number; dumps: number }>()
+
+  // Cold-layer first scan / re-assert (loop-report-sign-1123 分期2): the
+  // same caps the write path obeys are swept over the directory at load, so
+  // stock from earlier eras is taken over by the new mechanism — and a
+  // directory that grew past the caps elsewhere is brought back in bounds.
+  // Fail-soft: a sweep failure warns and never blocks the watch.
+  try {
+    const swept = sweepColdLayer(DUMP_DIR)
+    if (swept.removed > 0) {
+      ctx.logger.info(
+        `event-loop-monitor: cold-layer sweep removed ${swept.removed} dump(s): `
+        + `${swept.before.files} files/${swept.before.bytes}B → ${swept.after.files} files/${swept.after.bytes}B`,
+      )
+    }
+  } catch (error) {
+    ctx.logger.warn(`event-loop-monitor: cold-layer sweep failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
 
   const pushEvent = (event: EventLoopTimelineEvent): void => {
     events.push(event)
@@ -456,7 +516,10 @@ export function apply(ctx: Context, config: Config): void {
     while (history.length > HISTORY_LIMIT) history.shift()
 
     // Spike attribution (design §一第二层): max over the bad threshold with
-    // no slice overshoot in this window = unattributed → dump the scene.
+    // no slice overshoot in this window = unattributed → run the signature
+    // output scheme (loop-report-sign-1123): first sighting of a signature
+    // writes one full report when the cold-layer caps allow it; every
+    // sighting appends one hot-layer event line with its occurrence count.
     if (facts.max > maxBadMs) {
       if (overshootsInWindowCount > 0) {
         pushEvent({ at: now, kind: 'spike', max: facts.max, slices: overshootsInWindow })
@@ -465,11 +528,36 @@ export function apply(ctx: Context, config: Config): void {
         unattributed.worstMs = Math.max(unattributed.worstMs, facts.max)
         unattributed.lastAt = now
         pushEvent({ at: now, kind: 'spike', max: facts.max, slices: [] })
-        if (now - lastDumpAt >= DUMP_COOLDOWN_MS) {
-          lastDumpAt = now
-          const file = writeLoopReport()
-          if (file === undefined) ctx.logger.warn('event-loop-monitor: unattributed spike report dump failed')
-          else unattributed.dumps += 1
+        const sig = spikeSignature(facts.max, overshootsInWindow, maxBadMs)
+        const entry = signatures.get(sig) ?? { count: 0, dumps: 0 }
+        entry.count += 1
+        let action: 'dump' | 'count' = 'count'
+        // Full report only for a signature this process has not dumped yet,
+        // and only while the on-disk caps hold (readColdLayer → undefined =
+        // cannot prove the caps → do not write; fail-safe, quiet).
+        if (entry.dumps === 0) {
+          const cold = readColdLayer(DUMP_DIR)
+          if (
+            cold !== undefined
+            && (cold.perSignature.get(sig) ?? 0) < COLD_PER_SIGNATURE_LIMIT
+            && cold.total < COLD_GLOBAL_LIMIT
+          ) {
+            const file = writeLoopReport(sig)
+            if (file === undefined) ctx.logger.warn('event-loop-monitor: unattributed spike report dump failed')
+            else {
+              entry.dumps += 1
+              unattributed.dumps += 1
+              action = 'dump'
+            }
+          }
+        }
+        signatures.set(sig, entry)
+        try {
+          appendLoopEvent(DUMP_DIR, { at: now, sig, max: facts.max, occurrence: entry.count, action })
+        } catch (error) {
+          ctx.logger.warn(
+            `event-loop-monitor: event stream append failed: ${error instanceof Error ? error.message : String(error)}`,
+          )
         }
       }
     }

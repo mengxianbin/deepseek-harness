@@ -1,14 +1,22 @@
 /**
  * Coverage for @deepseek-ai/dsh-event-loop-monitor (design
- * event-loop-monitor-1108): the design §二 light table and §三.2 aggregate
- * line as pure-function cases, the slice-overshoot registry (globalThis
- * singleton, window diffing), the channel-c probe through a stand-in
- * webServer (schema, loopback fence, method check), the `disable` quiet
- * absence, fail-loud config, the loader load-path shape, and two real-timer
- * integration legs that pin the acceptance pipeline end to end: a 500 ms
- * synchronous busy-wait must surface as a histogram max spike AND the
- * over-threshold aggregate log line (unattributed → report dump), while a
- * slice recorded in the same window attributes the spike instead.
+ * event-loop-monitor-1108 + output scheme loop-report-sign-1123): the
+ * design §二 light table and §三.2 aggregate line as pure-function cases,
+ * the slice-overshoot registry (globalThis singleton, window diffing), the
+ * channel-c probe through a stand-in webServer (schema, loopback fence,
+ * method check), the `disable` quiet absence, fail-loud config, the loader
+ * load-path shape, the signature/cold-layer/hot-layer output scheme
+ * (bucketing, filename round-trip, caps, rolling JSONL, load sweep), and
+ * real-timer integration legs that pin the acceptance pipeline end to end:
+ * a 500 ms synchronous busy-wait must surface as a histogram max spike AND
+ * the over-threshold aggregate log line (first sighting of a signature →
+ * report dump), a repeat sighting must count into the event JSONL instead
+ * of dumping again, a full cold layer must refuse the dump, and a slice
+ * recorded in the same window attributes the spike instead.
+ *
+ * Every test runs in a throwaway cwd: the watch writes `.tmp/loop-report/`
+ * relative to the process cwd, and the load-time cold-layer sweep would
+ * otherwise act on the real repository's stock dumps.
  *
  * The channel-b alert file is deliberately NOT driven red here: its write
  * path would stamp the real `<dsh-home>` fact file from a test run. Red
@@ -16,13 +24,31 @@
  * fail-soft `writeFileSync` beside them.
  */
 
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as eventLoopMonitor from '@deepseek-ai/dsh-event-loop-monitor'
-import { recordOvershoot, resetOvershoots, snapshotOvershoots } from '@deepseek-ai/dsh-event-loop-monitor'
+import {
+  appendLoopEvent,
+  COLD_GLOBAL_LIMIT,
+  COLD_PER_SIGNATURE_LIMIT,
+  dumpFileName,
+  LEGACY_SIGNATURE,
+  parseDumpSignature,
+  readColdLayer,
+  recordOvershoot,
+  resetOvershoots,
+  spikeSignature,
+  snapshotOvershoots,
+  sweepColdLayer,
+  WORST_BUCKETS,
+  worstBucket,
+} from '@deepseek-ai/dsh-event-loop-monitor'
 import { overshootDelta } from '../src/overshoot.ts'
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => { setTimeout(resolve, ms) })
@@ -33,12 +59,43 @@ function busy(ms: number): void {
   while (Date.now() < end) { /* spin */ }
 }
 
-const fibers: { dispose(): Promise<unknown> }[] = []
+/** The dump directory the watch uses, relative to (the test's throwaway) cwd. */
+const DUMP_DIR = join('.tmp', 'loop-report')
 
-beforeEach(() => { resetOvershoots() })
+/** Cold-layer dump files currently on disk (the event JSONL never matches). */
+function dumpFiles(): string[] {
+  try {
+    return readdirSync(DUMP_DIR).filter(name => name.startsWith('loop-report-') && name.endsWith('.json')).sort()
+  } catch {
+    return []
+  }
+}
+
+/** The hot-layer event JSONL, parsed; an absent file reads as no events. */
+function readEvents(): Record<string, unknown>[] {
+  try {
+    return readFileSync(join(DUMP_DIR, 'loop-events.jsonl'), 'utf8')
+      .split('\n').filter(line => line.length > 0).map(line => JSON.parse(line) as Record<string, unknown>)
+  } catch {
+    return []
+  }
+}
+
+const fibers: { dispose(): Promise<unknown> }[] = []
+let cwdBackup = ''
+let tempCwd = ''
+
+beforeEach(() => {
+  resetOvershoots()
+  cwdBackup = process.cwd()
+  tempCwd = mkdtempSync(join(tmpdir(), 'event-loop-monitor-'))
+  process.chdir(tempCwd)
+})
 afterEach(async () => {
   vi.restoreAllMocks()
   await Promise.all(fibers.splice(0).map(fiber => fiber.dispose()))
+  process.chdir(cwdBackup)
+  rmSync(tempCwd, { recursive: true, force: true })
 })
 
 /** Fields a test may override when forging the probe request. */
@@ -204,6 +261,142 @@ describe('slice overshoot registry', () => {
   })
 })
 
+describe('spike signatures (loop-report-sign-1123)', () => {
+  it('buckets the worst ms in tiers of the configured maxBadMs', () => {
+    expect(worstBucket(2000, 2000)).toBe('sub1x')
+    expect(worstBucket(2001, 2000)).toBe('1-3x')
+    expect(worstBucket(6000, 2000)).toBe('1-3x')
+    expect(worstBucket(6001, 2000)).toBe('3-10x')
+    expect(worstBucket(20_000, 2000)).toBe('3-10x')
+    expect(worstBucket(20_001, 2000)).toBe('10-30x')
+    expect(worstBucket(60_000, 2000)).toBe('10-30x')
+    expect(worstBucket(60_001, 2000)).toBe('30x+')
+    expect(worstBucket(Number.NaN, 2000)).toBe('sub1x')
+    // The tiers follow a retuned threshold instead of fixed milliseconds.
+    expect(worstBucket(510, 300)).toBe('1-3x')
+  })
+
+  it('combines the bucket with the slice attribution state', () => {
+    expect(spikeSignature(3200, [], 2000)).toBe('1-3x_none')
+    expect(spikeSignature(7000, [], 2000)).toBe('3-10x_none')
+    expect(spikeSignature(1500, [], 2000)).toBe('sub1x_none')
+    // Sorted slice names, `.`-joined — attribution state rides in the signature.
+    expect(spikeSignature(7000, ['zstd', 'list'], 2000)).toBe('3-10x_list.zstd')
+    expect(spikeSignature(70_000, ['migration'], 2000)).toBe('30x+_migration')
+  })
+
+  it('round-trips through the dump file name and reads legacy stock as unsigned', () => {
+    expect(dumpFileName('2026-11-23T10-00-00-000Z', '1-3x_none'))
+      .toBe('loop-report-2026-11-23T10-00-00-000Z-sig-1-3x-none.json')
+    expect(parseDumpSignature(dumpFileName('2026-11-23T10-00-00-000Z', '1-3x_none'))).toBe('1-3x_none')
+    expect(parseDumpSignature(dumpFileName('2026-11-23T10-00-00-000Z', '3-10x_list.zstd'))).toBe('3-10x_list.zstd')
+    expect(parseDumpSignature(dumpFileName('2026-11-23T10-00-00-000Z', '30x+_none'))).toBe('30x+_none')
+    // Pre-signature stock and foreign files carry no signature.
+    expect(parseDumpSignature('loop-report-2026-11-20T17-06-17-260Z.json')).toBeUndefined()
+    expect(parseDumpSignature('loop-events.jsonl')).toBeUndefined()
+  })
+})
+
+describe('cold-layer census, caps and first scan', () => {
+  it('censuses dump files by signature with legacy stock as one class', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'elm-cold-'))
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, dumpFileName('2026-11-23T00-00-01-000Z', '1-3x_none')), '{}')
+    writeFileSync(join(dir, dumpFileName('2026-11-23T00-00-02-000Z', '1-3x_none')), '{}')
+    writeFileSync(join(dir, 'loop-report-2026-11-20T17-06-17-260Z.json'), '{}')
+    writeFileSync(join(dir, 'loop-events.jsonl'), '{}\n')
+    writeFileSync(join(dir, 'notes.txt'), 'foreign')
+    const census = readColdLayer(dir)
+    expect(census?.total).toBe(3)
+    expect(census?.perSignature.get('1-3x_none')).toBe(2)
+    expect(census?.perSignature.get(LEGACY_SIGNATURE)).toBe(1)
+    // A missing directory is an empty layer; a path that is not a directory is unreadable.
+    expect(readColdLayer(join(dir, 'absent'))).toEqual({ total: 0, perSignature: new Map() })
+    expect(readColdLayer(join(dir, 'notes.txt'))).toBeUndefined()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('sweeps to the per-signature cap, newest kept, foreign files untouched', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'elm-sweep-'))
+    mkdirSync(dir, { recursive: true })
+    // Five dumps of one signature, two of another, one legacy stock file.
+    for (let i = 1; i <= 5; i += 1) {
+      writeFileSync(join(dir, dumpFileName(`2026-11-23T00-00-0${i}-000Z`, '1-3x_none')), 'x'.repeat(10 + i))
+    }
+    writeFileSync(join(dir, dumpFileName('2026-11-23T00-00-01-000Z', '3-10x_list')), 'y')
+    writeFileSync(join(dir, dumpFileName('2026-11-23T00-00-02-000Z', '3-10x_list')), 'y')
+    writeFileSync(join(dir, 'loop-report-2026-11-20T17-06-17-260Z.json'), 'z')
+    writeFileSync(join(dir, 'loop-events.jsonl'), '{"at":1}\n')
+    writeFileSync(join(dir, 'notes.txt'), 'foreign')
+
+    const result = sweepColdLayer(dir)
+    expect(result.before).toEqual({ files: 8, bytes: (11 + 12 + 13 + 14 + 15) + 1 + 1 + 1 })
+    expect(result.removed).toBe(2)
+    expect(result.after.files).toBe(6)
+    expect(result.keptBySignature).toEqual({ '1-3x_none': 3, '3-10x_list': 2, [LEGACY_SIGNATURE]: 1 })
+    // Newest three of the capped signature survive (stamps 03/04/05).
+    const survivors = readdirSync(dir).filter(name => name.includes('1-3x')).sort()
+    expect(survivors).toHaveLength(COLD_PER_SIGNATURE_LIMIT)
+    expect(survivors).toEqual([
+      'loop-report-2026-11-23T00-00-03-000Z-sig-1-3x-none.json',
+      'loop-report-2026-11-23T00-00-04-000Z-sig-1-3x-none.json',
+      'loop-report-2026-11-23T00-00-05-000Z-sig-1-3x-none.json',
+    ])
+    // The event JSONL and any foreign file are out of the sweep's scope.
+    expect(readdirSync(dir)).toContain('loop-events.jsonl')
+    expect(readdirSync(dir)).toContain('notes.txt')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('applies the global cap on top of the per-signature survivors', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'elm-global-'))
+    mkdirSync(dir, { recursive: true })
+    // 55 distinct signatures (≤3 each), newest = highest stamp.
+    for (let i = 0; i < COLD_GLOBAL_LIMIT + 5; i += 1) {
+      const attr = `${String.fromCharCode(97 + (i % 26))}${String.fromCharCode(97 + Math.floor(i / 26))}`
+      const stamp = `2026-11-23T00-00-${String(i).padStart(2, '0')}-000Z`
+      writeFileSync(join(dir, dumpFileName(stamp, `1-3x_${attr}`)), 'x')
+    }
+    const result = sweepColdLayer(dir)
+    expect(result.before.files).toBe(COLD_GLOBAL_LIMIT + 5)
+    expect(result.removed).toBe(5)
+    expect(result.after.files).toBe(COLD_GLOBAL_LIMIT)
+    // The five oldest (stamps 00–04) went; the newest 50 remain.
+    const remaining = readdirSync(dir).filter(name => name.startsWith('loop-report-'))
+    expect(remaining.some(name => name.includes('T00-00-00-000Z'))).toBe(false)
+    expect(remaining.some(name => name.includes('T00-00-04-000Z'))).toBe(false)
+    expect(remaining.some(name => name.includes('T00-00-05-000Z'))).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('reads a missing directory as an empty sweep (fresh install, no-op)', () => {
+    const absent = join(tmpdir(), `elm-absent-${Date.now()}`)
+    expect(sweepColdLayer(absent)).toEqual({
+      before: { files: 0, bytes: 0 },
+      after: { files: 0, bytes: 0 },
+      removed: 0,
+      keptBySignature: {},
+    })
+  })
+})
+
+describe('hot-layer event JSONL (rolling retention)', () => {
+  it('appends one line per event and rolls back to the line cap', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'elm-events-'))
+    for (let occurrence = 1; occurrence <= 15; occurrence += 1) {
+      appendLoopEvent(dir, { at: occurrence, sig: '1-3x_none', max: 2100, occurrence, action: 'count' }, 10)
+    }
+    const lines = readFileSync(join(dir, 'loop-events.jsonl'), 'utf8').trim().split('\n')
+    expect(lines).toHaveLength(10)
+    // Oldest five dropped, newest ten kept in order.
+    expect(JSON.parse(lines[0]!)).toMatchObject({ occurrence: 6, action: 'count' })
+    expect(JSON.parse(lines[9]!)).toMatchObject({ occurrence: 15 })
+    // The file is one rolling JSONL: valid lines only, no partial records.
+    expect(() => lines.map(line => JSON.parse(line))).not.toThrow()
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
 describe('event-loop-monitor probe (channel c)', () => {
   it('serves the state schema with p99/max/elu and the design defaults', async () => {
     const { readState } = await setupProbe({})
@@ -315,5 +508,58 @@ describe('event-loop-monitor real-timer windows', () => {
     expect(migration?.count).toBeGreaterThanOrEqual(1)
     expect(migration?.worstMs).toBeGreaterThanOrEqual(120)
     expect(migration?.lastAt).toBeGreaterThan(0)
+  }, 15_000)
+
+  it('dumps the first sighting of a signature and counts the repeat into the event stream', async () => {
+    const { readState } = await setupProbe({ windowSec: 1, maxBadMs: 300 })
+    await sleep(50)
+    busy(500)
+    const first = await waitForWindows(readState, 1)
+    expect(first.max).toBeGreaterThan(300)
+    // First sighting: one full report, filed under the spike's signature.
+    expect(first.unattributed.count).toBe(1)
+    expect(first.unattributed.dumps).toBe(1)
+    const sig = spikeSignature(first.max, [], 300)
+    const filesAfterFirst = dumpFiles()
+    expect(filesAfterFirst).toHaveLength(1)
+    expect(parseDumpSignature(filesAfterFirst[0]!)).toBe(sig)
+
+    await sleep(50)
+    busy(500)
+    const second = await waitForWindows(readState, 2)
+    expect(second.max).toBeGreaterThan(300)
+    // Repeat sighting of the same signature: counted, never dumped again.
+    expect(second.unattributed.count).toBe(2)
+    expect(second.unattributed.dumps).toBe(1)
+    expect(dumpFiles()).toHaveLength(1)
+
+    const events = readEvents()
+    expect(events).toHaveLength(2)
+    expect(events[0]).toMatchObject({ sig, occurrence: 1, action: 'dump', max: first.max })
+    expect(events[1]).toMatchObject({ sig, occurrence: 2, action: 'count', max: second.max })
+  }, 15_000)
+
+  it('refuses the full report once the cold layer sits at the global cap', async () => {
+    // 50 signature-era files across 20 signatures (≤3 each) — within both
+    // caps, so the load-time sweep keeps every one of them.
+    mkdirSync(DUMP_DIR, { recursive: true })
+    for (let i = 0; i < COLD_GLOBAL_LIMIT; i += 1) {
+      const bucket = WORST_BUCKETS[i % WORST_BUCKETS.length]!
+      const attr = ['none', 'list', 'migration', 'zstd'][Math.floor(i / WORST_BUCKETS.length) % 4]!
+      const stamp = `2026-11-23T00-00-${String(i).padStart(2, '0')}-000Z`
+      writeFileSync(join(DUMP_DIR, dumpFileName(stamp, `${bucket}_${attr}`)), '{}')
+    }
+    const { readState } = await setupProbe({ windowSec: 1, maxBadMs: 300 })
+    expect(dumpFiles()).toHaveLength(COLD_GLOBAL_LIMIT)
+
+    await sleep(50)
+    busy(500)
+    const spiked = await waitForWindows(readState, 1)
+    expect(spiked.max).toBeGreaterThan(300)
+    expect(spiked.unattributed.count).toBe(1)
+    // Cap holds: no room for a report, so the occurrence is counted only.
+    expect(spiked.unattributed.dumps).toBe(0)
+    expect(dumpFiles()).toHaveLength(COLD_GLOBAL_LIMIT)
+    expect(readEvents()).toEqual([expect.objectContaining({ action: 'count', occurrence: 1 })])
   }, 15_000)
 })
