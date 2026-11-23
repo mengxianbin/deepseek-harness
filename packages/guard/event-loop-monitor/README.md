@@ -1,5 +1,5 @@
 ---
-description: "Event-loop health watch: a windowed monitorEventLoopDelay histogram plus eventLoopUtilization answers whether the main thread is stuck, a conditional aggregate log line speaks only when over threshold, a loopback state probe serves the same numbers, slice-overshoot accounting attributes spikes to a yield point, and unattributed spikes dump a process.report."
+description: "Event-loop health watch: a windowed monitorEventLoopDelay histogram plus eventLoopUtilization answers whether the main thread is stuck, a conditional aggregate log line speaks only when over threshold, a loopback state probe serves the same numbers, slice-overshoot accounting attributes spikes to a yield point, and unattributed spikes are deduplicated by a cheap signature — first sighting dumps a process.report, repeats count into a rolling event JSONL, both layers bounded on disk."
 kind: "package-reference"
 ---
 
@@ -7,7 +7,7 @@ kind: "package-reference"
 
 ## Summary
 
-Use this package to know at runtime whether the host's main thread is stuck, instead of guessing after the fact. A `monitorEventLoopDelay({ resolution: 10 })` histogram and an `eventLoopUtilization()` delta are read once per window (default 60 s) into p50/p99/max/mean and a light (🟢/🟡/🔴): green stays silent, an over-threshold window prints one aggregate log line, and a red stretch stamps a fact file under the DSH home. The loopback probe `GET /api/event-loop/state` serves the same numbers to the settings health card, spike windows are attributed against the three cooperative-yield slice points (`list`, `migration`, `zstd`) that book their overshoot through `recordOvershoot`, and a spike with no slice in the window dumps `process.report.getReport()` into `.tmp/loop-report/`. The `dsh` base bundle already mounts the watch next to the unit-scheduler gate.
+Use this package to know at runtime whether the host's main thread is stuck, instead of guessing after the fact. A `monitorEventLoopDelay({ resolution: 10 })` histogram and an `eventLoopUtilization()` delta are read once per window (default 60 s) into p50/p99/max/mean and a light (🟢/🟡/🔴): green stays silent, an over-threshold window prints one aggregate log line, and a red stretch stamps a fact file under the DSH home. The loopback probe `GET /api/event-loop/state` serves the same numbers to the settings health card, spike windows are attributed against the three cooperative-yield slice points (`list`, `migration`, `zstd`) that book their overshoot through `recordOvershoot`, and a spike with no slice in the window runs the bounded output scheme: a cheap signature (worst-ms bucket × slice attribution state) decides — the first sighting of a signature writes one full `process.report.getReport()` into `.tmp/loop-report/`, every repeat appends one line to a rolling event JSONL with an occurrence count, and the cold layer stays capped on disk (≤3 files per signature, ≤50 global, re-asserted by a sweep at load). Output scales with distinct phenomena, not with wall-clock time. The `dsh` base bundle already mounts the watch next to the unit-scheduler gate.
 
 ## Table of Contents
 
@@ -52,7 +52,7 @@ The generated [configuration catalog entry](../../../docs/config-catalog.md#deep
 
 - **A direct measurement of "is it stuck"** — the delay histogram is the definition of a stall (the timer that should have fired did not), and ELU separates a busy loop from a blocked one.
 - **Silence by default** — green windows log nothing; one conditional line per over-threshold window carries p99, max, ELU and the window size in the design's fixed shape.
-- **Attribution, not just alarm** — a spike that lines up with a slice overshoot names the slice; a spike that does not dumps a `process.report` for forensics.
+- **Attribution, not just alarm** — a spike that lines up with a slice overshoot names the slice; a spike that does not dumps a `process.report` once per signature and counts every repeat into the event stream, so `.tmp/loop-report/` stays bounded instead of growing forever.
 - **A loopback-only probe** — `GET /api/event-loop/state` answers the settings health card behind the unit-scheduler fence (non-loopback callers get 403), and the unit-scheduler queue card sits beside it so a full gate queue is never misread as a stuck loop.
 
 -----
@@ -66,7 +66,7 @@ The generated [configuration catalog entry](../../../docs/config-catalog.md#deep
 ### Three layers (design event-loop-monitor-1108 §一)
 
 1. **What**: `monitorEventLoopDelay({ resolution: 10 })` samples for the process lifetime; each window tick reads p50/p99/max/mean (ns → ms), takes an `eventLoopUtilization()` delta, and resets the histogram. The light fold is a pure function (`foldWindow`): 🟢 under both thresholds, 🟡 one or two consecutive p99-over windows or a single max breach, 🔴 three consecutive over-windows or three consecutive ELU-hot windows (the design's "ELU>90% 持续" gap-fill, mirroring the ≥3-window rule).
-2. **Who**: the three cooperative-yield slice points already compare `performance.now() >= yieldDeadline`; inside that branch they call `recordOvershoot(slice, overMs)`, one map increment at a check they already run. The registry lives on `globalThis` under `Symbol.for('dsh.event-loop-monitor.overshoot')`, so every importer in the host process shares one accumulator. A window whose max crosses `maxBadMs` with no overshoot delta is unattributed and triggers the `process.report` dump (10-minute cooldown per watch).
+2. **Who**: the three cooperative-yield slice points already compare `performance.now() >= yieldDeadline`; inside that branch they call `recordOvershoot(slice, overMs)`, one map increment at a check they already run. The registry lives on `globalThis` under `Symbol.for('dsh.event-loop-monitor.overshoot')`, so every importer in the host process shares one accumulator. A window whose max crosses `maxBadMs` with no overshoot delta is unattributed and runs the output scheme (`src/signature.ts`): the spike is signed (`worstBucket(max)` × attribution state, e.g. `1-3x_none`), the first sighting in the process writes one full report as `loop-report-<stamp>-sig-<bucket>-<attr>.json` when the on-disk caps allow it, and every sighting appends one line to `.tmp/loop-report/loop-events.jsonl` with its occurrence count. The former 10-minute cooldown is retired: structure (signature dedup + ≤3-per-signature/≤50-global caps + a load-time sweep) is the bound now.
 3. **Don't misread**: `GET /api/event-loop/state` serves the same window numbers plus the light, the bounded history ring (sparkline), the cumulative attribution table, the unattributed tally and the bounded timeline — the settings card renders those five blocks next to the unit-scheduler card.
 
 ### Three channels (design §三)
@@ -79,9 +79,10 @@ The generated [configuration catalog entry](../../../docs/config-catalog.md#deep
 
 | File | Role |
 | --- | --- |
-| `src/index.ts` | The plugin: config schema, light fold, aggregate line, window tick, alert writer, dump, and the probe route. |
+| `src/index.ts` | The plugin: config schema, light fold, aggregate line, window tick, alert writer, dump call, load-time sweep, and the probe route. |
 | `src/overshoot.ts` | The globalThis-keyed slice-overshoot registry the three yield points write and the tick diffs. |
-| `tests/` | Design-table folds, line shape, registry diffing, probe schema/fence, `disable`, fail-loud config, loader shape, and two real-timer legs (500 ms busy-wait → spike + line; slice in window → attribution). |
+| `src/signature.ts` | The output scheme: worst-ms bucketing, spike signatures, dump file naming/parsing, the cold-layer census/caps/first-scan sweep, and the rolling hot-layer event JSONL. |
+| `tests/` | Design-table folds, line shape, registry diffing, probe schema/fence, `disable`, fail-loud config, loader shape, the signature/cold-layer/hot-layer unit cases, and four real-timer legs (500 ms busy-wait → spike + line; slice in window → attribution; repeat signature → count not dump; full cold layer → refused dump). |
 
 </details>
 
@@ -116,7 +117,7 @@ These limits define where the watch stops answering. They are current package co
 - **A single spike under the thresholds is silent by design** — with defaults, one 500 ms block is below `maxBadMs` and too rare to move a 60 s p99; the design trades that miss for a quiet log (raise sensitivity by lowering the thresholds, or read the probe's `max` directly).
 - **The first sampling interval after a window reset can miss a stall that starts inside it** — a Node histogram quirk measured during implementation (a `reset()` immediately followed by a block loses that block's sample); mid-window stalls are captured, and windows are long enough that the exposure is one resolution interval per window.
 - **Channel b is a writer, not an alarm by itself** — the fact file is stamped for a future/auto-route-style reader; no reader folds it into a health frame yet, so today the log line and the probe are the live surfaces.
-- **Unattributed dumps are rate-limited** — one `process.report` per 10 minutes per watch, so a sustained unattributed stall leaves the first scene and tallies the rest rather than flooding `.tmp/loop-report/`.
+- **Unattributed dumps are bounded by signature, not by time** — the first sighting of a worst-ms bucket writes one `process.report`, repeats append one JSONL line, and the cold layer holds at ≤3 files per signature and ≤50 globally (enforced from filenames at write time and re-asserted by the load-time sweep, which also takes over pre-signature stock). Worst-case `.tmp/loop-report/` volume is therefore a constant; the old 10-minute cooldown retired with loop-report-sign-1123 because it bounded the flood but never the backlog.
 - **Process-local only** — the histogram and the registry live in one host process; a second host or a worker thread has its own watch and its own accumulator.
 
 <a id="dev-note"></a>
@@ -125,6 +126,6 @@ These limits define where the watch stops answering. They are current package co
 <details>
 <summary>Working context for maintainers — click to expand</summary>
 
-The watch is deliberately read-only: nothing it counts feeds back into scheduling or request handling, and the slice points' `recordOvershoot` calls are pure accounting at a branch they already execute. `foldWindow` and `formatAggregateLine` are pure so the design tables are testable without timers; the two real-timer tests use `windowSec: 1` with `maxBadMs: 300` to make a 500 ms busy-wait an over-threshold window within a bounded runtime — production keeps 60 s / 250 ms / 2000 ms. The alert-file write path is intentionally not driven red from tests (it would stamp the real `<dsh-home>` fact file); red logic lives in the pure fold.
+The watch is deliberately read-only: nothing it counts feeds back into scheduling or request handling, and the slice points' `recordOvershoot` calls are pure accounting at a branch they already execute. `foldWindow`, `formatAggregateLine`, `worstBucket` and `spikeSignature` are pure so the design tables and the signature scheme are testable without timers; the real-timer tests use `windowSec: 1` with `maxBadMs: 300` to make a 500 ms busy-wait an over-threshold window within a bounded runtime — production keeps 60 s / 250 ms / 2000 ms. Every test runs in a throwaway cwd because the watch writes `.tmp/loop-report/` (and sweeps it at load) relative to the process cwd — without that isolation a test run would act on the repository's real stock dumps. The alert-file write path is intentionally not driven red from tests (it would stamp the real `<dsh-home>` fact file); red logic lives in the pure fold.
 
 </details>

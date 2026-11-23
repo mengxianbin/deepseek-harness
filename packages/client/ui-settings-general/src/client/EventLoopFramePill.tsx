@@ -1,7 +1,9 @@
 /**
  * Server main-loop frame-interval pill in the settings trigger row
  * (event-loop-frame-pill-1123): the gear-adjacent glance chip carrying the
- * recent window's p99 plus the monitor's lamp color — the 250ms/2000ms
+ * recent window's value plus the monitor's lamp color — the p99 wording rides
+ * the hover label and aria only (2026-11-23 口径: 只去 p99 文字、数值保留) —
+ * the 250ms/2000ms
  * judgments stay server-side in event-loop-monitor, this seat only renders
  * them (⛔ no threshold copy of its own). Rides the System-health card's
  * pull chain verbatim (`pullEventLoopHealth` + `HEALTH_POLL_MS`, same
@@ -70,11 +72,13 @@ export function EventLoopFramePill({ t }: EventLoopFramePillProps) {
 
   // In-flight first pull: the placeholder face paints immediately and the
   // real reading replaces it the moment the pull settles (段1 立即有脸).
+  // No metric key here: the merged p99-only-in-hover 口径 deleted
+  // `eventLoop.pill.metric`, and the placeholder claims no value anyway.
   if (loop === undefined) {
     return (
       <span className={css.pill} data-event-loop-pill-loading aria-busy="true">
         <span className={`${css.dot} ${css.dot_loading}`} aria-hidden="true" />
-        <span aria-hidden="true">{t('eventLoop.pill.metric')} …</span>
+        <span aria-hidden="true">…</span>
       </span>
     )
   }
@@ -83,7 +87,11 @@ export function EventLoopFramePill({ t }: EventLoopFramePillProps) {
   const value = formatDelay(loop.p99)
   const light = t(LIGHT_KEYS[loop.light])
   return (
-    <Tooltip label={t('eventLoop.pill.tooltip')} delayMs={500} side="top">
+    <Tooltip
+      label={() => `${t('eventLoop.pill.label', { value, light })} · ${t('eventLoop.pill.tooltip')}`}
+      delayMs={500}
+      side="top"
+    >
       <span
         className={css.pill}
         data-event-loop-pill={value}
@@ -91,7 +99,7 @@ export function EventLoopFramePill({ t }: EventLoopFramePillProps) {
         aria-label={t('eventLoop.pill.label', { value, light })}
       >
         <span className={`${css.dot} ${css[`dot_${loop.light}`] ?? ''}`} aria-hidden="true" />
-        <span aria-hidden="true">{t('eventLoop.pill.metric')} {value}</span>
+        <span aria-hidden="true">{value}</span>
       </span>
     </Tooltip>
   )

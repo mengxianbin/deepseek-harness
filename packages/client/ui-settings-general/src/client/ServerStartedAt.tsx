@@ -1,6 +1,7 @@
 /**
  * Server start-time stamp in the settings trigger row (server-started-at-1117):
- * the wide column's glanceable `MM-DD HH:mm起` beside the gear, with the full
+ * the wide column's glanceable `MM-DD HH:mm` beside the gear (no since-word —
+ * the stamp itself stays, 2026-11-23 口径: 只去 since 文字), with the full
  * sentence + live elapsed age on hover — the honest answer to "did the server
  * actually restart". Renders nothing without a published instant (the store
  * clears on every reconnect until the fresh answer lands), and the settings
@@ -23,7 +24,7 @@ function pad2(value: number): string {
 }
 
 /**
- * Render the start-time stamp: the visible short form `MM-DD HH:mm起`, a
+ * Render the start-time stamp: the visible short form `MM-DD HH:mm`, a
  * visually-hidden full sentence for assistive technology (static — it never
  * prints a stale elapsed), and a hover tooltip whose label resolves at show
  * time so the elapsed age is current however long the page sat.

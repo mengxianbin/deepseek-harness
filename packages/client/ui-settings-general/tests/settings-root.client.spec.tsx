@@ -606,7 +606,7 @@ const STAMP_ISO = new Date(2026, 10, 12, 21, 49, 5).toISOString()
 
 it('shows the server start stamp in the wide trigger row, short form for the eye and full sentence for AT', () => {
   mount({ serverStartedAt: STAMP_ISO, dictionary: zh })
-  expect(screen.getByText('11-12 21:49 起')).toBeTruthy()
+  expect(screen.getByText('11-12 21:49')).toBeTruthy()
   expect(screen.getByText('服务器启动于 2026-11-12 21:49:05')).toBeTruthy()
 })
 

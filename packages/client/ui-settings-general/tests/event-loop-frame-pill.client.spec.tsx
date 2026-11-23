@@ -4,8 +4,9 @@
  * event-loop-pill-placeholder-1123): the fail-soft contract both ways — a
  * refused `GET /api/event-loop/state` must leave no face at all (pill 消失,
  * no console error, no unhandled rejection, and NO lingering placeholder),
- * a healthy answer must render the rounded p99 with the monitor's light, and
- * the first pull in flight paints the in-flight placeholder immediately,
+ * a healthy answer must render the rounded value with the monitor's light —
+ * the p99 wording rides hover/aria only (2026-11-23 口径: 只去 p99 文字) —
+ * and the first pull in flight paints the in-flight placeholder immediately,
  * replaced by the real reading once it settles. The pull rides the shared
  * chain (pullEventLoopHealth), so the fetch seam here is the page-global one
  * the chain resolves at call time.
@@ -68,7 +69,7 @@ describe('EventLoopFramePill fail-soft', () => {
     expect(consoleError).not.toHaveBeenCalled()
   })
 
-  it('renders the rounded p99 with the monitor light when the probe answers', async () => {
+  it('renders the rounded value (no p99 text) with the monitor light when the probe answers', async () => {
     vi.stubGlobal('fetch', vi.fn((input: string) => Promise.resolve(
       input.includes('/api/event-loop/state')
         ? jsonResponse(VALID_LOOP)
@@ -85,6 +86,9 @@ describe('EventLoopFramePill fail-soft', () => {
     expect(pill.getAttribute('data-event-loop-pill')).toBe('12ms')
     expect(pill.getAttribute('data-light')).toBe('green')
     expect(pill.textContent).toContain('12ms')
+    // 只去 p99 文字：可见面不带标签，p99 措辞只活在 hover/aria（2026-11-23 口径）。
+    expect(pill.textContent).not.toContain('p99')
+    expect(pill.getAttribute('aria-label')).toContain('p99')
     // The lamp dot carries the probe's green class (CSS-module hashed name).
     expect(pill.querySelector('[aria-hidden="true"]')?.className).toMatch(/dot_green|dot_/)
     // 真数据到达即替换：the in-flight placeholder is gone once the value lands.
