@@ -445,6 +445,15 @@
   overflow-wrap: break-word;
 }
 
+/* The session id under the title: a long hyphenated token, so it wraps at the
+   hyphens first and only force-breaks when a segment cannot fit the card. */
+.hoverId {
+  font-size: 12px;
+  line-height: 16px;
+  color: #CFD3D6;
+  overflow-wrap: break-word;
+}
+
 .hoverPath {
   font-size: 12px;
   line-height: 16px;
