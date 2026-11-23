@@ -48,13 +48,16 @@ function turnItem(turn: number): TurnRailItem {
   }
 }
 
+const FIRST_MARK: RailMark = { kind: 'turn', key: 'turn:1', item: { ...turnItem(1), interventions: [INTERVENTION] } }
+const LAST_MARK: RailMark = { kind: 'turn', key: 'turn:4', item: turnItem(4) }
+
 /** The rail's flat ladder: each Turn first, then its interventions, ascending. */
 const MARKS: RailMark[] = [
-  { kind: 'turn', key: 'turn:1', item: { ...turnItem(1), interventions: [INTERVENTION] } },
+  FIRST_MARK,
   { kind: 'intervention', key: 'input:1:69', item: INTERVENTION },
   { kind: 'turn', key: 'turn:2', item: turnItem(2) },
   { kind: 'turn', key: 'turn:3', item: turnItem(3) },
-  { kind: 'turn', key: 'turn:4', item: turnItem(4) },
+  LAST_MARK,
 ]
 
 /** Scroll positions that put the reading line on a chosen row (row top aligned 24px below the scrollport top). */
@@ -145,4 +148,29 @@ it('falls back to the reading Turn when the visible intervention carries no mark
 it('keeps the visible intervention as the position while no Turn is mounted', () => {
   const { navigation } = fixture(AT_INTERVENTION, false)
   expect(navigation.stepIntervention(MARKS, -1)?.key).toBe('turn:1')
+})
+
+it('walks off both edges when nothing measures a position, instead of the downward step claiming the top', () => {
+  // No Turn is mounted and the visible intervention carries no mark, so the reading line names
+  // no position and this rail has never landed: both directions must stop rather than the
+  // downward step jumping to the first mark while the upward one is a dead end.
+  const down = fixture(IN_TURN_4_REPLY, false)
+  expect(down.navigation.stepIntervention(MARKS, 1)).toBeUndefined()
+  const up = fixture(IN_TURN_4_REPLY, false)
+  expect(up.navigation.stepIntervention(MARKS, -1)).toBeUndefined()
+})
+
+it('steps from the last mark this rail landed on while no Turn is mounted', () => {
+  const end = fixture(IN_TURN_4_REPLY, false)
+  end.navigation.navigateTo(LAST_MARK)
+  expect(end.navigation.stepIntervention(MARKS, 1)).toBeUndefined()
+
+  const start = fixture(IN_TURN_4_REPLY, false)
+  start.navigation.navigateTo(FIRST_MARK)
+  expect(start.navigation.stepIntervention(MARKS, -1)).toBeUndefined()
+
+  const inside = fixture(IN_TURN_4_REPLY, false)
+  inside.navigation.navigateTo(FIRST_MARK)
+  expect(inside.navigation.stepIntervention(MARKS, 1)?.key).toBe('input:1:69')
+  expect(inside.navigation.stepIntervention(MARKS, -1)?.key).toBe('turn:1')
 })

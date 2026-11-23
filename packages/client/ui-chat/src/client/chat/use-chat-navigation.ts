@@ -28,6 +28,8 @@ interface TurnJump {
 export class ChatNavigation {
   private jump: TurnJump | null = null
   private settleFrame: number | null = null
+  /** Last mark this owner navigated to; stands in while the reading line measures no position. */
+  private landed: string | null = null
 
   constructor(
     private readonly viewport: ChatViewport,
@@ -45,6 +47,7 @@ export class ChatNavigation {
   /** Cancel navigation when opening a Chat view. */
   reset(): void {
     this.cancel()
+    this.landed = null
   }
 
   /** Cancel local callbacks; late history completions cannot revive a task. */
@@ -69,6 +72,7 @@ export class ChatNavigation {
    * @param mark - a Turn mark, or a human-intervention mark inside one.
    */
   readonly navigateTo = (mark: RailMark): void => {
+    this.landed = mark.key
     if (mark.kind === 'turn') {
       this.cancel()
       if (mark.item.anchor.kind === 'loaded') {
@@ -105,8 +109,10 @@ export class ChatNavigation {
    * earlier Turn never counts — it lies far above the line, and adopting it
    * would send the next step back into that older Turn instead of to the mark
    * beside the line; with no mounted Turn its visible intervention still
-   * counts. With neither on screen a downward step starts at the ladder's top
-   * and an upward step has nowhere to go.
+   * counts. When neither the line nor a mounted Turn names a position, the
+   * last mark this rail landed on stands in; with no such mark either
+   * direction walks off the edge instead of the downward step claiming the
+   * ladder's top, so the two directions always agree at both ends.
    * @param marks - the rail's flattened marks, ascending by Turn and seq.
    * @param delta - `1` for the next mark, `-1` for the previous one.
    * @returns the mark the step landed on, or undefined when it walked off an edge.
@@ -120,15 +126,16 @@ export class ChatNavigation {
       const current = marks.findIndex(mark => mark.kind === 'intervention' && mark.item.seq === intervention)
       if (current >= 0 && (turn === null || marks[current]?.item.turn === turn)) position = current
     }
-    if (position === null) {
-      if (turn === null) {
-        if (delta < 0) return undefined
-        position = -1
-      } else {
-        const own = marks.findIndex(mark => mark.kind === 'turn' && mark.item.turn === turn)
-        position = own >= 0 ? own : marks.findLastIndex(mark => mark.item.turn < turn)
-      }
+    if (position === null && turn !== null) {
+      const own = marks.findIndex(mark => mark.kind === 'turn' && mark.item.turn === turn)
+      const inherited = own >= 0 ? own : marks.findLastIndex(mark => mark.item.turn < turn)
+      if (inherited >= 0) position = inherited
     }
+    if (position === null && this.landed !== null) {
+      const settled = marks.findIndex(mark => mark.key === this.landed)
+      if (settled >= 0) position = settled
+    }
+    if (position === null) return undefined
     const target = marks[position + delta]
     if (target === undefined) return undefined
     this.navigateTo(target)
