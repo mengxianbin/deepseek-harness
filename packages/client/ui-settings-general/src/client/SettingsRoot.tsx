@@ -25,6 +25,7 @@ import type { ConnectionIndicatorState } from '@deepseek-ai/dsh-client-ui-primit
 import type { SettingsRootComponentProps, SettingsSectionRow } from './shell-contract.ts'
 import css from './SettingsRoot.module.css'
 import { DesktopUpdateIndicator } from './DesktopUpdateIndicator.tsx'
+import { EventLoopFramePill } from './EventLoopFramePill.tsx'
 import { RestartServerButton } from './RestartServerButton.tsx'
 import { ServerStartedAt } from './ServerStartedAt.tsx'
 
@@ -251,6 +252,11 @@ export function SettingsRoot(props: SettingsRootComponentProps) {
         {wide && connectionState === 'connected' && (
           <ServerStartedAt t={t} startedAt={serverStartedAt} />
         )}
+        {/* Frame-interval pill (event-loop-frame-pill-1123): wide column only,
+            beside the gear like the start stamp. It owns its fail-soft — no
+            probe answer renders nothing — so it needs no connection gate, and
+            it rides the System-health pull chain (no new polling). */}
+        {wide && <EventLoopFramePill t={t} />}
         <RestartServerButton
           t={t} wide={wide} configured={restartConfigured} runningSessions={restartRunningSessions}
           signal={restartSignal} />

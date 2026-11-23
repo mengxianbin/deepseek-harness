@@ -1,0 +1,41 @@
+/* Frame-interval pill in the settings trigger row (event-loop-frame-pill-1123):
+   a quiet chip beside the gear — the dot carries the monitor's lamp color and
+   the label the recent window's p99 (the 60s-lag honesty note lives in the
+   tooltip). Fixed flex slot like ServerStartedAt: never shrinks the gear or
+   the trailing controls, drops out entirely when the probe has no answer. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  min-width: 0;
+  height: 20px;
+  padding: 0 8px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-sm);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+}
+
+.dot_green {
+  background: var(--dsw-alias-state-success-primary);
+}
+
+.dot_yellow {
+  background: var(--dsw-alias-state-warn-primary);
+}
+
+.dot_red {
+  background: var(--dsw-alias-state-error-primary);
+}
