@@ -6,9 +6,14 @@
  * them (⛔ no threshold copy of its own). Rides the System-health card's
  * pull chain verbatim (`pullEventLoopHealth` + `HEALTH_POLL_MS`, same
  * visibility re-pull): no new cadence, no new endpoint, no second poller.
- * Fail-soft by construction: a refused or absent probe (403 fence, dead
- * server, malformed body) leaves the state `null` and the pill unrendered —
- * 面消失 ≠ 面变坏, and never a second red light (one fact, one lamp face).
+ * First pull in flight (`undefined`) paints the in-flight placeholder face
+ * immediately (event-loop-pill-placeholder-1123) so a sidebar re-expand is
+ * never blank for the ~1.3s the overview sweep blocks the probe; the real
+ * value replaces it the moment the pull settles. Fail-soft by construction:
+ * a refused or absent probe (403 fence, dead server, malformed body) settles
+ * to `null` and the pill unrendered — the placeholder covers the in-flight
+ * state only, so 面消失 ≠ 面变坏 holds on the refusal path, and never a
+ * second red light (one fact, one lamp face).
  */
 import { useEffect, useState } from 'react'
 import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -32,10 +37,11 @@ function formatDelay(ms: number): string {
 }
 
 /**
- * Render the frame-interval pill: value + lamp while the probe answers,
- * nothing at all otherwise (first pull in flight included — no stale guess).
+ * Render the frame-interval pill: value + lamp while the probe answers, the
+ * in-flight placeholder face while the first pull has not settled (no stale
+ * guess, but never blank either), and nothing at all once the probe refuses.
  * @param props - composed Settings slot copy seat.
- * @returns the pill element, or `null` while no fresh reading exists.
+ * @returns the pill element, or `null` when there is no face to show.
  */
 export function EventLoopFramePill({ t }: EventLoopFramePillProps) {
   const [loop, setLoop] = useState<EventLoopStateView | null | undefined>(undefined)
@@ -62,8 +68,18 @@ export function EventLoopFramePill({ t }: EventLoopFramePillProps) {
     }
   }, [])
 
-  // Fail-soft: no answer, refused probe, or malformed payload → no face.
-  if (loop === undefined || loop === null) return null
+  // In-flight first pull: the placeholder face paints immediately and the
+  // real reading replaces it the moment the pull settles (段1 立即有脸).
+  if (loop === undefined) {
+    return (
+      <span className={css.pill} data-event-loop-pill-loading aria-busy="true">
+        <span className={`${css.dot} ${css.dot_loading}`} aria-hidden="true" />
+        <span aria-hidden="true">{t('eventLoop.pill.metric')} …</span>
+      </span>
+    )
+  }
+  // Fail-soft: refused probe or malformed payload → no face (占位不覆盖拒答态).
+  if (loop === null) return null
   const value = formatDelay(loop.p99)
   const light = t(LIGHT_KEYS[loop.light])
   return (

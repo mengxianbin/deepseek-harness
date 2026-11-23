@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
 /**
- * Frame-interval pill fixtures (event-loop-frame-pill-1123): the fail-soft
- * contract both ways — a refused `GET /api/event-loop/state` must leave no
- * face at all (pill 消失, no console error, no unhandled rejection), and a
- * healthy answer must render the rounded p99 with the monitor's light.
- * The pull rides the shared chain (pullEventLoopHealth), so the fetch seam
- * here is the page-global one the chain resolves at call time.
+ * Frame-interval pill fixtures (event-loop-frame-pill-1123 +
+ * event-loop-pill-placeholder-1123): the fail-soft contract both ways — a
+ * refused `GET /api/event-loop/state` must leave no face at all (pill 消失,
+ * no console error, no unhandled rejection, and NO lingering placeholder),
+ * a healthy answer must render the rounded p99 with the monitor's light, and
+ * the first pull in flight paints the in-flight placeholder immediately,
+ * replaced by the real reading once it settles. The pull rides the shared
+ * chain (pullEventLoopHealth), so the fetch seam here is the page-global one
+ * the chain resolves at call time.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, waitFor } from '@testing-library/react'
@@ -59,6 +62,8 @@ describe('EventLoopFramePill fail-soft', () => {
     })
     await waitFor(() => {
       expect(container.querySelector('[data-event-loop-pill]')).toBeNull()
+      // 反例判据：占位不得在拒答态常驻 — refusal drops the placeholder too.
+      expect(container.querySelector('[data-event-loop-pill-loading]')).toBeNull()
     })
     expect(consoleError).not.toHaveBeenCalled()
   })
@@ -82,12 +87,42 @@ describe('EventLoopFramePill fail-soft', () => {
     expect(pill.textContent).toContain('12ms')
     // The lamp dot carries the probe's green class (CSS-module hashed name).
     expect(pill.querySelector('[aria-hidden="true"]')?.className).toMatch(/dot_green|dot_/)
+    // 真数据到达即替换：the in-flight placeholder is gone once the value lands.
+    expect(container.querySelector('[data-event-loop-pill-loading]')).toBeNull()
   })
 
-  it('keeps the pill hidden while the first pull is still in flight', () => {
-    // Never-resolving fetch: the seat must paint nothing rather than a guess.
+  it('shows the in-flight placeholder face while the first pull has not settled', async () => {
+    // 段1 反转（原「keeps the pill hidden」）：never-resolving fetch paints the
+    // placeholder immediately — no value claim (data-event-loop-pill absent),
+    // but the seat is never blank.
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})))
     const { container } = render(<EventLoopFramePill t={t} />)
+    const loading = container.querySelector('[data-event-loop-pill-loading]')
+    expect(loading).not.toBeNull()
+    expect(loading?.getAttribute('aria-busy')).toBe('true')
+    // No stale guess: the value face stays absent until the probe settles.
     expect(container.querySelector('[data-event-loop-pill]')).toBeNull()
+  })
+
+  it('replaces the placeholder with the real reading once the first pull settles', async () => {
+    // Deferred first answer: placeholder first, real value swaps in on settle.
+    let answer: ((response: Response) => void) | undefined
+    vi.stubGlobal('fetch', vi.fn((input: string) => new Promise<Response>((resolve) => {
+      if (input.includes('/api/event-loop/state')) answer = resolve
+      else resolve(jsonResponse({ at: 1, maxSlots: 4, held: 0, queued: 0, queueOldestMs: 0, waitP95: 0 }))
+    })))
+
+    const { container } = render(<EventLoopFramePill t={t} />)
+    expect(container.querySelector('[data-event-loop-pill-loading]')).not.toBeNull()
+    expect(container.querySelector('[data-event-loop-pill]')).toBeNull()
+
+    answer?.(jsonResponse(VALID_LOOP))
+    const pill = await waitFor(() => {
+      const node = container.querySelector('[data-event-loop-pill]')
+      expect(node).not.toBeNull()
+      return node as HTMLElement
+    })
+    expect(pill.getAttribute('data-event-loop-pill')).toBe('12ms')
+    expect(container.querySelector('[data-event-loop-pill-loading]')).toBeNull()
   })
 })
