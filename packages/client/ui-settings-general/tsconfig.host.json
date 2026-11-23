@@ -19,9 +19,7 @@
     "src/dir-lock.ts",
     "src/auto-build-journal.ts",
     "src/build-start-liveness.ts",
-    "src/restart-signal-poll-host.ts",
-    "src/server-started-at.ts",
-    "src/server-started-at-host.ts"
+    "src/restart-signal-poll-host.ts"
   ],
   "references": [
     { "path": "../../../vendor/cordis" },

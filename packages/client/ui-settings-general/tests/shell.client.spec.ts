@@ -197,26 +197,4 @@ describe('ui-settings-general shell', () => {
     expect(c.ctx.slots.entries('sidebar.settings')).toHaveLength(0)
     for (const name of CHILD_NAMES) expect(c.ctx.slots.spec(name)).toBeUndefined()
   })
-
-  it('publishes the Host start instant through the shell hook and re-pulls on reconnect (server-started-at-1117)', async ({ start }) => {
-    const iso = '2026-11-12T21:49:00.000Z'
-    // One stub answers both settings pulls: the start-time fact this test
-    // watches and the restart-signal judgment every boot recheck also makes.
-    const fetchImpl = vi.fn(async (input: string) => input === '/api/server/started-at'
-      ? { ok: true, status: 200, json: async () => ({ startedAt: iso }) }
-      : { ok: true, status: 200, json: async () => ({ state: 'OK' }) })
-    vi.stubGlobal('fetch', fetchImpl)
-    onTestFinished(() => { vi.unstubAllGlobals() })
-    const c = await start()
-    const pulls = () => fetchImpl.mock.calls.filter(call => call[0] === '/api/server/started-at')
-    await vi.waitFor(() => { expect(injectedOf(c).hooks.serverStartedAt.getSnapshot()).toBe(iso) })
-    expect(pulls()).toHaveLength(1)
-
-    // The reconnect leg clears and re-pulls: a pre-restart instant can never
-    // outlive the process it came from — the fresh answer replaces it.
-    c.connection.reconnect()
-    await c.mock.streams.opened('$events', 2)
-    await vi.waitFor(() => { expect(pulls().length).toBeGreaterThan(1) })
-    await vi.waitFor(() => { expect(injectedOf(c).hooks.serverStartedAt.getSnapshot()).toBe(iso) })
-  })
 })
