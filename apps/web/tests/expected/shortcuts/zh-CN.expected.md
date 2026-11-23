@@ -72,7 +72,7 @@
       - listitem: 打开引用菜单 @
       - listitem: 换行 Enter
       - listitem: 下一题／提交 ⇧ Enter
-      - listitem: 切换选项 ↑ ↓
+      - listitem: 切换选项 ⌃ ↑ ⌃ ↓
       - listitem: 上一题／下一题 PageUp PageDown
       - listitem: 选中选项 Enter Space
       - listitem: 发送消息 ⇧ Enter

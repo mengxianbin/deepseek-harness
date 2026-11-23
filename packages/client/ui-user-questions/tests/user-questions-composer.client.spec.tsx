@@ -1009,6 +1009,40 @@ describe('focus follow after a page change', () => {
     expect(document.activeElement).toBe(screen.getByLabelText('下一题'))
   })
 
+  it('lands on the already-selected option when paging back (q-pagefocus)', () => {
+    // FORK ask-ctrl-arrow-nav-1123 (裁定 q-pagefocus): the drafts keep their
+    // selections across a page turn, so returning to a question restores the
+    // keyboard to the choice that was already made — not the first row,
+    // which read as "my previous choice was forgotten".
+    const { carrier } = wait([
+      { id: 'one', question: 'First?', options: [{ label: 'One' }, { label: 'Two' }] },
+      { id: 'two', question: 'Second?', options: [{ label: 'Three' }, { label: 'Four' }] },
+    ])
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    const one = screen.getByRole('radio', { name: 'One' })
+    const two = screen.getByRole('radio', { name: 'Two' })
+    act(() => { one.focus() })
+    fireEvent.focusIn(one, { bubbles: true })
+
+    // Choosing Two (single-select) records the draft and steps to question 2;
+    // the focused option unmounts, so focus-follow hands the new page its
+    // first option (question 2 has no selection yet).
+    fireEvent.click(two)
+    expect(screen.getByText('2 / 2')).toBeTruthy()
+    expect(document.activeElement).toBe(screen.getByRole('radio', { name: 'Three' }))
+
+    // PageUp back: question 1's draft still has Two selected, so the landing
+    // is Two — the choice survives the page turn in focus as well as data.
+    // The option rows remount with the page, so the references captured on
+    // the first page are detached by now: re-query the landing node.
+    fireEvent.keyDown(screen.getByRole('radio', { name: 'Three' }), { key: 'PageUp' })
+    expect(screen.getByText('1 / 2')).toBeTruthy()
+    const landed = screen.getByRole('radio', { name: 'Two' })
+    expect(document.activeElement).toBe(landed)
+    expect(landed.getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByRole('radio', { name: 'One' }).getAttribute('aria-checked')).toBe('false')
+  })
+
   it('does not grab focus the card never held', () => {
     const { carrier } = wait([
       { id: 'one', question: 'First?', options: [{ label: 'One' }] },
@@ -1026,33 +1060,71 @@ describe('focus follow after a page change', () => {
 })
 
 describe('arrow keys switch the options', () => {
-  it('walks the option buttons with wrap, focus only — the choice and the page stay put', () => {
+  it('claims a bare arrow on an option row but never moves focus, choice, or page', () => {
     const { carrier, answer } = wait()
     render(<QuestionComposer matched={carrier} {...kit} />)
     const first = screen.getByRole('radio', { name: /工程落地型/ })
     const second = screen.getByRole('radio', { name: /研究潜力型/ })
     act(() => { first.focus() })
 
-    // ↓ claims the key and moves focus to the next option; the selection
-    // does not follow — a single-select arrow must not choose (choose()
-    // steps the page on), so the recommended default stays the answer and
-    // the card stays on question 1.
+    // FORK ask-ctrl-arrow-nav-1123: the bare-arrow walk is gone (superseded
+    // by Ctrl+↑/↓). A bare ↓/↑ on an option row is claimed only so the page
+    // does not scroll — focus stays on the same option, the selection does
+    // not follow (a single-select arrow must not choose), and the card stays
+    // on question 1.
     expect(fireEvent.keyDown(first, { key: 'ArrowDown' })).toBe(false)
-    expect(document.activeElement).toBe(second)
-    expect(first.getAttribute('aria-checked')).toBe('true')
-    expect(second.getAttribute('aria-checked')).toBe('false')
-    expect(screen.getByText('1 / 3')).toBeTruthy()
-
-    // Past the last option it wraps to the first; ArrowUp walks back and
-    // wraps at the top the same way.
-    expect(fireEvent.keyDown(second, { key: 'ArrowDown' })).toBe(false)
     expect(document.activeElement).toBe(first)
     expect(fireEvent.keyDown(first, { key: 'ArrowUp' })).toBe(false)
-    expect(document.activeElement).toBe(second)
+    expect(document.activeElement).toBe(first)
+    expect(second.getAttribute('aria-checked')).toBe('false')
+    expect(screen.getByText('1 / 3')).toBeTruthy()
     expect(answer).not.toHaveBeenCalled()
   })
 
-  it('moves a multi-select focus without toggling the choice', () => {
+  it('walks the Ctrl+↑/↓ ring across option rows and the answer field with wrap', () => {
+    const { carrier, answer } = wait()
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    const first = screen.getByRole('radio', { name: /工程落地型/ })
+    const second = screen.getByRole('radio', { name: /研究潜力型/ })
+    const field = screen.getByPlaceholderText<HTMLTextAreaElement>('输入你的答案')
+    act(() => { first.focus() })
+
+    // Forward: first option → last option → the answer field (focus in the
+    // field, caret at the end for typing on), then wraps back to the first
+    // option. Backward wraps the other way: first option → field, field →
+    // last option. Selection and page never follow the ring.
+    expect(fireEvent.keyDown(first, { key: 'ArrowDown', ctrlKey: true })).toBe(false)
+    expect(document.activeElement).toBe(second)
+    expect(fireEvent.keyDown(second, { key: 'ArrowDown', ctrlKey: true })).toBe(false)
+    expect(document.activeElement).toBe(field)
+    expect(field.selectionStart).toBe(field.value.length)
+    expect(fireEvent.keyDown(field, { key: 'ArrowDown', ctrlKey: true })).toBe(false)
+    expect(document.activeElement).toBe(first)
+    expect(fireEvent.keyDown(first, { key: 'ArrowUp', ctrlKey: true })).toBe(false)
+    expect(document.activeElement).toBe(field)
+    expect(fireEvent.keyDown(field, { key: 'ArrowUp', ctrlKey: true })).toBe(false)
+    expect(document.activeElement).toBe(second)
+    expect(first.getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByText('1 / 3')).toBeTruthy()
+    expect(answer).not.toHaveBeenCalled()
+  })
+
+  it('keeps the answer-field bare arrows with the caret — zero hijack', () => {
+    const { carrier } = wait()
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    const field = screen.getByPlaceholderText<HTMLTextAreaElement>('输入你的答案')
+    act(() => { field.focus() })
+
+    // The textarea's bare ↑/↓ belong to its own path (caret motion and the
+    // '/' menu arbitration): unclaimed here, focus stays in the field — the
+    // content layer is never hijacked by the ring.
+    expect(fireEvent.keyDown(field, { key: 'ArrowDown' })).toBe(true)
+    expect(document.activeElement).toBe(field)
+    expect(fireEvent.keyDown(field, { key: 'ArrowUp' })).toBe(true)
+    expect(document.activeElement).toBe(field)
+  })
+
+  it('moves a multi-select focus with Ctrl+↓ without toggling the choice', () => {
     const { carrier, answer } = wait([{
       id: 'checks', question: 'Which checks?', multiSelect: true,
       options: [{ label: 'Unit' }, { label: 'Lint' }, { label: 'Types' }],
@@ -1062,7 +1134,7 @@ describe('arrow keys switch the options', () => {
     const lint = screen.getByRole('checkbox', { name: 'Lint' })
     act(() => { unit.focus() })
 
-    expect(fireEvent.keyDown(unit, { key: 'ArrowDown' })).toBe(false)
+    expect(fireEvent.keyDown(unit, { key: 'ArrowDown', ctrlKey: true })).toBe(false)
     expect(document.activeElement).toBe(lint)
     expect(unit.getAttribute('aria-checked')).toBe('false')
     expect(lint.getAttribute('aria-checked')).toBe('false')
@@ -1079,9 +1151,11 @@ describe('arrow keys switch the options', () => {
     const a = screen.getByRole('radio', { name: 'A' })
     act(() => { a.focus() })
 
-    // Modified keys stay the browser's own — Ctrl/Shift combos are never
-    // claimed and focus does not move.
-    expect(fireEvent.keyDown(a, { key: 'ArrowDown', ctrlKey: true })).toBe(true)
+    // Alt/Meta/Shift combos stay the browser's own — only the plain Ctrl
+    // pair is the ring — and focus does not move.
+    expect(fireEvent.keyDown(a, { key: 'ArrowDown', altKey: true })).toBe(true)
+    expect(document.activeElement).toBe(a)
+    expect(fireEvent.keyDown(a, { key: 'ArrowDown', metaKey: true })).toBe(true)
     expect(document.activeElement).toBe(a)
     expect(fireEvent.keyDown(a, { key: 'ArrowDown', shiftKey: true })).toBe(true)
     expect(document.activeElement).toBe(a)
@@ -1093,30 +1167,19 @@ describe('arrow keys switch the options', () => {
     expect(fireEvent.keyDown(a, { key: 'ArrowDown', keyCode: 229 })).toBe(true)
     expect(document.activeElement).toBe(a)
 
-    // A busy submission disables every option: the arrow has nowhere to
-    // move focus to, so it stays unclaimed (the card body keeps its own
-    // scroll) and focus parked on the row's still-enabled description
-    // toggle stays put.
+    // A busy submission disables every option: the ring has no seat to hand
+    // focus to, so Ctrl+↑/↓ stays unclaimed, and a bare arrow on the row's
+    // still-enabled description toggle leaves focus parked where it is.
     fireEvent.click(a)
     fireEvent.click(screen.getByRole('button', { name: '提交' }))
     expect(screen.getByRole<HTMLButtonElement>('button', { name: '正在提交…' }).disabled).toBe(true)
     const row = a.closest('[data-option-row]') as HTMLElement
     const rowToggle = row.querySelector('button:not([disabled])') as HTMLButtonElement
     act(() => { rowToggle.focus() })
-    expect(fireEvent.keyDown(rowToggle, { key: 'ArrowDown' })).toBe(true)
+    expect(fireEvent.keyDown(rowToggle, { key: 'ArrowDown' })).toBe(false)
     expect(document.activeElement).toBe(rowToggle)
-  })
-
-  it('keeps the answer-field arrows out of the option walk', () => {
-    const { carrier } = wait()
-    render(<QuestionComposer matched={carrier} {...kit} />)
-    const field = screen.getByPlaceholderText<HTMLTextAreaElement>('输入你的答案')
-    act(() => { field.focus() })
-
-    // The textarea's ↓ belongs to its own path (caret movement and the
-    // '/' menu arbitration): unclaimed here, focus stays in the field.
-    expect(fireEvent.keyDown(field, { key: 'ArrowDown' })).toBe(true)
-    expect(document.activeElement).toBe(field)
+    expect(fireEvent.keyDown(rowToggle, { key: 'ArrowDown', ctrlKey: true })).toBe(true)
+    expect(document.activeElement).toBe(rowToggle)
   })
 })
 

@@ -792,8 +792,17 @@ describe('apply', () => {
 
   it("publishes the card's selection, paging, and option-walk keys as fixed reference rows", async () => {
     const registerFixed = vi.fn((_command: unknown) => () => {})
+    // FORK ask-ctrl-arrow-nav-1123: the option-nav row presents its keys
+    // through the binding authority (Ctrl+↑/↓), so the stub echoes the
+    // Windows presentation of a control chord and leaves every other
+    // binding on the display it had.
+    const describeBinding = vi.fn((binding: { code: string; modifiers: readonly string[] } | null) => ({
+      keys: binding !== null && binding.modifiers.includes('control')
+        ? ['Ctrl', '+', binding.code === 'ArrowUp' ? '↑' : '↓']
+        : ['Shift', 'Enter'],
+    }))
     const b = await bench(true, [], 60_000, emptyInbox(), {
-      describeBinding: vi.fn(() => ({ keys: ['Shift', 'Enter'] })),
+      describeBinding,
       registerFixed,
     })
     try {
@@ -826,9 +835,12 @@ describe('apply', () => {
         bindings: [{ code: 'PageUp', modifiers: [] }, { code: 'PageDown', modifiers: [] }],
       })
       expect(rows[3]).toMatchObject({
-        group: 'input', keys: ['↑', '↓'],
-        bindings: [{ code: 'ArrowUp', modifiers: [] }, { code: 'ArrowDown', modifiers: [] }],
+        group: 'input', keys: ['Ctrl', '+', '↑', 'Ctrl', '+', '↓'],
+        bindings: [{ code: 'ArrowUp', modifiers: ['control'] }, { code: 'ArrowDown', modifiers: ['control'] }],
       })
+      // The ring pair is reserved through the binding authority at registration.
+      expect(describeBinding).toHaveBeenCalledWith({ code: 'ArrowUp', modifiers: ['control'] })
+      expect(describeBinding).toHaveBeenCalledWith({ code: 'ArrowDown', modifiers: ['control'] })
     } finally {
       await b.fiber.dispose()
     }
