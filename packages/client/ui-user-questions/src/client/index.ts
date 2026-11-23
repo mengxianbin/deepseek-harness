@@ -414,13 +414,19 @@ export function apply(ctx: ClientContext): void {
       id: 'fixed.question-pager' as ShortcutCommandId, label: () => t('shortcut.pager'),
       keys: ['PageUp', 'PageDown'], bindings: [{ code: 'PageUp', modifiers: [] }, { code: 'PageDown', modifiers: [] }], group: 'input',
     }), 'ui-user-questions: fixed question pager')
-    // FORK dsh-local (ask-arrow-reference-1119, 2026-11-19): the option walk
-    // joins the reference the same literal way — the card owns the keydown,
-    // this row only advertises ↑/↓ (the menus 'move' row already carries the
-    // same codes in another group; no registry command is added).
+    // FORK dsh-local (ask-ctrl-arrow-nav-1123): the option walk moved onto
+    // Ctrl+↑/↓ (the card's parallel-ring gesture, QuestionComposer frame
+    // keydown) — the reference row advertises the modified pair the same
+    // literal way, platform-presented through the binding authority, and the
+    // fixed bindings reserve Ctrl+↑/↓ from editable commands. The menus
+    // 'move' row keeps the bare ↑/↓ codes in another group; no registry
+    // command is added.
+    const describeRing = (code: 'ArrowUp' | 'ArrowDown'): readonly string[] =>
+      scope.shortcuts.describeBinding({ code, modifiers: ['control'] }).keys
     scope.effect(() => scope.shortcuts.registerFixed({
       id: 'fixed.question-option-nav' as ShortcutCommandId, label: () => t('shortcut.optionNav'),
-      keys: ['↑', '↓'], bindings: [{ code: 'ArrowUp', modifiers: [] }, { code: 'ArrowDown', modifiers: [] }], group: 'input',
+      keys: [...describeRing('ArrowUp'), ...describeRing('ArrowDown')],
+      bindings: [{ code: 'ArrowUp', modifiers: ['control'] }, { code: 'ArrowDown', modifiers: ['control'] }], group: 'input',
     }), 'ui-user-questions: fixed question option nav')
   })
   const questionDraftStore = createQuestionDraftStore()

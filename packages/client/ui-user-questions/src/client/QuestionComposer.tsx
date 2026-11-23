@@ -648,31 +648,75 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
   // gesture), a busy submission does not turn the page, a folded card has no
   // body to scroll, and IME composition keeps its keys. Only a page we
   // actually turn prevents the default scroll of the card body / page.
+  //
+  // FORK dsh-local (ask-ctrl-arrow-nav-1123): the same frame keydown also owns
+  // the ring — Ctrl+↑/↓ walk the option rows and the answer field as parallel
+  // seats, wrap in both directions, and claim the key only when a seat
+  // actually takes focus (a locked card, a folded card, or a field with
+  // nowhere to go leaves the key to the browser). The '/' menu's arbitration
+  // runs first in the field's own handler: a key it claimed is already
+  // defaultPrevented by the time it bubbles here, so the menu keeps priority.
   const frameKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (event.key !== 'PageUp' && event.key !== 'PageDown') return
+    if (event.key === 'PageUp' || event.key === 'PageDown') {
+      if (isComposing(event)) return
+      if (collapsed || busy !== null) return
+      const next = event.key === 'PageUp' ? index - 1 : index + 1
+      if (next < 0 || next >= questions.length) return
+      event.preventDefault()
+      replaceProgress(next, drafts)
+      setError(null)
+      return
+    }
+    const ringKey = (event.key === 'ArrowUp' || event.key === 'ArrowDown')
+      && event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey
+    if (!ringKey) return
     if (isComposing(event)) return
     if (collapsed || busy !== null) return
-    const next = event.key === 'PageUp' ? index - 1 : index + 1
-    if (next < 0 || next >= questions.length) return
+    // The field's '/' arbitration ran first and claimed this key (open menu):
+    // the menu keeps priority, the ring never sees a key it already prevented.
+    if (event.defaultPrevented) return
+    const frame = frameRef.current
+    if (frame === null) return
+    const rows = [...frame.querySelectorAll<HTMLElement>('[data-option-row]')]
+    const field = frame.querySelector<HTMLTextAreaElement>('textarea')
+    const seats = rows.length + (field === null ? 0 : 1)
+    if (seats === 0) return
+    const target = event.target
+    if (!(target instanceof HTMLElement)) return
+    const rowIndex = rows.findIndex(row => row.contains(target))
+    // Off the ring (frame, pager, header): forward enters at the first seat,
+    // backward enters at the last — the same wrap the ends use.
+    const from = rowIndex >= 0 ? rowIndex : field !== null && field.contains(target) ? rows.length : -1
+    const step = event.key === 'ArrowDown' ? 1 : -1
+    const to = from < 0 ? (step > 0 ? 0 : seats - 1) : (from + step + seats) % seats
+    const nextRow = to < rows.length ? rows[to] : undefined
+    // Landing on the seat already holding focus (a one-seat ring) keeps the
+    // key native: an optionless card has no ring to walk, so its field keeps
+    // the browser's own paragraph jump.
+    if (nextRow === undefined ? field === null || field.contains(document.activeElement) : nextRow.contains(document.activeElement)) return
+    if (nextRow !== undefined) {
+      const button = nextRow.querySelector<HTMLButtonElement>('button')
+      if (button === null || button.disabled) return
+      event.preventDefault()
+      button.focus()
+      return
+    }
+    if (field === null || field.disabled) return
     event.preventDefault()
-    replaceProgress(next, drafts)
-    setError(null)
+    field.focus()
+    field.setSelectionRange(field.value.length, field.value.length)
+    trackCaret()
   }
 
-  // FORK dsh-local (ask-option-arrows-1118, 2026-11-19): option switching
-  // moves off Tab / Shift+Tab — Shift+Tab is awkward to hold and Tab read
-  // like it was about to turn the page — onto ArrowUp / ArrowDown. The
-  // handler sits on the option row so it catches the option button and its
-  // description toggle alike: arrows walk the rows with wrap and move focus
-  // only (a single-select arrow must not select — choose() steps the page
-  // on, so Enter stays the one selection gesture), while Tab / Shift+Tab
-  // leave the option list in one press by skipping the option buttons to
-  // the nearest other control — the description toggle, the answer field,
-  // the header — keeping Tab the way out of the card. Modifier keys and IME
-  // composition stay native, a locked card (busy submission, review) has no
-  // enabled option to hand focus to and lets the key through, and the
-  // answer field never sees this handler: its arrows keep the '/'
-  // arbitration.
+  // FORK dsh-local (ask-ctrl-arrow-nav-1123, supersedes ask-option-arrows-1118
+  // bare-arrow walk): the option row keeps only the Tab path — Tab / Shift+Tab
+  // leave the option list in one press by skipping the option buttons to the
+  // nearest other control — while a bare ↑/↓ is claimed for nothing but the
+  // page scroll: focus never moves off the row (the ring is Ctrl+↑/↓ at the
+  // frame level now, and the answer field keeps its own bare arrows for the
+  // caret plus the '/' arbitration). Modified keys, IME composition, and a
+  // folded-away body stay native; a locked card still suppresses the scroll
+  // but has no enabled seat to hand focus to, so focus stays put.
   const optionRowKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (isComposing(event)) return
     if (event.altKey || event.ctrlKey || event.metaKey) return
@@ -698,31 +742,36 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
       landing.focus()
       return
     }
-    if (event.shiftKey || locked) return
-    const rows = [...(event.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[data-option-row]') ?? [])]
-    const from = rows.indexOf(event.currentTarget)
-    if (from < 0) return
-    const step = event.key === 'ArrowDown' ? 1 : -1
-    const next = rows[(from + step + rows.length) % rows.length]
-    const button = next?.querySelector<HTMLButtonElement>('button:not([disabled])') ?? undefined
-    if (button === undefined) return
+    if (event.shiftKey) return
     event.preventDefault()
-    button.focus()
   }
 
   // FORK dsh-local (ask-keys-focus, 2026-11-17 裁定 A5): when the page moves
   // under the keyboard — a single-select choice auto-advancing, or any other
   // index change — and the option that held focus unmounted with it, focus
-  // falls to the body; hand it to the new question's first enabled option so
-  // a run of Enter keeps flowing. Focus that stayed on a real element (pager
-  // button, answer field, the frame itself) is left alone, and the in-card
-  // lease keeps a card that never held focus from grabbing it.
+  // falls to the body; hand it back to the new question so a run of Enter
+  // keeps flowing. Focus that stayed on a real element (pager button, answer
+  // field, the frame itself) is left alone, and the in-card lease keeps a
+  // card that never held focus from grabbing it.
+  // FORK dsh-local (ask-ctrl-arrow-nav-1123, 裁定 q-pagefocus 已选中项优先):
+  // the landing is the question's FIRST SELECTED option — drafts and their
+  // selections survive the page turn, so returning to a question restores the
+  // keyboard to the choice that was already made instead of the first row
+  // (which read as "my previous choice was forgotten"). No selection, or a
+  // locked card (busy/review) whose options are disabled, falls back to the
+  // first enabled option exactly as before; a multi-select lands on its
+  // first checked option in document order.
   useLayoutEffect(() => {
     if (!focusInCard.current || collapsed) return
     const active = document.activeElement
     if (active !== null && active !== document.body) return
-    const option = frameRef.current?.querySelector<HTMLButtonElement>('[data-option-row] button:not([disabled])')
-    option?.focus()
+    const frame = frameRef.current
+    if (frame === null) return
+    const options = [...frame.querySelectorAll<HTMLButtonElement>('[data-option-row] button[aria-checked]')]
+    const selected = options.find(button => button.getAttribute('aria-checked') === 'true' && !button.disabled)
+    const landing = selected
+      ?? frame.querySelector<HTMLButtonElement>('[data-option-row] button:not([disabled])')
+    landing?.focus()
   }, [index, collapsed])
 
   return (
