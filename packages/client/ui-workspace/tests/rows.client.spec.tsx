@@ -794,21 +794,77 @@ describe('workspace browser rows', () => {
     subagentsFirst.unmount()
   })
 
-  it('keeps jobs ahead of the wake-up mark, and both ahead of the unread completion', () => {
+  it('ranks the wake-up mark over the busy arrangements, and both ahead of the unread completion (statusdot-chain-order-1123)', () => {
+    // 2026-11-23 改序: 💤 > 子代理 > 后台. The sleep mark takes the seat while
+    // the losing job roster stays visible as a secondary line.
     const all = renderStatusRow({ completed: true, activeJobCount: 1, pendingWakeup: true })
     const cell = screen.getByRole('treeitem').firstElementChild
-    // Jobs render as the ongoing ring's badge now, never as a gear glyph.
-    expect(cell?.querySelector('[data-state="ongoing"]')).not.toBeNull()
-    expect(cell?.querySelector('[data-busy-count="1"]')).not.toBeNull()
+    expect(cell?.querySelector('[data-status-glyph="wakeup"]')).not.toBeNull()
+    expect(cell?.querySelector('[data-state="ongoing"]')).toBeNull()
     expect(cell?.querySelector('[data-state="done"]')).toBeNull()
-    // The losing wake-up still reaches assistive technology from the cell.
     expect(screen.getByText('待唤醒')).toBeTruthy()
     expect(screen.getByText('1 个后台任务运行中')).toBeTruthy()
     all.unmount()
 
+    // 后台任务仍压过未查看完成（§3.8 绿点被旁路压制语义零改）。
+    const jobsOverGreen = renderStatusRow({ completed: true, activeJobCount: 1 })
+    const jobsCell = screen.getByRole('treeitem').firstElementChild
+    expect(jobsCell?.querySelector('[data-state="ongoing"]')).not.toBeNull()
+    expect(jobsCell?.querySelector('[data-busy-count="1"]')).not.toBeNull()
+    expect(jobsCell?.querySelector('[data-state="done"]')).toBeNull()
+    jobsOverGreen.unmount()
+
     const wakeOverGreen = renderStatusRow({ completed: true, pendingWakeup: true })
     expect(screen.getByRole('treeitem').firstElementChild?.querySelector('[data-status-glyph="wakeup"]')).not.toBeNull()
     wakeOverGreen.unmount()
+  })
+
+  it('puts a stopped failed turn over the busy arrangements, and 待裁 over the failure (statusdot-chain-order-1123)', () => {
+    // 失败×子代理共现显红：旁路在跑绝不盖住红点。
+    const failedSub = renderStatusRow({ completed: true, completionOutcome: 'failed', runningSubagentCount: 2 })
+    let cell = screen.getByRole('treeitem').firstElementChild
+    expect(cell?.querySelector('[data-state="error"]')).not.toBeNull()
+    expect(cell?.querySelector('[data-state="ongoing"]')).toBeNull()
+    // 副态半边 (#statusdot-gap-A-1029)：输家副态在悬停/朗读面仍可见。
+    expect(screen.getByText('2 个子智能体运行中')).toBeTruthy()
+    failedSub.unmount()
+
+    // 失败×后台共现显红。
+    const failedJob = renderStatusRow({ completed: true, completionOutcome: 'failed', activeJobCount: 1 })
+    cell = screen.getByRole('treeitem').firstElementChild
+    expect(cell?.querySelector('[data-state="error"]')).not.toBeNull()
+    expect(cell?.querySelector('[data-state="ongoing"]')).toBeNull()
+    expect(screen.getByText('1 个后台任务运行中')).toBeTruthy()
+    failedJob.unmount()
+
+    // 💤×旁路共现显 💤，旁路计数降为副态。
+    const wakeBusy = renderStatusRow({ pendingWakeup: true, runningSubagentCount: 1, activeJobCount: 2 })
+    cell = screen.getByRole('treeitem').firstElementChild
+    expect(cell?.querySelector('[data-status-glyph="wakeup"]')).not.toBeNull()
+    expect(cell?.querySelector('[data-state="ongoing"]')).toBeNull()
+    expect(screen.getByText('待唤醒')).toBeTruthy()
+    expect(screen.getByText('1 个子智能体运行中')).toBeTruthy()
+    expect(screen.getByText('2 个后台任务运行中')).toBeTruthy()
+    wakeBusy.unmount()
+
+    // 在跑显转圈：失败分支带 `!running` 闸，自身在跑的重跑仍戴灰环。
+    const reRun = renderStatusRow({ completed: true, completionOutcome: 'failed', running: true })
+    cell = screen.getByRole('treeitem').firstElementChild
+    expect(cell?.querySelector('[data-state="ongoing"]')).not.toBeNull()
+    expect(cell?.querySelector('[data-state="error"]')).toBeNull()
+    reRun.unmount()
+
+    // 待裁压失败：待裁 ⟹ 开轮，黄点当仁不让，红点与旁路全降副态/缺席。
+    const pendingFailed = renderStatusRow({
+      pendingInteraction: 'question', completed: true, completionOutcome: 'failed', runningSubagentCount: 1,
+    })
+    cell = screen.getByRole('treeitem').firstElementChild
+    expect(cell?.querySelector('[data-state="warning"]')).not.toBeNull()
+    expect(cell?.querySelector('[data-state="error"]')).toBeNull()
+    expect(cell?.querySelector('[data-state="ongoing"]')).toBeNull()
+    expect(screen.getByText('等待回答')).toBeTruthy()
+    expect(screen.getByText('1 个子智能体运行中')).toBeTruthy()
+    pendingFailed.unmount()
   })
 
   it('labels the completed reminder New completion in English', () => {

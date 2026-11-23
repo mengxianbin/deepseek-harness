@@ -47,6 +47,7 @@ const TOOL_READY_FILE = '.chat-scroll-tool-ready'
 const TOOL_RELEASE_FILE = '.chat-scroll-tool-release'
 const INPUTS_SESSION_ID = 'chat-scroll-inputs-e2e'
 const RAIL_SESSION_ID = 'chat-scroll-rail-e2e'
+const RAIL_STEP_SESSION_ID = 'chat-scroll-rail-step-e2e'
 const FLING_SESSION_ID = SessionId('chat-scroll-fling-e2e')
 const LIVE_FLING_PROMPT = 'CHAT_SCROLL_FLING_USER Keep streaming while I fling back through older output.'
 const LIVE_FLING_FIRST = 'CHAT_SCROLL_FLING_STREAM_FIRST'
@@ -1617,6 +1618,76 @@ describe('web e2e: long Chat scroll contract', () => {
       // The rail followed the landing to the ladder top, so the fade now
       // marks the other (downward) end.
       await expect.poll(() => rail.locator('[class*="fadeBottom"]').count(), { timeout: 15_000 }).toBe(1)
+      assertClean(world)
+    })
+  }, 180_000)
+
+  it.skipIf(MODE === 'record')('steps the flat mark chain one stop per press in a turn-only session', async () => {
+    await withScrollWorld({
+      failureShot: 'web-e2e-turn-rail-flat-step',
+      seeds: [{ fixture: HISTORY_FIXTURE, id: RAIL_STEP_SESSION_ID }],
+    }, async (world) => {
+      await openSeed(world.page, HISTORY_FIXTURE, HISTORY_FIXTURE.markers.assistant(HISTORY_FIXTURE.turns))
+      await expectBottom(world.page)
+
+      const rail = world.page.getByRole('navigation', { name: 'Turn navigation' })
+      const previous = world.page.getByRole('button', { name: 'Previous stop', exact: true })
+      const next = world.page.getByRole('button', { name: 'Next stop', exact: true })
+      const currentLabel = () => rail.evaluate(nav =>
+        nav.querySelector<HTMLElement>('[aria-current="true"]')?.getAttribute('aria-label') ?? '')
+      const landedLabel = () => rail.evaluate(nav =>
+        nav.querySelector<HTMLElement>('[class*="markLanded"]')?.getAttribute('aria-label') ?? '')
+      const landedCount = () => rail.locator('[class*="markLanded"]').count()
+
+      // The fixture carries no ask events, so every mark here is a prompt node:
+      // a multi-turn no-ask session must render live step controls (no gray state).
+      await expect.poll(() => rail.count(), { timeout: 15_000 }).toBe(1)
+      expect(await previous.count()).toBe(1)
+      expect(await next.count()).toBe(1)
+      expect(await previous.isDisabled()).toBe(false)
+      expect(await next.isDisabled()).toBe(false)
+      const latest = rail.getByRole('button', { name: `Jump to turn ${String(HISTORY_FIXTURE.turns)}`, exact: true })
+      await expect.poll(() => latest.getAttribute('aria-current'), { timeout: 15_000 }).toBe('true')
+      const mountedLabels = await rail.evaluate(nav =>
+        [...nav.querySelectorAll<HTMLButtonElement>('button')].map(button => button.getAttribute('aria-label') ?? ''))
+      expect(mountedLabels.length).toBeGreaterThan(0)
+      for (const label of mountedLabels) expect(label).toMatch(/^(Load and jump to|Jump to) turn \d+$/)
+
+      // One press walks exactly one mark (turn 88 → 87 → 86), each landing visible
+      // as the single ring on the mark the chain stopped at.
+      await previous.click()
+      await expect.poll(currentLabel, { timeout: 30_000 }).toContain('turn 87')
+      await expect.poll(landedCount, { timeout: 15_000 }).toBe(1)
+      await expect.poll(landedLabel, { timeout: 15_000 }).toContain('turn 87')
+      await previous.click()
+      await expect.poll(currentLabel, { timeout: 30_000 }).toContain('turn 86')
+      await expect.poll(landedCount, { timeout: 15_000 }).toBe(1)
+      await expect.poll(landedLabel, { timeout: 15_000 }).toContain('turn 86')
+
+      // The chord walks the same chain in the opposite direction, one stop at a time.
+      await world.page.keyboard.press('Alt+ArrowDown')
+      await expect.poll(currentLabel, { timeout: 30_000 }).toContain('turn 87')
+
+      // At the last mark both inputs stop in place — no wrap to the first mark.
+      await next.click()
+      await expect.poll(currentLabel, { timeout: 30_000 }).toContain('turn 88')
+      const landedAtTail = await landedLabel()
+      expect(landedAtTail).toContain('turn 88')
+      await next.click()
+      await world.page.waitForTimeout(500)
+      expect(await landedLabel()).toBe(landedAtTail)
+      await world.page.keyboard.press('Alt+ArrowDown')
+      await world.page.waitForTimeout(500)
+      expect(await landedLabel()).toBe(landedAtTail)
+      expect(await currentLabel()).toContain('turn 88')
+
+      // Gray state only remains where there is nothing to walk: a fresh empty
+      // session has no marks, so the rail and both step controls are absent.
+      await world.page.locator('[class*="footArea"]').getByRole('button', { name: 'More', exact: true }).click()
+      await world.page.getByRole('menuitem', { name: 'New Session', exact: true }).click()
+      await expect.poll(() => rail.count(), { timeout: 15_000 }).toBe(0)
+      expect(await previous.count()).toBe(0)
+      expect(await next.count()).toBe(0)
       assertClean(world)
     })
   }, 180_000)

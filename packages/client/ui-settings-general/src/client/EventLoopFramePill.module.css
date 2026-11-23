@@ -1,8 +1,9 @@
-/* Frame-interval pill in the settings trigger row (event-loop-frame-pill-1123):
-   a quiet chip beside the gear — the dot carries the monitor's lamp color and
-   the label the recent window's p99 (the 60s-lag honesty note lives in the
-   tooltip). Fixed flex slot like ServerStartedAt: never shrinks the gear or
-   the trailing controls, drops out entirely when the probe has no answer. */
+/* Frame-interval lamp in the settings trigger row (event-loop-frame-pill-1123):
+   a quiet chip beside the gear — the dot alone carries the monitor's lamp
+   color in the row; the recent window's p99 and the 60s-lag honesty note
+   ride the hover tooltip (sidebar-foot-compact-1123), so the fixed slot
+   stays one dot wide and never shrinks the gear or the trailing controls.
+   Drops out entirely when the probe has no answer. */
 .pill {
   display: inline-flex;
   align-items: center;
