@@ -11,7 +11,7 @@ import {
   acknowledgeReloadConnectionLoss, captureExpandedTurnProcessAria, captureStableAria, compareOrRefreshGolden, fixtureUserPrompts,
   launchWebScaffold, recordFixture, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { connectFreshWorkspace, expandOwningTurnProcess, newEnglishPage, openSettings, saveFailureShot } from './support.ts'
+import { connectFreshWorkspace, expandOwningTurnProcess, newEnglishPage, openSettings, saveFailureShot, selectConversationView } from './support.ts'
 
 const FIXTURE = fileURLToPath(new URL('../../../snapshots/web/ptc-round/session.v3.jsonl', import.meta.url))
 const UI_EXPECTED = fileURLToPath(new URL('../../../snapshots/web/ptc-round/ui.expected.md', import.meta.url))
@@ -88,14 +88,14 @@ describe('web e2e: PTC mode round renders nested sub-calls', () => {
         await input.fill(PROMPT)
         await input.press('Shift+Enter')
         await waiting.promise
-        await page.getByRole('tab', { name: 'Trajectory', exact: true }).click()
+        await selectConversationView(page, 'Trajectory')
         const request = page.getByRole('table').getByRole('button', { name: 'Request #1', exact: true })
         await request.click()
         const panel = page.getByRole('tabpanel')
         await panel.locator('dl').first().getByText('Pending', { exact: true }).waitFor()
         expect(await panel.getByRole('button', { name: 'Assistant Message', exact: true }).count()).toBe(0)
         requestStates.push('# Waiting for output', await panel.locator('dl').first().ariaSnapshot())
-        await page.getByRole('tab', { name: 'Chat', exact: true }).click()
+        await selectConversationView(page, 'Chat')
         start.resolve(undefined)
         const row = page.locator('[data-chat-call-id] [data-state="preparing"]').first()
         await row.waitFor({ state: 'attached', timeout: 30_000 })
@@ -108,7 +108,7 @@ describe('web e2e: PTC mode round renders nested sub-calls', () => {
         expect(await row.locator('pre').count()).toBe(0)
         const group = row.locator('xpath=ancestor::*[@data-chat-group-key][1]')
         await compareOrRefreshGolden(PREPARING_EXPECTED, await group.ariaSnapshot(), MODE)
-        await page.getByRole('tab', { name: 'Trajectory', exact: true }).click()
+        await selectConversationView(page, 'Trajectory')
         const assistant = page.locator('tr[data-kind="message"][data-running="true"]').first()
         await assistant.click()
         await panel.locator('dl').first().getByText('Pending', { exact: true }).waitFor()
@@ -120,7 +120,7 @@ describe('web e2e: PTC mode round renders nested sub-calls', () => {
         await request.click()
         await panel.locator('dl').first().getByText('Pending', { exact: true }).waitFor()
         requestStates.push('# Streaming request', await panel.locator('dl').first().ariaSnapshot())
-        await page.getByRole('tab', { name: 'Chat', exact: true }).click()
+        await selectConversationView(page, 'Chat')
       } finally {
         releasePreparation?.()
       }
@@ -134,7 +134,7 @@ describe('web e2e: PTC mode round renders nested sub-calls', () => {
       if (MODE === 'record') {
         await recordFixture(scaffold, sessionId, FIXTURE)
       } else {
-        await page.getByRole('tab', { name: 'Trajectory', exact: true }).click()
+        await selectConversationView(page, 'Trajectory')
         await page.getByRole('table').getByRole('button', { name: 'Request #1', exact: true }).click()
         const panel = page.getByRole('tabpanel')
         await panel.getByText('Completed', { exact: true }).waitFor()
@@ -146,7 +146,7 @@ describe('web e2e: PTC mode round renders nested sub-calls', () => {
       }
     } finally {
       releasePreparation?.()
-      await page.getByRole('tab', { name: 'Chat', exact: true }).click()
+      await selectConversationView(page, 'Chat')
     }
   }, 200_000)
 
@@ -243,7 +243,7 @@ describe('web e2e: PTC mode round renders nested sub-calls', () => {
     const call = sessionEvents.find(event => event.type === 'tool/call' && event.data.name === 'run_code')
     if (call?.type !== 'tool/call') throw new Error('recorded PTC call missing')
     const args = JSON.parse(call.data.arguments) as { code: string; description: string }
-    await page.getByRole('tab', { name: 'Trajectory', exact: true }).click()
+    await selectConversationView(page, 'Trajectory')
     const row = page.locator('tr[data-kind="tool"]').filter({ hasText: 'run_code' }).first()
     await row.click()
     await page.getByRole('tab', { name: 'Code', exact: true }).waitFor()
@@ -287,7 +287,7 @@ describe('web e2e: PTC mode round renders nested sub-calls', () => {
     await page.getByRole('menuitem', { name: '日本語', exact: true }).click()
     await page.getByRole('dialog', { name: '設定', exact: true }).waitFor()
     await page.keyboard.press('Escape')
-    await page.getByRole('tab', { name: 'チャット', exact: true }).click()
+    await selectConversationView(page, 'チャット')
     await page.getByText('DONE', { exact: true }).waitFor()
     expect(await page.evaluate(() => document.documentElement.lang)).toBe('ja')
     const row = page.locator('[data-subcalls] [data-sample="bash"]').first()

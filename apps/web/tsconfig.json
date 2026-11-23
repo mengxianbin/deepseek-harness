@@ -238,7 +238,7 @@
     "tests/chat-long-interactions.e2e.ts",
     "tests/chat-continuous-conversation.e2e.ts",
     "tests/composer-tab-geometry.e2e.ts",
-    "tests/conversation-view-tabs.e2e.ts",
+    "tests/conversation-view-select.e2e.ts",
     "tests/window-drag-coverage.e2e.ts",
     "tests/complex-history.perf.ts",
     "tests/pwsh-terminal.e2e.ts",

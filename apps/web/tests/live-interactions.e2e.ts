@@ -27,7 +27,7 @@ import {
   compareOrRefreshGolden, fixtureUserPrompts,
   launchWebScaffold, recordFixture, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
+import { connectFreshWorkspace, newEnglishPage, saveFailureShot, selectConversationView } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('../../../snapshots/web/live-interactions', import.meta.url))
 const FIXTURE = join(SNAPSHOT_DIR, 'session.v3.jsonl')
@@ -235,7 +235,7 @@ describe('web e2e: live-turn interactions (cancel / error / retry)', () => {
     expect(await page.locator('body').textContent()).not.toContain('sk-preview-secret')
     const snapshot = await captureStableAria(page, '[class*="centerCol"]', scaffold!.workspaceCwd)
     await compareOrRefreshGolden(ERROR_EXPECTED, snapshot, MODE)
-    await page.getByRole('tab', { name: 'Trajectory' }).click()
+    await selectConversationView(page, 'Trajectory')
     const requestMarker = page.locator('tr[data-request-only="true"]').last()
       .getByRole('button', { name: /Request #/ })
     await requestMarker.click()
@@ -277,7 +277,7 @@ describe('web e2e: live-turn interactions (cancel / error / retry)', () => {
     }))
     const { settled } = await sendPrompt()
     await settled
-    await page.getByRole('tab', { name: 'Trajectory' }).click()
+    await selectConversationView(page, 'Trajectory')
     // The boundary marker row itself is a 0-height hairline except at the
     // table tail; the marker button is absolutely positioned and stays
     // visible, so wait on it directly.
@@ -373,14 +373,14 @@ describe('web e2e: live-turn interactions (cancel / error / retry)', () => {
       await page.getByText(RETRY_PARTIAL, { exact: true }).waitFor({ timeout: 15_000 })
       releaseFailure.resolve(undefined)
       await retryReady.promise
-      await page.getByRole('tab', { name: 'Trajectory', exact: true }).click()
+      await selectConversationView(page, 'Trajectory')
       await page.getByRole('table').getByRole('button', { name: 'Request #1', exact: true }).click()
       const overview = page.getByRole('tabpanel').locator('dl').first()
       await overview.getByText('Pending', { exact: true }).waitFor()
       await overview.getByText('Last attempt error', { exact: true }).waitFor()
       expect(await overview.getByText('Error', { exact: true }).count()).toBe(0)
       requestStates.push('# Retrying request', await overview.ariaSnapshot())
-      await page.getByRole('tab', { name: 'Chat', exact: true }).click()
+      await selectConversationView(page, 'Chat')
       releaseRetry.resolve(undefined)
       await settled
     } finally {
@@ -406,7 +406,7 @@ describe('web e2e: live-turn interactions (cancel / error / retry)', () => {
       scaffold!.workspaceCwd,
     )
     await compareOrRefreshGolden(RETRY_EXPANDED_EXPECTED, expanded, MODE)
-    await page.getByRole('tab', { name: 'Trajectory', exact: true }).click()
+    await selectConversationView(page, 'Trajectory')
     await page.getByRole('table').getByRole('button', { name: 'Request #1', exact: true }).click()
     const overview = page.getByRole('tabpanel').locator('dl').first()
     await overview.getByText('Completed', { exact: true }).waitFor()

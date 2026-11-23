@@ -11,7 +11,7 @@ import {
   assertFixtureInventory, captureStableAria, compareOrRefreshGolden,
   launchWebScaffold, seedSession, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { expandOwningTurnProcess, newEnglishPage, saveFailureShot, WEB_FIXTURE_TIME } from './support.ts'
+import { expandOwningTurnProcess, newEnglishPage, saveFailureShot, WEB_FIXTURE_TIME, selectConversationView } from './support.ts'
 
 import { AUTO_REVIEW_FIXTURE, captureAutoReviewState } from './auto-review-fixture.ts'
 
@@ -120,7 +120,7 @@ describe.skipIf(MODE === 'record')('web e2e: cold Auto-review denial', () => {
     const expanded = (await captureStableAria(page, '[class*="centerCol"]', scaffold.workspaceCwd))
       .split(SEED_ID).join('{{seededId}}')
 
-    await page.getByRole('tab', { name: 'Trajectory', exact: true }).click()
+    await selectConversationView(page, 'Trajectory')
     const ledger = page.locator('[data-trajectory-scroll]')
     await ledger.locator('table[data-scroll-ready="true"]').waitFor({ timeout: 15_000 })
     const nativeRecord = ledger.locator('tr[data-kind="tool"]').filter({ hasText: 'mystery' })

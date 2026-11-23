@@ -16,7 +16,7 @@ import {
   webSnapshotMode,
   type WebScaffold,
 } from './scaffold.ts'
-import { expandTurnProcesses, newEnglishPage, saveFailureShot, scrollIntoView } from './support.ts'
+import { expandTurnProcesses, newEnglishPage, saveFailureShot, scrollIntoView, selectConversationView } from './support.ts'
 
 const EXPECTED_DIR = fileURLToPath(new URL('./expected/thinking-markdown', import.meta.url))
 const UI_EXPECTED = fileURLToPath(new URL('./expected/thinking-markdown/ui.expected.md', import.meta.url))
@@ -260,7 +260,7 @@ describe('web e2e: secondary Thinking Markdown', () => {
     expect(await summary.evaluate(element => getComputedStyle(element).textOverflow)).toBe('ellipsis')
 
     await page.setViewportSize({ width: 1680, height: 1000 })
-    await page.getByRole('tab', { name: 'Trajectory', exact: true }).click()
+    await selectConversationView(page, 'Trajectory')
     await page.locator('tr[data-trajectory-row-key]', { hasText: DONE }).click()
     const details = page.getByRole('tabpanel')
     const trajectoryToggle = details.getByRole('button', { name: 'Thinking', exact: true })

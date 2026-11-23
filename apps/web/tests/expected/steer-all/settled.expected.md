@@ -1,11 +1,15 @@
 - banner:
   - navigation "Session hierarchy": Use the ask_user_question tool to
+  - button "Chat"
   - button "More actions"
   - button "Open right sidebar"
-  - tablist:
-    - tab "Chat" [selected]
-    - tab "Trajectory"
-  - button "More conversation views"
+- button "Previous stop"
+- navigation "Turn navigation":
+  - button "Jump to turn 1"
+  - button "Jump to Question 1 in turn 1"
+  - button "Jump to Input 1 in turn 1"
+  - button "Jump to Input 2 in turn 1"
+- button "Next stop"
 - text: Use the ask_user_question tool to ask me exactly one question with id "checkpoint", question "Ready to continue?", header "Checkpoint", and options labeled "Yes" and "No". After I answer, reply with one short sentence acknowledging my answer and stop. {{clock}}
 - button "Copy"
 - status: Completed
@@ -14,7 +18,16 @@
   - time: {{clock}}
   - text: →
   - time: {{clock}}
-- button "Asked questions"
+- button "Analysis completed"
+- time: {{clock}}
+- button "Ask question 1/1 answered" [expanded]
+- term: Ready to continue?
+- definition:
+  - list:
+    - listitem: "Yes"
+    - listitem: "No"
+- definition: "Yes"
+- button "Inspect"
 - group "Questions and answers":
   - term: Checkpoint Ready to continue?
   - definition: "Yes"

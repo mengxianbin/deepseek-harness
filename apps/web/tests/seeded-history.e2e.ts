@@ -29,7 +29,7 @@ import {
   launchWebScaffold, parseSeedFixture, realizeSeedFixture, recordFixture, renderSeedFixture, seedSession, watchConsole,
   webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { expandOwningTurnProcess, newEnglishPage, pinBrowserClock, pinHostClock, saveFailureShot, WEB_FIXTURE_TIME } from './support.ts'
+import { expandOwningTurnProcess, newEnglishPage, pinBrowserClock, pinHostClock, saveFailureShot, WEB_FIXTURE_TIME, selectConversationView } from './support.ts'
 
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
@@ -66,12 +66,12 @@ const PROMPT = 'Use the read tool twice in one assistant message: read a.txt and
 
 /** Trajectory visibility confirms Client receipt; Host persistence alone does not. */
 async function waitForContextInClient(page: Page, seq: number): Promise<void> {
-  await page.getByRole('tab', { name: 'Trajectory', exact: true }).click()
+  await selectConversationView(page, 'Trajectory')
   try {
     await page.locator(`[data-trajectory-scroll] tr[data-trajectory-row-key="context%00seq%00${seq}"]`)
       .waitFor({ state: 'visible', timeout: 10_000 })
   } finally {
-    await page.getByRole('tab', { name: 'Chat', exact: true }).click()
+    await selectConversationView(page, 'Chat')
   }
   await page.locator('[data-conversation-scroll]').waitFor({ state: 'visible' })
 }
@@ -498,9 +498,9 @@ describe('web e2e: seeded history renders through cold resume', () => {
     const scroller = page.locator('[data-conversation-scroll]')
     const top = await scroller.evaluate(element => element.scrollTop)
 
-    await page.getByRole('tab', { name: 'Trajectory', exact: true }).click()
+    await selectConversationView(page, 'Trajectory')
     await page.getByLabel('Trajectory timeline', { exact: true }).waitFor({ state: 'visible' })
-    await page.getByRole('tab', { name: 'Chat', exact: true }).click()
+    await selectConversationView(page, 'Chat')
 
     await expect.poll(() => current.getAttribute('aria-label')).toBe(active)
     await expect.poll(async () => Math.abs(await scroller.evaluate(element => element.scrollTop) - top)).toBeLessThanOrEqual(2)

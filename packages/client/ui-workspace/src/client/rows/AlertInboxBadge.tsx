@@ -24,6 +24,17 @@
  * the panel and badge flip immediately instead of waiting for the next 15s
  * heartbeat tick; the next frame then confirms the same truth (单写者不变).
  *
+ * **首帧占位 (2026-11-23)**: the seat paints from the initial
+ * `{ report: undefined }` snapshot as a PLACEHOLDER envelope — the 盾灯同构
+ * HealthShield first-snapshot precedent. The host sweep folds a health frame
+ * only every 15s and never replays on connect, so without the placeholder the
+ * header's envelope seat stays EMPTY for the first seconds after every page
+ * load (用户回报「信封图标卡几秒才出现」). The placeholder resolves with the
+ * first frame: a real badge when the fold's plane is attached, nothing when it
+ * is not (面未接线 quiet absence unchanged — a resolved absence never
+ * resurrects the placeholder). Before that frame there is no data to open, so
+ * the placeholder is a non-interactive seat: no button, no tab stop.
+ *
  * ⛔ never the `question` attention kind (it feeds health's `awaiting` count:
  * lighting it would collide semantically AND inflate the metric).
  */
@@ -153,15 +164,44 @@ function AlertInboxPanel(
 /**
  * Render the envelope badge beside the shield.
  * @param props - the health hook plus the sidebar locale seat.
- * @returns the badge element tree (plus the panel once opened), or null without
- *   a health source or an attached inbox plane (quiet absence, never a broken render).
+ * @returns the badge element tree (plus the panel once opened), a placeholder
+ *   seat while the first health frame is still pending, or null without a
+ *   health source or with a resolved absent inbox plane (quiet absence, never
+ *   a broken render).
  */
 export function AlertInboxBadge({ useSessionHealth, t }: AlertInboxBadgeProps) {
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState<readonly AlertInboxEntryView[] | null>(null)
   const health = useSessionHealth?.(value => value)
   if (health === undefined) return null
-  const inbox = health.report?.alertInbox
+  const report = health.report
+  if (report === undefined) {
+    // 首帧占位: the health source exists but no frame has landed yet — seat
+    // the envelope NOW (HealthShield's first-snapshot precedent), faint like
+    // the clear state. Non-interactive by design: there is no report to open,
+    // so it is a labeled span, not a button (no phantom click, no tab stop).
+    const loading = t('alertInbox.loading')
+    return (
+      <span className={clsx(css.badge, css.quiet)} data-alert-inbox-state="loading">
+        <Tooltip label={loading} delayMs={500}>
+          <span className={clsx(css.glyph, css.placeholder)} role="img" aria-label={loading}>
+            <svg
+              className={css.envelope}
+              viewBox="0 0 16 16"
+              width="16"
+              height="16"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <rect x="1.75" y="3.25" width="12.5" height="9.5" rx="1.5" />
+              <path d="M2.5 4.5 8 8.75 13.5 4.5" />
+            </svg>
+          </span>
+        </Tooltip>
+      </span>
+    )
+  }
+  const inbox = report.alertInbox
   if (inbox === undefined) return null
 
   const entries = draft ?? inbox.entries
