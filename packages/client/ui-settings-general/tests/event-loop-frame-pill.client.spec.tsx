@@ -1,17 +1,15 @@
 // @vitest-environment jsdom
 /**
- * Frame-interval lamp fixtures (event-loop-frame-pill-1123): the fail-soft
+ * Frame-interval pill fixtures (event-loop-frame-pill-1123): the fail-soft
  * contract both ways — a refused `GET /api/event-loop/state` must leave no
  * face at all (pill 消失, no console error, no unhandled rejection), and a
- * healthy answer must render the lamp dot with the monitor's light while the
- * rounded p99 rides the hover tooltip (sidebar-foot-compact-1123: the row
- * keeps only the dot, so the gear keeps its width in a narrowed sidebar).
+ * healthy answer must render the rounded value with the monitor's light — the
+ * p99 wording rides hover/aria only (2026-11-23 口径: 只去 p99 文字).
  * The pull rides the shared chain (pullEventLoopHealth), so the fetch seam
  * here is the page-global one the chain resolves at call time.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
+import { cleanup, render, waitFor } from '@testing-library/react'
 import { EventLoopFramePill } from '../src/client/EventLoopFramePill.tsx'
 import { en } from '../src/client/locales.ts'
 import type { EventLoopFramePillProps } from '../src/client/EventLoopFramePill.tsx'
@@ -22,8 +20,8 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-/** Dictionary seat with real parameter interpolation (the hover copy carries {value}/{light}). */
-const t: EventLoopFramePillProps['t'] = makeTranslate(en)
+/** Dictionary stub: the seat's keys resolve, parameters stay literal (copy shape is asserted elsewhere). */
+const t: EventLoopFramePillProps['t'] = key => (en as Record<string, string>)[key] ?? key
 
 const VALID_LOOP = {
   at: 1_795_400_000_000,
@@ -66,7 +64,7 @@ describe('EventLoopFramePill fail-soft', () => {
     expect(consoleError).not.toHaveBeenCalled()
   })
 
-  it('renders the lamp dot alone and moves the p99 value into the hover tooltip', async () => {
+  it('renders the rounded value (no p99 text) with the monitor light when the probe answers', async () => {
     vi.stubGlobal('fetch', vi.fn((input: string) => Promise.resolve(
       input.includes('/api/event-loop/state')
         ? jsonResponse(VALID_LOOP)
@@ -82,17 +80,12 @@ describe('EventLoopFramePill fail-soft', () => {
     // formatDelay(12.4) === '12ms' (round), light comes straight from the probe.
     expect(pill.getAttribute('data-event-loop-pill')).toBe('12ms')
     expect(pill.getAttribute('data-light')).toBe('green')
-    // The row keeps the dot alone: no printed metric beside the gear.
-    expect(pill.textContent).toBe('')
-    expect(pill.getAttribute('aria-label')).toBe('Server event loop p99 12ms (Healthy)')
+    expect(pill.textContent).toContain('12ms')
+    // 只去 p99 文字：可见面不带标签，p99 措辞只活在 hover/aria（2026-11-23 口径）。
+    expect(pill.textContent).not.toContain('p99')
+    expect(pill.getAttribute('aria-label')).toContain('p99')
     // The lamp dot carries the probe's green class (CSS-module hashed name).
     expect(pill.querySelector('[aria-hidden="true"]')?.className).toMatch(/dot_green|dot_/)
-    // The keyboard path of the same tooltip reveals value + 60s-lag note.
-    fireEvent.focus(pill)
-    await waitFor(() => {
-      expect(screen.getByRole('tooltip').textContent)
-        .toBe('Server event loop p99 12ms (Healthy) · 60s-window lag - not an instantaneous frame rate')
-    })
   })
 
   it('keeps the pill hidden while the first pull is still in flight', () => {

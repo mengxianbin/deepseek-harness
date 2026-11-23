@@ -1,16 +1,15 @@
 /**
- * Server main-loop frame-interval lamp in the settings trigger row
- * (event-loop-frame-pill-1123): the gear-adjacent chip carrying the
- * monitor's lamp color alone — the recent window's p99 rides the hover
- * tooltip instead of the row (sidebar-foot-compact-1123), so the chip's
- * fixed slot stays narrow and the gear keeps its width in a narrowed
- * sidebar. The 250ms/2000ms judgments stay server-side in
- * event-loop-monitor, this seat only renders them (⛔ no threshold copy of
- * its own). Rides the System-health card's pull chain verbatim
- * (`pullEventLoopHealth` + `HEALTH_POLL_MS`, same visibility re-pull): no
- * new cadence, no new endpoint, no second poller. Fail-soft by
- * construction: a refused or absent probe (403 fence, dead server,
- * malformed body) leaves the state `null` and the pill unrendered —
+ * Server main-loop frame-interval pill in the settings trigger row
+ * (event-loop-frame-pill-1123): the gear-adjacent glance chip carrying the
+ * recent window's value plus the monitor's lamp color — the p99 wording rides
+ * the hover label and aria only (2026-11-23 口径: 只去 p99 文字、数值保留) —
+ * the 250ms/2000ms
+ * judgments stay server-side in event-loop-monitor, this seat only renders
+ * them (⛔ no threshold copy of its own). Rides the System-health card's
+ * pull chain verbatim (`pullEventLoopHealth` + `HEALTH_POLL_MS`, same
+ * visibility re-pull): no new cadence, no new endpoint, no second poller.
+ * Fail-soft by construction: a refused or absent probe (403 fence, dead
+ * server, malformed body) leaves the state `null` and the pill unrendered —
  * 面消失 ≠ 面变坏, and never a second red light (one fact, one lamp face).
  */
 import { useEffect, useState } from 'react'
@@ -35,12 +34,10 @@ function formatDelay(ms: number): string {
 }
 
 /**
- * Render the frame-interval lamp: dot while the probe answers, nothing at
- * all otherwise (first pull in flight included — no stale guess). The
- * rounded p99 is hover-only copy: the tooltip resolver and the aria-label
- * both read it from the same probe answer.
+ * Render the frame-interval pill: value + lamp while the probe answers,
+ * nothing at all otherwise (first pull in flight included — no stale guess).
  * @param props - composed Settings slot copy seat.
- * @returns the lamp element, or `null` while no fresh reading exists.
+ * @returns the pill element, or `null` while no fresh reading exists.
  */
 export function EventLoopFramePill({ t }: EventLoopFramePillProps) {
   const [loop, setLoop] = useState<EventLoopStateView | null | undefined>(undefined)
@@ -84,6 +81,7 @@ export function EventLoopFramePill({ t }: EventLoopFramePillProps) {
         aria-label={t('eventLoop.pill.label', { value, light })}
       >
         <span className={`${css.dot} ${css[`dot_${loop.light}`] ?? ''}`} aria-hidden="true" />
+        <span aria-hidden="true">{value}</span>
       </span>
     </Tooltip>
   )
