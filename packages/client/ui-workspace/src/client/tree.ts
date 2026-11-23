@@ -926,8 +926,13 @@ const RESTING_STATE_RANK: Readonly<Record<RestingState, number>> = {
 
 /**
  * Map one row onto its 回合归属 tier (状态序 mapping 口径, step3 §一 ⑧):
+ * - now-failed — a stopped turn whose unread stop failed keeps the row's red
+ *   face (statusdot-chain-order-1123 镜像行面): `sessionBaseStatuses` ranks
+ *   that branch above the busy arrangements under the same `!running` gate, so
+ *   this判定 runs first and 旁路在跑 (subagents / jobs) never sinks the row
+ *   into `running`. It files with the other "waiting on me" reminders.
  * - `running` — the ball is under the bot's feet, so the row sinks (防打扰).
- *   Checked first: a durable green dot from a previous turn stays lit while the
+ *   Checked next: a durable green dot from a previous turn stays lit while the
  *   next turn runs, and that row is not awaiting my acceptance yet.
  * - live subagents / live background jobs — the same answer for the same
  *   reason: the bot is still working this row even though its own turn is
@@ -936,7 +941,9 @@ const RESTING_STATE_RANK: Readonly<Record<RestingState, number>> = {
  *   `running` + `completionUnread` alone would file it under 已完成 — a busy
  *   row parked inside the acceptance block, which is what the sidebar showed
  *   for `ask panel` (1 subagent running) and `taskbot-接管` (background job).
- *   The tier has to agree with the glyph the row actually draws.
+ *   The tier has to agree with the glyph the row actually draws — which is
+ *   exactly why the now-failed branch above must outrank this one: that row
+ *   draws the red ✕, not the spinner.
  * - otherwise `completionUnread` — the 待收讫 dot is the "waiting on me" state.
  * - otherwise `silent` — stopped with nothing owed to either side.
  * `running` reads the live status when it carries one and falls back to the
@@ -953,6 +960,12 @@ export function restingStateOf(
   runningSubagents = 0,
 ): RestingState {
   const running = status?.running ?? summary.running
+  // 停轮未读失败先于 busy 判 (statusdot-chain-order-1123): the row renders
+  // the red ✕ even while subagents/jobs are alive, so it must not sink into
+  // `running`; it files with the "waiting on me" reminders instead.
+  if (!running && status?.completionUnread === true && status.completionOutcome === 'failed') {
+    return 'completed'
+  }
   if (running || runningSubagents > 0) return 'running'
   if ((status?.activeJobCount ?? 0) > 0) return 'running'
   if (status?.completionUnread === true) return 'completed'
