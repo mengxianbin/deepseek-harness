@@ -117,7 +117,7 @@ describe('Workspace and Session hover handoff', () => {
       </HoverCardGroup>)
       const a = { anchor: screen.getByText('Workspace A'), copy: '/projects/Workspace A' }
       const b = { anchor: screen.getByText('Workspace B'), copy: '/projects/Workspace B' }
-      const s = { anchor: screen.getByText('Session'), copy: 'Session' }
+      const s = { anchor: screen.getByText('Session'), copy: 'Session\nsession' }
       // jsdom lacks PointerEvent; MouseEvent carries physical relatedTarget across row wrappers.
       const move = (from: Element, to: Element): void => {
         fireEvent(from, new MouseEvent('pointerout', { bubbles: true, relatedTarget: to }))
@@ -1282,6 +1282,30 @@ describe('workspace browser rows', () => {
     })
   })
 
+  it('session hover card shows the session id under the title and copies title with id', async () => {
+    vi.useFakeTimers()
+    const writeText = vi.fn(async () => {})
+    const restoreClipboard = installClipboard(writeText)
+    try {
+      const node: SessionNode = {
+        id: sid('s-idline'), title: 'With id', blank: false, running: false,
+        runningSubagentCount: 0, completed: false, updatedAt: 0, pinned: false, archived: false,
+      }
+      render(<SessionNodeItem node={node} currentId={undefined} now={0} onOpen={vi.fn()} t={t} />)
+      fireEvent.pointerEnter(screen.getByRole('treeitem').parentElement as HTMLElement)
+      act(() => { vi.advanceTimersByTime(800) })
+      // The id line hangs directly off the card title, above every other line.
+      const id = screen.getByText('s-idline')
+      expect(id.previousElementSibling?.textContent).toBe('With id')
+      // Clicking the card copies title and id together, one per line.
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: '复制: With id\ns-idline' })) })
+      expect(writeText).toHaveBeenCalledWith('With id\ns-idline')
+    } finally {
+      restoreClipboard()
+      vi.useRealTimers()
+    }
+  })
+
   it('session row menu opens without opening the session and Escape closes it', () => {
     const onOpen = vi.fn()
     const node: SessionNode = {
@@ -1401,9 +1425,9 @@ describe('workspace browser rows', () => {
       fireEvent(title, new MouseEvent('pointerout', { bubbles: true, relatedTarget: more }))
       fireEvent(more, new MouseEvent('pointerover', { bubbles: true, relatedTarget: title }))
       act(() => { vi.advanceTimersByTime(800) })
-      expect(screen.getByRole('button', { name: '复制: More hover' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: '复制: More hover\nmore-hover' })).toBeTruthy()
       fireEvent.click(more)
-      expect(screen.queryByRole('button', { name: '复制: More hover' })).toBeNull()
+      expect(screen.queryByRole('button', { name: '复制: More hover\nmore-hover' })).toBeNull()
     } finally {
       cleanup()
       vi.useRealTimers()
@@ -1425,7 +1449,7 @@ describe('workspace browser rows', () => {
       const row = screen.getByRole('treeitem')
       const title = screen.getByText('Action hover')
       const archive = screen.getByRole('button', { name: 'Archive' })
-      const card = () => screen.queryByRole('button', { name: '复制: Action hover' })
+      const card = () => screen.queryByRole('button', { name: '复制: Action hover\naction-hover' })
       fireEvent.pointerEnter(row)
       act(() => { vi.advanceTimersByTime(dwell) })
       if (dwell === 800) expect(card()).not.toBeNull()
