@@ -1137,6 +1137,29 @@ describe('deriveQueue (classification only since queue-zone-1113 — no segment 
     expect(queue.queued).toEqual(new Map([[sid('running-ask'), 'p0'], [sid('stopped-failed'), 'p1']]))
   })
 
+  it('keeps a failed row with a live subagent queued red, banded red, and out of the running tier (statusdot-chain-order-1123 读数一致)', () => {
+    // 「停轮失败 + 子代理在跑」一个构造三个读数面：行面显红（rows用例）、
+    // 队列 P1 与组头红带（本用例）、回合归属档不沉运行中（本用例）。
+    const parent = summary('parent', 40)
+    const sessions: SessionListState = {
+      ...list(parent),
+      projectionsBySession: { [parent.id]: catalog('child') },
+    }
+    const statuses: SessionStatusSnapshot = new Map([
+      [parent.id, status(undefined, { completionUnread: true, completionOutcome: 'failed' })],
+      [sid('child'), status(undefined, { running: true })],
+    ])
+    const queue = deriveQueue(sessions, statuses, [])
+    expect(queue.tiers.map(tier => tier.tier)).toEqual(['p1'])
+    expect(queue.tiers[0]!.sessions.map(node => node.id)).toEqual([sid('parent')])
+    const group = deriveGroups(
+      sessions, [workspace('project', ['parent'])], noRows, statuses, view(['project']), queue.queued,
+    )[0]!
+    expect(group.queuedRed).toBe(1)
+    expect(group.queuedYellow).toBe(0)
+    expect(restingStateOf(parent, statuses.get(parent.id), 1)).toBe('completed')
+  })
+
   it('keeps queued rows inside their group, banded red first then yellow (queue-zone-1113)', () => {
     const sessions = list(
       summary('resting-new', 50), summary('pinned-old', 10),
@@ -1310,6 +1333,21 @@ describe('状态序 restingStateOf（绿点完成态=已完成 / running=运行�
     // 没有活动事实时档位口径不变：绿点亮着仍是已完成。
     expect(restingStateOf({ running: false }, statusRow({ completionUnread: true }), 0))
       .toBe('completed')
+  })
+
+  it('状态序：停轮未读失败先于 busy 判——旁路在跑不沉 running 档（statusdot-chain-order-1123 镜像行面）', () => {
+    // 失败×子代理 / 失败×后台：行面显红 → 归「等我处理」档，不沉运行中。
+    expect(restingStateOf({ running: false }, statusRow({ completionUnread: true, completionOutcome: 'failed' }), 2))
+      .toBe('completed')
+    expect(restingStateOf(
+      { running: false }, statusRow({ completionUnread: true, completionOutcome: 'failed', activeJobCount: 1 }),
+    )).toBe('completed')
+    // `!running` 闸：自身在跑的失败未读仍读运行中（行面在跑显转圈同源）。
+    expect(restingStateOf(
+      { running: false }, statusRow({ running: true, completionUnread: true, completionOutcome: 'failed' }), 1,
+    )).toBe('running')
+    // §3.8 绿点被旁路压制语义零改：非失败的未读完成 + 旁路仍归运行中。
+    expect(restingStateOf({ running: false }, statusRow({ completionUnread: true }), 1)).toBe('running')
   })
 })
 

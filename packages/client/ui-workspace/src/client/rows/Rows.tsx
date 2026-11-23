@@ -501,17 +501,24 @@ function ownsLeadingCell(status: SessionStatus): boolean {
 }
 
 /**
- * Session status presentation; pending interaction is primary and live activity
- * outranks completion reminders, with a failed stop reminding in error red. The
- * ②-tier arrangements — subagents, a live background-job roster, and a goal
- * waiting to wake — all outrank the unread-completion reminder below them
- * (四档序：② 档高于 ③ 档), and every arrangement that loses its primary seat
- * rides into the hover card as a secondary line.
+ * Session status presentation; the primary seat follows the 2026-11-23 chain
+ * **待裁 > 失败 > running > 💤 > 子代理 > 后台 > done > idle**
+ * (statusdot-chain-order-1123): pending interaction leads, a failed stop ranks
+ * over live activity and the wake-up mark, live activity ranks over the wake-up
+ * mark, and both ②-tier arrangements — subagents and the live background-job
+ * roster — sit above the unread-completion reminder (四档序：② 档高于 ③ 档).
+ * Every arrangement that loses its primary seat rides into the hover card as a
+ * secondary line.
  *
- * One deliberate exception (collab step2 §7.2 失败例外): a **failed** stop is
- * promoted above the wake-up weak mark, because a goal on the books used to
- * swallow the red dot whole and leave a dead session looking merely sleepy.
- * A clean completion keeps its ③-tier place below every ②-tier arrangement.
+ * The chain only ranks 现态: a **failed** primary carries the `!running` gate
+ * (失败 ⟺ 停轮未读 — a re-run still wears the ongoing ring), and the 💤 mark
+ * sits behind `running` by branch order (💤 ⟺ goal 活跃 + `!running`), so a
+ * live turn never reads as a stopped one. The failed branch inherits collab
+ * step2 §7.2 失败例外 — the red dot stays above the wake-up weak mark, which
+ * used to swallow it whole — and now also outranks the busy arrangements, so
+ * 旁路在跑 never covers the red face (`#statusdot-gap-A-1029` 副态半边: the
+ * losing subagent/job lines stay visible on the hover card). A clean
+ * completion keeps its ③-tier place below every ②-tier arrangement.
  */
 function sessionBaseStatuses(
   node: Pick<SessionNode, 'pendingInteraction' | 'running' | 'runningSubagentCount'
@@ -585,25 +592,32 @@ function sessionBaseStatuses(
     ...rest.filter((status): status is SessionStatus => status !== undefined),
   ]
   if (pending !== undefined) return ranked(pending, subagents, jobs, wakeup)
-  if (node.running) {
-    return ranked({ state: 'ongoing', ...busyBadge, label: t('status.running') }, subagents, jobs, wakeup)
-  }
-  if (subagents !== undefined) return ranked(subagents, jobs, wakeup)
-  if (jobs !== undefined) return ranked(jobs, wakeup)
-  // 失败例外: a failed stop outranks the wake-up weak mark; the mark keeps its
-  // seat in the hover card so the goal is still visible underneath. The red
-  // dot embeds ✕ (勾成了/叹号等你/叉败了, 五态定稿 §二); a shutdown cut — own
-  // turn, killed subagent, or killed job — names itself 停机打断 instead of
-  // the ordinary 上轮失败, because the recovery differs (resume vs retry).
-  if (node.completed && node.completionOutcome === 'failed') {
+  // 失败例外 + 改序 (statusdot-chain-order-1123, 2026-11-23 裁定): a failed
+  // stop ranks over live activity and the wake-up weak mark — but only while
+  // the row is not itself running (失败 ⟺ 停轮未读带 `!running` 闸): a re-run
+  // still wears the ongoing ring, and neither a running subagent nor a live
+  // job may cover the red face. The red dot embeds ✕ (勾成了/叹号等你/叉败了,
+  // 五态定稿 §二); a shutdown cut — own turn, killed subagent, or killed job —
+  // names itself 停机打断 instead of the ordinary 上轮失败, because the
+  // recovery differs (resume vs retry). The losing wake-up and both busy
+  // arrangements ride the hover card as secondary lines.
+  if (!node.running && node.completed && node.completionOutcome === 'failed') {
     return ranked({
       state: 'error',
       label: node.completionInterrupted === true
         ? t('status.workInterrupted')
         : t('status.turnFailed'),
-    }, wakeup)
+    }, subagents, jobs, wakeup)
   }
-  if (wakeup !== undefined) return ranked(wakeup)
+  if (node.running) {
+    return ranked({ state: 'ongoing', ...busyBadge, label: t('status.running') }, subagents, jobs, wakeup)
+  }
+  // 💤 待唤醒 above the busy arrangements (2026-11-23 chain): the goal is on
+  // the books while the row is stopped, so the sleep mark takes the seat and
+  // the live subagent/job counts stay visible as hover secondaries.
+  if (wakeup !== undefined) return ranked(wakeup, subagents, jobs)
+  if (subagents !== undefined) return ranked(subagents, jobs)
+  if (jobs !== undefined) return ranked(jobs)
   // 待收讫·通过 embeds ✓ in the enlarged green dot (五态定稿 §二).
   if (node.completed) return [{ state: 'done', label: t('status.completed') }]
   // ④ splits: a confirmed nothing stays blank. Unreadability no longer swaps in
