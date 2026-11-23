@@ -72,7 +72,7 @@
       - listitem: Open reference menu @
       - listitem: New line Enter
       - listitem: Next / Submit Shift + Enter
-      - listitem: Switch options ↑ ↓
+      - listitem: Switch options Ctrl + ↑ Ctrl + ↓
       - listitem: Previous / Next question PageUp PageDown
       - listitem: Select option Enter Space
       - listitem: Send message Shift + Enter
