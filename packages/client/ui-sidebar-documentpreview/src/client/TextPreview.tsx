@@ -95,6 +95,9 @@ export function TextPreview({
   const scrollportRef = useRef<HTMLElement | null>(null)
   const storedScrollTopRef = useRef(0)
   const [menuOpen, setMenuOpen] = useState(false)
+  // The pane keeps one keyboard tab stop, on whichever element scrolls: the
+  // body while the body scrolls, a renderer's own viewport while that does.
+  const [bodyTabStop, setBodyTabStop] = useState(true)
   const absolutePath = meta.value?.absolutePath ?? current?.complete?.absolutePath
   const displayPath = absolutePath ?? file.path
   // Contributions that hand the file to the Host wait for its Host path.
@@ -115,7 +118,13 @@ export function TextPreview({
   const bindScrollport = useCallback((scrollport: HTMLElement | null): void => {
     const next = scrollport ?? bodyRef.current
     scrollportRef.current = next
-    if (next !== null) next.scrollTop = storedScrollTopRef.current
+    setBodyTabStop(scrollport === null)
+    if (next !== null) {
+      next.scrollTop = storedScrollTopRef.current
+      // The renderer owns its viewport's markup; keyboard paging belongs to the
+      // pane, so the focus stop is installed here rather than in every renderer.
+      if (scrollport !== null) scrollport.tabIndex = 0
+    }
   }, [])
 
   // First mount reads the first page; a body coming back to a tab with content
@@ -352,9 +361,14 @@ export function TextPreview({
         {/* jscpd:ignore-end */}
         {fileOwner !== undefined && renderSlot('sidebar.right.tab.document.actions', fileOwner)}
       </div>
+      {/* Focusable scrollport: keyboard paging (arrows / PageUp / PageDown)
+          scrolls the focused scroller natively, the conversation scrollport's
+          way (ui-conversation ConversationContent). While a renderer scrolls
+          itself, that viewport takes the stop instead (bindScrollport). */}
       <div
         ref={bindBody}
         className={clsx(css.body, state.wrap && css.wrap)}
+        tabIndex={bodyTabStop ? 0 : undefined}
         data-textpreview-body
         data-textpreview-wrap={state.wrap ? '' : undefined}
         onScrollCapture={(event) => {

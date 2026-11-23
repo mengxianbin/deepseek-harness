@@ -636,6 +636,33 @@ describe('TextPreview — navigation and view', () => {
     act(() => { h.instance.actions.toggledWrap(TAB_ID) })
     expect(body(view.container).hasAttribute('data-textpreview-wrap')).toBe(false)
   })
+
+  it('keeps one focusable scrollport for keyboard paging: the body, or the renderer viewport', async () => {
+    const h = harness({ 1: page(1, ['a', 'b', 'c'], true) })
+    const plain = render(<TextPreview {...h.props()} />)
+    await settle()
+    // A press on the content hands focus to the scrollport, so arrows / PageUp / PageDown page it natively.
+    expect(body(plain.container).tabIndex).toBe(0)
+    body(plain.container).focus()
+    expect(document.activeElement).toBe(body(plain.container))
+    plain.unmount()
+
+    const h2 = harness({ 1: page(1, ['a', 'b', 'c'], true) })
+    const code = codeProps(h2, { revision: 1 })
+    const fallback: TextPreviewProps = { ...code, renderSlot: documentSlots(() => <div data-late-renderer />) }
+    const view = render(<TextPreview {...code} />)
+    await settle()
+    const viewport = scrollport(view.container)
+    expect(viewport).not.toBe(body(view.container))
+    expect(viewport.tabIndex).toBe(0)
+    // The body no longer scrolls, so it no longer takes a tab stop.
+    expect(body(view.container).hasAttribute('tabindex')).toBe(false)
+
+    view.rerender(<TextPreview {...fallback} />)
+    await settle()
+    expect(body(view.container).tabIndex).toBe(0)
+    expect(scrollport(view.container)).toBe(body(view.container))
+  })
 })
 
 describe('TextPreview — header controls', () => {
