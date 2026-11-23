@@ -61,10 +61,6 @@ export type SettingsRootInjected = {
     restartRunningSessions: HostObservable<number>
     /** Latest restart-signal judgment; undefined before the first delivery. */
     restartSignal: HostObservable<RestartSignalView | undefined>
-    /** Host process start instant (ISO 8601); undefined before the first pull
-     * and while the connection is not carrying a fresh answer — the stamp
-     * hides rather than showing a pre-restart instant (server-started-at-1117). */
-    serverStartedAt: HostObservable<string | undefined>
   }
 }
 

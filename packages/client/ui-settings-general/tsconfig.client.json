@@ -8,7 +8,6 @@
   "include": [
     "src/client",
     "src/restart.ts",
-    "src/server-started-at.ts",
     "src/types.ts",
     "src/css-modules.d.ts"
   ],
