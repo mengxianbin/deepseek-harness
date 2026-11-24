@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-ai/dsh-event-loop-monitor",
-  "description": "Event-loop health watch: a windowed monitorEventLoopDelay histogram plus eventLoopUtilization with a conditional aggregate log line, a loopback state probe, slice-overshoot attribution and unattributed-spike process.report dumps",
+  "description": "Event-loop state probe: a thin shell serving the external sampler's <dsh-home>/event-loop-state.json — fresh file passes through verbatim (200), missing/stale answers 503; internal histogram/ELU watch, slice-overshoot attribution and report dumps retired",
   "version": "0.2.2-alpha.2",
   "publishConfig": {
     "access": "public"
