@@ -110,18 +110,12 @@ async function setupProbe(config: eventLoopMonitor.Config) {
   } as never)
   const fiber = await ctx.plugin(eventLoopMonitor, config)
   fibers.push(fiber)
-  if (config.disable === true) {
-    // A disabled component must stay a quiet absence: give the child
-    // fiber a beat to prove it never registers, then assert zero routes.
-    await new Promise(resolve => setTimeout(resolve, 100))
-    expect(routes.size).toBe(0)
-    return { ctx, routes }
-  }
-  // The route registers from a child fiber waiting on `webServer`.
-  await vi.waitFor(() => { expect(routes.size).toBe(1) }, { timeout: 2000 })
-  const handler = routes.get(eventLoopMonitor.STATE_PATH)
-  if (handler === undefined) throw new Error(`probe route ${eventLoopMonitor.STATE_PATH} did not register`)
+  // One return shape for both branches so `probe` is never optional: the
+  // caller resolves the handler at call time and a missing route throws
+  // loud (a disabled plugin must not be probed anyway).
   const probe = async (options: ProbeOptions = {}): Promise<{ status: number; body: string; headers: Record<string, string> }> => {
+    const handler = routes.get(eventLoopMonitor.STATE_PATH)
+    if (handler === undefined) throw new Error(`probe route ${eventLoopMonitor.STATE_PATH} is not registered`)
     const captured = { status: 0, body: '', headers: {} as Record<string, string> }
     const res = {
       writeHead(status: number, headers: Record<string, string> = {}): void {
@@ -133,6 +127,15 @@ async function setupProbe(config: eventLoopMonitor.Config) {
     await handler(probeRequest(options), res)
     return captured
   }
+  if (config.disable === true) {
+    // A disabled component must stay a quiet absence: give the child
+    // fiber a beat to prove it never registers, then assert zero routes.
+    await new Promise(resolve => setTimeout(resolve, 100))
+    expect(routes.size).toBe(0)
+    return { ctx, routes, probe }
+  }
+  // The route registers from a child fiber waiting on `webServer`.
+  await vi.waitFor(() => { expect(routes.size).toBe(1) }, { timeout: 2000 })
   return { ctx, routes, probe }
 }
 
