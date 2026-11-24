@@ -158,7 +158,7 @@ function withIntervention(
 /** The `turnOutline` unit registered on `ctx.sessionProjections` (exported for the unit spec). */
 export const turnOutlineProjectionDefinition = {
   key: 'turnOutline',
-  stateVersion: 3,
+  stateVersion: 4,
   stateSchema: turnOutlineStateSchema,
   init: () => EMPTY_OUTLINE,
   apply: (state, event) => {
@@ -188,9 +188,13 @@ export const turnOutlineProjectionDefinition = {
         if (kind !== 'user' && kind !== 'user-question-reply') return state
         const last = state.turns.at(-1)
         if (last === undefined) return state
-        if (last.prompt === '' && last.interventions.length === 0) {
-          // A late answer can open a Turn too; it is not that Turn's prompt text.
-          if (kind !== 'user') return state
+        if (kind === 'user-question-reply') {
+          // The questions UI anchors the late answer's row at this message, so
+          // the mark carries this seq; the errored result that preceded it has
+          // no row to align, and a late answer never becomes a prompt.
+          return withIntervention(state, { seq: event.seq, kind: 'question', preview: '' }, undefined)
+        }
+        if (last.prompt === '') {
           const prompt = preview(event.data.content, PROMPT_PREVIEW_LIMIT)
           if (prompt === '') return state
           return {
@@ -202,7 +206,7 @@ export const turnOutlineProjectionDefinition = {
         return withIntervention(state, {
           seq: event.seq,
           kind: 'input',
-          preview: kind === 'user' ? preview(event.data.content, INTERVENTION_PREVIEW_LIMIT) : '',
+          preview: preview(event.data.content, INTERVENTION_PREVIEW_LIMIT),
         }, undefined)
       }
       case 'tool/call': {
@@ -217,8 +221,13 @@ export const turnOutlineProjectionDefinition = {
         const index = state.pendingAsks.findIndex(pending => pending.callId === callId)
         if (index < 0) return state
         const pending = state.pendingAsks[index]
+        const cleared = { ...state, pendingAsks: state.pendingAsks.filter((_, at) => at !== index) }
+        // An errored result answered nothing: the transcript renders no answer
+        // row at its seq, so a mark there would jump nowhere. A late answer
+        // marks its own message instead.
+        if (event.data.message.isError === true) return cleared
         return withIntervention(
-          { ...state, pendingAsks: state.pendingAsks.filter((_, at) => at !== index) },
+          cleared,
           { seq: event.seq, kind: 'question', preview: pending?.preview ?? '' },
           event.data.turn,
         )
