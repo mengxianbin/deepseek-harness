@@ -33,7 +33,8 @@
 
 /* Rail geometry (figma rail spec): 36x36 control boxes centered in the 56px
    rail (10px side padding), 12px vertical rhythm, 18px from the rail top to
-   the whale's box (24px to the 24-wide whale glyph itself). */
+   the toggle's box — the 18px panel glyph sits 27px down (FORK
+   rail-icon-only-1124 replaced the 24px whale glyph at 24px). */
 .root.collapsed {
   padding: 18px 10px 6px;
 }
@@ -379,28 +380,9 @@
   border-radius: var(--dsw-radius-md);
 }
 
-/* Rail logo swap: collapsed, the toggle rests as the whale mark (brand ink,
-   no hover circle) and hovering reveals the panel icon — the expand
-   affordance (figma sidebar-hover flow). Expanded it is a plain panel icon. */
-.collapsed .toggle .panelIcon {
-  display: none;
-}
-
-@media (hover: hover) {
-  .collapsed .toggle:hover .panelIcon {
-    display: inline;
-  }
-
-  .collapsed .toggle:hover .railMark {
-    display: none;
-  }
-}
-
-.railMark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
+/* Rail resting face (FORK rail-icon-only-1124, 2026-11-24 用户指示): the
+   collapsed toggle rests as the plain panel icon too — no whale mark, no
+   hover swap; the expand affordance is the resting face in both states. */
 
 /* Rail icons ride the primary ink (figma rail spec); expanded keeps the
    secondary icon-button ink. */
