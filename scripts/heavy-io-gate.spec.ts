@@ -5,7 +5,7 @@
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { tmpdir, totalmem } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -16,6 +16,7 @@ import {
   defaultLockDirectory,
   isFullColdCommand,
   isProcessAlive,
+  memoryFloorState,
   readHeavyIoLock,
   releaseHeavyIoLock,
 } from './heavy-io-gate.ts'
@@ -48,6 +49,10 @@ function runGate(args: readonly string[], env: Record<string, string>) {
       // Default every spawned gate to a scratch history file so tests never
       // append to the machine-wide log; history cases override it per case.
       DSH_HEAVY_IO_HISTORY: join(tmpdir(), 'heavy-io-gate-spec-history.log'),
+      // Floor pinned green by default (heavy-admit-floor-1124): queue release
+      // now checks the memory floor, and a red machine would otherwise park
+      // every case. The dedicated red/green fixtures override per case.
+      DSH_HEAVY_IO_FLOOR_MB: '0',
       ...env,
     },
   })
@@ -379,6 +384,8 @@ describe('heavy-io gate history log', () => {
           DSH_HEAVY_IO_LOCK_DIR: directory,
           DSH_HEAVY_IO_HISTORY: history,
           DSH_HEAVY_IO_POLL_MS: '50',
+          // Floor pinned green: these raw spawns bypass runGate's defaults.
+          DSH_HEAVY_IO_FLOOR_MB: '0',
         },
       })
       let stdout = ''
@@ -425,6 +432,8 @@ describe('heavy-io gate history log', () => {
           DSH_HEAVY_IO_LOCK_DIR: directory,
           DSH_HEAVY_IO_HISTORY: history,
           DSH_HEAVY_IO_POLL_MS: '50',
+          // Floor pinned green: these raw spawns bypass runGate's defaults.
+          DSH_HEAVY_IO_FLOOR_MB: '0',
         },
       })
       children.push(child)
@@ -740,6 +749,131 @@ describe('heavy-io gate fullcheck token', () => {
     } finally {
       await rm(directory, { recursive: true, force: true })
       await rm(history, { force: true })
+    }
+  }, 90_000)
+})
+
+describe('heavy-io gate memory floor (heavy-admit-floor-1124)', () => {
+  it('computes the floor as 10% of physical total and honors the MB override', () => {
+    // 地板口径与派发前置同源：FreeMB ≥10%（本机 16108MB → 1611MB）。
+    const totalMb = Math.round(totalmem() / (1024 * 1024))
+    const defaults = memoryFloorState({})
+    expect(defaults.floorMb).toBe(Math.round(totalMb * 0.10))
+    expect(defaults.freeMb).toBeGreaterThanOrEqual(0)
+    // 红绿夹具与机器实况解耦：超大 floor = 恒红，0 = 恒绿（复跑可核）。
+    expect(memoryFloorState({ DSH_HEAVY_IO_FLOOR_MB: '999999999' }).green).toBe(false)
+    const pinned = memoryFloorState({ DSH_HEAVY_IO_FLOOR_MB: '0' })
+    expect(pinned.green).toBe(true)
+    expect(pinned.floorMb).toBe(0)
+    // 非法覆盖值回退默认口径，不静默变成 0（NaN/负数/空串——Number('')===0 是坑）。
+    expect(memoryFloorState({ DSH_HEAVY_IO_FLOOR_MB: 'abc' }).floorMb).toBe(defaults.floorMb)
+    expect(memoryFloorState({ DSH_HEAVY_IO_FLOOR_MB: '-5' }).floorMb).toBe(defaults.floorMb)
+    expect(memoryFloorState({ DSH_HEAVY_IO_FLOOR_MB: '' }).floorMb).toBe(defaults.floorMb)
+  })
+
+  it('holds a queued waiter while the floor is red — no release, floor-red line, command never runs', async () => {
+    const directory = lockDir('floor-red')
+    const history = historyPath('floor-red')
+    let child: ReturnType<typeof spawn> | undefined
+    try {
+      await rm(directory, { recursive: true, force: true })
+      await rm(history, { force: true })
+      // 红夹具：地板钉在任何 freemem 之上 → 恒红（不依赖机器当下水位）。
+      child = spawn(process.execPath, [tsxCli, gateScript, 'node -e "process.stdout.write(\'must-not-run\')"'], {
+        cwd: repositoryRoot,
+        env: {
+          ...process.env,
+          NO_COLOR: '1',
+          CI: 'false',
+          DSH_HEAVY_IO_LOCK_DIR: directory,
+          DSH_HEAVY_IO_HISTORY: history,
+          DSH_HEAVY_IO_POLL_MS: '50',
+          DSH_HEAVY_IO_FLOOR_MB: '999999999',
+        },
+      })
+      let stdout = ''
+      let stderr = ''
+      child.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8') })
+      child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8') })
+
+      await new Promise(done => setTimeout(done, 1_500))
+      // 处置 A 留队等待至绿：红窗内不放行（进程仍在队中）、命令零执行。
+      expect(child.exitCode).toBeNull()
+      expect(stderr).toContain('floor red')
+      expect(stdout).toBe('')
+      const during = readFileSync(history, 'utf8')
+      expect(during).toMatch(/ floor-red pid=\d+ waitedMs=\d+ freeMb=\d+ floorMb=999999999 cmd=/)
+      expect(during).not.toContain(' acquire ')
+      expect(during).not.toContain(' refused ')
+    } finally {
+      child?.kill()
+      await rm(directory, { recursive: true, force: true })
+      await rm(history, { force: true })
+    }
+  }, 90_000)
+
+  it('releases a queued waiter when the floor is green — normal acquire and run', () => {
+    const directory = lockDir('floor-green')
+    const history = historyPath('floor-green')
+    try {
+      rmSync(directory, { recursive: true, force: true })
+      rmSync(history, { force: true })
+      // 绿夹具：地板钉 0 → 恒绿，放行判定与红夹具同路径复跑。
+      const result = runGate(['node -e "process.stdout.write(\'green\')"'], {
+        DSH_HEAVY_IO_LOCK_DIR: directory,
+        DSH_HEAVY_IO_HISTORY: history,
+        DSH_HEAVY_IO_POLL_MS: '100',
+        DSH_HEAVY_IO_FLOOR_MB: '0',
+      })
+
+      expect(result.error).toBeUndefined()
+      expect(result.status).toBe(0)
+      expect(result.stdout).toBe('green')
+      const text = readFileSync(history, 'utf8')
+      expect(text).toMatch(/ acquire pid=\d+ cmd=node -e /)
+      expect(text).not.toContain(' floor-red ')
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+      rmSync(history, { force: true })
+    }
+  }, 90_000)
+
+  it('keeps CI / off / held passthroughs and the full-cold refusal order untouched', () => {
+    // 边界：地板检只进排队路径——抢修口（passthrough，pagein 裁定 ④）与
+    // 全-冷拒绝序（先于透传）零改动。
+    const directory = lockDir('floor-passthrough')
+    const history = historyPath('floor-passthrough')
+    try {
+      rmSync(directory, { recursive: true, force: true })
+      rmSync(history, { force: true })
+      const pass = runGate(['node -e "process.stdout.write(\'jumped\')"'], {
+        DSH_HEAVY_IO_LOCK_DIR: directory,
+        DSH_HEAVY_IO_HISTORY: history,
+        DSH_HEAVY_IO: '0',
+        // 红地板下透传照走（抢修口不被地板检拦下）。
+        DSH_HEAVY_IO_FLOOR_MB: '999999999',
+      })
+      expect(pass.status).toBe(0)
+      expect(pass.stdout).toBe('jumped')
+      const passText = readFileSync(history, 'utf8')
+      expect(passText).toMatch(/ passthrough pid=\d+ reason=off /)
+      expect(passText).not.toContain(' floor-red ')
+
+      // 全-冷无证仍排队前拒绝（拒绝序先于地板检，exit 2 语义不漂）。
+      rmSync(history, { force: true })
+      const refused = runGate(['echo npm run lint'], {
+        DSH_HEAVY_IO_LOCK_DIR: directory,
+        DSH_HEAVY_IO_HISTORY: history,
+        DSH_FULLCHECK_OK: '',
+        DSH_HEAVY_IO_POLL_MS: '100',
+        DSH_HEAVY_IO_FLOOR_MB: '999999999',
+      })
+      expect(refused.status).toBe(2)
+      expect(`${refused.stdout}${refused.stderr}`).toContain('full-cold command refused')
+      expect(readFileSync(history, 'utf8')).not.toContain(' floor-red ')
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+      rmSync(history, { force: true })
     }
   }, 90_000)
 })

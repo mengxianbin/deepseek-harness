@@ -22,9 +22,22 @@
  * full lints unserialized for 2 h (2026-11-14 17:12/17:18). Hot commands keep
  * the off/held passthrough semantics unchanged.
  *
+ * Queue release additionally requires a green memory floor
+ * (heavy-admit-floor-1124 · 口子②): a waiter polls `os.freemem()` against the
+ * floor — 10% of physical total, the same line as the dispatch pre-read
+ * (16108MB → 1611MB here; `DSH_HEAVY_IO_FLOOR_MB` overrides it in MB so
+ * fixtures can pin red/green) — and while the floor is red it stays queued
+ * (`floor-red` history lines, own 60s rate limit): 处置 A = 留队等待至绿, never a
+ * mid-queue refusal, so a floor-red wait can never pollute a caller's failure
+ * accounting. Cheap in-process read only — ⛔ never a spawned subprocess.
+ * The check sits inside the queue path only: CI/off/held passthroughs (the
+ * audited 抢修口, pagein-storm-rootcause-1124 ruling ④) and the full-cold
+ * refusal order are untouched, and a live holder still keeps the queue waiting
+ * exactly as before (地板红管「不起新活」，不管已在跑的).
+ *
  * Every transition also appends one observation line to a history.log kept
- * outside the lock directory (acquire / waiting / stale-break / release /
- * passthrough / refused, each with ISO time, pid and command). Pure observation:
+ * outside the lock directory (acquire / waiting / floor-red / stale-break /
+ * release / passthrough / refused, each with ISO time, pid and command). Pure observation:
  * no gate decision reads it and every write failure is swallowed, so a full disk
  * costs at most the log line, never the gate.
  *
@@ -38,7 +51,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
-import { homedir, tmpdir } from 'node:os'
+import { freemem, homedir, totalmem, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -103,7 +116,7 @@ const OWNERLESS_READ_BACKOFF_MS = 100
  * Every failure path (full disk, missing permission, bad override path) is
  * swallowed here: history is pure observation and must never affect the gate.
  * @param file - History file path.
- * @param event - Event name (acquire / waiting / stale-break / release / passthrough / refused).
+ * @param event - Event name (acquire / waiting / floor-red / stale-break / release / passthrough / refused).
  * @param command - The gated command.
  * @param fields - Extra key=value fields, rendered before `cmd`.
  */
@@ -366,6 +379,32 @@ export function fullcheckAuthorized(env: NodeJS.ProcessEnv): boolean {
   return env.DSH_FULLCHECK_OK === '1'
 }
 
+/** Memory floor as a share of physical total — the dispatch pre-read line (FreeMB ≥10%). */
+const DEFAULT_FLOOR_RATIO = 0.10
+
+/**
+ * Memory floor state at the moment a queued waiter would be released
+ * (heavy-admit-floor-1124 · 口子② 放行前内存复核).
+ * Floor = 10% of `os.totalmem()` (16108MB → 1611MB on this machine, matching
+ * the board reading), overridable in MB via `DSH_HEAVY_IO_FLOOR_MB` so red/green
+ * fixtures pin deterministically (huge value = always red, `0` = always green).
+ * Cheap in-process reads only (`os.freemem()` / `os.totalmem()`) — ⛔ never a
+ * spawned subprocess (spawn-to-read-memory is the availability-gate anti-pattern).
+ * @param env - Environment supplying the floor override.
+ * @returns whether the floor is green plus the readings behind the verdict.
+ */
+export function memoryFloorState(env: NodeJS.ProcessEnv): { green: boolean; freeMb: number; floorMb: number } {
+  const totalMb = Math.round(totalmem() / (1024 * 1024))
+  // Empty string must NOT read as 0 (Number('') === 0 would silently pin green).
+  const raw = env.DSH_HEAVY_IO_FLOOR_MB
+  const override = raw !== undefined && raw.trim() !== '' ? Number(raw) : Number.NaN
+  const floorMb = Number.isFinite(override) && override >= 0
+    ? Math.round(override)
+    : Math.round(totalMb * DEFAULT_FLOOR_RATIO)
+  const freeMb = Math.round(freemem() / (1024 * 1024))
+  return { green: freeMb >= floorMb, freeMb, floorMb }
+}
+
 /**
  * Observation-only snapshot of the lock holder a passthrough jumps past.
  * This is a logging input, not a gate decision: it never influences whether the
@@ -386,7 +425,8 @@ async function holderCommandForAudit(env: NodeJS.ProcessEnv): Promise<string> {
 /**
  * Queue for the machine-wide heavy lock and hold it until the lease is released.
  * Pure queue (2026-11-12 定稿): no wait bound, no fail-open — a waiter polls
- * until every live holder has released; only a dead owner breaks early.
+ * until every live holder has released *and* the memory floor reads green
+ * (heavy-admit-floor-1124 · 口子②, 处置 A 留队至绿); only a dead owner breaks early.
  * When the lease is taken on `process.env` (the in-process sink default), the
  * holder marks `DSH_HEAVY_IO_HELD=1` so nested gate wrappers pass through.
  * @param command - Description recorded in owner.json and history.log.
@@ -444,11 +484,12 @@ export async function enterHeavyIoGate(
 }
 
 /**
- * Wait until the lock directory is free (or its owner is dead), then take it.
- * Records acquire / waiting / stale-break transitions to the history log.
+ * Wait until the lock directory is free (or its owner is dead), the memory
+ * floor is green, then take it.
+ * Records acquire / waiting / floor-red / stale-break transitions to the history log.
  * @param directory - Lock directory path.
  * @param command - The gated command, reported to waiters and the log.
- * @param env - Environment supplying poll interval and history overrides.
+ * @param env - Environment supplying poll interval, floor and history overrides.
  * @returns the acquire timestamp (ms).
  */
 async function waitForHeavyIoLock(directory: string, command: string, env: NodeJS.ProcessEnv): Promise<number> {
@@ -456,7 +497,28 @@ async function waitForHeavyIoLock(directory: string, command: string, env: NodeJ
   const pollMs = Number(env.DSH_HEAVY_IO_POLL_MS ?? DEFAULT_POLL_INTERVAL_MS)
   const startedAt = Date.now()
   let waitingLoggedAt = 0
+  let floorLoggedAt = 0
   for (;;) {
+    // 地板红 → 不放行（处置 A 留队至绿，heavy-admit-floor-1124 ②）：复核放在
+    // acquire（放行点）之前，红窗内连无争用的首取也拦。独立事件名 + 独立 60s
+    // 限流，不与 waiting 行字段序耦合（既有 spec 正则零回归）。读 = os.freemem()
+    // 廉价读、零 spawn；读失败（抛不出的系统调用）不进此分支 = 天然 fail-open。
+    const floor = memoryFloorState(env)
+    if (!floor.green) {
+      process.stderr.write(
+        `heavy-io-gate: floor red (free ${floor.freeMb}MB < floor ${floor.floorMb}MB) — holding the queue\n`,
+      )
+      if (Date.now() - floorLoggedAt >= HISTORY_WAITING_INTERVAL_MS) {
+        floorLoggedAt = Date.now()
+        recordHistory(history, 'floor-red', command, {
+          waitedMs: Date.now() - startedAt,
+          freeMb: floor.freeMb,
+          floorMb: floor.floorMb,
+        })
+      }
+      await sleep(pollMs + Math.floor(Math.random() * 500))
+      continue
+    }
     if (await acquireHeavyIoLock(directory, command) !== undefined) {
       recordHistory(history, 'acquire', command)
       return startedAt
