@@ -7,7 +7,7 @@ kind: "package-reference"
 
 ## Summary
 
-Use this package to keep answering "is the main thread stuck" after the watch moved out of process (m-note design `event-loop-monitor-offproc-design-1123.md` §六 stages 2–3; user ruling 2026-11-24: mechanism A = external RTT probe plus on-demand external capture, `elu` = external CPU% proxy, package kept as a shell). The in-process watch this package used to be — a `monitorEventLoopDelay({ resolution: 10 })` histogram, an `eventLoopUtilization()` delta, the 60 s window tick, the light fold, the conditional aggregate log line, the slice-overshoot registry, the red-window alert fact file and the loop-report-sign-1123 signature/cold-layer output scheme — is retired: a frozen main thread cannot sample itself (the「事后 dump 栈永远是报案人栈」structural blind spot), and all sampling now lives in an external process (availability gate `rule/dsh-availability-gate.md` §二 first choice「外移出宿主」: the external collector computes, the host only reads and answers). What remains is the answer surface the settings card already polls: the loopback-fenced probe `GET /api/event-loop/state` reads the external sampler's one small file, `<dsh-home>/event-loop-state.json`, and passes its bytes through verbatim when fresh (200); a missing / unreadable / malformed / stale file answers 503 `{"ok":false,"error":"stale"}`, and because consumers already treat any non-200 as absent, a dead sampler is a quiet absence, never a broken face. The `dsh` base bundle already mounts the shell next to the unit-scheduler gate.
+Use this package to keep answering "is the main thread stuck" after the watch moved out of process (m-note design `event-loop-monitor-offproc-design-1123.md`, ruling 2026-11-24): the loopback-fenced `GET /api/event-loop/state` probe reads the external sampler's one small file, `<dsh-home>/event-loop-state.json`, and passes fresh bytes through verbatim (200); a missing, malformed or stale file answers 503 `stale`, which the health card and frame pill already render as a quiet absence. The `dsh` base bundle mounts the shell next to the unit-scheduler gate.
 
 ## Table of Contents
 
@@ -85,11 +85,9 @@ The handler reads the state file, parses it, takes the payload's own `windowSec`
 <a id="further-exploration"></a>
 ## Further Exploration
 
-- [Design: 进程外事件循环监视器设计档](../../../content/tech/ai/dsh/event-loop-monitor-offproc-design-1123.md) — the single implementation basis for this shell (sampling options, state-face wiring, deprecation route).
-- [Design: 事件循环监控方案设计](../../../content/tech/ai/dsh/event-loop-monitor-design-1108.md) — the original in-process watch this shell replaces (three layers, three channels, light table, UI five blocks).
 - [Unit-scheduler observation layer](../unit-scheduler/README.md) — the P0.5 precedent the fence and route registration still copy, and the queue card that keeps its numbers from being misread.
-- [Configuration catalog entry](../../../docs/config-catalog.md#deepseek-aidsh-event-loop-monitor) — generated field reference for this package.
 - [Guard group map](../README.md) — the other packages in this group.
+- Implementation basis (m-note 主树, plain paths because the design corpus lives outside this repository): `content/tech/ai/dsh/event-loop-monitor-offproc-design-1123.md` — sampling options, state-face wiring, deprecation route; the in-process watch it replaces is `content/tech/ai/dsh/event-loop-monitor-design-1108.md` (three layers, three channels, light table, UI five blocks); the availability argument is `rule/dsh-availability-gate.md` §二 first choice「外移出宿主」.
 
 -----
 
