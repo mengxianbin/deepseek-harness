@@ -11,6 +11,7 @@ import {
   clientBuildValueDefines,
   officialClientBuildEnvironment,
   readClientBuildRecord,
+  repositoryBranch,
   repositoryClientBuildEnvironment,
   repositoryCommitHash,
   repositoryGitDirty,
@@ -177,22 +178,27 @@ describe('client build environment', () => {
     }).toThrow(/DSH_CLIENT_VERSION/)
   })
 
-  it('owns repository version, commit, and dirty metadata for complete builds', () => {
+  it('owns repository version, commit, branch, and dirty metadata for complete builds', () => {
     const fixtureRoot = repositoryFixture()
     const commit = git(fixtureRoot, ['rev-parse', '--short=7', 'HEAD'])
+    const branch = git(fixtureRoot, ['symbolic-ref', '--short', 'HEAD'])
 
     expect(repositoryVersion(fixtureRoot)).toBe('1.2.3-rc.4')
     expect(repositoryGitDirty(fixtureRoot)).toBe(false)
+    expect(repositoryBranch(fixtureRoot)).toBe(branch)
     expect(repositoryClientBuildEnvironment(fixtureRoot, {
       DSH_CLIENT_COMMIT_HASH: COMMIT_HASH,
       DSH_CLIENT_EXTRA: 'preserved',
       DSH_CLIENT_GIT_DIRTY: 'true',
       DSH_CLIENT_VERSION: 'spoofed',
     })).toEqual({
+      DSH_CLIENT_BRANCH: branch,
       DSH_CLIENT_COMMIT_HASH: COMMIT_HASH.slice(0, 7),
       DSH_CLIENT_EXTRA: 'preserved',
       DSH_CLIENT_VERSION: '1.2.3-rc.4',
     })
+    // The official profile stays a fixed key set: releases are pinned to a tag,
+    // so no branch key may enter it (exact-match consumers depend on that).
     expect(officialClientBuildEnvironment(fixtureRoot)).toEqual({
       DSH_CLIENT_BUILD_PROFILE: 'official',
       DSH_CLIENT_COMMIT_HASH: commit,
@@ -223,6 +229,7 @@ describe('client build environment', () => {
     expect(repositoryClientBuildEnvironment(fixtureRoot, {
       DSH_CLIENT_COMMIT_HASH: COMMIT_HASH,
     })).toEqual({
+      DSH_CLIENT_BRANCH: branch,
       DSH_CLIENT_COMMIT_HASH: COMMIT_HASH.slice(0, 7),
       DSH_CLIENT_GIT_DIRTY: 'true',
       DSH_CLIENT_VERSION: '1.2.3-rc.4',
@@ -243,12 +250,27 @@ describe('client build environment', () => {
     write(join(fixtureRoot, 'package.json'), '{"version":"2.0.0"}\n')
 
     expect(repositoryGitDirty(fixtureRoot)).toBeUndefined()
+    // No Git metadata at all: no branch key either — the footer falls back to `v`.
+    expect(repositoryBranch(fixtureRoot)).toBeUndefined()
     expect(repositoryClientBuildEnvironment(fixtureRoot, {
       DSH_CLIENT_COMMIT_HASH: COMMIT_HASH,
       DSH_CLIENT_GIT_DIRTY: 'true',
     })).toEqual({
       DSH_CLIENT_COMMIT_HASH: COMMIT_HASH.slice(0, 7),
       DSH_CLIENT_VERSION: '2.0.0',
+    })
+  })
+
+  it('omits the branch key on a detached HEAD while keeping every other owned value', () => {
+    const fixtureRoot = repositoryFixture()
+    git(fixtureRoot, ['checkout', '--detach'])
+
+    expect(repositoryBranch(fixtureRoot)).toBeUndefined()
+    expect(repositoryClientBuildEnvironment(fixtureRoot, {
+      DSH_CLIENT_COMMIT_HASH: COMMIT_HASH,
+    })).toEqual({
+      DSH_CLIENT_COMMIT_HASH: COMMIT_HASH.slice(0, 7),
+      DSH_CLIENT_VERSION: '1.2.3-rc.4',
     })
   })
 

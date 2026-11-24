@@ -33,6 +33,7 @@ afterEach(() => {
   if (scrollIntoViewDescriptor === undefined) Reflect.deleteProperty(Element.prototype, 'scrollIntoView')
   else Object.defineProperty(Element.prototype, 'scrollIntoView', scrollIntoViewDescriptor)
   vi.useRealTimers()
+  vi.unstubAllEnvs()
 })
 
 type Row = { id: string; order: number; label: string }
@@ -600,14 +601,29 @@ it('delivers the restart-signal judgment to the collapsed dot-button (FORK rail-
   expect(dot.querySelector('[aria-hidden="true"]')).toBeTruthy()
 })
 
-// server-started-at-1117: the settings row's glanceable start-time stamp.
+// server-started-at-1117: the settings row's glanceable runtime-version tag.
 // Built from local components so the assertions hold in any test timezone.
 const STAMP_ISO = new Date(2026, 10, 12, 21, 49, 5).toISOString()
 
-it('shows the server start stamp in the wide trigger row, short form for the eye and full sentence for AT', () => {
+it('shows the runtime version tag in the wide trigger row, tag for the eye and full sentence for AT', () => {
   mount({ serverStartedAt: STAMP_ISO, dictionary: zh })
-  expect(screen.getByText('11-12 21:49')).toBeTruthy()
+  // No branch metadata in the test environment: the tag keeps the plain `v`
+  // fallback and the sentences carry no branch note (2026-11-24 甲裁).
+  expect(screen.getByText('v261112.2149')).toBeTruthy()
   expect(screen.getByText('服务器启动于 2026-11-12 21:49:05')).toBeTruthy()
+})
+
+it('stamps the build branch initial into the tag and the full branch name into the sentences', () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date(2026, 10, 13, 23, 19, 5))
+  vi.stubEnv('DSH_CLIENT_BRANCH', 'master')
+  mount({ serverStartedAt: STAMP_ISO, dictionary: zh })
+  // Letter for the eye (master→m), full name for hover/AT — never the other way round.
+  expect(screen.getByText('m261112.2149')).toBeTruthy()
+  expect(screen.getByText('服务器启动于 2026-11-12 21:49:05 · 分支 master')).toBeTruthy()
+  fireEvent.focus(document.querySelector('[data-server-started-at]')!)
+  expect(screen.getByRole('tooltip').textContent)
+    .toBe('服务器启动于 2026-11-12 21:49:05 · 已运行 1 天 1 小时 · 分支 master')
 })
 
 it('resolves the full sentence and live elapsed age when the stamp takes focus', () => {

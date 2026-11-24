@@ -110,6 +110,26 @@ export function repositoryGitDirty(root: string): boolean | undefined {
 }
 
 /**
+ * Resolve the checked-out branch embedded in client artifacts.
+ * @param root - repository root whose branch pointer is read.
+ * @returns the short branch name; undefined without a branch pointer
+ * (detached HEAD, non-Git checkout, or an empty symbolic ref).
+ */
+export function repositoryBranch(root: string): string | undefined {
+  try {
+    const value = execFileSync('git', ['symbolic-ref', '--short', 'HEAD'], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+    return value === '' ? undefined : value
+  } catch {
+    // Detached HEAD or no Git: the footer falls back to the plain version tag.
+    return undefined
+  }
+}
+
+/**
  * Resolve the public environment for a complete default build from one checkout.
  * Repository-owned metadata replaces inherited values; other public values pass through.
  * @param root - repository root supplying version and Git metadata.
@@ -124,10 +144,15 @@ export function repositoryClientBuildEnvironment(
   delete inherited.DSH_CLIENT_COMMIT_HASH
   delete inherited.DSH_CLIENT_GIT_DIRTY
   delete inherited.DSH_CLIENT_VERSION
+  // Branch is repository-owned like the dirty marker: a stale shell value must
+  // never label an artifact with a branch this checkout does not carry.
+  delete inherited.DSH_CLIENT_BRANCH
   const dirty = repositoryGitDirty(root)
+  const branch = repositoryBranch(root)
   return {
     ...inherited,
     DSH_CLIENT_COMMIT_HASH: repositoryCommitHash(root, environment),
+    ...(branch === undefined ? {} : { DSH_CLIENT_BRANCH: branch }),
     ...(dirty === true ? { DSH_CLIENT_GIT_DIRTY: 'true' } : {}),
     DSH_CLIENT_VERSION: repositoryVersion(root),
   }
