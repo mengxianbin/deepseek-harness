@@ -306,8 +306,8 @@ export const INITIAL_LIGHT_STATE: LightState = {
   light: 'green',
 }
 
-/** The three slice points in design order (design §一第二层 table). */
-export const SLICE_NAMES: readonly SliceName[] = ['list', 'migration', 'zstd']
+/** The slice points in design order (design §一第二层 table) + the heartbeat sweep (stall-rootcause-1123). */
+export const SLICE_NAMES: readonly SliceName[] = ['list', 'migration', 'zstd', 'sweep']
 
 /**
  * Fold one window into the light state — the design §二 table as a pure

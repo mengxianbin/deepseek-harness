@@ -28,8 +28,13 @@ export interface SliceOvershootStats {
   lastAt: number
 }
 
-/** Named slice points the design wires (list 16ms / migration 500ms / zstd 500ms). */
-export type SliceName = 'list' | 'migration' | 'zstd'
+/**
+ * Named slice points the design wires (list 16ms / migration 500ms / zstd
+ * 500ms) plus the heartbeat-sweep point added by stall-rootcause-1123
+ * (sweep 250ms): the 15s `session-controller` tick books its own overshoot
+ * so a spike window can answer "was the sweep the blocker".
+ */
+export type SliceName = 'list' | 'migration' | 'zstd' | 'sweep'
 
 /** Registry shape stored on globalThis; one per host process. */
 interface OvershootRegistry {
@@ -51,7 +56,7 @@ function registry(): OvershootRegistry {
 
 /**
  * Record one slice that ran past its yield deadline.
- * @param slice - which slice point overshot (`list` / `migration` / `zstd`).
+ * @param slice - which slice point overshot (`list` / `migration` / `zstd` / `sweep`).
  * @param overMs - milliseconds past the yield deadline (clamped at >= 0).
  */
 export function recordOvershoot(slice: SliceName, overMs: number): void {

@@ -410,7 +410,7 @@ describe('event-loop-monitor probe (channel c)', () => {
     for (const field of ['p50', 'p99', 'max', 'mean', 'elu'] as const) {
       expect(typeof state[field]).toBe('number')
     }
-    expect(state.attribution.map(entry => entry.slice)).toEqual(['list', 'migration', 'zstd'])
+    expect(state.attribution.map(entry => entry.slice)).toEqual(['list', 'migration', 'zstd', 'sweep'])
     expect(state.history).toEqual([])
     expect(state.events).toEqual([])
   })
