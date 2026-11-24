@@ -27,6 +27,12 @@
  * passthrough / refused, each with ISO time, pid and command). Pure observation:
  * no gate decision reads it and every write failure is swallowed, so a full disk
  * costs at most the log line, never the gate.
+ *
+ * Passthrough lines carry the full five-field audit row — `pid` / `reason` /
+ * `holderCmd` / `cmd` / ISO time (passthrough-audit-1124): who jumped the
+ * queue, which bypass path the gate let it through on, whose live lock it
+ * jumped past, and what ran. The `holderCmd` read is observation only and never
+ * feeds a release decision.
  */
 import { spawn, spawnSync } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
@@ -114,8 +120,16 @@ function recordHistory(
     parts.push(`cmd=${clean(command)}`)
     mkdirSync(dirname(file), { recursive: true })
     appendFileSync(file, `${parts.join(' ')}\n`, 'utf8')
-  } catch {
-    // Observation only: a history write failure must never fail the gate.
+  } catch (error) {
+    // Observation only: a history write failure must never fail the gate. It
+    // must not be silent either — a lost audit line is the exact defect this
+    // log exists to close (passthrough-audit-1124), so report it on stderr and
+    // still never throw (fail-open: 抢修优先, the command keeps running).
+    try {
+      process.stderr.write(`heavy-io-gate: history write failed (${event}): ${(error as Error).message}\n`)
+    } catch {
+      // stderr itself unavailable: even that must not take the gate down.
+    }
   }
 }
 
@@ -353,6 +367,23 @@ export function fullcheckAuthorized(env: NodeJS.ProcessEnv): boolean {
 }
 
 /**
+ * Observation-only snapshot of the lock holder a passthrough jumps past.
+ * This is a logging input, not a gate decision: it never influences whether the
+ * command is released, and every failure degrades to `none` instead of throwing
+ * (a passthrough must stay fail-open — 抢修优先).
+ * @param env - Environment supplying the lock directory override.
+ * @returns the live holder's command, or `none` when no owner record is readable.
+ */
+async function holderCommandForAudit(env: NodeJS.ProcessEnv): Promise<string> {
+  try {
+    const directory = env.DSH_HEAVY_IO_LOCK_DIR ?? defaultLockDirectory(env)
+    return (await readHeavyIoLock(directory))?.command ?? 'none'
+  } catch {
+    return 'none'
+  }
+}
+
+/**
  * Queue for the machine-wide heavy lock and hold it until the lease is released.
  * Pure queue (2026-11-12 定稿): no wait bound, no fail-open — a waiter polls
  * until every live holder has released; only a dead owner breaks early.
@@ -368,7 +399,10 @@ export async function enterHeavyIoGate(
 ): Promise<{ release: () => Promise<void> } | undefined> {
   // CI = 授权环境：全量检查是 CI 本职，一律透传（token 不适用）。
   if (env.CI === 'true') {
-    recordHistory(historyFile(env), 'passthrough', command, { reason: 'ci' })
+    recordHistory(historyFile(env), 'passthrough', command, {
+      reason: 'ci',
+      holderCmd: await holderCommandForAudit(env),
+    })
     return undefined
   }
   // 三级准入（fullcheck-token 2026-11-14）：全-冷命令 default-deny——排队前
@@ -387,7 +421,10 @@ export async function enterHeavyIoGate(
   }
   const reason = passthroughReason(env)
   if (reason !== undefined) {
-    recordHistory(historyFile(env), 'passthrough', command, { reason })
+    recordHistory(historyFile(env), 'passthrough', command, {
+      reason,
+      holderCmd: await holderCommandForAudit(env),
+    })
     return undefined
   }
   const directory = env.DSH_HEAVY_IO_LOCK_DIR ?? defaultLockDirectory(env)
