@@ -8,9 +8,6 @@
 
 import { Context, type Fiber } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-// Event-loop watch attribution (design event-loop-monitor-1108 §一第二层):
-// book the slice overshoot at the yield check this scanner already runs.
-import { recordOvershoot } from '@deepseek-ai/dsh-event-loop-monitor'
 import {
   createSessionFormatCatalogWithChildren,
   SessionFormatUnsupportedMigrationError,
@@ -1058,7 +1055,6 @@ class JsonlSessionPersistence extends SessionPersistence {
         scanner.write(plaintext)
         remainingFrames -= 1
         if (remainingFrames > 0 && performance.now() >= yieldDeadline) {
-          recordOvershoot('zstd', performance.now() - yieldDeadline)
           await scheduler.yield()
           signal?.throwIfAborted()
           yieldDeadline = performance.now() + ZSTD_DECODE_YIELD_INTERVAL_MS
