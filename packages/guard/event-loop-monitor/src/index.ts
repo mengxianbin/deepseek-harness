@@ -107,14 +107,15 @@ export const Config: z<Config> = z.object({
 export type EventLoopLight = 'green' | 'yellow' | 'red'
 
 /**
- * The three design slice points (design §一第二层 table) — the state
- * file's `attribution` rows follow this order; the in-process registry
- * that used to book them is retired with the internal watch.
+ * The design slice points (design §一第二层 table: list / migration /
+ * zstd) plus the heartbeat sweep added by stall-rootcause-1123 — the
+ * state file's `attribution` rows follow this order; the in-process
+ * registry that used to book them is retired with the internal watch.
  */
-export type SliceName = 'list' | 'migration' | 'zstd'
+export type SliceName = 'list' | 'migration' | 'zstd' | 'sweep'
 
-/** Design slice points in order, for consumers reading the attribution contract. */
-export const SLICE_NAMES: readonly SliceName[] = ['list', 'migration', 'zstd']
+/** Slice points in order, for consumers reading the attribution contract. */
+export const SLICE_NAMES: readonly SliceName[] = ['list', 'migration', 'zstd', 'sweep']
 
 /** One completed window as the state file's history carries it (shape unchanged). */
 export interface EventLoopWindow {
@@ -204,7 +205,7 @@ export interface EventLoopState {
   overWindows: number
   /** Bounded window history for the sparkline, oldest first. */
   history: readonly EventLoopWindow[]
-  /** Cumulative slice-overshoot attribution, design order (list / migration / zstd); may be empty under the external sampler. */
+  /** Cumulative slice-overshoot attribution, design order (list / migration / zstd / sweep); may be empty under the external sampler. */
   attribution: readonly SliceAttribution[]
   /** Unattributed spike tally. */
   unattributed: UnattributedSpike

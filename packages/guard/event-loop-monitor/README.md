@@ -76,7 +76,7 @@ The handler reads the state file, parses it, takes the payload's own `windowSec`
 | `src/index.ts` | The whole shell: config schema (historical keys retained, only `disable` effective), the freshness gate, and the fenced probe route. |
 | `tests/` | Thin-shell contract: fresh 200 byte pass-through with the full shape, stale/missing/malformed 503, fence 403, method 405, `disable` quiet absence, judgment-value zero-change pins. |
 
-`src/overshoot.ts` (slice-overshoot registry) and `src/signature.ts` (loop-report-sign-1123 output scheme) were deleted with the internal watch; the three cooperative-yield slice points keep their yield logic and no longer book overshoot.
+`src/overshoot.ts` (slice-overshoot registry) and `src/signature.ts` (loop-report-sign-1123 output scheme) were deleted with the internal watch; all four slice points — the three cooperative-yield checks (`list` / `migration` / `zstd`) and the 15 s heartbeat sweep (`sweep`, added by stall-rootcause-1123) — keep their host logic and no longer book overshoot, so `SESSION_SWEEP_ATTRIBUTION_BUDGET_MS` survives in session-controller only as the documented scale marker.
 
 </details>
 

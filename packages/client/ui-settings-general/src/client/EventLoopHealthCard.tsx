@@ -23,6 +23,7 @@ const SLICE_KEYS = {
   list: 'eventLoop.slice.list',
   migration: 'eventLoop.slice.migration',
   zstd: 'eventLoop.slice.zstd',
+  sweep: 'eventLoop.slice.sweep',
 } as const
 
 const LIGHT_KEYS = {

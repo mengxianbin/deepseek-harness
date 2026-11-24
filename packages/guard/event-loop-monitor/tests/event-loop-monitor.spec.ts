@@ -257,5 +257,8 @@ describe('judgment values and contract constants (zero change, design §二)', (
     expect(eventLoopMonitor.STATE_FILE).toBe('event-loop-state.json')
     expect(eventLoopMonitor.FRESHNESS_WINDOWS).toBe(2)
     expect(eventLoopMonitor.STALE_BODY).toEqual({ ok: false, error: 'stale' })
+    // Four-slice attribution contract (stall-rootcause-1123 added `sweep`;
+    // the external sampler's rows follow this order).
+    expect(eventLoopMonitor.SLICE_NAMES).toEqual(['list', 'migration', 'zstd', 'sweep'])
   })
 })
