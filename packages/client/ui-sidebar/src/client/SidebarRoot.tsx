@@ -28,7 +28,7 @@
 import { useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
-  FishLogo, IconEllipsisOutlineRegular, IconNewChatOutlineMedium, IconNewChatOutlineRegular,
+  IconEllipsisOutlineRegular, IconNewChatOutlineMedium, IconNewChatOutlineRegular,
   IconPanelLeftOutlineRegular, IconUserOutlineMedium, isDarwinDesktop, Menu, ShortcutKeys, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
@@ -358,9 +358,10 @@ export function SidebarRoot({
   }, [pointerInside])
 
   const darwinDesktop = isDarwinDesktop()
-  // Rail resting state is the whale mark; hovering swaps in the panel icon
-  // (the expand affordance, figma sidebar-hover flow). Expanded it is a plain
-  // panel icon.
+  // Both states rest as the plain panel icon (FORK rail-icon-only-1124,
+  // 2026-11-24 用户指示): the collapsed rail never rests as the whale mark
+  // and no longer swaps it in on hover — the expand affordance is the
+  // resting face.
   const toggle = (
     <Tooltip label={toggleLabel} shortcutKeys={shortcut?.keys} delayMs={500} side={captionTooltipSide}>
       <button
@@ -370,11 +371,6 @@ export function SidebarRoot({
         aria-keyshortcuts={shortcut?.aria}
         onClick={() => { toggleSidebar() }}
       >
-        {!wide && !windowsTitlebar && (
-          <span className={css.railMark} aria-hidden="true">
-            {renderSlot('sidebar.brand.mark', { size: 24 }, { fallback: <FishLogo size={24} /> })}
-          </span>
-        )}
         {/* Rail icons render at 18 (figma rail spec); expanded keeps the glyph-native sizes. */}
         <IconPanelLeftOutlineRegular className={css.panelIcon} size={wide || windowsTitlebar ? 16 : 18} />
         {!wide && renderSlot('sidebar.toggle.badge', {})}
@@ -406,7 +402,8 @@ export function SidebarRoot({
             usage glance plus the panel toggle. v2.1: the glance LEADS the row —
             an occupant that renders an empty `sidebar.brand.name` div must not
             push it right of that dead seat; a real occupant renders after it.
-            The collapsed rail keeps its whale-mark toggle. */}
+            The collapsed rail keeps its plain panel-icon toggle (FORK
+            rail-icon-only-1124: no whale resting face). */}
         {wide && (() => {
           const brandName = renderSlot('sidebar.brand.name', {}, { fallback: null })
           return (
