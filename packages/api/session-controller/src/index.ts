@@ -15,6 +15,7 @@ import type { SessionObservation } from '@deepseek-ai/dsh-session-query'
 import { Remote, RemoteError, TypertRemoteService, principalOf, type TypertResourceResolveInput } from '@deepseek-ai/dsh-typert-protocol'
 import { canonicalClientTimeZone } from '@deepseek-ai/dsh-util-time'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
+import { recordOvershoot } from '@deepseek-ai/dsh-event-loop-monitor'
 import type {} from '@deepseek-ai/dsh-api-remote-access'
 import {
   ApiSessionAgentController,
@@ -87,6 +88,18 @@ export { SessionSkillCatalog } from './skill-catalog.ts'
  * one interval instead of waiting for the next full list pull.
  */
 export const SESSION_STATUS_SWEEP_MS = 15_000
+
+/**
+ * Attribution budget for one sweep tick (stall-rootcause-1123): a tick that
+ * finishes under it books nothing — ordinary work, no noise in the
+ * accumulator; a tick that runs past it books
+ * `recordOvershoot('sweep', elapsed - budget)` so the event-loop monitor's
+ * next spike window can answer 「卡的是不是心跳清扫」 from the same
+ * globalThis accumulator as list/migration/zstd. 250ms sits on the
+ * monitor's production warn scale (60s / 250ms / 2000ms): a sweep that is
+ * itself over the host's p99-warn line is the one worth naming.
+ */
+export const SESSION_SWEEP_ATTRIBUTION_BUDGET_MS = 250
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -395,6 +408,9 @@ export class SessionController extends TypertRemoteService {
     // hearing frames rings the shield itself (step3 §5.2 自指 fail-closed).
     ctx.effect(() => {
       const timer = setInterval(() => {
+        // stall-rootcause-1123: the tick times itself — see
+        // SESSION_SWEEP_ATTRIBUTION_BUDGET_MS for the booking rule.
+        const sweepStarted = performance.now()
         const rows: SessionHealthRow[] = []
         for (const sessionId of [...sweepSessions]) {
           const session = ctx.sessions.get(sessionId)
@@ -453,6 +469,14 @@ export class SessionController extends TypertRemoteService {
           ...(reviveHealth === undefined ? {} : { reviveHealth }),
           ...(alertInbox === undefined ? {} : { alertInbox }),
         })
+        // stall-rootcause-1123: a tick past the budget books its overshoot
+        // (one map increment at a branch that already runs — the overshoot
+        // design's rules; light ticks stay unrecorded so the accumulator
+        // keeps naming only sweeps worth attributing a spike to).
+        const sweepElapsed = performance.now() - sweepStarted
+        if (sweepElapsed > SESSION_SWEEP_ATTRIBUTION_BUDGET_MS) {
+          recordOvershoot('sweep', sweepElapsed - SESSION_SWEEP_ATTRIBUTION_BUDGET_MS)
+        }
       }, SESSION_STATUS_SWEEP_MS)
       timer.unref()
       return () => {
