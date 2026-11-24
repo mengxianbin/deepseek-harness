@@ -503,10 +503,13 @@ describe('heavy-io gate history log', () => {
   }, 90_000)
 
   it('records which passthrough path skipped the gate', async () => {
+    const directory = lockDir('passthrough')
     const history = historyPath('passthrough')
     try {
+      await rm(directory, { recursive: true, force: true })
       await rm(history, { force: true })
       const result = runGate(['node -e "process.stdout.write(\'direct\')"'], {
+        DSH_HEAVY_IO_LOCK_DIR: directory,
         DSH_HEAVY_IO_HISTORY: history,
         DSH_HEAVY_IO: '0',
       })
@@ -514,8 +517,46 @@ describe('heavy-io gate history log', () => {
       expect(result.error).toBeUndefined()
       expect(result.status).toBe(0)
       expect(result.stdout).toBe('direct')
-      expect(readFileSync(history, 'utf8')).toMatch(/ passthrough pid=\d+ reason=off cmd=node -e /)
+      // 留痕可审五字段（passthrough-audit-1124）：ISO 时刻 / 事件 / pid /
+      // reason / holderCmd / cmd —— 一条 grep 即可按 "passthrough" 列出当日全部留痕。
+      expect(readFileSync(history, 'utf8')).toMatch(
+        /^\d{4}-\d{2}-\d{2}T[\d:.]+Z passthrough pid=\d+ reason=off holderCmd=none cmd=node -e /,
+      )
     } finally {
+      await rm(directory, { recursive: true, force: true })
+      await rm(history, { force: true })
+    }
+  }, 90_000)
+
+  it('records the live holder a passthrough jumps past (holderCmd audit field)', async () => {
+    const directory = lockDir('passthrough-holder')
+    const history = historyPath('passthrough-holder')
+    try {
+      await rm(directory, { recursive: true, force: true })
+      await rm(history, { force: true })
+      await mkdir(directory)
+      await writeFile(join(directory, 'owner.json'), JSON.stringify({
+        pid: process.pid,
+        startedAt: new Date().toISOString(),
+        command: 'live holder',
+      }))
+      const result = runGate(['node -e "process.stdout.write(\'jumped\')"'], {
+        DSH_HEAVY_IO_LOCK_DIR: directory,
+        DSH_HEAVY_IO_HISTORY: history,
+        DSH_HEAVY_IO: '0',
+      })
+
+      expect(result.error).toBeUndefined()
+      expect(result.status).toBe(0)
+      expect(result.stdout).toBe('jumped')
+      const text = readFileSync(history, 'utf8')
+      expect(text).toMatch(/ passthrough pid=\d+ reason=off holderCmd=live holder cmd=node -e /)
+      // 审计读是纯观测：透传绝不拿锁、活持有者绝不被惊动（放行判定零改动）。
+      expect(text).not.toContain(' acquire ')
+      expect(text).not.toContain(' stale-break ')
+      expect(existsSync(directory)).toBe(true)
+    } finally {
+      await rm(directory, { recursive: true, force: true })
       await rm(history, { force: true })
     }
   }, 90_000)
@@ -694,7 +735,7 @@ describe('heavy-io gate fullcheck token', () => {
       expect(result.status).toBe(0)
       expect(result.stdout.trim()).toBe('npm run lint')
       const text = readFileSync(history, 'utf8')
-      expect(text).toMatch(/ passthrough pid=\d+ reason=held cmd=echo npm run lint/)
+      expect(text).toMatch(/ passthrough pid=\d+ reason=held holderCmd=none cmd=echo npm run lint/)
       expect(text).not.toContain(' refused ')
     } finally {
       await rm(directory, { recursive: true, force: true })
