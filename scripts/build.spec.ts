@@ -75,10 +75,13 @@ describe('repository build steps', () => {
     }
   })
 
-  it.each(['complete', 'check', 'typecheck'] as const)('gives Host compilers and both aggregate checks an 8 GiB heap in %s scope', (scope) => {
+  it.each(['complete', 'check', 'typecheck'] as const)('gives Host compilers a 4 GiB heap and both aggregate checks a 6 GiB heap in %s scope', (scope) => {
     const gates = buildGates(root, scope)
-    for (const gate of gates.filter(gate => gate.id === 'host-src' || gate.id === 'host-check' || gate.id === 'client-check')) {
-      expect(gate.args[0]).toBe('--max-old-space-size=8192')
+    for (const gate of gates.filter(gate => gate.id === 'host-src')) {
+      expect(gate.args[0]).toBe('--max-old-space-size=4096')
+    }
+    for (const gate of gates.filter(gate => gate.id === 'host-check' || gate.id === 'client-check')) {
+      expect(gate.args[0]).toBe('--max-old-space-size=6144')
     }
     for (const gate of gates.filter(gate => gate.id === 'client-src')) {
       expect(gate.args.some(arg => arg.startsWith('--max-old-space-size'))).toBe(false)
