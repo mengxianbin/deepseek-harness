@@ -1,22 +1,26 @@
 /**
- * The 安康位 detail body — FOUR sections in ONE surface (批2
+ * The 安康位 detail body — FIVE sections in ONE surface (批2
  * duty-shield-b2-1103, ruling `shield-entry-ruling` A案 淡绿常驻可点:
  * 一个入口多段内容): 会话对账 (the three-invariant difference detail) above
  * 值守清单 (the duty ledger's rows) above 自动路由 (the controller's meter-
  * poll verdict, 2026-11-04 ruling) above 复活机制 (the selflearn revival
- * mechanism's five-fact verdict, 拍板⑭⑮). Shared verbatim by the header
+ * mechanism's five-fact verdict, 拍板⑭⑮) above 修复信号 (the m-note
+ * repair-signal mirror line, 三态账 + 盾挂 segment 4 — read-only counts,
+ * never an alarm). Shared verbatim by the header
  * shield popover and the queue alarm row, so both entrances expand the same
  * segments (step3 §3.3/§5.2 duty extension).
  *
  * 三态纪律 (清单档 §6.3, 警报经济学 archive-seal-light 2026-11-02): healthy
  * items are HIDDEN behind the summary counts (健康隐藏 — nothing to act on),
  * 有意停用 renders grey with its tag and never lights, failed renders red
- * with the collector's per-item reasons (逐项明细). The autoRoute and
- * reviveHealth planes are optional (absent = plugin not wired → quiet line,
- * never broken); a failing poll renders red WITH its raw error and streak
- * age, a red revive bundle with its raw fact tokens — the detail is the
- * on-demand investigation surface, so even a transient miss shows here even
- * though it never sets any ambient alarm.
+ * with the collector's per-item reasons (逐项明细). The autoRoute,
+ * reviveHealth and repairSignals planes are optional (absent = plugin not
+ * wired → quiet line, never broken); a failing poll renders red WITH its raw
+ * error and streak age, a red revive bundle with its raw fact tokens — the
+ * detail is the on-demand investigation surface, so even a transient miss
+ * shows here even though it never sets any ambient alarm. The repairSignals
+ * mirror reddens its own line when 无人管 > 0 and NOTHING else: it is
+ * display-only and feeds no broken verdict anywhere.
  */
 import type { SessionHealthState } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { WorkspaceBrowserProps } from '../contract/slots.ts'
@@ -37,15 +41,16 @@ const INVARIANT_KEYS = {
 } as const satisfies Record<HealthInvariant, WorkspaceKey>
 
 /**
- * Render the four-section detail over one wire report.
- * @param report - the sweep's audit (with its duty, autoRoute and reviveHealth folds); `undefined` until the first frame lands.
+ * Render the five-section detail over one wire report.
+ * @param report - the sweep's audit (duty, autoRoute, reviveHealth and repairSignals folds); `undefined` until first frame lands.
  * @param t - the workspace namespace translator.
- * @returns the sessions + duty + autoRoute + revive sections as one fragment.
+ * @returns the sessions + duty + autoRoute + revive + repairSignals sections as one fragment.
  */
 export function HealthDetail({ report, t }: { report: HealthReport; t: DetailTranslate }) {
   const duty = report?.duty
   const autoRoute = report?.autoRoute
   const revive = report?.reviveHealth
+  const repairSignals = report?.repairSignals
   const failed = duty?.items.filter(item => item.status === 'failed') ?? []
   const disabled = duty?.items.filter(item => item.status === 'disabled') ?? []
   return (
@@ -150,6 +155,31 @@ export function HealthDetail({ report, t }: { report: HealthReport; t: DetailTra
                 <span className={css.dutyItemReasons}>{revive.failed.join(', ') || '—'}</span>
               </div>
             )}
+      </section>
+      {/* 三态账 + 盾挂 (segment 4): the m-note repair-signal ledger as a
+          READ-ONLY mirror line — the sweep folds its three counters beside
+          duty/autoRoute/reviveHealth on the SAME tick (no new timer), and
+          this section only displays them. It never feeds the shield's broken
+          verdict nor the queue-alert row: a mirror can count, never alarm.
+          Absent = the writer has not published the ledger → quiet 「未接线」,
+          never broken (optional plane, like autoRoute/reviveHealth). */}
+      <section className={css.section} data-health-section="repairSignals">
+        <div className={css.sectionTitle}>{t('health.repairSignals.title')}</div>
+        {repairSignals === undefined
+          ? <div className={css.quiet}>{t('health.repairSignals.unwired')}</div>
+          : (
+            <div
+              className={repairSignals.unmanaged > 0 ? css.dutyUntrusted : css.dutySummary}
+              data-repair-signals={repairSignals.unmanaged > 0 ? 'unmanaged' : 'ok'}
+            >
+              {t('health.repairSignals.line', {
+                repairing: repairSignals.repairing,
+                queued: repairSignals.queued,
+                unmanaged: repairSignals.unmanaged,
+                oldest: repairSignals.oldestMin,
+              })}
+            </div>
+          )}
       </section>
     </>
   )

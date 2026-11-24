@@ -36,6 +36,7 @@ import { readDutyInventory } from './duty.ts'
 import { readAutoRoutePoll } from './auto-route.ts'
 import { readReviveHealth } from './revive-health.ts'
 import { syncAlertInbox } from './alert-inbox.ts'
+import { readRepairSignals } from './repair-signals.ts'
 import { alertInboxRequest } from './alert-inbox-route.ts'
 import type {
   ModelCatalog,
@@ -458,12 +459,20 @@ export class SessionController extends TypertRemoteService {
         // (revive-health mount precedent: zero new processes, zero new timers) —
         // and publishes the unread counts the envelope badge renders beside duty.
         const alertInbox = syncAlertInbox()
+        // 三态账 + 盾挂 (segment 4): the m-note repair-signal ledger rides the
+        // same fold — read-only mirror counts (repairing / queued / unmanaged /
+        // oldest), with the queued→unmanaged timeout demotion computed AT READ
+        // time, so this reader adds no timer of its own (presence/parse like
+        // reviveHealth; absence is a quiet 「未接线」 line, never broken, and
+        // nothing here may feed the shield's broken verdict).
+        const repairSignals = readRepairSignals()
         ctx.emit('api-session/health', {
           ...reconcileSessionHealth(rows),
           duty: readDutyInventory(),
           ...(autoRoute === undefined ? {} : { autoRoute }),
           ...(reviveHealth === undefined ? {} : { reviveHealth }),
           ...(alertInbox === undefined ? {} : { alertInbox }),
+          ...(repairSignals === undefined ? {} : { repairSignals }),
         })
       }, SESSION_STATUS_SWEEP_MS)
       timer.unref()

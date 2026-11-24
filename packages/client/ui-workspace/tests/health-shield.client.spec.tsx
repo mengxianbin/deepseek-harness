@@ -69,6 +69,28 @@ const noAutoRoute: SessionHealthState = {
   report: { ok: true, total: 1, counts: { running: 1, awaiting: 0, failed: 0, rest: 0 }, issues: [] },
 }
 
+/** Balanced books + the repair-signal mirror line (三态账 + 盾挂, segment 4). */
+const repairSignalsMirror: SessionHealthState = {
+  report: {
+    ok: true,
+    total: 1,
+    counts: { running: 1, awaiting: 0, failed: 0, rest: 0 },
+    issues: [],
+    repairSignals: { repairing: 2, queued: 1, unmanaged: 0, oldestMin: 47 },
+  },
+}
+
+/** Balanced books + 无人管 > 0 — the mirror line reddens, the shield must NOT. */
+const repairSignalsUnmanaged: SessionHealthState = {
+  report: {
+    ok: true,
+    total: 1,
+    counts: { running: 1, awaiting: 0, failed: 0, rest: 0 },
+    issues: [],
+    repairSignals: { repairing: 0, queued: 0, unmanaged: 3, oldestMin: 95 },
+  },
+}
+
 /** Balanced books + a SUSTAINED controller poll failure (2026-11-04 ruling: the shield's third alarm). */
 const autoRouteSustained: SessionHealthState = {
   report: {
@@ -258,5 +280,44 @@ describe('HealthShield', () => {
     fireEvent.click(screen.getByLabelText('安康位：对账平，点击展开明细'))
     const detail = document.querySelector('[data-health-detail=""]') as HTMLElement
     expect(detail.querySelector('[data-health-section="reviveHealth"]')?.textContent).toContain('复活机制未接入')
+  })
+
+  // 三态账 + 盾挂 (segment 4): the repair-signal mirror line is READ-ONLY —
+  // it renders the counts, and even 无人管 > 0 must never light the shield.
+  it('renders the repair-signal counts line when the ledger is wired (三态账 mirror)', () => {
+    render(<HealthShield useSessionHealth={selector => selector(repairSignalsMirror)} t={t} />)
+    const shield = screen.getByLabelText('安康位：对账平，点击展开明细').closest('[data-health-state]') as HTMLElement
+    expect(shield.getAttribute('data-health-state')).toBe('ok')
+
+    fireEvent.click(screen.getByLabelText('安康位：对账平，点击展开明细'))
+    const detail = document.querySelector('[data-health-detail=""]') as HTMLElement
+    const section = detail.querySelector('[data-health-section="repairSignals"]') as HTMLElement
+    expect(section.textContent).toContain('修复信号')
+    expect(section.textContent).toContain('在修 2 · 排队 1 · 无人管 0 · 最老 47min')
+  })
+
+  it('reddens ONLY the mirror line when 无人管 > 0 — the shield stays green (read-only mirror)', () => {
+    render(<HealthShield useSessionHealth={selector => selector(repairSignalsUnmanaged)} t={t} />)
+    // Never an alarm: the broken verdict ignores repairSignals entirely.
+    const shield = screen.getByLabelText('安康位：对账平，点击展开明细').closest('[data-health-state]') as HTMLElement
+    expect(shield.getAttribute('data-health-state')).toBe('ok')
+
+    fireEvent.click(screen.getByLabelText('安康位：对账平，点击展开明细'))
+    const detail = document.querySelector('[data-health-detail=""]') as HTMLElement
+    const line = detail.querySelector('[data-health-section="repairSignals"] [data-repair-signals]') as HTMLElement
+    expect(line.textContent).toContain('无人管 3')
+    expect(line.getAttribute('data-repair-signals')).toBe('unmanaged')
+    // Reuses the existing red notice class (no new CSS): dutyUntrusted, the
+    // single red notice line — never a new style, never an alarm.
+    expect(line.className).toContain('dutyUntrusted')
+  })
+
+  it('shows a quiet not-wired line when the repair-signal ledger is absent (optional plane)', () => {
+    render(<HealthShield useSessionHealth={selector => selector(noAutoRoute)} t={t} />)
+    const shield = screen.getByLabelText('安康位：对账平，点击展开明细').closest('[data-health-state]') as HTMLElement
+    expect(shield.getAttribute('data-health-state')).toBe('ok')
+    fireEvent.click(screen.getByLabelText('安康位：对账平，点击展开明细'))
+    const detail = document.querySelector('[data-health-detail=""]') as HTMLElement
+    expect(detail.querySelector('[data-health-section="repairSignals"]')?.textContent).toContain('修复信号账未接入')
   })
 })
