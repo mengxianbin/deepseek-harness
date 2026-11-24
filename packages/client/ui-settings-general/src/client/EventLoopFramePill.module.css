@@ -1,8 +1,10 @@
 /* Frame-interval pill in the settings trigger row (event-loop-frame-pill-1123):
    a quiet chip beside the gear — the dot carries the monitor's lamp color and
    the label the recent window's value (the p99 wording + 60s-lag honesty note
-   live in the tooltip). Fixed flex slot like ServerStartedAt: never shrinks the gear or
-   the trailing controls, drops out entirely when the probe has no answer. */
+   live in the tooltip). Fixed flex slot like ServerStartedAt: never shrinks the
+   gear or the trailing controls; while the first pull is in flight it shows
+   the neutral placeholder face (event-loop-pill-placeholder-1123), and drops
+   out entirely only once the probe refuses. */
 .pill {
   display: inline-flex;
   align-items: center;
@@ -38,4 +40,26 @@
 
 .dot_red {
   background: var(--dsw-alias-state-error-primary);
+}
+
+/* In-flight placeholder lamp (event-loop-pill-placeholder-1123): a quiet
+   neutral dot while the first pull has not settled — deliberately NOT a
+   green/yellow/red claim (the server owns those judgments), so it can never
+   read as a second lamp face. */
+.dot_loading {
+  background: var(--dsw-alias-label-tertiary);
+  opacity: 0.6;
+  animation: dot-breathe 1.2s ease-in-out infinite;
+}
+
+@keyframes dot-breathe {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot_loading {
+    animation: none;
+  }
 }

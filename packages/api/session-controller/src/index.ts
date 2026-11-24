@@ -88,6 +88,18 @@ export { SessionSkillCatalog } from './skill-catalog.ts'
  */
 export const SESSION_STATUS_SWEEP_MS = 15_000
 
+/**
+ * Attribution budget for one sweep tick (stall-rootcause-1123): 250ms sits
+ * on the monitor's production warn scale (60s / 250ms / 2000ms) — a sweep
+ * that is itself over the host's p99-warn line is the one worth naming.
+ * The in-host booking (`recordOvershoot('sweep', …)`) retired with the
+ * event-loop monitor's internal registry (loop-monitor-offproc-1123); the
+ * constant stays as the documented scale marker. If the sweep signal is
+ * still wanted after the move external, it must reach
+ * `<dsh-home>/event-loop-state.json` through the external sampler.
+ */
+export const SESSION_SWEEP_ATTRIBUTION_BUDGET_MS = 250
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     /** Host Session business API and Remote namespace owner. */

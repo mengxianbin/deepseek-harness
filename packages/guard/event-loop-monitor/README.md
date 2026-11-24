@@ -1,5 +1,5 @@
 ---
-description: "Event-loop health watch: a windowed monitorEventLoopDelay histogram plus eventLoopUtilization answers whether the main thread is stuck, a conditional aggregate log line speaks only when over threshold, a loopback state probe serves the same numbers, slice-overshoot accounting attributes spikes to a yield point, and unattributed spikes dump a process.report."
+description: "Event-loop state probe: a thin shell that serves the external sampler's state file — the loopback-fenced GET /api/event-loop/state passes a fresh <dsh-home>/event-loop-state.json through verbatim (200) and answers 503 stale when the file is missing, malformed or older than twice its window; the in-process histogram/ELU watch, slice-overshoot attribution and loop-report output scheme are retired with internal sampling."
 kind: "package-reference"
 ---
 
@@ -7,7 +7,7 @@ kind: "package-reference"
 
 ## Summary
 
-Use this package to know at runtime whether the host's main thread is stuck, instead of guessing after the fact. A `monitorEventLoopDelay({ resolution: 10 })` histogram and an `eventLoopUtilization()` delta are read once per window (default 60 s) into p50/p99/max/mean and a light (🟢/🟡/🔴): green stays silent, an over-threshold window prints one aggregate log line, and a red stretch stamps a fact file under the DSH home. The loopback probe `GET /api/event-loop/state` serves the same numbers to the settings health card, spike windows are attributed against the three cooperative-yield slice points (`list`, `migration`, `zstd`) that book their overshoot through `recordOvershoot`, and a spike with no slice in the window dumps `process.report.getReport()` into `.tmp/loop-report/`. The `dsh` base bundle already mounts the watch next to the unit-scheduler gate.
+Use this package to keep answering "is the main thread stuck" after the watch moved out of process (m-note design `event-loop-monitor-offproc-design-1123.md`, ruling 2026-11-24): the loopback-fenced `GET /api/event-loop/state` probe reads the external sampler's one small file, `<dsh-home>/event-loop-state.json`, and passes fresh bytes through verbatim (200); a missing, malformed or stale file answers 503 `stale`, which the health card and frame pill already render as a quiet absence. The `dsh` base bundle mounts the shell next to the unit-scheduler gate.
 
 ## Table of Contents
 
@@ -23,11 +23,11 @@ Use this package to know at runtime whether the host's main thread is stuck, ins
 <a id="use-this-package"></a>
 ## Use this package
 
-Nothing to mount by hand: the `dsh` base bundle already enables the watch, so the probe and the log line are live in every stock composition. This section reads what the watch does with one config, and when the numbers are worth touching.
+Nothing to mount by hand: the `dsh` base bundle already enables the probe, so the endpoint is live in every stock composition. This section reads what the shell does with one config, and when its knobs are worth touching.
 
 ### When to choose it
 
-Keep the design defaults on a normal machine — 60 s windows keep the log quiet and a 2 s single-block threshold keeps routine jitter out of the alarm. Lower `maxBadMs` or `p99WarnMs` when you are actively hunting a stall (a 500 ms experiment only trips a 300 ms threshold), shorten `windowSec` for a denser timeline during an investigation, and reach for `disable` when a composition must not carry a watch at all.
+The shell decides nothing: the external sampler owns the window, the thresholds (design §二 60 s / 250 ms / 2000 ms, judgment values unchanged) and the capture legs. Keep the defaults on a normal machine, and reach for `disable` when a composition must not carry the probe at all — a disabled component is a quiet absence (the probe 404s through the webserver's unmatched path), never a broken face.
 
 ### Setting it up
 
@@ -41,19 +41,17 @@ A profile that needs different numbers overrides only the fields it cares about:
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `disable` | `false` | Turn the whole watch off: no histogram, no timer, no probe route, no alert file (a quiet absence — the probe 404s). The yml-level `disabled: true` key skips the plugin entirely. |
-| `windowSec` | `60` | Sampling window in seconds; each window reads the histogram, resets it, folds the light, and speaks only when over threshold. |
-| `p99WarnMs` | `250` | p99 warn threshold in ms: one or two consecutive windows over it are 🟡, three are 🔴. |
-| `maxBadMs` | `2000` | Single-block bad threshold in ms: one window above it is at least 🟡, and it is the boundary that decides spike attribution. |
-
-The generated [configuration catalog entry](../../../docs/config-catalog.md#deepseek-aidsh-event-loop-monitor) carries the same field list with its source JSDoc.
+| `disable` | `false` | Turn the probe off entirely: no route registers (a quiet absence — the probe 404s). The yml-level `disabled: true` key skips the plugin entirely. |
+| `windowSec` | `60` | Retired with internal sampling (held by the external sampler): accepted for profile compatibility, no effect here; the default still sizes the freshness fallback. |
+| `p99WarnMs` | `250` | Retired with internal sampling (held by the external sampler): accepted for profile compatibility, no effect here. |
+| `maxBadMs` | `2000` | Retired with internal sampling (held by the external sampler): accepted for profile compatibility, no effect here. |
 
 ### What you get
 
-- **A direct measurement of "is it stuck"** — the delay histogram is the definition of a stall (the timer that should have fired did not), and ELU separates a busy loop from a blocked one.
-- **Silence by default** — green windows log nothing; one conditional line per over-threshold window carries p99, max, ELU and the window size in the design's fixed shape.
-- **Attribution, not just alarm** — a spike that lines up with a slice overshoot names the slice; a spike that does not dumps a `process.report` for forensics.
-- **A loopback-only probe** — `GET /api/event-loop/state` answers the settings health card behind the unit-scheduler fence (non-loopback callers get 403), and the unit-scheduler queue card sits beside it so a full gate queue is never misread as a stuck loop.
+- **A fresh-state pass-through** — a fresh `<dsh-home>/event-loop-state.json` is served byte-for-byte (200), so the settings health card and the gear-adjacent frame pill keep their exact response shape and their exact numbers.
+- **Fail-soft by construction** — a missing / unreadable / unparseable / stale file answers 503 `{"ok":false,"error":"stale"}`; the client pull chain (`pullOne` → `null`) already renders that as the card's unavailable line and no pill face, so a dead sampler is a quiet absence (availability Q4: 面消失 ≠ 面变坏).
+- **A loopback-only probe** — non-loopback callers get 403 before any state is read, non-GET gets 405 with `allow: GET`, and every answer carries `cache-control: no-store` (unchanged fence semantics from the unit-scheduler precedent).
+- **Nothing else** — no timers, no sampling, no writes: one small-file read per poll (availability gate §二 first choice, duty-inventory「one small file, never a per-tick schedule query」先例).
 
 -----
 
@@ -63,25 +61,22 @@ The generated [configuration catalog entry](../../../docs/config-catalog.md#deep
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-### Three layers (design event-loop-monitor-1108 §一)
+### Freshness gate (design `event-loop-monitor-offproc-design-1123.md` §六 stage 2)
 
-1. **What**: `monitorEventLoopDelay({ resolution: 10 })` samples for the process lifetime; each window tick reads p50/p99/max/mean (ns → ms), takes an `eventLoopUtilization()` delta, and resets the histogram. The light fold is a pure function (`foldWindow`): 🟢 under both thresholds, 🟡 one or two consecutive p99-over windows or a single max breach, 🔴 three consecutive over-windows or three consecutive ELU-hot windows (the design's "ELU>90% 持续" gap-fill, mirroring the ≥3-window rule).
-2. **Who**: the three cooperative-yield slice points already compare `performance.now() >= yieldDeadline`; inside that branch they call `recordOvershoot(slice, overMs)`, one map increment at a check they already run. The registry lives on `globalThis` under `Symbol.for('dsh.event-loop-monitor.overshoot')`, so every importer in the host process shares one accumulator. A window whose max crosses `maxBadMs` with no overshoot delta is unattributed and triggers the `process.report` dump (10-minute cooldown per watch).
-3. **Don't misread**: `GET /api/event-loop/state` serves the same window numbers plus the light, the bounded history ring (sparkline), the cumulative attribution table, the unattributed tally and the bounded timeline — the settings card renders those five blocks next to the unit-scheduler card.
+The handler reads the state file, parses it, takes the payload's own `windowSec` (60 when absent or unusable) as the window, and compares the file's mtime against twice that window (`FRESHNESS_WINDOWS = 2`). Fresh → the file's bytes go out verbatim; anything the gate cannot prove fresh — missing, unreadable, not a JSON object, or too old — returns `undefined` and the handler answers 503 stale. Every failure path is a caught `undefined`: the gate never throws into a request.
 
-### Three channels (design §三)
+### Response shape contract
 
-- **a — log**: `formatAggregateLine` returns the design's line (`event-loop: p99 412ms max 2.1s elu 63% over 60s window`) for yellow/red and `undefined` for green; the tick logs it once per window.
-- **b — alert fact file**: every red window stamps `<dsh-home>/event-loop-watch-state.json` with pure facts (auto-route poll-state shape); a recovery writes the recovered light and the red duration. Absence means "never red", never "broken" — the write is fail-soft and warned once.
-- **c — probe**: registered from a child fiber waiting on `webServer` (the composition without an HTTP layer keeps the watch and simply has no route), fence before method check, `cache-control: no-store`.
+`EventLoopState` (exported types) documents the payload byte-for-byte what the external sampler writes: `at`, `windowSec`, `p50`, `p99`, `max`, `mean`, `elu`, `light`, `consecutiveOver`, `consecutiveNormal`, `overWindows`, `history`, `attribution`, `unattributed`, `events`. The client's `parseEventLoop` guards the load-bearing keys and drops anything malformed to `null`; an empty `attribution` array renders the health card's table with only its gray unattributed row, and `elu` carries the external CPU% proxy (labeled「进程外代理」in all eight locales, ruling 2026-11-24).
 
 ### Source map
 
 | File | Role |
 | --- | --- |
-| `src/index.ts` | The plugin: config schema, light fold, aggregate line, window tick, alert writer, dump, and the probe route. |
-| `src/overshoot.ts` | The globalThis-keyed slice-overshoot registry the three yield points write and the tick diffs. |
-| `tests/` | Design-table folds, line shape, registry diffing, probe schema/fence, `disable`, fail-loud config, loader shape, and two real-timer legs (500 ms busy-wait → spike + line; slice in window → attribution). |
+| `src/index.ts` | The whole shell: config schema (historical keys retained, only `disable` effective), the freshness gate, and the fenced probe route. |
+| `tests/` | Thin-shell contract: fresh 200 byte pass-through with the full shape, stale/missing/malformed 503, fence 403, method 405, `disable` quiet absence, judgment-value zero-change pins. |
+
+`src/overshoot.ts` (slice-overshoot registry) and `src/signature.ts` (loop-report-sign-1123 output scheme) were deleted with the internal watch; all four slice points — the three cooperative-yield checks (`list` / `migration` / `zstd`) and the 15 s heartbeat sweep (`sweep`, added by stall-rootcause-1123) — keep their host logic and no longer book overshoot, so `SESSION_SWEEP_ATTRIBUTION_BUDGET_MS` survives in session-controller only as the documented scale marker.
 
 </details>
 
@@ -90,18 +85,16 @@ The generated [configuration catalog entry](../../../docs/config-catalog.md#deep
 <a id="further-exploration"></a>
 ## Further Exploration
 
-- [Design: 事件循环监控方案设计](../../../content/tech/ai/dsh/event-loop-monitor-design-1108.md) — the single implementation basis (three layers, three channels, light table, UI five blocks).
-- [Unit-scheduler observation layer](../unit-scheduler/README.md) — the P0.5 precedent this watch copies (conditional line, fenced probe, unref'd tick) and the queue card that keeps its numbers from being misread.
-- [Gap argument](../../../content/tech/ai/dsh/async-main-thread-block-audit-1108.md) — why production had no runtime "is it stuck" signal before this package.
-- [Configuration catalog entry](../../../docs/config-catalog.md#deepseek-aidsh-event-loop-monitor) — generated field reference for this package.
+- [Unit-scheduler observation layer](../unit-scheduler/README.md) — the P0.5 precedent the fence and route registration still copy, and the queue card that keeps its numbers from being misread.
 - [Guard group map](../README.md) — the other packages in this group.
+- Implementation basis (m-note 主树, plain paths because the design corpus lives outside this repository): `content/tech/ai/dsh/event-loop-monitor-offproc-design-1123.md` — sampling options, state-face wiring, deprecation route; the in-process watch it replaces is `content/tech/ai/dsh/event-loop-monitor-design-1108.md` (three layers, three channels, light table, UI five blocks); the availability argument is `rule/dsh-availability-gate.md` §二 first choice「外移出宿主」.
 
 -----
 
 <a id="model-experience"></a>
 ## Model Experience
 
-None, as observation policy only: it reads timers and logs; it registers no prompt, schema, or result text.
+None, as observation policy only: it reads one small file and answers an HTTP probe; it registers no prompt, schema, or result text.
 
 #### KV Cache effect
 
@@ -111,13 +104,12 @@ No direct invalidation: the package contributes no request tokens and never muta
 
 <a id="known-limitations-and-deferred-work"></a>
 
-These limits define where the watch stops answering. They are current package constraints, not a backlog.
+These limits define where the shell stops answering. They are current package constraints, not a backlog.
 
-- **A single spike under the thresholds is silent by design** — with defaults, one 500 ms block is below `maxBadMs` and too rare to move a 60 s p99; the design trades that miss for a quiet log (raise sensitivity by lowering the thresholds, or read the probe's `max` directly).
-- **The first sampling interval after a window reset can miss a stall that starts inside it** — a Node histogram quirk measured during implementation (a `reset()` immediately followed by a block loses that block's sample); mid-window stalls are captured, and windows are long enough that the exposure is one resolution interval per window.
-- **Channel b is a writer, not an alarm by itself** — the fact file is stamped for a future/auto-route-style reader; no reader folds it into a health frame yet, so today the log line and the probe are the live surfaces.
-- **Unattributed dumps are rate-limited** — one `process.report` per 10 minutes per watch, so a sustained unattributed stall leaves the first scene and tallies the rest rather than flooding `.tmp/loop-report/`.
-- **Process-local only** — the histogram and the registry live in one host process; a second host or a worker thread has its own watch and its own accumulator.
+- **The probe answers 503 until the external sampler starts writing the state file** — after this shell lands and dsh web restarts (restart is always a human step), the settings card shows its unavailable line and the frame pill shows no face until the sampler ships its first fresh file; that transition window is the design's quiet absence, not a regression of the face logic.
+- **The shell computes nothing** — `p50`/`p99`/`max`/`elu`/`light`/`history`/`attribution`/`events` are exactly what the file carries; a well-formed JSON object with wrong field values passes through (the client's shape guard is the second line of defense, dropping it to an absent face).
+- **Freshness granularity is the sampler's window** — the file's mtime is the writer's liveness signal, so the card carries at least the design's 60 s lag by construction (unchanged from the in-process watch's window semantics).
+- **`windowSec` / `p99WarnMs` / `maxBadMs` are inert here** — profiles may keep setting them without error, but only the external sampler reads them; changing them in a profile changes nothing until the sampler is configured to match.
 
 <a id="dev-note"></a>
 ### Dev Note
@@ -125,6 +117,6 @@ These limits define where the watch stops answering. They are current package co
 <details>
 <summary>Working context for maintainers — click to expand</summary>
 
-The watch is deliberately read-only: nothing it counts feeds back into scheduling or request handling, and the slice points' `recordOvershoot` calls are pure accounting at a branch they already execute. `foldWindow` and `formatAggregateLine` are pure so the design tables are testable without timers; the two real-timer tests use `windowSec: 1` with `maxBadMs: 300` to make a 500 ms busy-wait an over-threshold window within a bounded runtime — production keeps 60 s / 250 ms / 2000 ms. The alert-file write path is intentionally not driven red from tests (it would stamp the real `<dsh-home>` fact file); red logic lives in the pure fold.
+The shell is deliberately read-only: nothing it reads feeds back into scheduling or request handling. Freshness uses `statSync(...).mtimeMs`, not the payload's `at` field — mtime is the writer's liveness signal and cannot be forged by a stalled payload clock. Tests point `DSH_HOME` at a throwaway temp directory (`resolveDshHome` reads `process.env.DSH_HOME` at call time, ahead of `data-root.json`), so no test can stamp the real `~/.dsh/event-loop-state.json`; the old throwaway-cwd discipline for `.tmp/loop-report/` retired with `src/signature.ts`. The judgment values stay pinned by test: 60 s window, 250 ms p99 warn, 2000 ms single-block bad (design §二, zero change per the task boundary).
 
 </details>

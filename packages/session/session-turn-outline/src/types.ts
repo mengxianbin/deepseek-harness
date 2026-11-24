@@ -19,7 +19,10 @@ export type TurnOutlineInterventionKind = 'question' | 'input'
  * One human-intervention anchor inside a Turn: an answered decision request,
  * or a later human message admitted into the running Turn. Neither opens a
  * Turn, so neither has a `turn/start` of its own to page history through —
- * the intervention's own event seq is the load-through target instead.
+ * the intervention's own event seq is the load-through target instead, and a
+ * `question` mark records only at a seq whose row the transcript renders: the
+ * answering `tool/result`, or a late answer's own message when that result
+ * errored.
  */
 export interface TurnOutlineIntervention {
   /** The intervention's event seq; the rail aligns the row recorded at it. */

@@ -32,7 +32,7 @@ export interface EventLoopWindowView {
 
 /** Cumulative slice-overshoot attribution row. */
 export interface SliceAttributionView {
-  slice: 'list' | 'migration' | 'zstd'
+  slice: 'list' | 'migration' | 'zstd' | 'sweep'
   count: number
   worstMs: number
   lastAt: number

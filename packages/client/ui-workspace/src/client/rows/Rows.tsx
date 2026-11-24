@@ -769,9 +769,10 @@ function ReadMarkIndicator({ t }: { t: RowTranslate }) {
 }
 
 /**
- * Hover-card body: full title, display working directory, relative time, the Session's own scheduled-task
- * section, and every relevant live status. The task section sits above the
- * status lines so they stay the card's trailing status line.
+ * Hover-card body: full title, the session id directly under it, display working directory, relative time, the
+ * Session's own scheduled-task section, and every relevant live status. The
+ * task section sits above the status lines so they stay the card's trailing
+ * status line.
  */
 function SessionHoverContent({ node, cwd, now, renderSlot, t }: {
   node: SessionNode
@@ -789,6 +790,9 @@ function SessionHoverContent({ node, cwd, now, renderSlot, t }: {
   return (
     <div className={css.hoverContent}>
       <div className={css.hoverTitle}>{displayTitle(node, t)}</div>
+      {/* The id takes the title's line order in the metadata style: it is the
+          handle for matching this session against ids seen elsewhere. */}
+      <div className={css.hoverId}>{node.id}</div>
       {cwd !== undefined && <div className={css.hoverPath}>{cwd}</div>}
       {/* Same placeholder rule as the row's trailing cell: no timestamp
           before the first prompt. */}
@@ -1214,7 +1218,7 @@ export function SessionNodeItem({
       openDelayMs={800}
       grouped
       disabled={menuOpen || drag?.active === true}
-      copyText={row.blank || row.title === '' ? undefined : row.title}
+      copyText={row.blank || row.title === '' ? undefined : `${row.title}\n${row.id}`}
       copyLabel={t('copy')}
       copiedLabel={t('hover.copied')}
     />

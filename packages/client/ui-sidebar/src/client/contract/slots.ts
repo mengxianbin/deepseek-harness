@@ -21,9 +21,12 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     /** Non-interactive notification inside the collapsed sidebar expand button. */
     'sidebar.toggle.badge': { kind: 'single'; scope: 'root'; owner: Record<never, never> }
     /**
-     * Brand mark rendered in the expanded brand row and collapsed rail.
-     * Declared by this package's `sidebar` entry; deployments may replace
-     * the shell's fish fallback without replacing the surrounding controls.
+     * Brand mark no state seats anymore (FORK rail-icon-only-1124,
+     * 2026-11-24 用户指示: the collapsed toggle rests as the Open sidebar
+     * panel icon — no whale face, no hover swap — and the wide row belongs
+     * to UsageGlance). Still declared by this package's `sidebar` entry:
+     * registrations stay valid and render wherever a future seat calls
+     * them in place of the shell's fish fallback.
      */
     'sidebar.brand.mark': { kind: 'single'; scope: 'root'; owner: SidebarBrandMarkOwnerProps }
     /**

@@ -4,11 +4,12 @@
  * `turn/start` seq, bounded prompt and final-response previews, and the human
  * interventions inside each turn); compositions without the registry are
  * unaffected; unmounting the plugin removes the key (HMR safety). The response
- * buffers as a draft and commits at `turn/end`, and an answered decision
- * request records only once its result lands, so the identity-gated change
- * feed pushes when — and only when — a served value changes. Narrow fold paths
- * with fabricated envelopes (non-human sources, regressive turn numbers,
- * outlived results) run against the exported definition directly.
+ * buffers as a draft and commits at `turn/end`, and a decision request
+ * records only once a result that answered lands — an errored result records
+ * nothing and a late answer marks its own message — so the identity-gated
+ * change feed pushes when — and only when — a served value changes. Narrow
+ * fold paths with fabricated envelopes (non-human sources, regressive turn
+ * numbers, outlived results) run against the exported definition directly.
  */
 
 import { describe, expect, expectTypeOf, it } from 'vitest'
@@ -25,6 +26,9 @@ import type { TurnOutlineEntry, TurnOutlineState } from '@deepseek-ai/dsh-sessio
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
     'test-injector': { kind: 'test-injector' } & ContextFormed
+    // Mirrors dsh-user-questions' declaration; that package is not a
+    // dependency of this spec, so the late-answer source is declared here.
+    'user-question-reply': { kind: 'user-question-reply'; callId: ToolCallId; outcome: 'answered' }
   }
 }
 
@@ -81,6 +85,27 @@ function appendResult(session: Session, turn: number, callId: string): SessionSe
   }, { surfaceOp: 'append' }).seq
 }
 
+/** Append the result that cut a call short; an errored result carries no answer. */
+function appendErrorResult(session: Session, turn: number, callId: string): SessionSeq {
+  return session.append('tool/result', {
+    turn,
+    step: 1,
+    message: createToolResultMessage({
+      callId: ToolCallId(callId),
+      content: [{ type: 'text', text: 'interrupted before any result was recorded' }],
+      isError: true,
+    }),
+  }, { surfaceOp: 'append' }).seq
+}
+
+/** Append a late decision answer as the human message carrying it; returns its seq — the mark's anchor. */
+function appendLateReply(session: Session, callId: string): SessionSeq {
+  return session.append('user/message', createUserMessage({
+    content: [{ type: 'text', text: '{"answers":[{"id":"q0","selected":["a"]}]}' }],
+    source: { kind: 'user-question-reply', callId: ToolCallId(callId), outcome: 'answered' },
+  }), { surfaceOp: 'append' }).seq
+}
+
 function outlineOf(ctx: Context, session: Session): readonly TurnOutlineEntry[] {
   return ctx.sessionProjections.snapshot(session).values.turnOutline as readonly TurnOutlineEntry[]
 }
@@ -94,7 +119,7 @@ describe('turn outline projection unit', () => {
     const { ctx, session } = await harness(true)
     expect(outlineOf(ctx, session)).toEqual([])
     expect(ctx.sessionProjections.checkpoint(session).turnOutline)
-      .toEqual({ ver: 3, seq: -1, val: { turns: [], draft: '', pendingAsks: [] } })
+      .toEqual({ ver: 4, seq: -1, val: { turns: [], draft: '', pendingAsks: [] } })
   })
 
   it('folds each turn with its boundary seq, first prompt, turn-end response, and later inputs', async () => {
@@ -366,24 +391,56 @@ describe('turn outline projection unit', () => {
     ])
   })
 
-  it('records a late decision answer as an input intervention with no preview (fabricated envelope)', () => {
-    const def = turnOutlineProjectionDefinition
-    const base: TurnOutlineState = {
-      turns: [{ turn: 1, seq: SessionSeq(0), prompt: 'p', response: '', interventions: [] }],
-      draft: '',
-      pendingAsks: [],
-    }
-    const reply = {
-      type: 'user/message',
-      seq: SessionSeq(7),
-      time: 0,
-      data: {
-        source: { kind: 'user-question-reply', callId: 'call-late' },
-        content: [{ type: 'text', text: '{"answers":[{"id":"q0","selected":"a"}]}' }],
+  it('records a late decision answer as a question intervention at its own message', async () => {
+    const { ctx, session } = await harness(true)
+    session.append('turn/start', { turn: 1 })
+    appendPrompt(session, 'choose')
+    const replySeq = appendLateReply(session, 'call-late')
+    expect(outlineOf(ctx, session)[0]?.interventions).toEqual([
+      { seq: replySeq, kind: 'question', preview: '' },
+    ])
+  })
+
+  it('marks no errored result: the transcript renders no answer row at its seq', async () => {
+    const { ctx, session } = await harness(true)
+    session.append('turn/start', { turn: 1 })
+    appendPrompt(session, 'choose')
+    appendAsk(session, 1, 'call-cut', '{"questions":[{"id":"q0","question":"Keep going?"}]}')
+    appendErrorResult(session, 1, 'call-cut')
+    expect(outlineOf(ctx, session)[0]?.interventions).toEqual([])
+    expect(ctx.sessionProjections.checkpoint(session).turnOutline?.val)
+      .toMatchObject({ pendingAsks: [] })
+  })
+
+  it('marks a late answer that opens its Turn without becoming the prompt', async () => {
+    const { ctx, session } = await harness(true)
+    const boundary = session.append('turn/start', { turn: 1 }).seq
+    const replySeq = appendLateReply(session, 'call-opens')
+    expect(outlineOf(ctx, session)).toEqual([
+      {
+        turn: 1,
+        seq: boundary,
+        prompt: '',
+        response: '',
+        interventions: [{ seq: replySeq, kind: 'question', preview: '' }],
       },
-    } as unknown as SessionEvent
-    expect(def.apply(base, reply).turns[0]?.interventions)
-      .toEqual([{ seq: SessionSeq(7), kind: 'input', preview: '' }])
+    ])
+  })
+
+  it('still fills the prompt from the first prose message after an opening late answer', async () => {
+    const { ctx, session } = await harness(true)
+    const boundary = session.append('turn/start', { turn: 1 }).seq
+    const replySeq = appendLateReply(session, 'call-then-prose')
+    appendPrompt(session, 'and also check the width')
+    expect(outlineOf(ctx, session)).toEqual([
+      {
+        turn: 1,
+        seq: boundary,
+        prompt: 'and also check the width',
+        response: '',
+        interventions: [{ seq: replySeq, kind: 'question', preview: '' }],
+      },
+    ])
   })
 
   it('records nothing for a result that outlived its turn (fabricated envelope)', () => {

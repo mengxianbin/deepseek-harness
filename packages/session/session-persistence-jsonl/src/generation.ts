@@ -35,9 +35,6 @@ import type {
   SessionFormatRestore,
 } from '@deepseek-ai/dsh-session-format'
 import { validateStoredEvents } from '@deepseek-ai/dsh-session-persistence'
-// Event-loop watch attribution (design event-loop-monitor-1108 §一第二层):
-// book the slice overshoot at the yield check this decoder already runs.
-import { recordOvershoot } from '@deepseek-ai/dsh-event-loop-monitor'
 import type { JsonlCompression } from './format.ts'
 import { generationLogFilename, logSuffix, SessionLogScanner } from './format.ts'
 import { publishNewFileWin32 } from './win32.ts'
@@ -404,7 +401,6 @@ async function consumeMigrationBytes(
     for (let offset = 0; offset < bytes.length; offset += MIGRATION_WORK_CHUNK_BYTES) {
       rows.write(bytes.subarray(offset, offset + MIGRATION_WORK_CHUNK_BYTES))
       if (performance.now() < yieldDeadline) continue
-      recordOvershoot('migration', performance.now() - yieldDeadline)
       await scheduler.yield()
       signal?.throwIfAborted()
       yieldDeadline = performance.now() + MIGRATION_DECODE_YIELD_INTERVAL_MS
