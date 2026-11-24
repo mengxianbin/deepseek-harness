@@ -880,6 +880,40 @@ export interface SessionHealthReport {
    * never broken; the inverse of duty's fail-closed).
    */
   readonly alertInbox?: AlertInboxReport
+  /**
+   * The repair-signal mirror line (三态账 + 盾挂, segment 4): the SAME 15s
+   * tick reads the m-note writer's single-source
+   * `<dsh-home>/repair-signal-ledger.json` and folds its three signal-repair
+   * counters plus the oldest-waiting age beside duty/autoRoute/reviveHealth
+   * (同一数据源同一周期, zero new timers). Read-only mirror — it never feeds
+   * the shield's broken verdict or the queue-alert row, it only counts. The
+   * queue-timeout demotion happens at READ time (a `queued` signal ≥30 min
+   * old reads 无人管), so no writer state and no timer is needed for the
+   * timeout case. Absent while the writer has not published the ledger —
+   * quiet 「未接线」, never broken (optional plane, like autoRoute/reviveHealth).
+   */
+  readonly repairSignals?: RepairSignalReport
+}
+
+/**
+ * The repair-signal counters the sweep published (三态账 + 盾挂, segment 4).
+ * Computed at READ time from the m-note ledger — no writer-side timer: the
+ * queued→unmanaged demotion is the fold's own age judgment on the existing
+ * 15s sweep tick.
+ */
+export interface RepairSignalReport {
+  /** Signals in `repairing` state. */
+  readonly repairing: number
+  /** `queued` signals younger than the 30-minute timeout at read time. */
+  readonly queued: number
+  /**
+   * 无人管: explicit `unmanaged` signals PLUS `queued` signals at/over the
+   * 30-minute timeout (read-time demotion = 「超时无人动」 detected without
+   * any new timer).
+   */
+  readonly unmanaged: number
+  /** Whole minutes since the oldest `firstSeen` across all signals; 0 with no signals. */
+  readonly oldestMin: number
 }
 
 /** One 值守总账 item exactly as the collector wrote it (清单档 §6.3 三态语义). */

@@ -84,6 +84,22 @@ const { alertInboxHolder } = vi.hoisted(
 )
 vi.mock('../src/alert-inbox.ts', () => ({ syncAlertInbox: () => alertInboxHolder.alertInbox }))
 
+// 三态账 + 盾挂 (segment 4): the m-note repair-signal ledger rides the SAME
+// fold — mocked like the other optional planes (machine-independent while
+// still proving the CALL SITE: a sweep that stopped reading it would drop the
+// key). Setting `holder.repairSignals = undefined` = writer not wired → the
+// key must vanish from the frame entirely (conditional-spread detach); the
+// reader's own three-count / read-time-timeout behavior lives in
+// repair-signals.spec.ts. Read-only mirror: it never feeds the broken verdict.
+const { repairSignalsHolder } = vi.hoisted(
+  (): { repairSignalsHolder: { repairSignals: Record<string, unknown> | undefined } } => ({
+    repairSignalsHolder: {
+      repairSignals: { repairing: 1, queued: 2, unmanaged: 1, oldestMin: 47 },
+    },
+  }),
+)
+vi.mock('../src/repair-signals.ts', () => ({ readRepairSignals: () => repairSignalsHolder.repairSignals }))
+
 const defaults = {
   defaultModelSelection: () => ({ provider: 'fixture', model: 'fixture-model' }),
   cwd: '/tmp',
@@ -202,6 +218,8 @@ describe('sweep publishes api-session/health (step2 §4.3 同一数据源同一�
       reviveHealth: reviveHolder.reviveHealth,
       // 告警信箱: and so does the alert-inbox unread count (badge 对账基准).
       alertInbox: alertInboxHolder.alertInbox,
+      // 三态账: and so does the repair-signal mirror line (segment 4, read-only).
+      repairSignals: repairSignalsHolder.repairSignals,
     })
 
     await vi.advanceTimersByTimeAsync(SESSION_STATUS_SWEEP_MS)
@@ -213,14 +231,17 @@ describe('sweep publishes api-session/health (step2 §4.3 同一数据源同一�
     autoRouteHolder.autoRoute = undefined
     reviveHolder.reviveHealth = undefined
     alertInboxHolder.alertInbox = undefined
+    repairSignalsHolder.repairSignals = undefined
     await vi.advanceTimersByTimeAsync(SESSION_STATUS_SWEEP_MS)
     expect(health).toHaveBeenCalledTimes(3)
     expect('autoRoute' in (health.mock.calls[2]?.[0] ?? {})).toBe(false)
     expect('reviveHealth' in (health.mock.calls[2]?.[0] ?? {})).toBe(false)
     expect('alertInbox' in (health.mock.calls[2]?.[0] ?? {})).toBe(false)
+    expect('repairSignals' in (health.mock.calls[2]?.[0] ?? {})).toBe(false)
     expect(health.mock.calls[2]?.[0]).toMatchObject({ ok: true, duty: dutyFixture })
     autoRouteHolder.autoRoute = { ok: false, failingSince: 1, failingForSec: 300, sustained: true, error: 'boom', ageSec: 5 }
     reviveHolder.reviveHealth = { ok: true, mode: 'live', status: 'ok', breakerTrips: 0, halted: false, failed: [], at: 1 }
     alertInboxHolder.alertInbox = { at: 1, unread: 2, escalated: 1, total: 5 }
+    repairSignalsHolder.repairSignals = { repairing: 1, queued: 2, unmanaged: 1, oldestMin: 47 }
   })
 })
