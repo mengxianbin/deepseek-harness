@@ -69,7 +69,10 @@ function isQuestionDraftProgress(value: unknown, questionCount: number): value i
   if (typeof progress.index !== 'number' || !Number.isInteger(progress.index)
     || progress.index < 0 || progress.index >= questionCount
     || !Array.isArray(progress.drafts) || progress.drafts.length !== questionCount
-    || (progress.wait !== undefined && progress.wait !== 'editing' && progress.wait !== 'waiting')) return false
+    || (progress.wait !== undefined && progress.wait !== 'editing' && progress.wait !== 'waiting')
+    // Card-level remark (ask-focus-restore-1125 裁定 D): optional string;
+    // records written before the field still validate.
+    || (progress.note !== undefined && typeof progress.note !== 'string')) return false
   return progress.drafts.every((item: unknown) => {
     if (typeof item !== 'object' || item === null || Array.isArray(item)) return false
     const draft = item as Record<string, unknown>
@@ -229,6 +232,9 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
   const storedProgress = review === undefined ? validStored : undefined
   const index = validStored?.index ?? 0
   const drafts = storedProgress?.drafts ?? initialDrafts
+  // The card-level remark (题外话) rides the same progress record, so page
+  // turns and picks below carry it without a second store.
+  const note = storedProgress?.note ?? ''
   const restoredWait = storedProgress?.wait
     ?? (storedProgress?.drafts.some((item, itemIndex) =>
       item.selected.length !== initialDrafts[itemIndex]?.selected.length
@@ -282,6 +288,15 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
   // its card up so the state it disabled stays readable.
   const [autoFolded, setAutoFolded] = useState(false)
   const collapsed = autoFolded
+  // The card-level remark box (ask-focus-restore-1125 裁定 D): open state is
+  // local chrome — the TEXT lives in the progress record above, so closing the
+  // box, turning pages, or a Client restart never loses it. A restored non-
+  // empty remark opens the box so its content is visible on remount.
+  const [noteOpen, setNoteOpen] = useState(() => (storedProgress?.note ?? '') !== '')
+  const noteRef = useRef<HTMLTextAreaElement>(null)
+  // Set by the footer toggle, consumed by the layout effect below: the box is
+  // not mounted at click time, so the seat has to be granted after it renders.
+  const noteFocusRef = useRef(false)
   const frameRef = useRef<HTMLDivElement>(null)
   // FORK dsh-local (ask-keys-focus, 2026-11-17 裁定): whether focus was last
   // held inside this card. An index change that unmounts the focused option
@@ -304,6 +319,19 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
   const lastTrackedRef = useRef<string | null>(null)
   const pendingCaretRef = useRef<number | null>(null)
   const insertRef = useRef<AnswerSurfaceInsert>(() => false)
+  // FORK dsh-local (ask-focus-restore-1125, 2026-11-25 裁定 C): 底钉 capture —
+  // called BEFORE a keystroke's growth lands, it records whether the body
+  // scrollport sat at (within a line of) its bottom, arming the layout effect
+  // below to pin it there once the field grows. A body the user scrolled up
+  // from is left alone: scrolling away is the signal to keep reading the
+  // choices, and the next keystroke must not yank them back (守卫).
+  const bodyPinnedRef = useRef<boolean | null>(null)
+  const captureBodyPin = (): void => {
+    const surface = answerSurface.current
+    bodyPinnedRef.current = surface === null
+      ? null
+      : surface.scrollHeight - surface.scrollTop - surface.clientHeight <= 8
+  }
   // Every navigation write stays in bounds and drafts mirrors questions 1:1.
   // oxlint-disable-next-line typescript/no-non-null-assertion
   const question = questions[index]!
@@ -335,6 +363,8 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
       index: nextIndex,
       drafts: nextDrafts,
       ...(waitDisposition.current === undefined ? {} : { wait: waitDisposition.current }),
+      // The remark rides every navigation write so no page turn drops it.
+      ...(note === '' ? {} : { note }),
     })
   }
 
@@ -448,10 +478,11 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
 
   // The answer surface's insert target: applies a picked plain text over the
   // pick-time span, writes the draft through the same path a typed edit takes
-  // (a single-select draft yields its selection to the custom answer, as
-  // `draftCustom` does), and parks the caret behind the insert for the layout
-  // effect below to restore. `keep` (chained completion) has no answer-field
-  // meaning and is ignored.
+  // (a single-select draft keeps its selection beside the insert, as
+  // `draftCustom` does), captures the body pin before the insert grows the
+  // field, and parks the caret behind the insert for the layout effect below
+  // to restore. `keep` (chained completion) has no answer-field meaning and
+  // is ignored.
   useEffect(() => {
     insertRef.current = (text, span) => {
       if (span.draftRev !== revRef.current) return false
@@ -461,9 +492,9 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
       if (span.start < 0 || span.start > span.end || span.end > current.length) return false
       const next = current.slice(0, span.start) + text + current.slice(span.end)
       if (next === current) return true
+      captureBodyPin()
       updateDraft(item => ({
         ...item,
-        selected: question.multiSelect === true ? item.selected : [],
         custom: next,
         skipped: false,
       }))
@@ -522,7 +553,11 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
           : [...current.selected, label]
         return { ...current, selected, skipped: false }
       }
-      return { selected: [label], custom: '', skipped: false }
+      // FORK dsh-local (ask-focus-restore-1125, 2026-11-25 裁定 B): a
+      // single-select pick no longer clears a typed custom answer — selected
+      // and custom coexist (the protocol always allowed both; multi-select
+      // was already this shape).
+      return { ...current, selected: [label], skipped: false }
     }, question.multiSelect !== true && index < questions.length - 1 ? index + 1 : index)
   }
 
@@ -549,10 +584,16 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
         const custom = value.custom.trim()
         return {
           id: item.id,
-          selected: custom === '' || item.multiSelect === true ? value.selected : [],
+          // FORK dsh-local (ask-focus-restore-1125, 2026-11-25 裁定 B): a
+          // single-select answer keeps its selection alongside a typed custom
+          // (the old exclusivity dropped `selected` whenever custom was set).
+          selected: value.selected,
           ...(custom === '' ? {} : { custom }),
         }
       }),
+      // FORK dsh-local (ask-focus-restore-1125, 2026-11-25 裁定 D): the
+      // card-level remark rides the same submission; blank leaves it out.
+      ...(note.trim() === '' ? {} : { note: note.trim() }),
     }
     setBusy('answer')
     setError(null)
@@ -588,16 +629,17 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
     submitDrafts(drafts)
   }
 
-  // Shared by the inline custom field and the optionless one: a multi-select
-  // draft retains checked labels, while a single-select custom answer replaces
-  // its selection. The shared composer gesture pair decides (same authority as
-  // the message input): Enter breaks a line through the browser's own
-  // insertion; Shift/Ctrl+Enter continues the flow.
+  // Shared by the inline custom field and the optionless one: typing never
+  // clears a selection — selected and custom coexist (2026-11-25 裁定 B,
+  // both question shapes). The shared composer gesture pair decides (same
+  // authority as the message input): Enter breaks a line through the
+  // browser's own insertion; Shift/Ctrl+Enter continues the flow. The body
+  // pin is captured before the growth lands (裁定 C).
   const draftCustom = (event: ChangeEvent<HTMLTextAreaElement>): void => {
     const value = event.target.value
+    captureBodyPin()
     updateDraft(current => ({
       ...current,
-      selected: question.multiSelect === true ? current.selected : [],
       custom: value,
       skipped: false,
     }))
@@ -609,6 +651,28 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
     if (gesture === 'newline' || gesture === 'none') return
     event.preventDefault()
     continueFlow()
+  }
+
+  // The remark box's own seat (ask-focus-restore-1125 裁定 D): the same
+  // composer gesture pair as the answer field — Enter breaks a line, Shift/
+  // Ctrl+Enter continues the flow — but no trigger pipeline: the '/' menu
+  // belongs to the answer surface, never to this box. The write goes through
+  // its own store call because the note value differs from the render's.
+  const updateNote = (value: string): void => {
+    engage()
+    captureBodyPin()
+    actions.replace(pending.key, {
+      index,
+      drafts,
+      ...(waitDisposition.current === undefined ? {} : { wait: waitDisposition.current }),
+      ...(value === '' ? {} : { note: value }),
+    })
+    setError(null)
+  }
+
+  const toggleNote = (): void => {
+    if (!noteOpen) noteFocusRef.current = true
+    setNoteOpen(open => !open)
   }
 
   // Menu arbitration first: a key the open '/' menu claims (arrows, Escape,
@@ -773,6 +837,56 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
       ?? frame.querySelector<HTMLButtonElement>('[data-option-row] button:not([disabled])')
     landing?.focus()
   }, [index, collapsed])
+
+  // FORK dsh-local (ask-focus-restore-1125, 2026-11-25 裁定 A): the fold
+  // unmounts the card body, so a field with content loses its caret and both
+  // scroll positions on the way down. Content-gated restore ladder on
+  // re-entry: when the card unfolds over a non-empty draft, focus lands back
+  // in the answer field at the END of the text, the body scrollport sits at
+  // its bottom, and the field's own scroll sits at its bottom — writing
+  // resumes where it stopped. An empty field keeps the original landing (the
+  // remembered option or the frame): there is nothing to resume. The ladder
+  // runs only on a fold→unfold transition; page turns keep their own
+  // scroll-to-top in `replaceProgress` and stay untouched here. Declared
+  // after the focus-follow effect so its landing wins when both apply.
+  const wasCollapsedRef = useRef(autoFolded)
+  useLayoutEffect(() => {
+    const reentered = wasCollapsedRef.current && !collapsed
+    wasCollapsedRef.current = collapsed
+    if (!reentered || draft.custom === '') return
+    const field = textRef.current
+    if (field !== null && !field.disabled) {
+      field.focus()
+      field.setSelectionRange(field.value.length, field.value.length)
+    }
+    const surface = answerSurface.current
+    if (surface !== null) surface.scrollTop = surface.scrollHeight
+    if (field !== null) field.scrollTop = field.scrollHeight
+  }, [collapsed, draft.custom])
+
+  // FORK dsh-local (ask-focus-restore-1125, 2026-11-25 裁定 C): after the
+  // field grows, pin the body scrollport to its bottom when it sat at its
+  // bottom before this keystroke — a long answer then pushes its choices out
+  // of view as it grows instead of scrolling itself in a six-line well. Only
+  // the capture taken on the keystroke arms the pin: a body the user scrolled
+  // up from (or a page turn that reset it to its top) never gets yanked back.
+  useLayoutEffect(() => {
+    const pinned = bodyPinnedRef.current
+    bodyPinnedRef.current = null
+    if (pinned !== true) return
+    const surface = answerSurface.current
+    if (surface !== null) surface.scrollTop = surface.scrollHeight
+  }, [draft.custom])
+
+  // Opening the remark box from the footer seats the keyboard in it on the
+  // render that mounts it (the box does not exist at click time). A fold
+  // leaves `noteOpen` untouched, so re-entry never re-runs this — the
+  // fold-reentry ladder above keeps owning re-entry focus.
+  useLayoutEffect(() => {
+    if (!noteFocusRef.current) return
+    noteFocusRef.current = false
+    noteRef.current?.focus()
+  }, [noteOpen])
 
   return (
     <div
@@ -1054,6 +1168,27 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
                     />
                   ))}
               </div>
+
+              {/* FORK dsh-local (ask-focus-restore-1125, 2026-11-25 裁定 D):
+                  the card-level remark box (题外话): free text that belongs to
+                  no single question, opened from the footer toggle and kept
+                  across pages in the progress record. Closed it takes no
+                  space; a review card has nothing to add. */}
+              {review === undefined && noteOpen && (
+                <div className={css.noteRow} data-question-note="">
+                  <AnswerField
+                    variant="inline"
+                    value={note}
+                    disabled={locked}
+                    placeholder={t('note.placeholder')}
+                    textRef={noteRef}
+                    onChange={(event) => { updateNote(event.target.value) }}
+                    // Same gesture pair as the answer field; one shared
+                    // handler keeps the pair single-sourced.
+                    onKeyDown={continueFromCustom}
+                  />
+                </div>
+              )}
             </div>
 
             <footer className={css.footer}>
@@ -1080,6 +1215,17 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
               {/* A review card has nothing to send: the pager alone walks the record. */}
               {review === undefined && (
                 <div className={css.footerActions}>
+                  {/* FORK dsh-local (ask-focus-restore-1125, 裁定 D): the
+                      题外话 open/close toggle — the box itself takes no space
+                      while closed and empty. */}
+                  <Button
+                    variant="outline"
+                    aria-pressed={noteOpen}
+                    disabled={busy !== null}
+                    onClick={toggleNote}
+                  >
+                    {t('note.toggle')}
+                  </Button>
                   <Button variant="outline" disabled={busy !== null} onClick={skipQuestion}>
                     {t('action.skip')}
                   </Button>

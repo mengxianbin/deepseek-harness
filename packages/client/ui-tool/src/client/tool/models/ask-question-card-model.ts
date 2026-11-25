@@ -32,6 +32,12 @@ export type AskQuestionCardModel =
     kind: 'answered'
     questions: readonly AnsweredQuestionCardItem[]
     skippedLabel: string
+    /**
+     * The card-level remark (题外话, ask-focus-restore-1125 裁定 D) the answer
+     * carried, with its localized label; absent when none was given or the
+     * record predates the field.
+     */
+    note?: { label: string; text: string }
   }
   | {
     kind: 'unanswered'

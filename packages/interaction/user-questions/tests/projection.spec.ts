@@ -252,6 +252,24 @@ describe('userQuestions projection fold', () => {
     })])).toEqual(empty)
   })
 
+  it('records the card-level remark beside the batch it settled with (ask-focus-restore-1125)', () => {
+    const noted = '{"answers":[{"id":"scope","selected":["Tool only"]}],"note":"顺带看看部署日志"}'
+    const settledWithNote = { active: [], settled: [{ callId, answers: [{ id: 'scope', selected: ['Tool only'] }], note: '顺带看看部署日志' }] }
+    // In-time result: the note rides the batch into the settled record.
+    expect(foldUserQuestions([timedHeader, asked, resulted(noted)])).toEqual(settledWithNote)
+    // Late reply: the steered envelope carries it the same way.
+    const continued = [timedHeader, asked, resulted('{"pending":true,"callId":"call_ask_1"}')]
+    expect(foldUserQuestions([...continued, event(3, 'user/message', reply(noted))])).toEqual(settledWithNote)
+    // The strict state and wire schemas accept the field — and records
+    // written before it still parse (optional, backwards compatible).
+    const view = { active: [], settled: [{ callId: 'call_ask_1', answers: answerBatch, note: '题外话' }] }
+    expect(userQuestionProjectionDefinition.stateSchema.parse({ inheritedEventCount: 0, timed: true, questions: view }))
+      .toMatchObject({ questions: view })
+    expect(userQuestionProjectionDefinition.wire.viewSchema.parse({
+      active: [], settled: [{ callId: 'call_ask_1', answers: answerBatch }],
+    })).toBeTruthy()
+  })
+
   it('restores a checkpointed state in service vocabulary and refuses duplicate call ids', () => {
     const full = {
       callId: 'call_ask_1',

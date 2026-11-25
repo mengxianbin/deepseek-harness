@@ -409,6 +409,60 @@ describe('QuestionComposer', () => {
     expect(screen.getByRole<HTMLButtonElement>('button', { name: '正在提交…' }).disabled).toBe(true)
   })
 
+  it('keeps a single-select selection and a typed custom answer together', () => {
+    const { carrier, answer } = wait([{
+      id: 'one', question: 'Pick one', options: [{ label: 'Alpha' }, { label: 'Beta' }],
+    }])
+    render(<QuestionComposer matched={carrier} {...kit} />)
+
+    // Pick first, then type: the typed answer must not clear the selection
+    // (2026-11-25 裁定 B, ask-focus-restore-1125).
+    fireEvent.click(screen.getByRole('radio', { name: 'Alpha' }))
+    const custom = screen.getByPlaceholderText<HTMLTextAreaElement>(zh['custom.placeholder'])
+    fireEvent.change(custom, { target: { value: '理由写在这里' } })
+    // Re-pick another option: the typed answer must not be cleared either.
+    fireEvent.click(screen.getByRole('radio', { name: 'Beta' }))
+    expect(custom.value).toBe('理由写在这里')
+    expect(screen.getByRole('radio', { name: 'Beta' }).getAttribute('aria-checked')).toBe('true')
+
+    fireEvent.click(screen.getByRole('button', { name: '提交' }))
+    expect(answer).toHaveBeenCalledWith(answerBatch([
+      { id: 'one', selected: ['Beta'], custom: '理由写在这里' },
+    ]))
+  })
+
+  it('keeps a card-level remark across pages and submits it with the batch', () => {
+    const { carrier, answer } = wait()
+    render(<QuestionComposer matched={carrier} {...kit} />)
+
+    // The 题外话 box opens from the footer toggle and takes the keyboard.
+    const toggle = screen.getByRole('button', { name: zh['note.toggle'] })
+    expect(toggle.getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    const note = screen.getByPlaceholderText(zh['note.placeholder'])
+    expect(document.activeElement).toBe(note)
+    fireEvent.change(note, { target: { value: '题外话：顺带看看部署日志' } })
+
+    // Typed on the first page: page turns must not drop it, and a question
+    // that never got an answer can still be skipped on the way.
+    fireEvent.click(screen.getByRole('radio', { name: /工程落地型/ }))
+    expect(screen.getByText('2 / 3')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '跳过' }))
+    expect(screen.getByText('3 / 3')).toBeTruthy()
+    fireEvent.click(screen.getByRole('checkbox', { name: '系统设计' }))
+    fireEvent.click(screen.getByRole('button', { name: '提交' }))
+
+    expect(answer).toHaveBeenCalledWith({
+      answers: [
+        { id: 'profile', selected: ['工程落地型 (Recommended)'] },
+        { id: 'detail', selected: [] },
+        { id: 'signals', selected: ['系统设计'] },
+      ],
+      note: '题外话：顺带看看部署日志',
+    })
+  })
+
   it('expands long copy in place without choosing an option', () => {
     const description = 'Remove the experimental client from every shipped template and require an explicit profile install.'
     const { carrier } = wait([{
@@ -487,6 +541,43 @@ describe('QuestionComposer', () => {
     expect(screen.queryByText(firstDescription)).toBeNull()
     const descriptionToggle = screen.getAllByRole('button', { name: '展开' })[1]
     expect(document.getElementById(descriptionToggle?.getAttribute('aria-controls') ?? '')?.textContent).toBe(secondDescription)
+  })
+
+  it('pins the body to its bottom while typing, and leaves a scrolled-up body alone', () => {
+    const { carrier } = wait()
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    const body = document.querySelector('[data-question-scroll]') as HTMLElement
+    // jsdom has no layout: pin the metrics so "at the bottom" and "scrolled
+    // up" are both expressible (own properties on HTMLElement.prototype
+    // shadow Element's inherited zeros).
+    const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight')
+    const clientHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => 500 })
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 300 })
+    try {
+      const custom = screen.getByPlaceholderText(zh['custom.placeholder'])
+      // At the bottom (200 + 300 = 500): a keystroke's growth pins the body
+      // to its new bottom so the choices scroll out of view.
+      body.scrollTop = 200
+      fireEvent.change(custom, { target: { value: '一' } })
+      expect(body.scrollTop).toBe(500)
+      // Guard: the user scrolls up to read the choices — the next keystroke
+      // must not yank the body back down.
+      body.scrollTop = 100
+      fireEvent.change(custom, { target: { value: '一二' } })
+      expect(body.scrollTop).toBe(100)
+    } finally {
+      if (scrollHeightDescriptor === undefined) {
+        Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight')
+      } else {
+        Object.defineProperty(HTMLElement.prototype, 'scrollHeight', scrollHeightDescriptor)
+      }
+      if (clientHeightDescriptor === undefined) {
+        Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight')
+      } else {
+        Object.defineProperty(HTMLElement.prototype, 'clientHeight', clientHeightDescriptor)
+      }
+    }
   })
 
   it('keeps expansions with their question when the shared position moves elsewhere', () => {
@@ -615,8 +706,10 @@ describe('QuestionComposer', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: '系统设计' }))
     fireEvent.click(screen.getByRole('button', { name: '提交' }))
     // Line breaks reach the model verbatim: nothing along the way flattens them.
+    // The single-select's recommended default now rides alongside the typed
+    // answer — the exclusivity that used to drop it is gone (2026-11-25 裁定 B).
     expect(answer).toHaveBeenCalledWith(answerBatch([
-      { id: 'profile', selected: [], custom: multiline },
+      { id: 'profile', selected: ['工程落地型 (Recommended)'], custom: multiline },
       { id: 'detail', selected: [], custom: multiline },
       { id: 'signals', selected: ['系统设计'] },
     ]))
@@ -755,8 +848,12 @@ describe('PendingQuestion domain face', () => {
     expect(screen.getByRole('radiogroup')).toBeTruthy()
     const custom = screen.getByPlaceholderText(zh['custom.placeholder'])
     fireEvent.change(custom, { target: { value: '要能独立排查线上问题' } })
-    // Re-expanding must not steal focus back into the textarea: it was
-    // autofocused on first presentation, so focus stays where it was.
+    // Re-expanding over an EMPTY field must not steal focus into the
+    // textarea: the fold-reentry restore ladder (2026-11-25 裁定 A,
+    // ask-focus-restore-1125) is content-gated — with nothing typed at the
+    // moment of re-entry the landing stays where it was. (With content the
+    // ladder takes the caret to the field's end and both scrollports to their
+    // bottoms — its own case below.)
     expect(document.activeElement).not.toBe(custom)
     fireEvent.click(screen.getByLabelText('下一题'))
     fireEvent.click(screen.getByRole('checkbox', { name: '系统设计' }))
@@ -766,6 +863,42 @@ describe('PendingQuestion domain face', () => {
       { id: 'detail', custom: '要能独立排查线上问题', selected: [] },
       { id: 'signals', selected: ['系统设计'] },
     ]))
+  })
+
+  it('re-expanding over a typed draft restores the caret and both scrollports to the end', () => {
+    const { carrier } = wait()
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    // Reach the optionless second question and write into its field first.
+    fireEvent.click(screen.getByRole('radio', { name: /工程落地型/ }))
+    const custom = screen.getByPlaceholderText(zh['custom.placeholder'])
+    fireEvent.change(custom, { target: { value: '第一段\n第二段' } })
+    // Fold: the body unmounts, taking the caret and both scroll positions
+    // with it — exactly what the ladder has to restore.
+    fireEvent.pointerDown(document.body, { bubbles: true })
+    expect(screen.queryByPlaceholderText(zh['custom.placeholder'])).toBeNull()
+    // jsdom has no layout: pin the scrollports' metrics so the ladder has a
+    // bottom to scroll to (own property on HTMLElement.prototype shadows
+    // Element's inherited zero).
+    const scrollTopDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight')
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => 500 })
+    try {
+      fireEvent.click(screen.getByText('补充你的要求'))
+      const restored = screen.getByPlaceholderText<HTMLTextAreaElement>(zh['custom.placeholder'])
+      // Focus lands in the field, at the end of the text.
+      expect(document.activeElement).toBe(restored)
+      expect(restored.selectionStart).toBe(restored.value.length)
+      expect(restored.selectionEnd).toBe(restored.value.length)
+      // Both scrollports sit at their bottom.
+      expect(restored.scrollTop).toBe(500)
+      const body = document.querySelector('[data-question-scroll]') as HTMLElement
+      expect(body.scrollTop).toBe(500)
+    } finally {
+      if (scrollTopDescriptor === undefined) {
+        Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight')
+      } else {
+        Object.defineProperty(HTMLElement.prototype, 'scrollHeight', scrollTopDescriptor)
+      }
+    }
   })
 
   it('a folded strip does not flash open under its own close button', () => {

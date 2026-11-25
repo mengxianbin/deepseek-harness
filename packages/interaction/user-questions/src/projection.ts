@@ -99,7 +99,15 @@ const answerSchema = z.object({
 const settledQuestionsSchema: z.ZodType<readonly SettledUserQuestion[]> = z.array(z.object({
   callId: z.string().min(1).transform(ToolCallId),
   answers: z.array(answerSchema),
-}).strict())
+  // FORK dsh-local (ask-focus-restore-1125, 2026-11-25 裁定 D): strict — the
+  // field must be declared or a record carrying a note is rejected on reload.
+  // Optional, so every record written before this batch still parses.
+  note: z.string().optional(),
+}).strict().transform((item): SettledUserQuestion => ({
+  callId: item.callId,
+  answers: item.answers,
+  ...(item.note === undefined ? {} : { note: item.note }),
+})))
 
 const projectionViewSchema: z.ZodType<UserQuestionProjectionView> = z.object({
   active: pendingQuestionsSchema,
@@ -107,7 +115,10 @@ const projectionViewSchema: z.ZodType<UserQuestionProjectionView> = z.object({
 }).strict()
 
 /** The `answers` batch as both the in-time tool result and the steered late reply spell it. */
-const answerBatchSchema = z.object({ answers: z.array(answerSchema) }).loose()
+const answerBatchSchema = z.object({
+  answers: z.array(answerSchema),
+  note: z.string().optional(),
+}).loose()
 
 /** A Session with no timed `ask_user_question` call yet, shared so the wire value stays referentially stable. */
 const emptyView: UserQuestionProjectionView = { active: [], settled: [] }
@@ -177,9 +188,10 @@ function isPendingResult(content: readonly ContentBlock[]): boolean {
 /**
  * Read the answer batch out of one recorded text: a tool result or a late reply.
  * @param content - Content blocks of the recorded message.
- * @returns The batch, or null when the text carries none this reader can use.
+ * @returns The batch plus its optional card-level note, or null when the text
+ *   carries none this reader can use.
  */
-function answerBatchOf(content: readonly ContentBlock[]): readonly AskUserQuestionAnswerItem[] | null {
+function answerBatchOf(content: readonly ContentBlock[]): { answers: readonly AskUserQuestionAnswerItem[]; note?: string } | null {
   const text = content.find(block => block.type === 'text')
   if (text === undefined) return null
   let parsed: unknown
@@ -191,7 +203,11 @@ function answerBatchOf(content: readonly ContentBlock[]): readonly AskUserQuesti
     return null
   }
   const result = answerBatchSchema.safeParse(parsed)
-  return result.success ? result.data.answers : null
+  if (!result.success) return null
+  return {
+    answers: result.data.answers,
+    ...(result.data.note === undefined ? {} : { note: result.data.note }),
+  }
 }
 
 /**
@@ -200,18 +216,24 @@ function answerBatchOf(content: readonly ContentBlock[]): readonly AskUserQuesti
  * @param view - Current question state.
  * @param callId - Call the result or reply named.
  * @param answers - The batch it carried; empty when a late reply carried none.
+ * @param note - The card-level remark the settling answer carried, if any.
  * @returns The same view when that call was not answerable, otherwise the updated one.
  */
 function settleQuestion(
   view: UserQuestionProjectionView,
   callId: string,
   answers: readonly AskUserQuestionAnswerItem[],
+  note?: string,
 ): UserQuestionProjectionView {
   const question = view.active.find(item => item.callId === callId)
   if (question === undefined) return view
   return {
     active: view.active.filter(item => item.callId !== callId),
-    settled: [...view.settled, { callId: question.callId, answers }],
+    settled: [...view.settled, {
+      callId: question.callId,
+      answers,
+      ...(note === undefined ? {} : { note }),
+    }],
   }
 }
 
@@ -269,14 +291,14 @@ export function applyUserQuestionEvent(fold: UserQuestionFold, event: SessionEve
           },
         }
       }
-      const answers = event.data.error === undefined && event.data.message.isError !== true
+      const batch = event.data.error === undefined && event.data.message.isError !== true
         ? answerBatchOf(event.data.message.content)
         : null
       return {
         ...fold,
-        questions: answers === null
+        questions: batch === null
           ? { ...view, active: view.active.filter(question => question.callId !== callId) }
-          : settleQuestion(view, callId, answers),
+          : settleQuestion(view, callId, batch.answers, batch.note),
       }
     }
     case 'tool/ptc-dispatch': {
@@ -295,7 +317,8 @@ export function applyUserQuestionEvent(fold: UserQuestionFold, event: SessionEve
     case 'user/message': {
       const source = event.data.source
       if (source.kind !== 'user-question-reply') return fold
-      const questions = settleQuestion(view, source.callId, answerBatchOf(event.data.content) ?? [])
+      const batch = answerBatchOf(event.data.content)
+      const questions = settleQuestion(view, source.callId, batch?.answers ?? [], batch?.note)
       return questions === view ? fold : { ...fold, questions }
     }
     default:
