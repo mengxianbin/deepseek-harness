@@ -228,7 +228,8 @@ describe('ask_user_question tool', () => {
         + ' Keep every question field brief — the card renders question, detail, and option text inline; '
         + 'put long reports in a file and reference its path instead. '
         + 'The question field itself must fit on one line — at most 36 CJK characters (or 72 half-width units). '
-        + 'Put background or long context into a regular conversation message sent before calling this tool, not into the card.',
+        + 'Put background or long context into a regular conversation message sent before calling this tool, not into the card.'
+        + ' The answer may also carry a top-level note: a card-level remark the user typed that belongs to no single question.',
       parameters: { properties: { questions: { description: 'Questions to ask the user before continuing.' } } },
     })
     expect(schemas[0]?.parameters.properties).not.toHaveProperty('timeout')
@@ -287,6 +288,43 @@ describe('ask_user_question tool', () => {
       isError: false,
       content: [{ type: 'text', text: '{"answers":[{"id":"pkg","selected":[],"custom":"bun"}]}' }],
     })
+  })
+
+  it('carries the card-level note through both tool faces (ask-focus-restore-1125)', async () => {
+    const note = '题外话：顺带看看部署日志'
+    const descriptions: (string | undefined)[] = []
+    for (const mode of ['legacy', 'timed'] as const) {
+      const ctx = await setup({ mode, timeout: -1 })
+      registerQuestionAnswerer(ctx, {
+        async ask() {
+          return { answers: [{ id: 'continue', selected: ['yes'] }], note }
+        },
+      })
+      const definition = ctx.tools.definitions().find(tool => tool.name === 'ask_user_question')
+      // Both faces declare the same optional output field for the remark
+      // (`schemas()` projects only name/description/parameters, so the output
+      // declaration is read off the full definition).
+      expect(JSON.stringify(definition?.output)).toContain('Optional card-level remark the user typed outside any single question')
+      descriptions.push(definition?.description)
+
+      const result = await executeToolFixture(ctx, {
+        signal: testToolSignal,
+        callId: ToolCallId(`ask-note-${mode}`),
+        name: 'ask_user_question',
+        arguments: { questions: [{ id: 'continue', question: 'Continue?' }] },
+      })
+
+      expect(result).toMatchObject({
+        isError: false,
+        content: [{ type: 'text', text: `{"answers":[{"id":"continue","selected":["yes"]}],"note":"${note}"}` }],
+      })
+      await ctx.fiber.dispose()
+    }
+    // Both faces carry the same note sentence (their openings legitimately
+    // differ — only the shared guidance must match, as with the stem rule).
+    const noteSentence = 'The answer may also carry a top-level note: a card-level remark the user typed that belongs to no single question.'
+    expect(descriptions[0] ?? '').toContain(noteSentence)
+    expect(descriptions[1] ?? '').toContain(noteSentence)
   })
 
   it('asks the registered user-questions provider and projects structured answers to text', async () => {

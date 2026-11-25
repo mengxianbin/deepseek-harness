@@ -351,7 +351,8 @@
 
 /* Leading indicator (20×20): single-select shows the option
    number, multi-select swaps in a checkbox; the custom-answer row follows —
-   its checkbox mirrors the typed draft (styling only, exclusivity holds). */
+   its checkbox mirrors the typed draft (styling only; since 2026-11-25 the
+   selection and the typed draft coexist — ask-focus-restore-1125 裁定 B). */
 .number {
   display: grid;
   place-items: center;
@@ -534,7 +535,9 @@
 /* Custom answer row (figma 973:36427): an option-shaped row whose copy is an
    inline text input; focus or a typed draft gives it the selected look.
    While a single-select option is chosen, focus alone does not apply that
-   look, so the radio group shows one selection; typing clears the option. */
+   look — the radio group keeps its own selection — and since 2026-11-25
+   (ask-focus-restore-1125 裁定 B) typing no longer clears the option:
+   selection and typed answer coexist. */
 .customRow {
   display: flex;
   /* Same first-line alignment as .option — the indicator seat carries the
@@ -590,26 +593,29 @@
   overflow-wrap: anywhere;
 }
 
-/* The height ruler, never painted. Growth stops at 6 lines: the card body is
-   capped at 520px and still owes that budget to the title, the option rows and
-   the footer actions, so a long answer scrolls in the textarea instead of
-   pushing the choices it belongs to out of view.
+/* The height ruler, never painted. Growth stops at 16 lines (384px): the cap
+   was raised from 6 lines by ask-focus-restore-1125 (2026-11-25 裁定 C), and
+   the old intent — a long answer scrolls in the textarea instead of pushing
+   the choices it belongs to out of view — is FLIPPED: a long answer now takes
+   over the card body and pushes its choices out (the body pins to its bottom
+   while typing, with a guard for a manual scroll-up). The cap stays only as a
+   bound on the field; past it the textarea scrolls itself.
    content-box overrides the card-wide border-box so the cap counts TEXT lines
    in both variants: under border-box the block variant's 16px of vertical
-   padding eats two thirds of a line and the sixth one arrives as an 8px sliver.
+   padding eats two thirds of a line and a cut line arrives as an sliver.
    Width is unaffected — a stretched grid item's used width comes from the
    track, not from this box-sizing. */
 .fieldMirror {
   box-sizing: content-box;
-  max-height: 144px;
+  max-height: 384px;
   overflow: hidden;
   visibility: hidden;
 }
 
 .fieldInput {
   resize: none;
-  /* The stack's only scrollport: past the mirror's cap the field stops growing
-     and this scrolls. */
+  /* Past the mirror's cap the field stops growing and this scrolls; below the
+     cap the body scrollport carries the growth (pinned to its bottom). */
   overflow-y: auto;
   border: none;
   outline: none;
@@ -642,6 +648,24 @@
 }
 
 .customBlock:focus-within {
+  border-color: var(--dsw-alias-state-business-primary);
+}
+
+/* Card-level remark row (ask-focus-restore-1125 裁定 D): the 题外话 box — a
+   framed free-text row under the options, opened from the footer toggle. It
+   is scroll content like the option rows (shrinking it would push the field
+   past the footer), and the field inside it mirrors and grows exactly like
+   the answer field, so a long remark pushes the choices out of view too. */
+.noteRow {
+  flex-shrink: 0;
+  margin: 4px 12px 8px;
+  padding: 6px 8px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-lg);
+  background: var(--dsw-alias-bg-module-platform);
+}
+
+.noteRow:focus-within {
   border-color: var(--dsw-alias-state-business-primary);
 }
 

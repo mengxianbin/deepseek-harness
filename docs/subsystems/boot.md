@@ -128,7 +128,7 @@ Persist complete raw configs and apply them through the normal Loader path.
  */
 entries(): Entry[]
 
-/** Read inherited and explicit profile values for the active entries.
+/** Read inherited and explicit values for the active entries across every file layer.
  * @returns Detached layer values alongside their Loader entries.
  */
 configuration(): Array<{ entry: Entry; inherited: Record<string, unknown>; override: Record<string, unknown> }>

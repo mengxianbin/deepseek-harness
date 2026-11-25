@@ -543,8 +543,22 @@ insertBefore(id: WorkspaceId, beforeId?: WorkspaceId): Promise<readonly Workspac
  * to stop the session's work: the durable archive set is what a provider's
  * `agent/pre-step` gate reads, so every wake the stops induce is already
  * blocked. Archiving drops the session's pin in the same durable write
- * (pinning and archival are mutually exclusive). An already archived id
+ * (pinning and archival are mutually exclusive) and stamps the archive
+ * moment into `archivedAtById` in that same write, so a resolved archive
+ * always carries its time (archive-at-host-time-1114). An already archived id
  * resolves without writing, asking, or stopping.
+ *
+ * A parent archive cascades to its subagent descendants in the same
+ * operation (archive-cascade-reap-1114): the header index is refreshed so
+ * children created after boot stay visible, then every descendant reached
+ * through `origin === 'subagent'` parent links is archived through the same
+ * core write. Children are archived without `stopActivity` — running
+ * subagent work is refused and reported, never killed on the user's
+ * behalf — and a child that refuses or fails is logged loudly while the
+ * parent's completed archive stands; the idle reaper picks such a child up
+ * once it goes quiet. A repeat call on an already archived parent keeps
+ * its documented no-op and does not rescan (historical orphans are the
+ * reaper's job, not a replay's).
  * @param sessionId - The session to archive.
  * @param options - Whether running work is stopped instead of refusing.
  * @returns resolution after durability and, with `stopActivity`, after every stop request was issued.
@@ -557,7 +571,9 @@ archiveSession(sessionId: SessionId, options: ArchiveSessionOptions = {}): Promi
  * returns to its recorded position. Unarchiving runs no session-existence
  * check because removing an id cannot introduce an unknown one, so an
  * entry whose session is gone still resolves. An id that is not archived
- * resolves without writing.
+ * resolves without writing. Unarchiving also drops the id's `archivedAtById`
+ * entry in the same durable write: a re-archived session stamps a fresh
+ * moment, so the retention clock restarts (archive-at-host-time-1114).
  * @param sessionId - The session to unarchive.
  * @returns resolution after durability.
  */

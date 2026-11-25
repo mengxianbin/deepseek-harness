@@ -23,6 +23,12 @@ export interface QuestionDraftProgress {
   drafts: QuestionDraftAnswer[]
   /** Local indefinite-wait choice restored with the draft. */
   wait?: 'editing' | 'waiting'
+  /**
+   * Card-level remark (题外话, ask-focus-restore-1125 裁定 D): free text that
+   * belongs to no single question, kept across page turns. Absent when empty;
+   * records written before this field still validate.
+   */
+  note?: string
 }
 
 interface QuestionDraftState {

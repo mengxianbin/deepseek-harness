@@ -97,6 +97,13 @@ export interface AskUserQuestionAnswerItem {
 export interface AskUserQuestionAnswer {
   /** Structured answers keyed by question id. */
   answers: AskUserQuestionAnswerItem[]
+  /**
+   * Optional card-level remark (ask-focus-restore-1125, 2026-11-25 裁定 D):
+   * free text that belongs to no single question — the "off-topic" opinion a
+   * multi-page card had nowhere to put. Typed once, kept across pages,
+   * returned alongside `answers`. Absent on older records.
+   */
+  note?: string
 }
 
 /** `open` while the tool call may still return the answer; `continued` once the answer can only arrive as a new turn. */
@@ -121,6 +128,8 @@ export interface SettledUserQuestion {
   readonly callId: ToolCallId
   /** The recorded batch, one entry per question; empty when the late reply carried none. */
   readonly answers: readonly AskUserQuestionAnswerItem[]
+  /** The recorded card-level remark, when the settling answer carried one. */
+  readonly note?: string
 }
 
 /**

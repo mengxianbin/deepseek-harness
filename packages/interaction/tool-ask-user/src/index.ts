@@ -37,6 +37,10 @@ const description = 'Ask the user a concise question when you need confirmation,
   // call — kept identical in the timed description below.
   + 'The question field itself must fit on one line — at most 36 CJK characters (or 72 half-width units). '
   + 'Put background or long context into a regular conversation message sent before calling this tool, not into the card.'
+  // FORK dsh-local (ask-focus-restore-1125, 2026-11-25 裁定 D): kept
+  // identical to the timed description below — the card-level remark rides
+  // the result as a top-level `note`.
+  + ' The answer may also carry a top-level note: a card-level remark the user typed that belongs to no single question.'
 
 export function apply(ctx: Context, config: Config = {}): void {
   if (config.mode === 'timed') {
@@ -99,6 +103,12 @@ export function apply(ctx: Context, config: Config = {}): void {
               },
             },
           },
+          // FORK dsh-local (ask-focus-restore-1125, 2026-11-25 裁定 D): kept
+          // identical to the timed schema's note below.
+          note: {
+            type: 'string',
+            description: 'Optional card-level remark the user typed outside any single question; omitted when none was given.',
+          },
         },
       },
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
@@ -121,6 +131,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           selected: [...answer.selected],
           ...answer.custom !== undefined ? { custom: answer.custom } : {},
         })),
+        ...result.note !== undefined ? { note: result.note } : {},
       }
     },
   }))

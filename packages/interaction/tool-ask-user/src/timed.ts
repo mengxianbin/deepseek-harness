@@ -38,6 +38,10 @@ const description = 'Ask brief, direct, self-contained questions about missing i
   // legacy description in index.ts — same numbers, same before-call channel.
   + 'The question field itself must fit on one line — at most 36 CJK characters (or 72 half-width units). '
   + 'Put background or long context into a regular conversation message sent before calling this tool, not into the card.'
+  // FORK dsh-local (ask-focus-restore-1125, 2026-11-25 裁定 D): kept
+  // identical to the legacy description in index.ts — the card-level remark
+  // rides the result as a top-level `note`.
+  + ' The answer may also carry a top-level note: a card-level remark the user typed that belongs to no single question.'
 
 /**
  * Instruction the pending result carries in its `message` field. It is a field
@@ -65,6 +69,8 @@ interface ToolAnswerResult {
     readonly selected: string[]
     readonly custom?: string
   }[]
+  /** Card-level remark the user typed outside any single question (ask-focus-restore-1125). */
+  readonly note?: string
 }
 
 /**
@@ -102,6 +108,7 @@ function answerResult(result: AskUserQuestionAnswer): ToolAnswerResult {
       selected: [...answer.selected],
       ...answer.custom !== undefined ? { custom: answer.custom } : {},
     })),
+    ...result.note !== undefined ? { note: result.note } : {},
   }
 }
 
@@ -191,6 +198,12 @@ export function registerTimedAskUser(ctx: Context, timeout = 120): void {
                     custom: { type: 'string', description: 'Optional free-form answer; omitted for a skipped question.' },
                   },
                 },
+              },
+              // FORK dsh-local (ask-focus-restore-1125, 2026-11-25 裁定 D):
+              // kept identical to the legacy schema's note in index.ts.
+              note: {
+                type: 'string',
+                description: 'Optional card-level remark the user typed outside any single question; omitted when none was given.',
               },
             },
           },

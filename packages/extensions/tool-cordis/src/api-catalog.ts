@@ -781,7 +781,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'configuration(): Array<{ entry: Entry; inherited: Record<string, unknown>; override: Record<string, unknown> }>',
-        description: 'Read inherited and explicit profile values for the active entries.',
+        description: 'Read inherited and explicit values for the active entries across every file layer.',
         parameters: [],
         returns: 'Detached layer values alongside their Loader entries.',
       },
@@ -4599,13 +4599,13 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'archiveSession(sessionId: SessionId, options: ArchiveSessionOptions = {}): Promise<void>',
-        description: 'Archive one session durably. The session must exist (live or in session persistence); its workspace accounting — or lack of one — is irrelevant. Without `stopActivity` the session must also be inactive: the `workspace/session-activity` waterfall is asked once, and any reported activity rejects with WorkspaceActiveSessionError before anything is written. With `stopActivity` the archive is written without an activity check, and the `workspace/session-stop` providers are then asked to stop the session\'s work: the durable archive set is what a provider\'s `agent/pre-step` gate reads, so every wake the stops induce is already blocked. Archiving drops the session\'s pin in the same durable write (pinning and archival are mutually exclusive). An already archived id resolves without writing, asking, or stopping.',
+        description: 'Archive one session durably. The session must exist (live or in session persistence); its workspace accounting — or lack of one — is irrelevant. Without `stopActivity` the session must also be inactive: the `workspace/session-activity` waterfall is asked once, and any reported activity rejects with WorkspaceActiveSessionError before anything is written. With `stopActivity` the archive is written without an activity check, and the `workspace/session-stop` providers are then asked to stop the session\'s work: the durable archive set is what a provider\'s `agent/pre-step` gate reads, so every wake the stops induce is already blocked. Archiving drops the session\'s pin in the same durable write (pinning and archival are mutually exclusive) and stamps the archive moment into `archivedAtById` in that same write, so a resolved archive always carries its time (archive-at-host-time-1114). An already archived id resolves without writing, asking, or stopping.\n\nA parent archive cascades to its subagent descendants in the same operation (archive-cascade-reap-1114): the header index is refreshed so children created after boot stay visible, then every descendant reached through `origin === \'subagent\'` parent links is archived through the same core write. Children are archived without `stopActivity` — running subagent work is refused and reported, never killed on the user\'s behalf — and a child that refuses or fails is logged loudly while the parent\'s completed archive stands; the idle reaper picks such a child up once it goes quiet. A repeat call on an already archived parent keeps its documented no-op and does not rescan (historical orphans are the reaper\'s job, not a replay\'s).',
         parameters: [{ name: 'sessionId', description: 'The session to archive.' }, { name: 'options', description: 'Whether running work is stopped instead of refusing.' }],
         returns: 'resolution after durability and, with `stopActivity`, after every stop request was issued.',
       },
       {
         signature: 'unarchiveSession(sessionId: SessionId): Promise<void>',
-        description: 'Unarchive one session durably by dropping it from the registry-global archive set; the accounting slot was never touched, so the session returns to its recorded position. Unarchiving runs no session-existence check because removing an id cannot introduce an unknown one, so an entry whose session is gone still resolves. An id that is not archived resolves without writing.',
+        description: 'Unarchive one session durably by dropping it from the registry-global archive set; the accounting slot was never touched, so the session returns to its recorded position. Unarchiving runs no session-existence check because removing an id cannot introduce an unknown one, so an entry whose session is gone still resolves. An id that is not archived resolves without writing. Unarchiving also drops the id\'s `archivedAtById` entry in the same durable write: a re-archived session stamps a fresh moment, so the retention clock restarts (archive-at-host-time-1114).',
         parameters: [{ name: 'sessionId', description: 'The session to unarchive.' }],
         returns: 'resolution after durability.',
       },
@@ -5509,6 +5509,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type AgentStatus = \'idle\' | \'running\';',
   },
   {
+    name: 'AlertInboxEntryView',
+    declaration: 'export interface AlertInboxEntryView {\n    readonly id: string;\n    readonly cause: string;\n    readonly lastAt: number;\n    readonly count: number;\n    readonly unread: boolean;\n    readonly archived: boolean;\n}',
+  },
+  {
+    name: 'AlertInboxReport',
+    declaration: 'export interface AlertInboxReport {\n    readonly at: number;\n    readonly unread: number;\n    readonly escalated: number;\n    readonly total: number;\n    readonly entries: readonly AlertInboxEntryView[];\n}',
+  },
+  {
     name: 'AnalyticsPreset',
     declaration: 'export type AnalyticsPreset = \'creator\' | \'ptc\' | \'minimal\' | \'standard\';',
   },
@@ -5562,7 +5570,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'AskUserQuestionAnswer',
-    declaration: 'export interface AskUserQuestionAnswer {\n    answers: AskUserQuestionAnswerItem[];\n}',
+    declaration: 'export interface AskUserQuestionAnswer {\n    answers: AskUserQuestionAnswerItem[];\n    note?: string;\n}',
   },
   {
     name: 'AskUserQuestionAnswerItem',
@@ -7857,6 +7865,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface RenderedDocumentBytes extends WorkspaceFileBytes {\n    readonly missingFonts: string[];\n    readonly generation: OfficeToPdfGeneration;\n}',
   },
   {
+    name: 'RepairSignalReport',
+    declaration: 'export interface RepairSignalReport {\n    readonly repairing: number;\n    readonly queued: number;\n    readonly unmanaged: number;\n    readonly oldestMin: number;\n}',
+  },
+  {
     name: 'ReplayEnvelope',
     declaration: 'export interface ReplayEnvelope {\n    response: unknown;\n    blocks?: readonly unknown[];\n}',
   },
@@ -7939,6 +7951,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ReviewDecision',
     declaration: 'export type ReviewDecision = \'approved\' | \'changes-requested\' | \'review-required\' | \'none\';',
+  },
+  {
+    name: 'ReviveHealthReport',
+    declaration: 'export interface ReviveHealthReport {\n    readonly ok: boolean;\n    readonly mode: \'shadow\' | \'live\';\n    readonly status: \'ok\' | \'error\';\n    readonly breakerTrips: number;\n    readonly halted: boolean;\n    readonly failed: readonly string[];\n    readonly at: number;\n}',
   },
   {
     name: 'RpcId',
@@ -8354,7 +8370,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionHealthReport',
-    declaration: 'export interface SessionHealthReport {\n    readonly ok: boolean;\n    readonly total: number;\n    readonly counts: SessionHealthCounts;\n    readonly issues: readonly SessionHealthIssue[];\n    readonly duty?: DutyInventoryReport;\n    readonly autoRoute?: AutoRoutePollReport;\n}',
+    declaration: 'export interface SessionHealthReport {\n    readonly ok: boolean;\n    readonly total: number;\n    readonly counts: SessionHealthCounts;\n    readonly issues: readonly SessionHealthIssue[];\n    readonly duty?: DutyInventoryReport;\n    readonly autoRoute?: AutoRoutePollReport;\n    readonly reviveHealth?: ReviveHealthReport;\n    readonly alertInbox?: AlertInboxReport;\n    readonly repairSignals?: RepairSignalReport;\n}',
   },
   {
     name: 'SessionHistoryRecord',

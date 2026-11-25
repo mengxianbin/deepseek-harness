@@ -46,8 +46,12 @@ function parseJson(text: string): unknown {
   }
 }
 
-/** Answer records from the result JSON; null when the result is malformed. */
-function answerEntries(text: string): AskUserQuestionAnswerItem[] | null {
+/**
+ * Answer records plus the optional card-level note from result JSON; null
+ * when the result is malformed (ask-focus-restore-1125 裁定 D: the note is
+ * read beside the batch it rides with, in-time or from a late reply).
+ */
+function answerBatchOf(text: string): { answers: AskUserQuestionAnswerItem[]; note?: string } | null {
   const parsed = parseJson(text)
   if (!isRecord(parsed)) return null
   const answers = parsed.answers
@@ -64,17 +68,18 @@ function answerEntries(text: string): AskUserQuestionAnswerItem[] | null {
       ...(answer.custom === undefined ? {} : { custom: answer.custom }),
     })
   }
-  return entries
+  const note = typeof parsed.note === 'string' && parsed.note !== '' ? parsed.note : undefined
+  return { answers: entries, ...(note === undefined ? {} : { note }) }
 }
 
-/** Answers from a submitted steer that still awaits admission to a step. */
-function queuedAnswerEntries(message: unknown, callId: string): AskUserQuestionAnswerItem[] | null {
+/** Answers plus note from a submitted steer that still awaits admission to a step. */
+function queuedAnswerBatch(message: unknown, callId: string): { answers: AskUserQuestionAnswerItem[]; note?: string } | null {
   if (!isRecord(message) || !Array.isArray(message.content)) return null
   const content: unknown = message.content[0]
   if (!isRecord(content) || content.type !== 'text' || typeof content.text !== 'string') return null
   const parsed = parseJson(content.text)
   if (!isRecord(parsed) || parsed.kind !== 'answer_to_pending_question' || parsed.callId !== callId) return null
-  return answerEntries(content.text)
+  return answerBatchOf(content.text)
 }
 
 /** One question's choices from call JSON; absent when any entry is malformed. */
@@ -185,18 +190,25 @@ function pairAnswers(
  * @param questions - The call's questions, or null when they failed validation.
  * @param answers - The recorded answer batch.
  * @param t - Row translator.
+ * @param note - The batch's card-level remark, when it carried one.
  * @returns What the answered row shows.
  */
 function answeredPresentation(
   questions: readonly AskUserQuestionItem[] | null,
   answers: readonly AskUserQuestionAnswerItem[],
   t: AskQuestionRowProps['t'],
+  note?: string,
 ): AnswerPresentation {
   const answered = answers.filter(answer => answer.selected.length > 0 || (answer.custom ?? '') !== '').length
   const paired = questions === null ? null : pairAnswers(questions, answers)
   return {
     summary: t('ask.answered', { answered, total: answers.length }),
-    transcript: paired === null ? null : { kind: 'answered', questions: paired, skippedLabel: t('ask.skipped') },
+    transcript: paired === null ? null : {
+      kind: 'answered',
+      questions: paired,
+      skippedLabel: t('ask.skipped'),
+      ...(note === undefined || note === '' ? {} : { note: { label: t('ask.noteLabel'), text: note } }),
+    },
     // The read-only panel renders the option lists the user chose from and
     // looks each answer up by question id, so a batch this row cannot pair
     // unambiguously gets no panel either: blank or dropped answers would read
@@ -327,7 +339,7 @@ export function AskQuestionRow({
         transcript = { kind: 'unanswered', questions: unansweredItems(questions), verdict: t('ask.closedDetail') }
       }
     } else if (settled !== undefined) {
-      const presentation = answeredPresentation(questions, settled.answers, t)
+      const presentation = answeredPresentation(questions, settled.answers, t, settled.note)
       summary = presentation.summary
       transcript = presentation.transcript
       const record = presentation.record
@@ -359,8 +371,13 @@ export function AskQuestionRow({
         // Answered either way: whether the answer beat the timeout is the
         // agent's pacing, not something a reader of the row has to reason
         // about, so a late-answered call reads exactly like an in-time one.
-        const answers = settled?.answers ?? answerEntries(text)
-        const presentation = answers === null ? null : answeredPresentation(questions, answers, t)
+        // The projection's settled record wins over the result text — it also
+        // carries the card-level note for a reply that settled late.
+        const batch = settled !== undefined
+          ? { answers: settled.answers, ...(settled.note === undefined ? {} : { note: settled.note }) }
+          : answerBatchOf(text)
+        const answers = batch?.answers ?? null
+        const presentation = answers === null ? null : answeredPresentation(questions, answers, t, batch?.note)
         // Full transcripts require stable ids and valid visible fields; retain the
         // legacy best-effort count when only strict pairing is unsafe.
         summary = presentation?.summary ?? answeredSummary(text, t) ?? model.summary
@@ -375,8 +392,10 @@ export function AskQuestionRow({
     }
   }
   if (answerable && queuedReply !== undefined && rowAction === reopen) {
-    const answers = queuedAnswerEntries(queuedReply, callId)
-    const presentation = answers === null ? null : answeredPresentation(questionEntries(argsRaw), answers, t)
+    const batch = queuedAnswerBatch(queuedReply, callId)
+    const presentation = batch === null
+      ? null
+      : answeredPresentation(questionEntries(argsRaw), batch.answers, t, batch.note)
     if (presentation?.record !== undefined) {
       summary = presentation.summary
       transcript = presentation.transcript

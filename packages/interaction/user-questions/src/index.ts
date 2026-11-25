@@ -254,6 +254,9 @@ export class UserQuestionService extends TypertRemoteService {
         text: JSON.stringify({
           kind: 'answer_to_pending_question', tool: 'ask_user_question', callId,
           questions: question.questions, answers: answer.answers,
+          // FORK dsh-local (ask-focus-restore-1125, 2026-11-25 裁定 D): the
+          // card-level remark rides the same envelope as the batch.
+          ...(answer.note !== undefined ? { note: answer.note } : {}),
         }),
       }],
     })

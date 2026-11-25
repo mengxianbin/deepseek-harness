@@ -66,6 +66,16 @@ export function AskQuestionCard({ card }: { card: AskQuestionCardModel }) {
           </dd>
         </div>
       ))}
+      {/* The card-level remark (题外话, ask-focus-restore-1125 裁定 D): read as
+          one more question-shaped item so it keeps the card's own typography. */}
+      {card.note !== undefined && (
+        <div className={css.item}>
+          <dt className={css.question}>{card.note.label}</dt>
+          <dd className={css.answer}>
+            <span className={css.answerLine}>{card.note.text}</span>
+          </dd>
+        </div>
+      )}
     </dl>
   )
 }

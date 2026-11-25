@@ -51,8 +51,9 @@ const t = makeTranslate(zh, commonZh)
 interface RowEnvironment {
   /** Call ids the `userQuestions` projection still lists as answerable; absent = none. */
   answerable?: readonly string[]
-  /** Answer batches the projection settled a late reply with, by call id; absent = none. */
-  settled?: Readonly<Record<string, readonly unknown[]>>
+  /** Answer batches the projection settled a late reply with, by call id; absent = none.
+   *  A settled entry may also carry the card-level note (ask-focus-restore-1125). */
+  settled?: Readonly<Record<string, readonly unknown[] | { answers: readonly unknown[]; note?: string }>>
   /** Pending steers mirrored by the durable Inbox projection. */
   inbox?: { readonly 'next-turn': readonly unknown[]; readonly 'next-step': readonly unknown[] }
   /** The injected reopen verb; absent = a panel is always there to show. */
@@ -64,7 +65,9 @@ interface RowEnvironment {
 function rowProps(block: ToolCallBlock, env: RowEnvironment = {}): Parameters<typeof AskQuestionRow>[0] {
   const view = {
     active: (env.answerable ?? []).map(callId => ({ callId })),
-    settled: Object.entries(env.settled ?? {}).map(([callId, answers]) => ({ callId, answers })),
+    settled: Object.entries(env.settled ?? {}).map(([callId, entry]) => 'answers' in entry
+      ? { callId, answers: entry.answers, ...(entry.note === undefined ? {} : { note: entry.note }) }
+      : { callId, answers: entry }),
   }
   const useProjection = (key: string, select: (value: unknown) => unknown) =>
     select(key === 'inbox' ? env.inbox : view)
@@ -404,6 +407,43 @@ describe('AskQuestionRow', () => {
     expect(screen.getByText('未回答')).toBeTruthy()
     expect(screen.queryByText(/"questions"/)).toBeNull()
     expect(screen.queryByText(/"answers"/)).toBeNull()
+  })
+
+  it('renders the card-level remark the answer carried (ask-focus-restore-1125)', () => {
+    // In-time result: the note rides the batch and reads as one more
+    // question-shaped item on the transcript. Strict pairing needs one
+    // answer per asked question.
+    const noted = JSON.stringify({
+      answers: [
+        { id: 'goal', selected: ['Ship it'] },
+        { id: 'scope', selected: ['deepseek-harness'] },
+        { id: 'notes', selected: [] },
+      ],
+      note: '顺带看看部署日志',
+    })
+    render(<AskQuestionRow {...rowProps(resultNode(READABLE_ARGS, noted))} />)
+
+    expect(screen.getByText('题外话')).toBeTruthy()
+    expect(screen.getByText('顺带看看部署日志')).toBeTruthy()
+    expect(screen.queryByText(/"note"/)).toBeNull()
+  })
+
+  it('shows a remark a late reply settled with, read from the settled record', () => {
+    render(<AskQuestionRow {...rowProps(
+      resultNode(READABLE_ARGS, PENDING_RESULT),
+      { settled: { c1: {
+        answers: [
+          { id: 'goal', selected: ['Ship it'] },
+          { id: 'scope', selected: ['deepseek-harness'] },
+          { id: 'notes', selected: [] },
+        ],
+        note: '顺带看看部署日志',
+      } } },
+    )} />)
+
+    expect(screen.getByText('题外话')).toBeTruthy()
+    expect(screen.getByText('顺带看看部署日志')).toBeTruthy()
+    expect(screen.getByText('2/3 已回答')).toBeTruthy()
   })
 
   it('keeps every offered option on screen, marking the chosen one', () => {
