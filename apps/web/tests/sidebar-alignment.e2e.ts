@@ -443,7 +443,7 @@ describe('web e2e: sidebar search alignment and row action targets', () => {
     expect(tripwire.pageErrors).toEqual([])
   })
 
-  it.each([false, true])('keeps account footer geometry in wide and rail layouts (signed in: %s)', async (signedIn) => {
+  it.each([false, true])('keeps the footer settings seat geometry in wide and rail layouts (signed in: %s)', async (signedIn) => {
     onTestFailed(() => saveFailureShot(page, `web-e2e-sidebar-account-${String(signedIn)}`))
     const account = scaffold.ctx.deepseekAccount
     const state: AccountView = {
@@ -465,41 +465,58 @@ describe('web e2e: sidebar search alignment and row action targets', () => {
     ] : []
     try {
       if (signedIn) await page.reload({ waitUntil: 'load' })
-      const accountButton = page.getByRole('button', { name: 'Account menu', exact: true })
-      await expect.poll(() => accountButton.getAttribute('data-signed-out')).toBe(String(!signedIn))
-      const measure = () => accountButton.evaluate((element) => {
+      // Ruling A (ask t2-account-repair, 2026-11-26): the account More row is
+      // gone — the settings-launcher fork replaced the footer seat with the
+      // settings trigger (AccountMenu.module.css FORK note: `.anchor`, `.avatar`,
+      // `.label`, `[data-collapsed]`, `[data-signed-out]` "left with the menu";
+      // SidebarRoot.tsx round 3 rules the wide foot as Settings → ⋯). So the
+      // subject is now that trigger (SettingsRoot.tsx `aria-label={t('trigger')}`
+      // = "Settings") and the reference is its own `.triggerRow` — the direct
+      // layout container, CSS-fixed in BOTH states. `footArea` was dropped as a
+      // reference because its wide right edge also carries the ⋯ menu
+      // (content-sized, not a contract), and the `newSession` capsule never
+      // renders in the wide non-darwin sidebar at all.
+      const seat = page.getByRole('button', { name: 'Settings', exact: true })
+      await expect.poll(() => seat.count()).toBe(1)
+      const measure = () => seat.evaluate((element) => {
         const button = element.getBoundingClientRect()
         const style = getComputedStyle(element)
-        const newSession = document.querySelector('button[class*="newSession"]')
-        if (newSession === null) throw new Error('New session reference is missing')
-        const reference = newSession.getBoundingClientRect()
-        const footer = element.closest('[class*="footArea"]')?.getBoundingClientRect()
-        if (footer === undefined) throw new Error('Account footer is missing')
+        const row = element.closest<HTMLElement>('[class*="triggerRow"]')
+        if (row === null) throw new Error('Settings trigger row is missing')
+        const reference = row.getBoundingClientRect()
         return {
-          height: button.height, width: button.width,
-          footerCenterOffset: (button.left + button.right - footer.left - footer.right) / 2,
+          // Every field below is derived from SettingsRoot.module.css, never
+          // from an observed run: `.trigger { height:42px; margin:0; flex:1;
+          // border-inline:3px }` and `.trigger.rail { 36x36; margin:0;
+          // border-inline:0 }` over `--dsh-sidebar-paint-inset: 3px`.
+          // `width` is deliberately absent: `.trigger` is `flex:1` inside an
+          // auto-width `.settingsArea`, so it is content-sized, not contractual.
+          height: button.height,
+          rowCenterOffset: (button.left + button.right - reference.left - reference.right) / 2,
           leftOffset: button.left - reference.left, rightOffset: button.right - reference.right,
           paintedLeftOffset: button.left + Number.parseFloat(style.borderLeftWidth) - reference.left,
           paintedRightOffset: button.right - Number.parseFloat(style.borderRightWidth) - reference.right,
         }
       })
       const wide = await measure()
-      expect(wide.height).toBe(signedIn ? 44 : 32)
-      expect(wide.leftOffset).toBe(signedIn ? -2 : -4)
-      expect(wide.rightOffset).toBe(signedIn ? 2 : 4)
-      expect(wide.paintedLeftOffset).toBe(signedIn ? -2 : -1)
-      expect(wide.paintedRightOffset).toBe(signedIn ? 2 : 1)
+      expect(wide).toEqual({
+        height: 42, rowCenterOffset: 0, leftOffset: 0, rightOffset: 0,
+        paintedLeftOffset: 3, paintedRightOffset: -3,
+      })
       await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click()
-      await expect.poll(() => accountButton.getAttribute('data-collapsed')).toBe('true')
+      // Live collapse signal: the toggle flips its accessible name to
+      // "Open sidebar" once the rail lands (SidebarRoot `toggleLabel`). The old
+      // probe polled `data-collapsed` on the account seat, which left with it.
+      await expect.poll(() => page.getByRole('button', { name: 'Open sidebar', exact: true }).count()).toBe(1)
       await expect.poll(async () => {
-        const rect = await accountButton.boundingBox()
+        const rect = await seat.boundingBox()
         return rect === null ? null : { width: rect.width, height: rect.height }
       }).toEqual({ width: 36, height: 36 })
-      await page.locator('button[class*="newSession"]').evaluate(async (element) => {
-        await Promise.all(element.getAnimations().map(animation => animation.finished))
-      })
       const rail = await measure()
-      expect(rail.footerCenterOffset).toBe(0)
+      expect(rail).toEqual({
+        height: 36, rowCenterOffset: 0, leftOffset: 0, rightOffset: 0,
+        paintedLeftOffset: 0, paintedRightOffset: 0,
+      })
       await compareOrRefreshGolden(
         fileURLToPath(new URL(`./expected/sidebar-alignment/account-${signedIn ? 'signed-in' : 'signed-out'}.expected.md`, import.meta.url)),
         JSON.stringify({ wide, rail }, null, 2), MODE,
