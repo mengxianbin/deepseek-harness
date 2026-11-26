@@ -546,6 +546,14 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
   }
 
   const choose = (label: string): void => {
+    // FORK dsh-local (ask-deselect-1126, 2026-11-26 裁定 A): a single-select
+    // pick is removable — clicking the option that is already picked clears it
+    // (and stays on this question instead of stepping on). Any other pick keeps
+    // replacing the selection, and custom keeps coexisting (2026-11-25 裁定 B
+    // untouched). Multi-select already toggled, so it is out of this branch.
+    const deselecting = question.multiSelect !== true
+      && draft.selected.length === 1
+      && draft.selected[0] === label
     updateDraft((current) => {
       if (question.multiSelect === true) {
         const selected = current.selected.includes(label)
@@ -557,8 +565,8 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
       // single-select pick no longer clears a typed custom answer — selected
       // and custom coexist (the protocol always allowed both; multi-select
       // was already this shape).
-      return { ...current, selected: [label], skipped: false }
-    }, question.multiSelect !== true && index < questions.length - 1 ? index + 1 : index)
+      return { ...current, selected: deselecting ? [] : [label], skipped: false }
+    }, !deselecting && question.multiSelect !== true && index < questions.length - 1 ? index + 1 : index)
   }
 
   const answered = (item: QuestionDraftAnswer): boolean =>

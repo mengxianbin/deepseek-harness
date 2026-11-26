@@ -313,6 +313,36 @@ describe('QuestionComposer', () => {
     expect(screen.getByRole('radio', { name: 'D' }).getAttribute('aria-checked')).toBe('false')
   })
 
+  it('clears a single-select pick when its own option is clicked again, without stepping the page', () => {
+    const { carrier } = wait([
+      { id: 'first', question: 'First?', options: [{ label: 'A (Recommended)' }, { label: 'B' }] },
+      { id: 'later', question: 'Later?', options: [{ label: 'C' }, { label: 'D' }] },
+    ])
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    const a = screen.getByRole('radio', { name: 'A' })
+    expect(a.getAttribute('aria-checked')).toBe('true')
+
+    // The recommended pick is the current selection, so this click removes it
+    // (ask-deselect-1126 裁定 A) and the page stays put: a deselect is not a
+    // step. The cleared draft reads as unanswered again.
+    fireEvent.click(a)
+    expect(a.getAttribute('aria-checked')).toBe('false')
+    expect(screen.getByText('1 / 2')).toBeTruthy()
+    // The flow gesture reports the cleared draft as unanswered instead of
+    // stepping. (getByLabelText('下一题') would hit the pager arrow, which turns
+    // the page unconditionally — hence the option gesture here.)
+    fireEvent.keyDown(a, { key: 'Enter', shiftKey: true })
+    expect(screen.getByRole('status').textContent).toBe('请选择一个选项或填写自定义答案。')
+
+    // Clicking it back picks it again — and only then does the flow step on
+    // (custom is empty, so reaching page 2 already implies the selection).
+    // Re-query after the turn: the first node unmounted with page 1.
+    fireEvent.click(a)
+    expect(screen.getByText('2 / 2')).toBeTruthy()
+    fireEvent.click(screen.getByLabelText('上一题'))
+    expect(screen.getByRole('radio', { name: 'A' }).getAttribute('aria-checked')).toBe('true')
+  })
+
   it('classifies Enter on an option: bare selects through native activation, Shift/Ctrl+Enter runs the flow', () => {
     const { carrier, answer } = wait([
       { id: 'mode', question: 'Which mode?', options: [{ label: 'Alpha' }, { label: 'Beta' }] },
@@ -375,7 +405,10 @@ describe('QuestionComposer', () => {
     expect(scrollRegion?.contains(screen.getByRole('heading', { name: '选择候选人类型' }))).toBe(true)
     expect(scrollRegion?.contains(screen.getByRole('radio', { name: /工程落地型/ }))).toBe(true)
     expect(scrollRegion?.contains(screen.getByText('下一题').closest('button'))).toBe(false)
-    fireEvent.click(screen.getByRole('radio', { name: /工程落地型/ }))
+    // Page turn only: 工程落地型 is the pre-selected recommendation, and a click
+    // on the selected option now clears it (ask-deselect-1126 裁定 A), so the
+    // walk rides the pager instead of the option.
+    fireEvent.click(screen.getByLabelText('下一题'))
 
     expect(screen.getByText('2 / 3')).toBeTruthy()
     // detail is per-question: the second question carries none.
@@ -445,8 +478,10 @@ describe('QuestionComposer', () => {
     fireEvent.change(note, { target: { value: '题外话：顺带看看部署日志' } })
 
     // Typed on the first page: page turns must not drop it, and a question
-    // that never got an answer can still be skipped on the way.
-    fireEvent.click(screen.getByRole('radio', { name: /工程落地型/ }))
+    // that never got an answer can still be skipped on the way. The first turn
+    // rides the pager — clicking the pre-selected recommendation would now
+    // clear it (ask-deselect-1126 裁定 A) and the batch below keeps it.
+    fireEvent.click(screen.getByLabelText('下一题'))
     expect(screen.getByText('2 / 3')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '跳过' }))
     expect(screen.getByText('3 / 3')).toBeTruthy()
@@ -657,7 +692,9 @@ describe('QuestionComposer', () => {
     render(<QuestionComposer matched={carrier} {...kit} />)
 
     expect(screen.getByPlaceholderText('输入你的答案')).toBeTruthy()
-    fireEvent.click(screen.getByRole('radio', { name: '工程落地型' }))
+    // Page turn via the pager: 工程落地型 is already the selected recommendation,
+    // and clicking the selected option now clears it (ask-deselect-1126 裁定 A).
+    fireEvent.click(screen.getByLabelText('下一题'))
     const emptyCustom = screen.getByPlaceholderText('输入你的答案')
     // Plain Enter is the newline gesture: it neither advances nor validates.
     expect(fireEvent.keyDown(emptyCustom, { key: 'Enter' })).toBe(true)
@@ -743,7 +780,9 @@ describe('QuestionComposer', () => {
     view.rerender(<QuestionComposer matched={second.carrier} {...kit} />)
     expect(screen.getByRole('radio', { name: /研究潜力型/ }).getAttribute('aria-checked')).toBe('false')
 
-    fireEvent.click(screen.getByRole('radio', { name: /工程落地型/ }))
+    // Page turn via the pager: the fresh card opens on the pre-selected
+    // recommendation, and clicking it would now clear it (ask-deselect-1126).
+    fireEvent.click(screen.getByLabelText('下一题'))
     const custom = screen.getByPlaceholderText('输入你的答案')
     fireEvent.change(custom, { target: { value: 'x' } })
     fireEvent.keyDown(custom, { key: 'Enter', shiftKey: true })
@@ -840,9 +879,11 @@ describe('PendingQuestion domain face', () => {
   it('keeps the close button out of the fold path and preserves drafts across a fold', () => {
     const { carrier, answer } = wait()
     render(<QuestionComposer matched={carrier} {...kit} />)
-    fireEvent.click(screen.getByRole('radio', { name: /工程落地型/ }))
-    // Single-select auto-advances to the second question; folding and
-    // re-expanding must not lose either the picked option or the position.
+    // Page turn via the pager — clicking the pre-selected recommendation would
+    // now clear it (ask-deselect-1126 裁定 A). The recommendation rides the
+    // saved draft into the batch below either way; folding and re-expanding
+    // must not lose either the picked option or the position.
+    fireEvent.click(screen.getByLabelText('下一题'))
     fireEvent.pointerDown(document.body, { bubbles: true })
     fireEvent.click(screen.getByText('补充你的要求'))
     expect(screen.getByRole('radiogroup')).toBeTruthy()
@@ -868,8 +909,10 @@ describe('PendingQuestion domain face', () => {
   it('re-expanding over a typed draft restores the caret and both scrollports to the end', () => {
     const { carrier } = wait()
     render(<QuestionComposer matched={carrier} {...kit} />)
-    // Reach the optionless second question and write into its field first.
-    fireEvent.click(screen.getByRole('radio', { name: /工程落地型/ }))
+    // Reach the optionless second question and write into its field first —
+    // by pager, since clicking the pre-selected recommendation would now clear
+    // it (ask-deselect-1126 裁定 A).
+    fireEvent.click(screen.getByLabelText('下一题'))
     const custom = screen.getByPlaceholderText(zh['custom.placeholder'])
     fireEvent.change(custom, { target: { value: '第一段\n第二段' } })
     // Fold: the body unmounts, taking the caret and both scroll positions
