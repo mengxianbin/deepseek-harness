@@ -945,6 +945,21 @@ export interface DutyInventoryReport {
   readonly fresh: boolean
   /** Seconds since the collector stamped the ledger; absent when the file could not be read. */
   readonly ageSec?: number
+  /**
+   * Sleep-window exemption (duty-sleep-gap-1126, 2026-11-26 ruling "A + 灰色豁免标记"):
+   * `true` when the RAW age is stale but the collector-measured sleep overlap covers
+   * it — the machine was asleep, not the collector broken. The report still reads
+   * `fresh: true` (no lamp), while this flag lets the UI render a **grey**
+   * "睡眠豁免" note instead of hiding the fact, so the偶发检查契机 stays visible
+   * without lighting red. Absent = no exemption applied.
+   */
+  readonly sleepExempt?: boolean
+  /**
+   * Seconds the machine slept inside the stale window, as measured by the
+   * collector (`sleepOverlapSec`, Kernel-Power 506/507 pairing). `0` / absent
+   * = nothing deducted (fail-closed: read failure ⇒ no deduction ⇒ still red).
+   */
+  readonly sleepOverlapSec?: number
   readonly counts: {
     readonly total: number
     readonly healthy: number

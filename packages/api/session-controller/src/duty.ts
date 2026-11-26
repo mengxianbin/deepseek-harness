@@ -54,10 +54,40 @@ export function readDutyInventory(
 }
 
 /**
+ * Sleep-window deduction input (duty-sleep-gap-1126): the collector's measured
+ * `sleepOverlapSec` converted to ms, clamped into `[0, ageMs]`.
+ *
+ * Fail-closed on every path (三道兜底, 违反即打回): a missing / non-numeric /
+ * non-finite / non-positive key deducts **nothing**, and the deduction never
+ * exceeds the raw age — so a ledger the collector could not explain reads exactly
+ * as it did before this feature existed (still red when stale).
+ * @param payload - the parsed `duty-inventory-state/1` document.
+ * @param ageMs - the raw age; `undefined` means nothing to compare against.
+ * @returns ms to subtract from the raw age (0 = no exemption).
+ */
+function sleepOverlapMsOf(payload: unknown, ageMs: number | undefined): number {
+  if (ageMs === undefined || ageMs <= 0) return 0
+  if (typeof payload !== 'object' || payload === null) return 0
+  const raw = (payload as { sleepOverlapSec?: unknown }).sleepOverlapSec
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) return 0
+  // 兜底②: deduction ≤ raw age ⇒ effectiveAge ≥ 0 always.
+  return Math.min(raw * 1000, ageMs)
+}
+
+/**
  * Pure fold of one parsed ledger against its age (the sweep's freshness
  * judgment): shape-invalid reads unreadable; a shape-valid ledger older than
  * {@link DUTY_LEDGER_STALE_MS} keeps its items for display but reads
  * `fresh: false` → `ok: false` (戳过期 at the file level).
+ *
+ * **Sleep-window deduction** (duty-sleep-gap-1126, 2026-11-26 ruling
+ * 「A + 灰色豁免标记」): when the collector measured that the machine slept for
+ * most of the stale window, that time is subtracted before the freshness test —
+ * a machine asleep is not a collector broken. The raw `ageSec` stays untouched
+ * for display, and `sleepExempt` marks the case so the UI can show a **grey**
+ * note instead of red *or* silence (the 偶发检查契机 is kept visible).
+ * Only this file-level age is affected: item-level `failed` verdicts are
+ * untouched and keep lighting red (第②层项级红零改).
  * @param payload - the parsed `duty-inventory-state/1` document.
  * @param ageMs - ms since the collector stamped the file; `undefined` = no mtime.
  * @returns the duty verdict the wire carries.
@@ -76,14 +106,24 @@ export function foldDutyInventory(payload: unknown, ageMs: number | undefined): 
     disabled: items.filter(item => item.status === 'disabled').length,
     failed: items.filter(item => item.status === 'failed').length,
   }
-  const fresh = ageMs !== undefined && ageMs <= DUTY_LEDGER_STALE_MS
+  const sleepMs = sleepOverlapMsOf(payload, ageMs)
+  const rawStale = ageMs === undefined || ageMs > DUTY_LEDGER_STALE_MS
+  const effectiveAgeMs = ageMs === undefined ? undefined : Math.max(0, ageMs - sleepMs)
+  const fresh = effectiveAgeMs !== undefined && effectiveAgeMs <= DUTY_LEDGER_STALE_MS
+  // 豁免 = 原本会红、因睡眠扣减后不红。只在真扣了东西时才标（sleepMs > 0），
+  // 否则「fresh 且无扣减」的正常态也会被误标成豁免。
+  const sleepExempt = sleepMs > 0 && rawStale && fresh
   const report: DutyInventoryReport = {
     // fail-closed: untrusted file OR any failed item → not ok (插队 P0/P1 follows).
+    // 睡眠豁免只动 fresh，counts.failed 照旧参与 —— 第②层项级红零改。
     ok: fresh && counts.failed === 0,
     fresh,
+    ...(sleepExempt ? { sleepExempt: true } : {}),
+    ...(sleepMs > 0 ? { sleepOverlapSec: Math.max(0, Math.round(sleepMs / 1000)) } : {}),
     counts,
     items,
   }
+  // ageSec = 原始年龄（不扣减）：UI 要显示真实断档时长 + 睡眠时长两件事。
   return ageMs === undefined ? report : { ...report, ageSec: Math.max(0, Math.round(ageMs / 1000)) }
 }
 

@@ -140,3 +140,72 @@ describe('readDutyInventory (文件读取, fail-closed)', () => {
     expect(report.counts.total).toBe(1)
   })
 })
+
+/**
+ * 睡眠窗扣减（duty-sleep-gap-1126，2026-11-26 拍板「A + 灰色豁免标记」）：
+ * 断档窗内机器睡了多久由 collector 量出（`sleepOverlapSec`），fold 从原始年龄
+ * 里扣掉——睡 6h 扣 6h 不红（无感）、醒着没跑照常红。三道 fail-closed 兜底
+ * + 第②层项级红零改，逐条在此钉死（反例判据 = 违反即打回）。
+ */
+describe('foldDutyInventory 睡眠窗扣减（duty-sleep-gap-1126）', () => {
+  /** 21 分钟 > DUTY_LEDGER_STALE_MS(20min) ⇒ 原始判据必红，是扣减的测试面。 */
+  const staleAge = DUTY_LEDGER_STALE_MS + 60_000
+
+  it('overlap covering the stale window → fresh + sleepExempt（无感，且原始年龄照报）', () => {
+    // 1200s < staleAge(1260s)：不触发 clamp，sleepOverlapSec 报的就是实测量
+    const report = foldDutyInventory({ ...ledger([healthyItem]), sleepOverlapSec: 1_200 }, staleAge)
+    expect(report.fresh).toBe(true)
+    expect(report.sleepExempt).toBe(true)
+    // ageSec = 原始年龄不扣减（UI 要显示真实断档 + 睡眠时长两件事）
+    expect(report.ageSec).toBe(Math.round(staleAge / 1000))
+    expect(report.sleepOverlapSec).toBe(1_200)
+    expect(report.ok).toBe(true)
+  })
+
+  it('no overlap → stale stays red（醒着没跑 = 真故障，照常红）', () => {
+    const report = foldDutyInventory(ledger([healthyItem]), staleAge)
+    expect(report.fresh).toBe(false)
+    expect(report.ok).toBe(false)
+    expect(report.sleepExempt).toBeUndefined()
+    expect(report.sleepOverlapSec).toBeUndefined()
+  })
+
+  it('overlap > age clamps to age（兜底② effectiveAge ≥ 0 恒成立）', () => {
+    const report = foldDutyInventory({ ...ledger([healthyItem]), sleepOverlapSec: 999_999 }, staleAge)
+    expect(report.fresh).toBe(true)
+    expect(report.sleepExempt).toBe(true)
+    expect(report.ageSec).toBeGreaterThan(0)
+  })
+
+  it('already-fresh ledger is never marked exempt（不把正常态误标成豁免）', () => {
+    const report = foldDutyInventory({ ...ledger([healthyItem]), sleepOverlapSec: 100 }, 30_000)
+    expect(report.fresh).toBe(true)
+    expect(report.sleepExempt).toBeUndefined()
+  })
+
+  it('exemption does NOT hide item-level failures（第②层项级红零改，照常破 ok）', () => {
+    const report = foldDutyInventory({ ...ledger([failedItem]), sleepOverlapSec: 1_500 }, staleAge)
+    expect(report.fresh).toBe(true)
+    expect(report.sleepExempt).toBe(true)
+    expect(report.counts.failed).toBe(1)
+    // 项级 failed 照旧参与 ok 判定 —— 睡眠豁免只动文件级 fresh
+    expect(report.ok).toBe(false)
+  })
+
+  it('malformed overlap key deducts nothing（兜底① fail-closed：读不到 = 不扣减 = 照常红）', () => {
+    const badValues: readonly unknown[] = ['1500', -5, 0, Number.NaN, null, undefined, { n: 1 }]
+    for (const bad of badValues) {
+      const report = foldDutyInventory({ ...ledger([healthyItem]), sleepOverlapSec: bad }, staleAge)
+      expect(report.fresh, `sleepOverlapSec=${String(bad)}`).toBe(false)
+      expect(report.sleepExempt, `sleepOverlapSec=${String(bad)}`).toBeUndefined()
+    }
+  })
+
+  it('shape-invalid payload still fails closed without an exemption (不可读分支零豁免)', () => {
+    const report = foldDutyInventory({ noItems: true, sleepOverlapSec: 9_999 }, staleAge)
+    expect(report.fresh).toBe(false)
+    expect(report.ok).toBe(false)
+    expect(report.sleepExempt).toBeUndefined()
+    expect(report.counts.total).toBe(0)
+  })
+})
