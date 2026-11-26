@@ -63,6 +63,16 @@ describe('QuestionReplyView', () => {
     expect(screen.getByText(/\d{2}:\d{2}/)).toBeTruthy()
   })
 
+  it('echoes the card-level remark the batch carried, and drops it with the batch (remark-echo-1126)', () => {
+    const { rerender } = render(<QuestionReplyBubble data={{ ...data, note: '顺带看看部署日志' }} t={t} />)
+    expect(screen.getByText('题外话')).toBeTruthy()
+    expect(screen.getByText('顺带看看部署日志')).toBeTruthy()
+
+    rerender(<QuestionReplyBubble data={data} t={t} />)
+    expect(screen.queryByText('题外话')).toBeNull()
+    expect(screen.queryByText('顺带看看部署日志')).toBeNull()
+  })
+
   it('copies the question with its answer, then confirms the write', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })

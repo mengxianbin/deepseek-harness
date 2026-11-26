@@ -30,6 +30,13 @@ export interface QuestionReplyData {
   readonly answers: readonly QuestionReplyAnswer[]
   /** Model-facing text, shown when the payload is unreadable. */
   readonly text: string
+  /**
+   * The card-level remark (题外话, ask-focus-restore-1125 裁定 D) the batch
+   * carried. Both payloads spell it as a top-level `note` beside the answers;
+   * this bubble is the reply's conversation echo, so it reads the same field
+   * (remark-echo-1126: the row transcript already did, the bubble did not).
+   */
+  readonly note?: string
   readonly time: number
 }
 
@@ -51,9 +58,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * Read the question and answer pairs out of the reply text at the conversation boundary.
  * @param text - Model-facing JSON payload of the steered message.
- * @returns The pairs, or empty lists when the payload is unreadable.
+ * @returns The pairs and the payload's card-level note, or empty lists when
+ *   the payload is unreadable.
  */
-export function replyPairsOf(text: string): Pick<QuestionReplyData, 'questions' | 'answers'> {
+export function replyPairsOf(text: string): Pick<QuestionReplyData, 'questions' | 'answers' | 'note'> {
   let value: unknown
   try {
     value = JSON.parse(text)
@@ -62,8 +70,9 @@ export function replyPairsOf(text: string): Pick<QuestionReplyData, 'questions' 
     void error
     return { questions: [], answers: [] }
   }
+  const note = isRecord(value) && typeof value.note === 'string' && value.note !== '' ? value.note : undefined
   if (!isRecord(value) || !Array.isArray(value.questions)) {
-    return { questions: [], answers: [] }
+    return { questions: [], answers: [], ...(note === undefined ? {} : { note }) }
   }
   const questions: QuestionReplyQuestion[] = []
   for (const question of value.questions) {
@@ -83,7 +92,7 @@ export function replyPairsOf(text: string): Pick<QuestionReplyData, 'questions' 
       ...(typeof answer.custom === 'string' ? { custom: answer.custom } : {}),
     })
   }
-  return { questions, answers }
+  return { questions, answers, ...(note === undefined ? {} : { note }) }
 }
 
 /**
@@ -186,8 +195,12 @@ function resultReply(
     answers.push({ id: answer.id, selected: answer.selected,
       ...(answer.custom === undefined ? {} : { custom: answer.custom }) })
   }
+  // The result JSON carries the card-level note beside the answers; without
+  // reading it here the conversation bubble echoed the answers but dropped
+  // the remark the user had just submitted (remark-echo-1126).
+  const note = typeof value.note === 'string' && value.note !== '' ? value.note : undefined
   return { seq: event.seq, time: event.time, callId: String(event.type === 'tool/result' ? event.data.message.source.callId : event.data.subCallId),
-    outcome: 'answered', questions, answers, text }
+    outcome: 'answered', questions, answers, text, ...(note === undefined ? {} : { note }) }
 }
 
 /**

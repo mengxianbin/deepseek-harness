@@ -102,9 +102,14 @@
   white-space: normal;
 }
 
+/* The chosen option's fill (ask-highlight-token-1126): this rule used the
+   undefined `bg-l1` alias — var() resolved to nothing, the whole background
+   declaration was dropped at computed-value time, and the pick showed only its
+   border. Correct token = bg-layer-1 (the exact old spelling is in the commit
+   message; keep it out of here so the repo-wide grep for it stays at zero). */
 .option[data-selected] {
   border-color: var(--dsw-alias-border-l1);
-  background: var(--dsw-alias-bg-l1);
+  background: var(--dsw-alias-bg-layer-1);
   color: var(--dsw-alias-label-primary);
 }
 
@@ -126,7 +131,7 @@
 }
 
 .optionDescription {
-  color: var(--dsw-alias-label-quaternary);
+  color: var(--dsw-alias-label-caption);
   font-size: calc(var(--dsh-content-font-size, 14px) - 1px);
   line-height: calc(20px + var(--dsh-content-font-delta, 0px));
   overflow-wrap: anywhere;
