@@ -223,7 +223,7 @@ describe('SidebarRoot shell', () => {
     expect(screen.queryByText('1.2.3-rc.4-0123456-dirty')).toBeNull()
     expect(container.querySelector('[title="1.2.3-rc.4-0123456-dirty"]')).toBeNull()
     expect(screen.queryByRole('button', { name: 'New session' })).toBeNull()
-    expect(screen.getByRole('button', { name: t('glance.open') })).toBeTruthy()
+    expect(screen.getByRole('group', { name: t('glance.title') })).toBeTruthy()
   })
 
   it.each([
@@ -270,7 +270,7 @@ describe('SidebarRoot shell', () => {
     // surfaces at all — the row is the usage glance plus the toggle.
     expect(screen.queryByText('DSH Local Build')).toBeNull()
     expect(container.querySelector('[class*="logoRow"]')).not.toBeNull()
-    expect(screen.getByRole('button', { name: t('glance.open') })).toBeTruthy()
+    expect(screen.getByRole('group', { name: t('glance.title') })).toBeTruthy()
   })
 
   it('hands the region its wide flag and clamps expandSidebar to the collapsed state', () => {

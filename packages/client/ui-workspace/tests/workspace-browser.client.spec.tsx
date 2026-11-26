@@ -547,7 +547,8 @@ describe('WorkspaceBrowser', () => {
       useSessions: hook(sessions),
       useWorkspaces: hook(workspaceState([workspace('alpha', ['alpha-s']), workspace('beta', ['beta-s'])])),
     })
-    expect(screen.getByText('工作区')).toBeTruthy()
+    // No section title label renders in either grouping (2026-11-26).
+    expect(document.querySelector('[class*="sectionLabel"]')).toBeNull()
     expect(screen.getByText('alpha')).toBeTruthy()
     // Sessions hidden while their group is folded.
     expect(screen.queryByText('alpha-s')).toBeNull()
@@ -561,9 +562,10 @@ describe('WorkspaceBrowser', () => {
     expect(screen.getByRole('menuitem', { name: '按工作区' }).querySelector('svg')).toBeTruthy()
     expect(screen.getByRole('menuitem', { name: '手动排序' }).querySelector('svg')).toBeTruthy()
     fireEvent.click(screen.getByRole('menuitem', { name: '单列表' }))
-    // Store-driven flip: title changes, rows flatten newest-first, headers gone.
+    // Store-driven flip: rows flatten newest-first, headers gone — and the
+    // header stays label-free.
     expect(b.store.getSnapshot().groupBy).toBe('flat')
-    expect(screen.getByText('会话')).toBeTruthy()
+    expect(document.querySelector('[class*="sectionLabel"]')).toBeNull()
     // Headers are gone; the flat rows keep their Workspace home labels.
     expect(document.querySelector('[class*="projectRow"]')).toBeNull()
     expect(screen.getByText('alpha-s')).toBeTruthy()
@@ -574,7 +576,8 @@ describe('WorkspaceBrowser', () => {
     expect(screen.getByRole('menuitem', { name: '手动排序' }).hasAttribute('disabled')).toBe(false)
     fireEvent.click(screen.getByRole('menuitem', { name: '按工作区' }))
     expect(b.store.getSnapshot().groupBy).toBe('workspace')
-    expect(screen.getByText('工作区')).toBeTruthy()
+    expect(document.querySelector('[class*="projectRow"]')).not.toBeNull()
+    expect(document.querySelector('[class*="sectionLabel"]')).toBeNull()
 
     // Escape closes the menu without picking.
     fireEvent.click(screen.getByRole('button', { name: '视图选项' }))
@@ -3127,170 +3130,6 @@ describe('Workspace tree grouping', () => {
     expect(b.props.insertWorkspaceBefore).toHaveBeenCalledWith(wid('alpha'), wid('gamma'))
   })
 
-  it('leads the list body with the 安康位 alarm and expands the difference detail (件C5)', () => {
-    const brokenReport: SessionHealthReport = {
-      ok: false,
-      total: 2,
-      counts: { running: 1, awaiting: 0, failed: 0, rest: 0 },
-      issues: [{ invariant: 'unreadable', sessionIds: [sid('ghost')] }],
-    }
-    mount({ useSessionHealth: hook({ report: brokenReport }) })
-    // The alarm is the body's first line (queue-zone-1113), red-flagged broken.
-    const alert = screen.getByText('安康位告警：对账对不上，点开看明细')
-      .closest('[data-row-key="queue-health"]') as HTMLElement
-    expect(alert.getAttribute('data-health-alert')).toBe('broken')
-    // The click expands the same detail the shield shows: which invariant, which Sessions.
-    fireEvent.click(alert.querySelector('button') as HTMLElement)
-    expect(screen.getByText('有读不到的会话')).toBeTruthy()
-    expect(screen.getByText('ghost')).toBeTruthy()
-  })
-
-  it('stays quiet on a balanced 安康位 and shows the stale alarm when the chain goes silent (件C5)', () => {
-    const balanced: SessionHealthReport = {
-      ok: true, total: 1, counts: { running: 1, awaiting: 0, failed: 0, rest: 0 }, issues: [],
-    }
-    const healthy = mount({ useSessionHealth: hook({ report: balanced }) })
-    expect(document.querySelector('[data-row-key="queue-health"]')).toBeNull()
-    healthy.view.unmount()
-
-    mount({ useSessionHealth: hook({ report: balanced, stale: true as const, staleSeconds: 35 }) })
-    const alert = screen.getByText('安康位告警：读数中断 35s，执法者失联')
-      .closest('[data-row-key="queue-health"]') as HTMLElement
-    expect(alert.getAttribute('data-health-alert')).toBe('stale')
-    fireEvent.click(alert.querySelector('button') as HTMLElement)
-    expect(screen.getByText('安康位自身读不到：盾已亮虚线圈，读数恢复即自动清除')).toBeTruthy()
-  })
-
-  it('cuts the duty alarm into the queue head on a failed 值守总账, quiet on disabled-only (批2 插队)', () => {
-    const ledgerBase = {
-      ok: true,
-      fresh: true,
-      ageSec: 120,
-      counts: { total: 3, healthy: 1, disabled: 2, failed: 0 },
-      items: [
-        { id: 'DSH-Build-Watchdog', status: 'healthy' as const, intentional: false, reasons: [] },
-        { id: 'taskbot-guard-check', status: 'disabled' as const, intentional: true, reasons: [] },
-        { id: 'taskbot-archive-janitor', status: 'disabled' as const, intentional: true, reasons: [] },
-      ],
-    }
-    const sessionsBalanced: SessionHealthReport = {
-      ok: true, total: 1, counts: { running: 1, awaiting: 0, failed: 0, rest: 0 }, issues: [],
-    }
-    // 有意停用 = 灰不亮不插队: a healthy/disabled-only ledger queues nothing.
-    const quiet = mount({ useSessionHealth: hook({ report: { ...sessionsBalanced, duty: ledgerBase } }) })
-    expect(document.querySelector('[data-row-key="queue-health"]')).toBeNull()
-    quiet.view.unmount()
-
-    // A failed item flips the verdict → the alarm row cuts in at the segment head.
-    mount({
-      useSessionHealth: hook({
-        report: {
-          ...sessionsBalanced,
-          duty: {
-            ...ledgerBase,
-            ok: false,
-            counts: { total: 3, healthy: 1, disabled: 1, failed: 1 },
-            items: [
-              ...ledgerBase.items.slice(0, 2),
-              {
-                id: 'DSH-Host-Revive',
-                status: 'failed' as const,
-                intentional: false,
-                cadenceLabel: '每 5 分钟',
-                reasons: ['该跑没跑：LastRunTime 距今 900s > 阈 900s'],
-              },
-            ],
-          },
-        },
-      }),
-    })
-    const alert = screen.getByText('值守告警：值守总账有失效，点开看明细')
-      .closest('[data-row-key="queue-health"]') as HTMLElement
-    expect(alert.getAttribute('data-health-alert')).toBe('broken')
-    fireEvent.click(alert.querySelector('button') as HTMLElement)
-    // The expansion is the shared two-section body: failed row with reasons, disabled row grey.
-    const detail = alert.querySelector('[data-health-alert-detail=""]') as HTMLElement
-    expect(detail.textContent).toContain('值守清单')
-    expect(detail.textContent).toContain('DSH-Host-Revive')
-    expect(detail.textContent).toContain('该跑没跑')
-    expect(detail.textContent).toContain('taskbot-guard-check')
-    expect(detail.textContent).toContain('有意停用')
-    expect(detail.textContent).not.toContain('DSH-Build-Watchdog')
-  })
-
-  // 2026-11-04 ruling: a SUSTAINED controller poll failure queues with its own
-  // text (never borrowed from 对账), while a transient miss queues nothing.
-  it('cuts the auto-route alarm into the queue head only when the failure is sustained (2026-11-04)', () => {
-    const sessionsBalanced: SessionHealthReport = {
-      ok: true, total: 1, counts: { running: 1, awaiting: 0, failed: 0, rest: 0 }, issues: [],
-    }
-    // Transient miss (< threshold): the queue stays quiet — the glance tooltip owns it.
-    const transient = mount({
-      useSessionHealth: hook({
-        report: { ...sessionsBalanced, autoRoute: { ok: false, failingForSec: 47, sustained: false, error: 'fetch failed', ageSec: 3 } },
-      }),
-    })
-    expect(document.querySelector('[data-row-key="queue-health"]')).toBeNull()
-    transient.view.unmount()
-
-    // Sustained (≥ threshold): the row cuts in with its own text, red-flagged.
-    mount({
-      useSessionHealth: hook({
-        report: {
-          ...sessionsBalanced,
-          autoRoute: {
-            ok: false,
-            failingSince: 1,
-            failingForSec: 312,
-            sustained: true,
-            error: 'meter source unreachable: fetch failed (cause: connect ECONNREFUSED 127.0.0.1:7897)',
-            ageSec: 4,
-          },
-        },
-      }),
-    })
-    const alert = screen.getByText('自动路由告警：控制器读数持续中断，点开看明细')
-      .closest('[data-row-key="queue-health"]') as HTMLElement
-    expect(alert.getAttribute('data-health-alert')).toBe('broken')
-    // The books balance — this alarm must not borrow the reconciliation text.
-    expect(alert.textContent).not.toContain('对账对不上')
-    fireEvent.click(alert.querySelector('button') as HTMLElement)
-    const detail = alert.querySelector('[data-health-alert-detail=""]') as HTMLElement
-    expect(detail.querySelector('[data-health-section="autoRoute"]')?.textContent).toContain('控制器读数中断 312s')
-    expect(detail.textContent).toContain('connect ECONNREFUSED')
-  })
-
-  // 拍板⑭⑮: the revive mechanism's red verdict queues with its own text; an
-  // ABSENT health document (change-only writer) queues nothing — quiet, never broken.
-  it('cuts the revive-mechanism alarm into the queue head only when the verdict is red (拍板⑭⑮)', () => {
-    const sessionsBalanced: SessionHealthReport = {
-      ok: true, total: 1, counts: { running: 1, awaiting: 0, failed: 0, rest: 0 }, issues: [],
-    }
-    // Absent document = not attached: the queue stays quiet (never broken).
-    const absent = mount({ useSessionHealth: hook({ report: sessionsBalanced }) })
-    expect(document.querySelector('[data-row-key="queue-health"]')).toBeNull()
-    absent.view.unmount()
-
-    // Red verdict: the row cuts in with its own text, red-flagged.
-    mount({
-      useSessionHealth: hook({
-        report: {
-          ...sessionsBalanced,
-          reviveHealth: { ok: false, mode: 'shadow', status: 'ok', breakerTrips: 0, halted: false, failed: ['mode'], at: 1 },
-        },
-      }),
-    })
-    const alert = screen.getByText('复活机制告警：准入/除名机制不健康，点开看明细')
-      .closest('[data-row-key="queue-health"]') as HTMLElement
-    expect(alert.getAttribute('data-health-alert')).toBe('broken')
-    // The books balance — this alarm must not borrow the reconciliation text.
-    expect(alert.textContent).not.toContain('对账对不上')
-    fireEvent.click(alert.querySelector('button') as HTMLElement)
-    const detail = alert.querySelector('[data-health-alert-detail=""]') as HTMLElement
-    expect(detail.querySelector('[data-health-section="reviveHealth"]')?.textContent).toContain('复活机制异常')
-    expect(detail.textContent).toContain('mode')
-  })
-
   it('seats the shield outside the actions cluster clip window (件C5 裁切复修1101)', () => {
     const balanced: SessionHealthReport = {
       ok: true, total: 1, counts: { running: 1, awaiting: 0, failed: 0, rest: 0 }, issues: [],
@@ -3306,12 +3145,52 @@ describe('Workspace tree grouping', () => {
     expect(shield.closest('[class*="sectionHeader"]')).not.toBeNull()
   })
 
+  it('renders no 安康位 alarm line in either list body — the shield owns the alarm (2026-11-26)', () => {
+    // The line was attention text only, so it is gone from both bodies even
+    // while the books are broken; the shield stays the single detail surface.
+    const brokenReport: SessionHealthReport = {
+      ok: false,
+      total: 2,
+      counts: { running: 1, awaiting: 0, failed: 0, rest: 0 },
+      issues: [{ invariant: 'unreadable', sessionIds: [sid('ghost')] }],
+    }
+    const grouped = mount({
+      useSessionHealth: hook({ report: brokenReport }),
+      useSessions: hook(sessionState([summary('session-7', 12)])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['session-7'])])),
+    })
+    expect(document.querySelector('[data-row-key="queue-health"]')).toBeNull()
+    expect(screen.queryByText(/安康位告警|值守告警|自动路由告警|复活机制告警/)).toBeNull()
+    // The shield still opens the same difference detail the line used to show.
+    const shield = document.querySelector('[data-health-state]') as HTMLElement
+    expect(shield).toBeTruthy()
+    fireEvent.click(shield.querySelector('button') as HTMLElement)
+    const detail = document.querySelector('[data-health-detail=""]') as HTMLElement
+    expect(detail).toBeTruthy()
+    expect(detail.textContent).toContain('有读不到的会话')
+    expect(detail.textContent).toContain('ghost')
+    grouped.view.unmount()
+
+    // The flat body never mounts it either.
+    localStorage.clear()
+    const preferences = createWorkspaceViewStore().create()
+    preferences.actions.setGroupBy('flat')
+    localStorage.setItem('dsh.workspace.view.v5', JSON.stringify(preferences.getSnapshot()))
+    mount({
+      useSessionHealth: hook({ report: brokenReport }),
+      useSessions: hook(sessionState([summary('session-7', 12)])),
+      useWorkspaces: hook(workspaceState([])),
+    })
+    expect(document.querySelector('[data-row-key="queue-health"]')).toBeNull()
+    expect(screen.queryByText(/安康位告警|值守告警|自动路由告警|复活机制告警/)).toBeNull()
+  })
+
   // queue-zone-1113 (2026-11-13 ruling): the global 「要我拿主意」 segment is
   // gone — no count bar, no fold, no 无待办 line, no segment tree. Queued
   // rows live banded inside their Workspace group (red first, yellow after),
   // the flat list lifts the same bands to its top, the cross-workspace counts
-  // ride the group header badge, and the 安康位 alarm survives as a
-  // conditional line at the head of both list bodies.
+  // ride the group header badge, and (since 2026-11-26) no 安康位 alarm line
+  // leads either body — the header shield is the single alarm surface.
   it('renders no global queue segment at all — the queued row lives in its group (queue-zone-1113)', () => {
     mount({
       useSessions: hook(sessionState([summary('session-7', 12), summary('session-8', 11)])),
@@ -3429,48 +3308,5 @@ describe('Workspace tree grouping', () => {
     // flow keeps the order the browser selected for it.
     expect(screen.getAllByRole('treeitem').map(row => row.querySelector('[class*="title"]')?.textContent))
       .toEqual(['failed-new', 'failed-old', 'ask-new', 'ask-old', 'rest-b', 'rest-a'])
-  })
-
-  it('keeps the 安康位 alarm as the conditional first line of both list bodies (queue-zone-1113)', () => {
-    const brokenReport: SessionHealthReport = {
-      ok: false,
-      total: 2,
-      counts: { running: 1, awaiting: 0, failed: 0, rest: 0 },
-      issues: [{ invariant: 'unreadable', sessionIds: [sid('ghost')] }],
-    }
-    const balanced: SessionHealthReport = {
-      ok: true, total: 1, counts: { running: 1, awaiting: 0, failed: 0, rest: 0 }, issues: [],
-    }
-    const grouped = mount({
-      useSessionHealth: hook({ report: brokenReport }),
-      useSessions: hook(sessionState([summary('session-7', 12)])),
-      useWorkspaces: hook(workspaceState([workspace('alpha', ['session-7'])])),
-    })
-    const alert = document.querySelector('[data-row-key="queue-health"]') as HTMLElement
-    expect(alert).toBeTruthy()
-    // It leads the body's rows with no segment furniture around it.
-    expect(alert.closest('[class*="treeBody"]')?.firstElementChild).toBe(alert)
-    expect(document.querySelector('[data-row-key="queue"]')).toBeNull()
-    // Idle: the same body renders no alarm at all.
-    rerender(grouped, { useSessionHealth: hook({ report: balanced }) })
-    expect(document.querySelector('[data-row-key="queue-health"]')).toBeNull()
-    grouped.view.unmount()
-
-    // The flat body mounts the same conditional line.
-    localStorage.clear()
-    const preferences = createWorkspaceViewStore().create()
-    preferences.actions.setGroupBy('flat')
-    localStorage.setItem('dsh.workspace.view.v5', JSON.stringify(preferences.getSnapshot()))
-    const flatBroken = mount({
-      useSessionHealth: hook({ report: brokenReport }),
-      useSessions: hook(sessionState([summary('session-7', 12)])),
-      useWorkspaces: hook(workspaceState([])),
-    })
-    const flatAlert = document.querySelector('[data-row-key="queue-health"]') as HTMLElement
-    expect(flatAlert).toBeTruthy()
-    expect(flatAlert.closest('[class*="treeBody"]')?.firstElementChild).toBe(flatAlert)
-    expect(document.querySelector('[data-row-key="queue"]')).toBeNull()
-    rerender(flatBroken, { useSessionHealth: hook({ report: balanced }) })
-    expect(document.querySelector('[data-row-key="queue-health"]')).toBeNull()
   })
 })

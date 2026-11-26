@@ -124,7 +124,18 @@ describe('WorkspaceBrowser.module.css list', () => {
     expect(rowDeclarations('.rowActions')?.get('gap')).toBe('13px')
     expect(rowDeclarations('.iconButton')?.get('width')).toBe('24px')
     expect(rowDeclarations('.time')?.get('margin-inline-end')).toBe('-1px')
-    expect(declarations('.sectionLabel')?.get('left')).toBe('-1px')
+  })
+
+  it('left-aligns the whole header row now that the title label is gone (2026-11-26)', () => {
+    // No 工作区 / 会话 label leads the row any more, so the search control and
+    // every icon after it pack against the left edge instead of floating right.
+    expect(declarations('.sectionHeader')?.get('justify-content')).toBe('flex-start')
+    expect(declarations('.searchSlot')?.get('margin-left')).toBeUndefined()
+    expect(declarations('.sectionLabel')).toBeUndefined()
+    expect(declarations('.sectionLabelHidden')).toBeUndefined()
+    // The clipped action window still holds exactly the two cluster buttons;
+    // the 安康位 shield and alert inbox stay their siblings AFTER it.
+    expect(declarations('.headerActions')?.get('max-width')).toBe('60px')
   })
 
   it('extends native row action targets while retaining the compact layout footprint', () => {
@@ -155,7 +166,6 @@ describe('WorkspaceBrowser.module.css list', () => {
     expect(declarations('.searchExpanded')?.get('width')).toBe('100%')
     expect(declarations('.searchExpanded')?.get('margin-inline')).toBe('0')
     expect(declarations('.searchExpanded .searchButton')?.get('height')).toBe('32px')
-    expect(declarations('.sectionHeader:has(.searchExpanded) .sectionLabelHidden')?.get('margin-right')).toBe('0')
     expect(declarations('.list')?.get('overflow-y')).toBe('auto')
   })
 
@@ -181,16 +191,19 @@ describe('WorkspaceBrowser.module.css list', () => {
     expect(declarations('.rail .search')?.get('width')).toBe('36px')
   })
 
-  it('drops the removed queue segment styles and keeps the alarm line on the list seat (queue-zone-1113)', () => {
+  it('drops the removed queue segment and alarm line styles (queue-zone-1113)', () => {
     // The global segment (section, count bar, rows clip, empty line, fold
     // chevron) went away with the ruling — no rule may survive for it.
     for (const removed of [
       '.queueSection', '.queueToggle', '.queueRows', '.queueEmpty', '.queueChevron', '.queueChevronOpen',
     ]) expect(declarations(removed), removed).toBeUndefined()
     expect(css).not.toContain('[data-queue-scroll]')
-    // The 安康位 alarm line keeps the list's trailing seat and row gutter.
-    expect(declarations('.queueHealth')?.get('margin'))
-      .toBe('0 calc(var(--dsh-session-list-edge-inset) - var(--dsh-session-list-scrollbar-offset)) 4px 12px')
+    // 2026-11-26: the 安康位 alarm line is gone from the list head too, so its
+    // box, button and expansion body all lose their rules with it.
+    for (const removed of ['.queueHealth', '.queueHealthButton', '.queueHealthDetail']) {
+      expect(declarations(removed), removed).toBeUndefined()
+    }
+    expect(css).not.toContain('queue-health')
     // The group header badge rides the title's line a notch under the title's
     // size, spaced clear of the name, on a dot sized to the smaller type.
     expect(rowDeclarations('.attentionBadges')?.get('font-size')).toBe('12px')

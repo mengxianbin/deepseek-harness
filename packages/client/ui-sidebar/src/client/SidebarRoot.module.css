@@ -691,8 +691,11 @@
    Today/Cycle token rows in their own column to the right; every track keeps
    the same fixed width and sits left-aligned. Rows stack GAPLESS — each
    12px line box carries its 6px track with 3px lead, so three rows plus the
-   button's 4px padding total exactly 40px, the height the Windows titlebar
-   logo row allows (60px web / 40px titlebar, see .logoRow). */
+   readout's 4px padding total exactly 40px, the height the Windows titlebar
+   logo row allows (60px web / 40px titlebar, see .logoRow).
+   Read-only (2026-11-26 用户裁定纯只读): the glance no longer opens Settings,
+   so the readout drops the pointer cursor and the hover fill — no click
+   affordance on a non-interactive surface. */
 .usageGlance {
   flex: 1;
   min-width: 0;
@@ -700,11 +703,11 @@
   align-items: center;
 }
 
-.glanceButton {
+.glanceReadout {
   display: inline-flex;
   align-items: center;
-  /* FORK (usage glance v2.4.3): the button stretches with the sidebar so the
-     elastic chain (button → body → rows → track) can consume the whole width. */
+  /* FORK (usage glance v2.4.3): the readout stretches with the sidebar so the
+     elastic chain (readout → body → rows → track) can consume the whole width. */
   flex: 1 1 auto;
   min-width: 0;
   max-width: 100%;
@@ -715,11 +718,6 @@
   border-radius: var(--dsw-radius-sm);
   background: transparent;
   color: inherit;
-  cursor: pointer;
-}
-
-.glanceButton:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
 }
 
 .glanceBody {

@@ -1,7 +1,8 @@
 /**
  * The workspace/session browsing region filling the sidebar shell's
- * `sidebar.workspaces` hole: section header (title + view options + add
- * workspace), search, the grouped tree or flat list, and the workspace
+ * `sidebar.workspaces` hole: section header (search + view options + add
+ * workspace + the 安康位 shield and alert inbox badges, all left-aligned with
+ * no title label), search, the grouped tree or flat list, and the workspace
  * dialogs. Wide state renders the full browser; rail state renders the two
  * region icons (search / add workspace) as 36px controls on the shell's shared
  * rail entry path, each requesting expansion through the owner share. Adding
@@ -26,7 +27,6 @@ import {
 import type {
   SessionListState, SessionSearchResultItem,
 } from '@deepseek-ai/dsh-api-session-controller/client'
-import type { SessionHealthState } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import { workspaceDisplayTitle } from '@deepseek-ai/dsh-api-workspace-controller/default-workspace'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
@@ -43,7 +43,6 @@ import {
 import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
 import { HealthShield } from './HealthShield.tsx'
 import { AlertInboxBadge } from './AlertInboxBadge.tsx'
-import { HealthDetail } from './HealthDetail.tsx'
 import { FLAT_SESSION_ORDER_KEY, type SessionGroupBy } from '../stores.ts'
 import { WorkspacePickFlow } from '../WorkspacePicker.tsx'
 import css from './WorkspaceBrowser.module.css'
@@ -286,12 +285,6 @@ type SessionTreeProps = Pick<
    */
   watchSessionJobs: WorkspaceBrowserProps['watchSessionJobs']
   /**
-   * The ui-session health hook (global standard prop), threaded the same
-   * way: required as a slot with `undefined` in it; the list body's
-   * `HealthAlertLine` owns absence (collab-step4-c5 安康位, queue-zone-1113).
-   */
-  useSessionHealth: WorkspaceBrowserProps['useSessionHealth']
-  /**
    * FORK archive-seal-light-1101: the C1 verdict snapshot the row lamps read,
    * read once from the browser's bound `useSealLight` hook and threaded down
    * as plain data — rows hold no subscription machinery of their own.
@@ -350,96 +343,14 @@ type SessionTreeProps = Pick<
  * queue-zone-1113 (2026-11-13 ruling): the global 「要我拿主意」 segment is gone —
  * no segment, no count bar, no fold, no 「无待办」 line. Queued red/yellow rows
  * live inside their Workspace group (red band first, yellow band after —
- * `deriveGroups`), and the flat list lifts the same bands to its top. What
- * remains at the head of BOTH list bodies is the 安康位 alarm below: a
- * conditional line with no chrome when idle, mounted only while the trigger
- * holds (queue-zone-1113 removes the count bar it used to ride with).
+ * `deriveGroups`), and the flat list lifts the same bands to its top.
  *
- * FORK dsh-local (collab-step4-c5, marker: healthShield): the 安康位 alarm is a
- * conditional row at the top of the list body (step3 §5.2 插队, step2 §4.3 机制
- * 自动巡检) — a red row when the Host sweep's books stop balancing, an amber
- * dashed row when the health chain itself goes silent; the click expands the
- * same detail the shield shows. 批2 duty-shield-b2-1103 (step2 §4.3 duty
- * extension): the duty fold rides the SAME row — a failed or untrusted 值守总账
- * reads exactly like a broken Session reconciliation (三态纪律: 有意停用 never
- * sets the verdict, so it never alarms — 灰不亮不报警), and the expansion
- * renders the shared HealthDetail (会话对账 + 值守清单). 2026-11-04 ruling: a
- * SUSTAINED auto-route poll failure joins the row with its own text (never
- * borrowed from 对账), and the detail gains the 自动路由 section. 拍板⑭⑮: the
- * revive mechanism's red verdict joins with its own text too (正常静默、异常才
- * 亮 — an ABSENT health document never triggers this row; the detail's fourth
- * section carries the quiet 「未接线」 line), and the detail gains the 复活机制
- * section.
+ * 2026-11-26: the 安康位 alarm line that used to lead BOTH list bodies is
+ * removed too (对账 / duty / stale / autoRoute / revive — all five verdicts).
+ * It carried no information the header's 安康位 shield did not already show:
+ * the shield stays the single detail surface (its popover renders the shared
+ * HealthDetail), and the list head keeps only its rows.
  */
-/** The 安康位 alarm's conditional row at the top of a list body (collab step3 §5.2). */
-function HealthQueueAlert({ health, t }: { health: SessionHealthState; t: SessionTreeProps['t'] }) {
-  const [expanded, setExpanded] = useState(false)
-  const report = health.report
-  const sessionBroken = report?.ok === false
-  // 批2: the duty verdict plugs into the same alarm — red + 插队 for a failed
-  // or untrusted ledger; a healthy/disabled-only ledger sets nothing here.
-  const dutyBroken = report?.duty?.ok === false
-  // 2026-11-04 ruling: a SUSTAINED auto-route meter-poll failure joins the
-  // alarm (transient misses set nothing — the glance tooltip owns those).
-  const autoRouteSustained = report?.autoRoute?.sustained === true
-  // 拍板⑭⑮: the revive mechanism's own verdict joins with its own text; an
-  // ABSENT health document sets nothing (change-only writer, optional plane).
-  const reviveBroken = report?.reviveHealth?.ok === false
-  const broken = sessionBroken || dutyBroken || autoRouteSustained || reviveBroken
-  return (
-    <div className={css.queueHealth} data-row-key="queue-health" data-health-alert={broken ? 'broken' : 'stale'}>
-      <button
-        type="button"
-        className={css.queueHealthButton}
-        aria-expanded={expanded}
-        onClick={() => { setExpanded(value => !value) }}
-      >
-        {sessionBroken
-          ? t('queue.health.broken')
-          : dutyBroken
-            ? t('queue.health.duty')
-            : autoRouteSustained
-              // Its own text: the books balance, the controller is blind —
-              // never borrow "对账对不上" for a different fact.
-              ? t('queue.health.autoRoute')
-              : reviveBroken
-                // 拍板⑭⑮: its own text — the revival mechanism, not any
-                // other plane's words (one fact, one alarm surface).
-                ? t('queue.health.revive')
-                : t('queue.health.stale', { s: health.staleSeconds ?? 0 })}
-      </button>
-      {expanded && (
-        <div className={css.queueHealthDetail} data-health-alert-detail="">
-          {/* `broken` already narrows at least one plane present; the shared
-              body shows every section the report carries (批2 两段). */}
-          {broken
-            ? <HealthDetail report={report} t={t} />
-            : t('queue.health.staleHint')}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/**
- * The 安康位 alarm line at the head of a list body (queue-zone-1113): the
- * health hook is read unconditionally (a hook must stay unconditional), but
- * the row renders only while its trigger holds — stale readings, a broken
- * session/duty reconciliation, a sustained auto-route failure, or (拍板⑭⑮)
- * the revive mechanism's red verdict — so an idle body shows no chrome at
- * all. The grouped and the flat body both mount this as their first child,
- * above the rows.
- */
-function HealthAlertLine({ useSessionHealth, t }: {
-  useSessionHealth: WorkspaceBrowserProps['useSessionHealth']
-  t: SessionTreeProps['t']
-}) {
-  const health = useSessionHealth?.(state => state)
-  if (health === undefined) return null
-  const triggered = health.stale === true || health.report?.ok === false || health.report?.duty?.ok === false
-    || health.report?.autoRoute?.sustained === true || health.report?.reviveHealth?.ok === false
-  return triggered ? <HealthQueueAlert health={health} t={t} /> : null
-}
 
 /** The list-empty placeholder — a glyph over the text; the archived-only view names its filter and offers the way back. */
 function EmptySessions({ rowState, onLeaveArchivedOnly, t }: Pick<SessionTreeProps, 'rowState' | 'onLeaveArchivedOnly' | 't'>) {
@@ -508,7 +419,7 @@ function SessionListError({ onRetry, t }: { onRetry: () => void; t: SessionTreeP
 
 /** The scrolling session tree; unmounting drops the sessions subscription and the session watermarks. */
 function SessionTree({
-  list, useSessionStatus, useSessionHealth, startSession, open, workspaces, ungroupedSessionIds,
+  list, useSessionStatus, startSession, open, workspaces, ungroupedSessionIds,
   rowState, onLeaveArchivedOnly,
   workspaceReady, animationResetKey, usePanelInfo, useRemoteAccess, useSessionAccess, useWorkspaceAccess,
   onRenameRequest, onDeleteRequest, onSessionRenameRequest,
@@ -893,11 +804,8 @@ function SessionTree({
   return (
     <HoverCardGroup className={clsx(css.treeBody, css.wide)} containerRef={treeBodyRef}>
       {/* queue-zone-1113: no segment leads the list — queued rows live banded
-          inside their groups below. The 安康位 alarm is this body's conditional
-          first child: mounted only while its trigger holds, no chrome when idle.
-          The list-start drop marker follows it: a workspace drop lands before
-          the first workspace. */}
-      <HealthAlertLine useSessionHealth={useSessionHealth} t={t} />
+          inside their groups below. The list-start drop marker follows it: a
+          workspace drop lands before the first workspace. */}
       {workspaceDropAtListStart && <span className={css.listTopDropIndicator} aria-hidden="true" />}
       <AnimatedRows
         className={clsx(css.list, workspaceDropAtListStart && css.listTopDropActive)}
@@ -919,13 +827,12 @@ function SessionTree({
 
 /** The flat "In one list" body: every session is one draggable top-level row. */
 function FlatList({
-  list, sessionIds, rowState, onLeaveArchivedOnly, useSessionStatus, useSessionHealth, useSessionAccess, open,
+  list, sessionIds, rowState, onLeaveArchivedOnly, useSessionStatus, useSessionAccess, open,
   onSessionRenameRequest, usePanelInfo, setSessionOrder, workspaceReady, animationResetKey,
   revealSessionId, onSessionRevealed, renderSlot, home, t, watchSessionJobs, seals, sealRows, workspaces,
 }: Pick<
   SessionTreeProps,
   | 'useSessionStatus'
-  | 'useSessionHealth'
   | 'useSessionAccess'
   | 'open'
   | 'onSessionRenameRequest'
@@ -984,9 +891,7 @@ function FlatList({
   return (
     <HoverCardGroup className={clsx(css.treeBody, css.wide)}>
       {/* queue-zone-1113: no segment leads the flat body — queued rows are
-          lifted to the top of the flow below. The 安康位 alarm is this body's
-          conditional first child, mounted only while its trigger holds. */}
-      <HealthAlertLine useSessionHealth={useSessionHealth} t={t} />
+          lifted to the top of the flow below. */}
       <AnimatedRows
         className={clsx(css.list, css.flatList)}
         role="tree"
@@ -1626,11 +1531,6 @@ export function WorkspaceBrowser({
     <div ref={rootRef} className={clsx(css.root, !wide && css.rail)}>
       <div className={clsx(css.sectionHeader, wide && searchSpacingMotionEnabled && css.searchSpacingMotion)}>
         {wide && (
-          <span className={clsx(css.sectionLabel, css.wide, searchExpanded && css.sectionLabelHidden)}>
-            {groupBy === 'flat' ? t('section.sessions') : t('section.workspaces')}
-          </span>
-        )}
-        {wide && (
           <div className={clsx(css.searchSlot, searchExpanded && css.searchSlotExpanded)}>
             <div
               ref={searchRoot}
@@ -1824,7 +1724,6 @@ export function WorkspaceBrowser({
                   workspaceReady={workspaceReady}
                   animationResetKey={`${groupBy}/${orderBy}/${archivedFilter}`}
                   useSessionStatus={useSessionStatus}
-                  useSessionHealth={useSessionHealth}
                   open={guardedOpen}
                   onSessionRenameRequest={requestSessionRename}
                   renderSlot={renderSlot}
@@ -1848,7 +1747,6 @@ export function WorkspaceBrowser({
                   list={list}
                   shortcuts={shortcuts}
                   useSessionStatus={useSessionStatus}
-                  useSessionHealth={useSessionHealth}
                   onSessionRenameRequest={requestSessionRename}
                   renderSlot={renderSlot}
                   workspaces={orderedWorkspaces}

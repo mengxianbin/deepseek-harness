@@ -19,7 +19,7 @@
  * structure — never render. The rows and the cycle token read the same
  * provider row (current provider first), so the token column stays on the
  * month row's window. Rows stack gapless: 3 × 12px line boxes plus the
- * button's 4px padding = 40px, exactly the Windows titlebar logo row's height
+ * readout's 4px padding = 40px, exactly the Windows titlebar logo row's height
  * (the web row, 60px with 8px padding, keeps slack). Today's compact token
  * total lives in its own column to the right (`200M`). FORK dsh-local (v2.2,
  * 2026-10-15): that column stacks vertically — the token total above, and
@@ -103,22 +103,27 @@
  * dot is a width-only addition — the wide titlebar logo row's 40px height
  * budget (3 × 12px rows + 4px padding) stays untouched.
  *
- * Clicking the control opens the settings panel on the usage section by
- * replaying the user's own path — the shell owns the panel state and exposes
- * no service for it, so every step degrades silently.
+ * Read-only (2026-11-26 用户裁定纯只读): the click-to-open-Settings path is
+ * retired. The replay used to open the panel but could never land on the
+ * usage section — dsh-usage seats its page inside Web Extensions now, so the
+ * first-level `[data-settings-section="dsh-usage"]` row it hunted no longer
+ * exists, and the glance's own readings had already diverged from that page
+ * anyway. Opening Settings is the footer gear's job. The control is a
+ * non-interactive group: readings plus a title tooltip, no pointer cursor,
+ * no hover affordance.
  *
  * v3 source indication, dots fully retired (2026-11-04 用户裁定, superseding
  * the exception-only v2 badge from `ea1b98f237`/2026-10-30): both source dots
  * are gone. Usage warnings speak through the bar colors alone; the source
  * state speaks through the dimmed Go window rows (triggered = the rows stop
- * describing dsh's live spend) plus one button-title line spelling the
+ * describing dsh's live spend) plus one readout-title line spelling the
  * switch; the 95–99 dead-zone fork needs no indicator at all (the bar colors
  * already carry it). The control still reads the auto-routing controller's
  * own policy state at `GET /api/auto-route/status` (same origin, same 60s
  * cadence; a 404 — controller not installed — reads as nothing at all),
  * never the overview's `current{provider,model,source}` — that is
  * last-request-routing semantics and would flap while both sources run.
- * ONE exception line survives on the button title: a failing controller
+ * ONE exception line survives on the readout title: a failing controller
  * poll (控制器轮询异常), transient by design — ambient surfaces stay silent
  * for blips (狼来了), while a SUSTAINED failure (≥ ~5 min) reddens the
  * 安康盾 on the harness side, which folds the same controller's poll ledger
@@ -232,13 +237,6 @@ export function formatBalanceFigure(balance: BalanceView): string {
   if (total === undefined || total === '') return '—'
   return balance.currency === 'CNY' ? `${total}R` : total
 }
-
-/**
- * Stable selector for the usage nav row. The settings shell stamps each nav
- * button with `data-settings-section`, so the replay addresses the row by its
- * section id instead of localized text.
- */
-const USAGE_SECTION_ROW = '[data-settings-section="dsh-usage"]'
 
 /** One quota window as the host normalizes it. */
 interface PlanWindowView {
@@ -361,10 +359,10 @@ export interface GlanceState {
 }
 
 /**
- * One auto-route status reading, reduced to what the button still renders
+ * One auto-route status reading, reduced to what the readout still renders
  * after the badge-dot retirement (2026-11-04 用户裁定: dots fully retired —
  * usage warnings speak through bar colors, source state through the frozen
- * rows, and the poll failure through one button-title line).
+ * rows, and the poll failure through one readout-title line).
  */
 export interface SourceBadgeView {
   /** True while the policy sits in its triggered (switched) phase — the rows freeze. */
@@ -374,7 +372,7 @@ export interface SourceBadgeView {
 }
 
 /**
- * Reduce the auto-route status document to the button facts. Foreign or
+ * Reduce the auto-route status document to the readout's title facts. Foreign or
  * partial payloads (a host without the controller, an older one) read as
  * "no badge facts" — the title line is absent, never wrong.
  * @param document_ - the parsed `/api/auto-route/status` body.
@@ -687,35 +685,6 @@ export function deriveGlance(overview: UsageOverviewView, now: number = Date.now
 }
 
 /**
- * Open the settings panel on the usage section. Every step degrades silently:
- * with the panel already open only the nav pick runs, and a missing row leaves
- * the panel on its default section.
- */
-export function openUsageSection(): void {
-  const pick = (panel: Element): HTMLElement | null =>
-    panel.querySelector<HTMLElement>(USAGE_SECTION_ROW)
-  const open = document.querySelector('[role="dialog"]')
-  if (open !== null) {
-    pick(open)?.click()
-    return
-  }
-  const sidebar = document.querySelector('[data-pane="sidebar"], [class*="sidebarCol"]')
-  const trigger = sidebar?.querySelector('[class*="settingsArea"] button') as HTMLElement | null
-  trigger?.click()
-  let tries = 0
-  const attempt = (): void => {
-    const panel = document.querySelector('[role="dialog"]')
-    if (panel !== null) {
-      pick(panel)?.click()
-      return
-    }
-    tries += 1
-    if (tries <= 40) window.setTimeout(attempt, 50)
-  }
-  window.setTimeout(attempt, 0)
-}
-
-/**
  * The last load's snapshot at MODULE scope (FORK usage-glance-swr-1031): it
  * outlives the component's mount, so the sidebar's collapse→expand unmount
  * remounts onto stale-while-revalidate instead of placeholders. Absent fields
@@ -759,7 +728,7 @@ export interface UsageGlanceProps {
  * control shows only the token column's placeholders, and a remount seeds
  * from the module cache then revalidates (FORK usage-glance-swr-1031).
  * @param props - the shell's locale translator.
- * @returns the glance button, or null when the usage host serves no routes.
+ * @returns the glance readout, or null when the usage host serves no routes.
  */
 export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
   // Seed from the module-scope snapshot (FORK usage-glance-swr-1031): a
@@ -864,7 +833,7 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
   // Exception-only source indication, v3 (2026-11-04 用户裁定 双点完全下岗):
   // the red/warn source dots are GONE. Usage warnings already speak through
   // the bar colors; the source state speaks through the frozen Go rows plus
-  // one button-title line ("dsh 已自动切至 MiMo 官方"); the 95–99 dead-zone
+  // one readout-title line ("dsh 已自动切至 MiMo 官方"); the 95–99 dead-zone
   // fork needs no badge at all (bar colors suffice). The ONLY remaining
   // exception line is a failing controller poll (title: 控制器轮询异常) —
   // transient by design: ambient surfaces stay silent for blips (狼来了),
@@ -891,18 +860,17 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
   ].join(' · ')
   return (
     <span className={css.usageGlance}>
-      <button
-        type="button"
-        className={css.glanceButton}
-        aria-label={t('glance.open')}
+      <span
+        role="group"
+        className={css.glanceReadout}
+        aria-label={t('glance.title')}
         title={[
           ...(frozen ? [t('glance.source.frozen')] : []),
           // The one surviving exception line (transient poll failure);
-          // a sustained one is the 安康盾's job, not this button's.
+          // a sustained one is the 安康盾's job, not this readout's.
           ...(pollFailing ? [t('glance.source.pollError')] : []),
-          t('glance.open'),
+          t('glance.title'),
         ].join(' · ')}
-        onClick={() => { openUsageSection() }}
       >
         <span className={css.glanceBody}>
           <span className={frozen ? `${css.glanceRows} ${css.glanceRowsFrozen}` : css.glanceRows}>
@@ -989,7 +957,7 @@ export function UsageGlance({ t }: UsageGlanceProps): ReactNode {
             </span>
           </span>
         </span>
-      </button>
+      </span>
     </span>
   )
 }

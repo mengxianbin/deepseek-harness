@@ -412,14 +412,19 @@ describe('web e2e: workspace management (create / rename / grouping / hover affo
   it('switches to the flat "In one list" view and persists the preference', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-ws-flat'))
     // Grouped default: workspace group rows render (the seeded session sits
-    // under Ungrouped; the created workspaces are empty groups).
-    await expect.poll(() => page.getByText('Workspaces', { exact: true }).count(), { timeout: 10_000 }).toBe(1)
+    // under Ungrouped; the created workspaces are empty groups). The header
+    // carries no title label at all since 2026-11-26.
+    await expect.poll(() => page.getByText('Ungrouped', { exact: true }).count(), { timeout: 10_000 })
+      .toBeGreaterThanOrEqual(1)
+    await expect.poll(() => page.locator('[class*="sectionLabel"]').count()).toBe(0)
     // Grouping and ordering moved into the View options menu.
     await page.getByRole('button', { name: 'View options' }).click()
     await page.getByRole('menuitem', { name: 'In one list' }).click()
-    // Flat mode: the section label flips and the seeded session is a
-    // top-level row with no group headers above it.
-    await expect.poll(() => page.getByText('Sessions', { exact: true }).count(), { timeout: 10_000 }).toBeGreaterThanOrEqual(1)
+    // Flat mode: still no title label (the row is label-free in both
+    // groupings), the group headers are gone, and the seeded session is a
+    // top-level row.
+    await expect.poll(() => page.locator('[class*="sectionLabel"]').count(), { timeout: 10_000 }).toBe(0)
+    await expect.poll(() => page.locator('[class*="groupSection"]').count()).toBe(0)
     await expect.poll(() => page.getByText('Ungrouped', { exact: true }).count(), { timeout: 5_000 }).toBe(0)
     await expect.poll(() => page.locator('[role="treeitem"]').count(), { timeout: 10_000 }).toBeGreaterThanOrEqual(1)
     expect(await page.evaluate(() => localStorage.getItem('dsh.workspace.view.v5'))).toContain('flat')
@@ -875,7 +880,9 @@ describe('web e2e: workspace management (create / rename / grouping / hover affo
     await page.reload({ waitUntil: 'load' })
     await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
     acknowledgeReloadConnectionLoss(tripwire, warningStart)
-    await expect.poll(() => page.getByText('Workspaces', { exact: true }).count(), { timeout: 15_000 }).toBe(1)
+    // The rebuilt baseline is grouped again — the resident Ungrouped bucket
+    // is the readiness signal (the header title label no longer exists).
+    await expect.poll(() => page.getByText('Ungrouped', { exact: true }).count(), { timeout: 15_000 }).toBe(1)
     // Initial Workspace reconnection can focus the composer after the tree renders.
     // Finish that navigation before the next test opens a path editor.
     await page.locator('[role="treeitem"][aria-selected="true"]').waitFor({ timeout: 15_000 })

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
-import { deriveGlance, formatBalanceFigure, formatCompactTokens, formatRefreshStamp, openUsageSection, readSourceBadge, resetGlanceCache, UsageGlance, type GlanceWindowRow, type UsageOverviewView } from '../src/client/UsageGlance.tsx'
+import { deriveGlance, formatBalanceFigure, formatCompactTokens, formatRefreshStamp, readSourceBadge, resetGlanceCache, UsageGlance, type GlanceWindowRow, type UsageOverviewView } from '../src/client/UsageGlance.tsx'
 import { en } from '../src/client/locales.ts'
 
 const t = makeTranslate({ ...commonEn, ...en })
@@ -420,7 +420,7 @@ describe('UsageGlance', () => {
     expect(screen.getByText(t('glance.today.label'))).toBeTruthy()
     expect(screen.getByText(t('glance.cycle.label'))).toBeTruthy()
     expect(screen.getByText(t('glance.mimoBalance.label'))).toBeTruthy()
-    expect(screen.getByRole('button', { name: t('glance.open') })).toBeTruthy()
+    expect(screen.getByRole('group', { name: t('glance.title') })).toBeTruthy()
   })
 
   it('paints the overrun in warn with the split at the tick on an over-pace row', async () => {
@@ -621,60 +621,10 @@ describe('UsageGlance', () => {
     expect(fetchMock).toHaveBeenCalledTimes(6)
   })
 
-  it('replays the user path onto the usage section', async () => {
-    const sidebar = document.createElement('div')
-    sidebar.className = 'sidebarCol'
-    const settingsArea = document.createElement('div')
-    settingsArea.className = 'settingsArea'
-    const trigger = document.createElement('button')
-    settingsArea.append(trigger)
-    sidebar.append(settingsArea)
-    document.body.append(sidebar)
-
-    const dialog = document.createElement('div')
-    dialog.setAttribute('role', 'dialog')
-    const nav = document.createElement('nav')
-    const general = document.createElement('button')
-    general.textContent = '通用设置'
-    general.setAttribute('data-settings-section', 'general')
-    const usage = document.createElement('button')
-    usage.textContent = '使用统计'
-    usage.setAttribute('data-settings-section', 'dsh-usage')
-    nav.append(general, usage)
-    dialog.append(nav)
-
-    let triggerClicks = 0
-    let usageClicks = 0
-    trigger.addEventListener('click', () => {
-      triggerClicks += 1
-      document.body.append(dialog)
-    })
-    usage.addEventListener('click', () => { usageClicks += 1 })
-
-    openUsageSection()
-    // The trigger activates synchronously; the nav pick rides the retry timer.
-    expect(triggerClicks).toBe(1)
-    await flush()
-    expect(usageClicks).toBe(1)
-  })
-
-  it('picks the section directly when the panel is already open', () => {
-    const dialog = document.createElement('div')
-    dialog.setAttribute('role', 'dialog')
-    const nav = document.createElement('nav')
-    const usage = document.createElement('button')
-    usage.setAttribute('data-settings-section', 'dsh-usage')
-    nav.append(usage)
-    dialog.append(nav)
-    document.body.append(dialog)
-    let clicks = 0
-    usage.addEventListener('click', () => { clicks += 1 })
-
-    openUsageSection()
-    expect(clicks).toBe(1)
-  })
-
-  it('leaves the panel alone when the section row is missing', async () => {
+  it('is a read-only group — no click opens Settings (2026-11-26 用户裁定纯只读)', async () => {
+    // The click-to-open-Settings path is retired: the dsh-usage section moved
+    // into Web Extensions, so the replay's first-level nav row no longer exists
+    // and a click could only ever open the panel on its default section.
     const sidebar = document.createElement('div')
     sidebar.className = 'sidebarCol'
     const settingsArea = document.createElement('div')
@@ -684,20 +634,26 @@ describe('UsageGlance', () => {
     sidebar.append(settingsArea)
     document.body.append(sidebar)
     let triggerClicks = 0
-    trigger.addEventListener('click', () => {
-      triggerClicks += 1
-      const dialog = document.createElement('div')
-      dialog.setAttribute('role', 'dialog')
-      const nav = document.createElement('nav')
-      nav.append(document.createElement('button'))
-      dialog.append(nav)
-      document.body.append(dialog)
-    })
+    trigger.addEventListener('click', () => { triggerClicks += 1 })
 
-    openUsageSection()
-    expect(triggerClicks).toBe(1)
-    await flush()
-    expect(document.querySelectorAll('[data-settings-section]')).toHaveLength(0)
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => OVERVIEW })))
+    const { container } = render(<UsageGlance t={t} />)
+    await screen.findByText('85%')
+    // Not a button: no role, no click handler, no Settings side effect.
+    expect(container.querySelector('button')).toBeNull()
+    fireEvent.click(container.querySelector('[role="group"]')!)
+    expect(triggerClicks).toBe(0)
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+  })
+
+  it('keeps the title on the readout itself — no dialog, no nav row, no replay', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => OVERVIEW })))
+    const { container } = render(<UsageGlance t={t} />)
+    await screen.findByText('85%')
+    const readout = container.querySelector('[role="group"]')
+    expect(readout).not.toBeNull()
+    expect(readout?.getAttribute('title')).toBe(t('glance.title'))
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
   })
 })
 
@@ -716,10 +672,7 @@ describe('UsageGlance balance row after the re-login CTA moved (FORK mimo-login-
     expect(screen.queryByRole('link')).toBeNull()
   })
 
-  it('keeps the whole-row settings replay intact (the stopPropagation carve-out left with the link)', async () => {
-    // The settings-path fixture from the replay tests: the row's onClick
-    // replays onto the usage section; the old CTA needed a carve-out, the
-    // readings-only row does not.
+  it('ignores clicks on the balance row — the whole readout is inert (纯只读 2026-11-26)', async () => {
     const sidebar = document.createElement('div')
     sidebar.className = 'sidebarCol'
     const settingsArea = document.createElement('div')
@@ -732,10 +685,11 @@ describe('UsageGlance balance row after the re-login CTA moved (FORK mimo-login-
     trigger.addEventListener('click', () => { triggerClicks += 1 })
 
     vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: async () => OVERVIEW })))
-    render(<UsageGlance t={t} />)
+    const { container } = render(<UsageGlance t={t} />)
     await screen.findByText(t('glance.mimoBalance.label'))
     fireEvent.click(screen.getByText(t('glance.mimoBalance.label')))
-    expect(triggerClicks).toBe(1)
+    expect(triggerClicks).toBe(0)
+    expect(container.querySelector('button')).toBeNull()
   })
 })
 
@@ -801,7 +755,7 @@ describe('current-source button (auto-route, dots fully retired 2026-11-04)', ()
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
     expectNoDot(container)
     expect(container.querySelector('[class*="glanceRowsFrozen"]')).toBeNull()
-    expect(container.querySelector('button')?.getAttribute('title')).toBe(t('glance.open'))
+    expect(container.querySelector('[role="group"]')?.getAttribute('title')).toBe(t('glance.title'))
     expect(screen.getByText('85%')).toBeTruthy()
   })
 
@@ -819,13 +773,13 @@ describe('current-source button (auto-route, dots fully retired 2026-11-04)', ()
     // The triggered state speaks through the dimmed rows, never a dot.
     expectNoDot(container)
     expect(container.querySelector('[class*="glanceRowsFrozen"]')).toBeTruthy()
-    const button = container.querySelector('button')
-    expect(button?.getAttribute('title')).toContain(t('glance.source.frozen'))
+    const readout = container.querySelector('[role="group"]')
+    expect(readout?.getAttribute('title')).toContain(t('glance.source.frozen'))
     // The controller's restore edge (all windows < 0.95) brings the rows back.
     status = statusDoc({ phase: 'baseline', effectiveSource: 'opencode-go', lastPoll: { at: NOW, ok: true } })
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
     expect(container.querySelector('[class*="glanceRowsFrozen"]')).toBeNull()
-    expect(button?.getAttribute('title')).not.toContain(t('glance.source.frozen'))
+    expect(readout?.getAttribute('title')).not.toContain(t('glance.source.frozen'))
   })
 
   it('shows one title line while the controller poll fails (no dot, no dim)', async () => {
@@ -839,9 +793,9 @@ describe('current-source button (auto-route, dots fully retired 2026-11-04)', ()
     expectNoDot(container)
     // The surviving exception line rides the BUTTON title (hover-revealed,
     // transient by design — a sustained failure is the 安康盾's alarm).
-    const title = container.querySelector('button')?.getAttribute('title') ?? ''
+    const title = container.querySelector('[role="group"]')?.getAttribute('title') ?? ''
     expect(title).toContain(t('glance.source.pollError'))
-    expect(title).toContain(t('glance.open'))
+    expect(title).toContain(t('glance.title'))
     // Baseline never dims whatever the poll says (2026-11-08: the phase alone
     // gates the dim; the failure rides only its title line).
     expect(container.querySelector('[class*="glanceRowsFrozen"]')).toBeNull()
@@ -868,14 +822,14 @@ describe('current-source button (auto-route, dots fully retired 2026-11-04)', ()
     status = statusDoc({ phase: 'triggered', effectiveSource: 'mimo', lastPoll: { at: NOW, ok: false, error: 'meter source unreachable: fetch failed' } })
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
     expect(container.querySelector('[class*="glanceRowsFrozen"]')).toBeTruthy()
-    const title = container.querySelector('button')?.getAttribute('title') ?? ''
+    const title = container.querySelector('[role="group"]')?.getAttribute('title') ?? ''
     expect(title).toContain(t('glance.source.pollError'))
     expect(title).toContain(t('glance.source.frozen'))
     // The recovery lands the same dim it never lost — no flash either way.
     status = statusDoc({ phase: 'triggered', effectiveSource: 'mimo', lastPoll: { at: NOW, ok: true } })
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
     expect(container.querySelector('[class*="glanceRowsFrozen"]')).toBeTruthy()
-    expect(container.querySelector('button')?.getAttribute('title')).not.toContain(t('glance.source.pollError'))
+    expect(container.querySelector('[role="group"]')?.getAttribute('title')).not.toContain(t('glance.source.pollError'))
   })
 
   it('renders the two-leg fork as baseline — bar colors carry it, no chrome', async () => {
@@ -892,7 +846,7 @@ describe('current-source button (auto-route, dots fully retired 2026-11-04)', ()
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
     expectNoDot(container)
     expect(container.querySelector('[class*="glanceRowsFrozen"]')).toBeNull()
-    expect(container.querySelector('button')?.getAttribute('title')).toBe(t('glance.open'))
+    expect(container.querySelector('[role="group"]')?.getAttribute('title')).toBe(t('glance.title'))
   })
 
   it('keeps the overview snapshot alive when the status fetch fails', async () => {
@@ -904,7 +858,7 @@ describe('current-source button (auto-route, dots fully retired 2026-11-04)', ()
     const { container } = render(<UsageGlance t={t} />)
     // The rows still render; the poll-error line simply never appears.
     expect(await screen.findByText('85%')).toBeTruthy()
-    expect(container.querySelector('button')?.getAttribute('title')).not.toContain(t('glance.source.pollError'))
+    expect(container.querySelector('[role="group"]')?.getAttribute('title')).not.toContain(t('glance.source.pollError'))
   })
 
   it('shows no poll-error line when the controller is absent (404)', async () => {
@@ -913,7 +867,7 @@ describe('current-source button (auto-route, dots fully retired 2026-11-04)', ()
       : { status: 200, ok: true, json: async () => OVERVIEW })))
     const { container } = render(<UsageGlance t={t} />)
     expect(await screen.findByText('85%')).toBeTruthy()
-    expect(container.querySelector('button')?.getAttribute('title')).toBe(t('glance.open'))
+    expect(container.querySelector('[role="group"]')?.getAttribute('title')).toBe(t('glance.title'))
   })
 })
 
@@ -978,7 +932,7 @@ describe('remount cache — stale-while-revalidate (FORK usage-glance-swr-1031)'
       : { status: 200, ok: true, json: async () => OVERVIEW })))
     const first = render(<UsageGlance t={t} />)
     await screen.findByText('85%')
-    expect(first.container.querySelector('button')?.getAttribute('title')).toContain(t('glance.source.pollError'))
+    expect(first.container.querySelector('[role="group"]')?.getAttribute('title')).toContain(t('glance.source.pollError'))
     first.unmount()
     // One hanging promise per load cycle: the overview leg is released below,
     // the badge leg (created only after it settles) never is — the cached
@@ -987,12 +941,12 @@ describe('remount cache — stale-while-revalidate (FORK usage-glance-swr-1031)'
     vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { release = resolve })))
     render(<UsageGlance t={t} />)
     expect(screen.getByText('85%')).toBeTruthy()
-    expect(document.querySelector('button')?.getAttribute('title')).toContain(t('glance.source.pollError'))
+    expect(document.querySelector('[role="group"]')?.getAttribute('title')).toContain(t('glance.source.pollError'))
     await act(async () => {
       release?.({ status: 500, ok: false, json: async () => ({}) })
       await Promise.resolve()
     })
     expect(screen.getByText('85%')).toBeTruthy()
-    expect(document.querySelector('button')?.getAttribute('title')).toContain(t('glance.source.pollError'))
+    expect(document.querySelector('[role="group"]')?.getAttribute('title')).toContain(t('glance.source.pollError'))
   })
 })
