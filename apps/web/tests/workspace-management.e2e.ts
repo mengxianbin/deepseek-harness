@@ -518,13 +518,18 @@ describe('web e2e: workspace management (create / rename / grouping / hover affo
    * @returns the session row locator, already present.
    */
   async function seededSessionRow(target = page) {
-    const ungroupedRow = target.getByText('Ungrouped', { exact: true }).locator('..').locator('..')
+    // Structural probe: the group row is the treeitem whose data-row-key is the
+    // empty workspace bucket. Resolving it from the literal word is ambiguous —
+    // a second "Ungrouped" prints on a loose row / hover card as the 归宿短标
+    // fallback (Rows.tsx `homeLabel || t('group.ungrouped')`), so the text walk
+    // up two levels resolves to two elements and trips strict mode.
+    const ungroupedRow = target.locator('[data-row-key="workspace:"]')
     const ungroupedSection = ungroupedRow.locator('..')
     // Initial-current auto-expansion can race this gesture; converge on
     // expanded rather than assuming which update wins first.
     await expect.poll(async () => {
       if (await ungroupedRow.getAttribute('aria-expanded') !== 'true') {
-        await target.getByText('Ungrouped', { exact: true }).click()
+        await ungroupedRow.getByText('Ungrouped', { exact: true }).click()
         await target.waitForTimeout(50)
       }
       return await ungroupedRow.getAttribute('aria-expanded')
