@@ -89,6 +89,17 @@ export function HealthDetail({ report, t }: { report: HealthReport; t: DetailTra
                   {t('health.duty.untrusted', { s: duty.ageSec ?? 0 })}
                 </div>
               )}
+              {/* 睡眠豁免（duty-sleep-gap-1126）：原始年龄超线但睡眠窗已扣减、
+                  实际 fresh —— 灰标只提示「名义龄 + 已豁免」，不亮红。
+                  与上方红支互斥（sleepExempt ⇒ fresh）。 */}
+              {duty.sleepExempt === true && (
+                <div className={css.dutySleepExempt} data-duty-sleep-exempt="">
+                  {t('health.duty.sleepExempt', {
+                    s: duty.ageSec ?? 0,
+                    sleep: duty.sleepOverlapSec ?? 0,
+                  })}
+                </div>
+              )}
               {/* failed = 红 + 逐项明细 (collector reasons, untranslated by policy). */}
               {failed.map(item => (
                 <div key={item.id} className={css.dutyFailed} data-duty-item="failed">

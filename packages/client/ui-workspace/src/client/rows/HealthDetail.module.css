@@ -56,6 +56,15 @@
   color: var(--dsw-alias-state-error-primary);
 }
 
+/* Sleep-exempt ledger (duty-sleep-gap-1126): the file age red was
+   deducted by the sleep window and the item is actually fresh — the
+   notice stays grey so it reads as "nominally aged, exempted", not a
+   failure. */
+.dutySleepExempt {
+  padding: 2px 0;
+  color: var(--dsw-alias-label-secondary);
+}
+
 .dutyFailed {
   display: flex;
   flex-wrap: wrap;
