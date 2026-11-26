@@ -3,10 +3,15 @@
 - textbox "搜索会话名称"
 - button "视图选项"
 - button "添加工作区"
+- button "安康位：对账平，点击展开明细"
+- img "告警信箱加载中"
 - tree "会话":
-  - treeitem "workspace" [expanded]
+  - treeitem "workspace 1 个会话" [expanded]:
+    - text: workspace
+    - img "1 个会话": "1"
   - treeitem "新会话" [selected]
 - button "设置"
+- text: 服务器启动于 {{date}} {{clock}}
 - button "更多"
 - banner:
   - button "打开右侧边栏"
