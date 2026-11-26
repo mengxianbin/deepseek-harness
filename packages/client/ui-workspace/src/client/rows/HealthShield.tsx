@@ -1,9 +1,12 @@
 /**
  * The 安康位 shield badge (FORK dsh-local, collab-step4-c5, marker:
- * healthShield): the 工作区 section header's right-end seat — a sibling AFTER
+ * healthShield): the 工作区 section header's trailing seat — a sibling AFTER
  * the 🔍 / view-options / add cluster, never inside it (the cluster's fixed
  * 60px overflow-hidden clip window swallows a third child whole, 1101 裁切
- * 复修), reading the ui-session health hook.
+ * 复修), reading the ui-session health hook. 2026-11-26: the header row lost
+ * its 工作区 / 会话 title label and left-aligned, so the badge now reads as
+ * the fourth of five icons starting at the row's left edge (🔍 / view options /
+ * add workspace / shield / alert inbox) instead of a right-end seat.
  * Placement = user ruling 2026-11-01 (ask 回执 id=`shield-placement`, A 案
  * 工作区行右端): the first seat — the wide top strip beside UsageGlance —
  * squeezed the usage text out of the clipped row, and this badge audits the
@@ -15,11 +18,10 @@
  * 不变量、哪些会话); and a chain the client stops hearing overlays the SAME
  * amber dashed stale ring the session rows use (step3 §5.1 vocabulary, 自指
  * fail-closed) — the last known verdict stays painted under it (未知不吞已知)
- * while the tooltip counts the interruption up. The 安康位 alarm additionally
- * renders as a conditional line at the head of the session list (the queue
- * health alert — since queue-zone-1113 there is no 「要我拿主意」 segment to cut
- * into; it mounts only while its trigger holds); this badge is the always-on
- * global seat.
+ * while the tooltip counts the interruption up. 2026-11-26: the conditional
+ * 安康位 alarm line that used to lead the session list is removed (pure
+ * attention text, no information the badge did not already carry), so this
+ * badge is the ONE alarm surface — always-on global seat, detail unchanged.
  *
  * 批2 duty-shield-b2-1103 (ruling `shield-entry-ruling` A案 淡绿常驻可点,
  * 2026-11-03): the faint-green平态 is now CLICKABLE — one badge, one detail
@@ -28,7 +30,7 @@
  * is green, without a second badge (一个入口两段内容). `broken` widens to the
  * duty fold: a failed or untrusted 值守总账 paints the shield red exactly like
  * a broken Session reconciliation (三态纪律: healthy quiet / 有意停用 grey /
- * failed red + 逐项明细 + 列表头条件行).
+ * failed red + 逐项明细).
  *
  * 2026-11-04 ruling (controller-poll availability): `broken` widens once more
  * to the auto-route plane's SUSTAINED verdict — a meter-poll failure streak

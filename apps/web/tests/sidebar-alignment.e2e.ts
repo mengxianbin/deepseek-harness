@@ -22,8 +22,14 @@ const ACTION_CENTER_SPACING = 29
 const ACTION_TRAILING_INSET = 7
 const SEARCH_HEIGHT = 32
 const SEARCH_TRANSITION_MS = 180
-const HEADER_LABEL_OFFSET = 7
-const HEADER_ACTION_RIGHT_OFFSETS = { search: -61, view: -29, add: 3 }
+/** Collapsed search slot: a 28px icon button at the row's left edge. */
+const COLLAPSED_SEARCH_WIDTH = 28
+/**
+ * Seat of each header control from the row's content-box left edge, in px.
+ * The 工作区 / 会话 title label is gone (2026-11-26), so the search leads at 0
+ * and the two cluster buttons follow at search(28) + gap(4) and then +32.
+ */
+const HEADER_CONTROL_LEFT_OFFSETS = { search: 0, view: 32, add: 64 }
 
 /**
  * Measure painted glyphs and pointer targets independently of the row's layout cells.
@@ -139,38 +145,54 @@ describe('web e2e: sidebar search alignment and row action targets', () => {
     try { await browser?.close() } finally { await scaffold?.close() }
   })
 
-  it('aligns the 32px expanded search with both edges of New session', async () => {
+  it('left-aligns the header controls and grows the expanded search from the row start (2026-11-26)', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-sidebar-search-alignment'))
+    const header = page.locator('[class*="sectionHeader"]')
+      .filter({ has: page.getByRole('button', { name: 'Search sessions', exact: true }) })
     const searchButton = page.getByRole('button', { name: 'Search sessions', exact: true })
     const input = page.getByPlaceholder('Search session names', { exact: true })
     const search = input.locator('..')
-    const newSession = page.locator('button[class*="newSession"]')
-    const measure = async () => {
-      const searchBox = await search.boundingBox()
-      const newSessionBox = await newSession.boundingBox()
-      if (searchBox === null || newSessionBox === null) throw new Error('sidebar controls have no layout box')
-      return {
-        height: searchBox.height,
-        leftOffset: searchBox.x - newSessionBox.x,
-        rightOffset: searchBox.x + searchBox.width - newSessionBox.x - newSessionBox.width,
-      }
+    // The row's own content box is the reference: the 工作区 / 会话 title label
+    // was removed (2026-11-26), so the old New session capsule it used to
+    // measure against no longer exists in the wide non-darwin sidebar.
+    const contentBox = async () => {
+      const box = await header.boundingBox()
+      if (box === null) throw new Error('section header has no layout box')
+      const insets = await header.evaluate((element) => {
+        const style = getComputedStyle(element)
+        return { left: Number.parseFloat(style.paddingLeft), right: Number.parseFloat(style.paddingRight) }
+      })
+      return { left: box.x + insets.left, right: box.x + box.width - insets.right }
+    }
+    const offsets = async () => {
+      const content = await contentBox()
+      const controls = [
+        searchButton,
+        page.getByRole('button', { name: 'View options', exact: true }),
+        page.getByRole('button', { name: 'Add workspace', exact: true }),
+      ]
+      const boxes = await Promise.all(controls.map(control => control.boundingBox()))
+      return boxes.map(box => (box === null ? null : Math.round(box.x - content.left)))
     }
     for (const dark of [false, true]) {
       await page.evaluate(dark => document.body.toggleAttribute('data-ds-dark-theme', dark), dark)
-      await expect.poll(async () => {
-        const reference = await newSession.boundingBox()
-        if (reference === null) throw new Error('New session has no layout box')
-        const controls = [searchButton, page.getByRole('button', { name: 'View options', exact: true }), page.getByRole('button', { name: 'Add workspace', exact: true })]
-        const boxes = await Promise.all(controls.map(control => control.boundingBox()))
-        return boxes.map(box => box === null ? null : box.x + box.width - reference.x - reference.width)
-      }).toEqual(Object.values(HEADER_ACTION_RIGHT_OFFSETS))
-      const labelBox = await page.locator('[class*="sectionHeader"] [class*="sectionLabel"]').boundingBox()
-      const referenceBox = await newSession.boundingBox()
-      if (labelBox === null || referenceBox === null) throw new Error('Sidebar heading has no layout box')
-      expect(labelBox.x - referenceBox.x).toBe(HEADER_LABEL_OFFSET)
+      // 0 / 32 / 64: the search leads the row, then the two cluster buttons at
+      // a 4px gap — nothing stands before them any more, and the 安康位 shield
+      // and alert inbox follow the cluster instead of floating at the right end.
+      await expect.poll(offsets).toEqual(Object.values(HEADER_CONTROL_LEFT_OFFSETS))
+      expect(await page.locator('[class*="sectionHeader"] [class*="sectionLabel"]').count()).toBe(0)
       await searchButton.click()
       await expect.poll(() => searchButton.getAttribute('aria-expanded')).toBe('true')
-      await expect.poll(measure, { timeout: 10_000 }).toEqual({ height: SEARCH_HEIGHT, leftOffset: 0, rightOffset: 0 })
+      await expect.poll(async () => {
+        const content = await contentBox()
+        const box = await search.boundingBox()
+        if (box === null) throw new Error('search has no layout box')
+        return {
+          height: box.height,
+          leftOffset: Math.round(box.x - content.left),
+          grew: box.width > COLLAPSED_SEARCH_WIDTH,
+        }
+      }, { timeout: 10_000 }).toEqual({ height: SEARCH_HEIGHT, leftOffset: 0, grew: true })
       expect(await input.evaluate(element => element === document.activeElement)).toBe(true)
       await input.press('Escape')
       await expect.poll(() => searchButton.getAttribute('aria-expanded')).toBe('false')

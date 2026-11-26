@@ -1,7 +1,8 @@
 /* 批2 duty-shield-b2-1103 (ruling shield-entry-ruling A案): the shared
-   two-section detail body — 会话对账 above, 值守清单 below — used by BOTH the
-   header shield popover (fixed viewport panel) and the queue alarm row's
-   expansion, so the two entrances show the same two segments. 三态纪律
+   two-section detail body — 会话对账 above, 值守清单 below — rendered by the
+   header shield popover (fixed viewport panel), so every verdict shows the
+   same two segments. Its second entrance, the queue alarm row's expansion,
+   was removed 2026-11-26 with the alarm line itself. 三态纪律
    (清单档 §6.3): healthy items are hidden behind the summary counts, 有意停用
    renders grey (never lit), failed renders red with the collector's reasons. */
 /* `border-l` (no digit) is not a defined token — the declaration silently
