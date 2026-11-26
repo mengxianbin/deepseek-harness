@@ -315,26 +315,45 @@ describe('web e2e: sidebar search alignment and row action targets', () => {
           searchExpanded: header.querySelector('button[aria-label="Search sessions"]')?.getAttribute('aria-expanded'),
         }
       }
-      const first = await new Promise<ReturnType<typeof measure>>((resolve) => {
+      // Test-defect fix, expectations unchanged: both waits below had no
+      // ceiling, so a missed class mutation or a never-settling animation hung
+      // the whole spec until the 180s test timeout without naming the step.
+      // Each leg now rejects with the step it was waiting on — a passing run
+      // behaves exactly as before.
+      const first = await new Promise<ReturnType<typeof measure>>((resolve, reject) => {
         // Observe the first rendered wide frame after the rail gesture's React updates.
+        const ceiling = setTimeout(() => {
+          observer.disconnect()
+          reject(new Error(`rail expansion never changed the root class (still "${root.className}")`))
+        }, 20_000)
         const observer = new MutationObserver(() => {
           if (root.className === railClass) return
           observer.disconnect()
-          requestAnimationFrame(() => { resolve(measure()) })
+          clearTimeout(ceiling)
+          requestAnimationFrame(() => {
+            // A throw inside rAF would otherwise vanish as an unhandled error
+            // and leave this promise pending forever.
+            try { resolve(measure()) } catch (error) { reject(error) }
+          })
         })
         observer.observe(root, { attributes: true, attributeFilter: ['class'] })
         const trigger = entry === 'search'
           ? root.querySelector<HTMLButtonElement>('button[aria-label="Search sessions"]')
           : document.querySelector<HTMLButtonElement>('button[aria-label="Open sidebar"]')
-        if (trigger === null) { observer.disconnect(); throw new Error('Rail expansion trigger is missing') }
+        if (trigger === null) { observer.disconnect(); clearTimeout(ceiling); reject(new Error('Rail expansion trigger is missing')); return }
         trigger.click()
       })
       const headerTransitions = header.getAnimations()
         .filter(animation => animation instanceof CSSTransition)
         .map(animation => animation.transitionProperty)
-      await Promise.all(root.getAnimations({ subtree: true })
-        .filter(animation => animation.effect?.getTiming().iterations !== Infinity)
-        .map(animation => animation.finished.then(() => undefined, () => undefined)))
+      await Promise.race([
+        Promise.all(root.getAnimations({ subtree: true })
+          .filter(animation => animation.effect?.getTiming().iterations !== Infinity)
+          .map(animation => animation.finished.then(() => undefined, () => undefined))),
+        new Promise<never>((_resolve, reject) => {
+          setTimeout(() => reject(new Error('sidebar animations never settled')), 20_000)
+        }),
+      ])
       return {
         first, last: measure(), headerTransitions,
         sameHeader: root.querySelector('[class*="sectionHeader"]') === header,
