@@ -324,7 +324,14 @@ describe('web e2e: sidebar search alignment and row action targets', () => {
         // Observe the first rendered wide frame after the rail gesture's React updates.
         const ceiling = setTimeout(() => {
           observer.disconnect()
-          reject(new Error(`rail expansion never changed the root class (still "${root.className}")`))
+          // Name the capture as well as the outcome: without `railClass` a
+          // "never changed" report cannot tell "captured too early (still
+          // wide)" from "watching an element the rail class never lands on".
+          const chain: string[] = []
+          for (let node: Element | null = root; node !== null && chain.length < 5; node = node.parentElement) {
+            chain.push(`${node.tagName.toLowerCase()}:${String(node.className)}`)
+          }
+          reject(new Error(`rail expansion never changed the root class (railClass="${railClass}" now="${String(root.className)}" chain=[${chain.join(' > ')}])`))
         }, 20_000)
         const observer = new MutationObserver(() => {
           if (root.className === railClass) return
