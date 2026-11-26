@@ -93,7 +93,7 @@ export function installWorkspaceShortcuts(
       const reason = addReason()
       return reason === null ? { status: 'handled', run: controls.add } : { status: 'blocked', reason }
     })
-  register('session.rename', () => t('rename.session.title'), ['rename session'], 'KeyG', ['primary', 'alt'], ['primary', 'alt'], (context) => {
+  register('session.rename', () => t('rename.session.title'), ['rename session'], 'KeyM', ['primary', 'alt'], ['primary', 'alt'], (context) => {
     const target = current()
     return target === undefined || target.blank || context.modal !== null || ctx.layout.panelInfo.getSnapshot().activePanelId !== null
       ? { status: 'blocked', reason: t('shortcut.noSession') }
