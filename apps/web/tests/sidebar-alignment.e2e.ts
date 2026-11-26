@@ -485,24 +485,28 @@ describe('web e2e: sidebar search alignment and row action targets', () => {
         if (row === null) throw new Error('Settings trigger row is missing')
         const reference = row.getBoundingClientRect()
         return {
-          // Every field below is derived from SettingsRoot.module.css, never
-          // from an observed run: `.trigger { height:42px; margin:0; flex:1;
-          // border-inline:3px }` and `.trigger.rail { 36x36; margin:0;
-          // border-inline:0 }` over `--dsh-sidebar-paint-inset: 3px`.
-          // `width` is deliberately absent: `.trigger` is `flex:1` inside an
-          // auto-width `.settingsArea`, so it is content-sized, not contractual.
+          // Contract-only: every retained field is derived from CSS, never from
+          // an observed run — `.trigger { height:42px; margin:0; flex:1;
+          // border-inline:3px }` over `--dsh-sidebar-paint-inset: 3px`.
+          // DROPPED as content-sized, not contractual: `width` (flex:1 over an
+          // auto-width container) and the right-edge fields, because the seat
+          // shares its row with a trailing control (~85.6px measured) — those
+          // measure the sibling, and pinning them would freeze observed content.
           height: button.height,
-          rowCenterOffset: (button.left + button.right - reference.left - reference.right) / 2,
-          leftOffset: button.left - reference.left, rightOffset: button.right - reference.right,
+          leftOffset: button.left - reference.left,
           paintedLeftOffset: button.left + Number.parseFloat(style.borderLeftWidth) - reference.left,
-          paintedRightOffset: button.right - Number.parseFloat(style.borderRightWidth) - reference.right,
         }
       })
       const wide = await measure()
-      expect(wide).toEqual({
-        height: 42, rowCenterOffset: 0, leftOffset: 0, rightOffset: 0,
-        paintedLeftOffset: 3, paintedRightOffset: -3,
-      })
+      // Signed-out sits flush at the row start (0 / +3px painted border).
+      // Signed-in shifts right by exactly 2px: `AccountMenu.module.css:4`
+      // `.root[data-inset='true'] { margin-inline: 2px }` with
+      // `data-inset={signedIn && wide}` (AccountMenu.tsx:54).
+      expect(wide).toEqual(
+        signedIn
+          ? { height: 42, leftOffset: 2, paintedLeftOffset: 5 }
+          : { height: 42, leftOffset: 0, paintedLeftOffset: 3 },
+      )
       await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click()
       // Live collapse signal: the toggle flips its accessible name to
       // "Open sidebar" once the rail lands (SidebarRoot `toggleLabel`). The old
@@ -513,10 +517,10 @@ describe('web e2e: sidebar search alignment and row action targets', () => {
         return rect === null ? null : { width: rect.width, height: rect.height }
       }).toEqual({ width: 36, height: 36 })
       const rail = await measure()
-      expect(rail).toEqual({
-        height: 36, rowCenterOffset: 0, leftOffset: 0, rightOffset: 0,
-        paintedLeftOffset: 0, paintedRightOffset: 0,
-      })
+      // Rail: `.trigger.rail { 36x36; border-inline: 0 }` centred by
+      // `.triggerRow.railRow { width:36px; align-items:center }`, and the
+      // `data-inset` margin requires `wide`, so sign-in cannot shift this state.
+      expect(rail).toEqual({ height: 36, leftOffset: 0, paintedLeftOffset: 0 })
       await compareOrRefreshGolden(
         fileURLToPath(new URL(`./expected/sidebar-alignment/account-${signedIn ? 'signed-in' : 'signed-out'}.expected.md`, import.meta.url)),
         JSON.stringify({ wide, rail }, null, 2), MODE,
