@@ -51,6 +51,18 @@ describe('replyPairsOf', () => {
     expect(replyPairsOf(noAnswers)).toEqual({ questions: [{ id: 'scope', question: 'Which scope?' }], answers: [] })
   })
 
+  it('reads the card-level note beside the answers, ignoring a blank or non-string one (remark-echo-1126)', () => {
+    expect(replyPairsOf(JSON.stringify({
+      questions: [{ id: 'scope', question: 'Which scope?' }], answers: [], note: '先看部署日志',
+    }))).toMatchObject({ note: '先看部署日志' })
+    expect(replyPairsOf(JSON.stringify({
+      questions: [{ id: 'scope', question: 'Which scope?' }], answers: [], note: '',
+    }))).not.toHaveProperty('note')
+    expect(replyPairsOf(JSON.stringify({
+      questions: [{ id: 'scope', question: 'Which scope?' }], answers: [], note: 42,
+    }))).not.toHaveProperty('note')
+  })
+
   it('omits options from the projected question', () => {
     const text = JSON.stringify({
       questions: [{ id: 'scope', question: 'Which scope?', options: [{ label: 'Tool only', description: 1 }, 'nope', { description: 'no label' }] }],
@@ -202,6 +214,36 @@ describe('answeredQuestionDefinition', () => {
     run.assembler.flush()
     expect(run.nodes()).toHaveLength(1)
     expect(run.nodes()[0]).toMatchObject({ kind: 'question-reply', anchorSeq: 7, groupTree: 'exchange' })
+  })
+
+  it('carries the card-level note the in-time result answered with (remark-echo-1126)', () => {
+    const run = answerAssembler()
+    run.assembler.replaceWindow([{ type: 'event', event: toolCall() },
+      { type: 'event', event: toolResult(JSON.stringify({
+        answers: [{ id: 'notes', selected: [] }, { id: 'scope', selected: ['Tool only'], custom: 'note' }],
+        note: '顺带看看部署日志',
+      })) }], false)
+    run.assembler.flush()
+    expect(run.nodes()).toHaveLength(1)
+    expect(run.nodes()[0]).toMatchObject({
+      kind: 'question-reply',
+      data: { note: '顺带看看部署日志' },
+    })
+    expect(run.nodes()[0]?.data).not.toHaveProperty('seq')
+  })
+
+  it('carries the card-level note the late reply envelope carried (remark-echo-1126)', () => {
+    const run = answerAssembler()
+    const noted = JSON.stringify({ ...(JSON.parse(answered) as Record<string, unknown>), note: '顺带看看部署日志' })
+    run.assembler.replaceWindow([{ type: 'event', event: toolCall() },
+      { type: 'event', event: toolResult('{"pending":true,"callId":"call-1"}') },
+      { type: 'event', event: message(replySource('answered'), noted) }], false)
+    run.assembler.flush()
+    expect(run.nodes()).toHaveLength(1)
+    expect(run.nodes()[0]).toMatchObject({
+      kind: 'question-reply',
+      data: { note: '顺带看看部署日志' },
+    })
   })
 
   it.each([

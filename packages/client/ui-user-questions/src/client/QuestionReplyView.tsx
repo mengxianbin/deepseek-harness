@@ -44,6 +44,15 @@ export function QuestionReplyBubble({ data, t }: { data: QuestionReplyData; t: P
                   <dd className={css.answer}>{values.length === 0 ? t('reply.skipped') : values.join(', ')}</dd>
                 </div>
               })}
+              {/* The card-level remark (题外话, ask-focus-restore-1125 裁定 D):
+                  read as one more question-shaped item so the echo shows the
+                  whole submission, not just its answers (remark-echo-1126). */}
+              {data.note !== undefined && (
+                <div>
+                  <dt className={css.question}><span>{t('note.toggle')}</span></dt>
+                  <dd className={css.answer}>{data.note}</dd>
+                </div>
+              )}
             </dl>}
         </UserMessageBubble>
       </div>
