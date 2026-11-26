@@ -112,11 +112,11 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
       <span
         class="usageGlance"
       >
-        <button
-          aria-label="Open usage statistics"
-          class="glanceButton"
-          title="Open usage statistics"
-          type="button"
+        <span
+          aria-label="Usage statistics"
+          class="glanceReadout"
+          role="group"
+          title="Usage statistics"
         >
           <span
             class="glanceBody"
@@ -172,7 +172,7 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
               </span>
             </span>
           </span>
-        </button>
+        </span>
       </span>
       <span
         aria-hidden="true"
@@ -357,11 +357,11 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
       <span
         class="usageGlance"
       >
-        <button
-          aria-label="Open usage statistics"
-          class="glanceButton"
-          title="Open usage statistics"
-          type="button"
+        <span
+          aria-label="Usage statistics"
+          class="glanceReadout"
+          role="group"
+          title="Usage statistics"
         >
           <span
             class="glanceBody"
@@ -417,7 +417,7 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
               </span>
             </span>
           </span>
-        </button>
+        </span>
       </span>
       <span
         aria-hidden="true"
@@ -506,11 +506,11 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
       <span
         class="usageGlance"
       >
-        <button
-          aria-label="Open usage statistics"
-          class="glanceButton"
-          title="Open usage statistics"
-          type="button"
+        <span
+          aria-label="Usage statistics"
+          class="glanceReadout"
+          role="group"
+          title="Usage statistics"
         >
           <span
             class="glanceBody"
@@ -566,7 +566,7 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
               </span>
             </span>
           </span>
-        </button>
+        </span>
       </span>
       <span
         aria-hidden="true"
