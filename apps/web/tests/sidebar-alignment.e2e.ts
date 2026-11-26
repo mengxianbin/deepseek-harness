@@ -250,11 +250,11 @@ describe('web e2e: sidebar search alignment and row action targets', () => {
       const first = samples.frames[0]!
       const last = samples.frames.at(-1)!
       expect(first).toMatchObject(expand
-        ? { marginRight: -4, paddingLeft: 12, paddingRight: 1, gap: 4 }
+        ? { marginRight: -4, paddingLeft: 8, paddingRight: 1, gap: 4 }
         : { marginRight: 0, paddingLeft: 4, paddingRight: 4, gap: 0 })
       expect(last).toMatchObject(expand
         ? { marginRight: 0, paddingLeft: 4, paddingRight: 4, gap: 0 }
-        : { marginRight: -4, paddingLeft: 12, paddingRight: 1, gap: 4 })
+        : { marginRight: -4, paddingLeft: 8, paddingRight: 1, gap: 4 })
       for (const frame of samples.frames.slice(1, -1)) {
         for (const key of ['marginRight', 'paddingLeft', 'paddingRight', 'gap', 'width'] as const) {
           expect(frame[key]).toBeGreaterThan(Math.min(first[key], last[key]))
@@ -340,7 +340,7 @@ describe('web e2e: sidebar search alignment and row action targets', () => {
     expect(samples.first).toEqual(samples.last)
     expect(samples.first).toMatchObject(entry !== 'toggle'
       ? { marginRight: 0, paddingLeft: 4, paddingRight: 4, gap: 0, searchExpanded: 'true' }
-      : { marginRight: -4, paddingLeft: 12, paddingRight: 1, gap: 4, searchExpanded: 'false' })
+      : { marginRight: -4, paddingLeft: 8, paddingRight: 1, gap: 4, searchExpanded: 'false' })
     expect(samples.sameHeader).toBe(true)
     expect(samples.sameAdd).toBe(true)
     if (entry === 'search') {
