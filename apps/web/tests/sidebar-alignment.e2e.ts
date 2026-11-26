@@ -283,7 +283,13 @@ describe('web e2e: sidebar search alignment and row action targets', () => {
       else await input.press('Escape')
     }
     await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click()
-    await expect.poll(() => page.getByRole('button', { name: 'Account menu', exact: true }).getAttribute('data-collapsed')).toBe('true')
+    // Live collapse signal: the sidebar toggle flips its accessible name to
+    // "Open sidebar" once the rail lands (SidebarRoot `toggleLabel`). The old
+    // probe polled `data-collapsed` on the account seat — that attribute left
+    // with the account More row when the settings-launcher fork replaced it
+    // (AccountMenu.module.css FORK note: `[data-collapsed]`, `[data-signed-out]`
+    // "left with the menu"), so the poll could never resolve.
+    await expect.poll(() => page.getByRole('button', { name: 'Open sidebar', exact: true }).count()).toBe(1)
     const add = page.getByRole('button', { name: 'Add workspace', exact: true })
     const samples = await add.evaluate(async (button, entry) => {
       const header = button.closest<HTMLElement>('[class*="sectionHeader"]')
