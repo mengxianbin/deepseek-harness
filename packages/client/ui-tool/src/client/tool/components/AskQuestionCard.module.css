@@ -106,10 +106,14 @@
    undefined `bg-l1` alias — var() resolved to nothing, the whole background
    declaration was dropped at computed-value time, and the pick showed only its
    border. Correct token = bg-layer-1 (the exact old spelling is in the commit
-   message; keep it out of here so the repo-wide grep for it stays at zero). */
+   message; keep it out of here so the repo-wide grep for it stays at zero).
+   Contrast pass (ask-highlight-contrast-1127, 2026-11-27, 回执 contrast-pick =
+   C 档「品牌浅蓝底」): bg-layer-1 is white on the white card — visible only as
+   a 4% border, i.e. "很不明显" — so the fill moves to the brand tint and the
+   border steps up to l2, exactly the package the preview showed. */
 .option[data-selected] {
-  border-color: var(--dsw-alias-border-l1);
-  background: var(--dsw-alias-bg-layer-1);
+  border-color: var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-state-business-tertiary);
   color: var(--dsw-alias-label-primary);
 }
 
