@@ -23,7 +23,7 @@
         - text: Add workspace ⌥ ⌘ O
       - listitem:
         - button "Edit shortcut for Rename session"
-        - text: Rename session ⌥ ⌘ G
+        - text: Rename session ⌥ ⌘ M
       - listitem:
         - button "Edit shortcut for Fork session"
         - text: Fork session ⇧ ⌘ F

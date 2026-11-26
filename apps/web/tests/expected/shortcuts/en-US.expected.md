@@ -23,7 +23,7 @@
         - text: Add workspace Ctrl + Alt + O
       - listitem:
         - button "Edit shortcut for Rename session"
-        - text: Rename session Ctrl + Alt + G
+        - text: Rename session Ctrl + Alt + M
       - listitem:
         - button "Edit shortcut for Fork session"
         - text: Fork session Ctrl + Shift + F

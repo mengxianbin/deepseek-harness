@@ -87,7 +87,7 @@ describe('workspace shortcut ownership', () => {
     expect(b.registry.catalog.getSnapshot().every(row => row.keys.length > 0)).toBe(true)
     const web = await bench('web')
     expect(web.registry.catalog.getSnapshot().map(row => row.aria)).toEqual([
-      'Alt+Meta+N', 'Alt+Meta+K', 'Alt+Meta+1', 'Alt+Meta+O', 'Alt+Meta+G', 'Shift+Meta+F', 'Alt+Meta+A',
+      'Alt+Meta+N', 'Alt+Meta+K', 'Alt+Meta+1', 'Alt+Meta+O', 'Alt+Meta+M', 'Shift+Meta+F', 'Alt+Meta+A',
     ])
     await b.fiber.dispose()
     expect(b.registry.catalog.getSnapshot()).toEqual([])
@@ -121,13 +121,13 @@ describe('workspace shortcut ownership', () => {
     }
     expect(consume).not.toHaveBeenCalled()
     expect(b.controls.state.getSnapshot().renameTarget).toBeNull()
-    expect(b.registry.dispatch(key('KeyG', { ...primary, alt: true }), context, consume).status).toBe('handled')
+    expect(b.registry.dispatch(key('KeyM', { ...primary, alt: true }), context, consume).status).toBe('handled')
     expect(b.controls.state.getSnapshot().renameTarget?.sessionId).toBe('a')
   })
 
   it.each(['web', 'desktop'] as const)('renames only a nonblank main Conversation without an obscuring modal on %s', async (runtime) => {
     const b = await bench(runtime)
-    const gesture = key('KeyG', { alt: true })
+    const gesture = key('KeyM', { alt: true })
     const invoke = (modal: string | null = null) => b.registry.dispatch(gesture, { ...context, modal }, vi.fn())
     b.list.set({ ...b.list.getSnapshot(), byId: { [sid('a')]: { ...row('a', true), blank: true } } })
     expect(invoke().status).toBe('blocked')
