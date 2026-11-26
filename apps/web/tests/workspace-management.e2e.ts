@@ -421,11 +421,13 @@ describe('web e2e: workspace management (create / rename / grouping / hover affo
     await page.getByRole('button', { name: 'View options' }).click()
     await page.getByRole('menuitem', { name: 'In one list' }).click()
     // Flat mode: still no title label (the row is label-free in both
-    // groupings), the group headers are gone, and the seeded session is a
-    // top-level row.
+    // groupings), and the seeded session becomes a top-level row — the group
+    // headers (the only place the Ungrouped *bucket* ever rendered) are gone.
+    // The literal word may still print on a loose row as its 归宿短标 fallback
+    // (Rows.tsx `homeLabel || t('group.ungrouped')`), so the check is scoped to
+    // group sections and never matches any text on the page.
     await expect.poll(() => page.locator('[class*="sectionLabel"]').count(), { timeout: 10_000 }).toBe(0)
     await expect.poll(() => page.locator('[class*="groupSection"]').count()).toBe(0)
-    await expect.poll(() => page.getByText('Ungrouped', { exact: true }).count(), { timeout: 5_000 }).toBe(0)
     await expect.poll(() => page.locator('[role="treeitem"]').count(), { timeout: 10_000 }).toBeGreaterThanOrEqual(1)
     expect(await page.evaluate(() => localStorage.getItem('dsh.workspace.view.v5'))).toContain('flat')
     // Persisted across reload; then restore grouped for inter-spec hygiene.
