@@ -541,7 +541,11 @@ describe('session.list projections column', () => {
     const row = response.value.items.find(item => item.sessionId === session.id)
     expect(row?.projections?.kind).toBe('sequenced')
     expect(Object.keys(row?.projections?.values ?? {})).toEqual([...ctx.sessionProjections.summaryKeys()])
-    expect(Object.keys(row?.projections?.values ?? {})).toEqual(['sessionListMetadata', 'conversationContinuation'])
+    // The merged registry also folds the fork's durable-cause units, so the
+    // pinned set is the five summary keys in registration order.
+    expect(Object.keys(row?.projections?.values ?? {})).toEqual(
+      ['sessionListMetadata', 'turnBoundary', 'conversationContinuation', 'lastTurnOutcome', 'lastReceipt'],
+    )
     expect(row?.projections?.values.conversationContinuation).toBeNull()
   })
 
@@ -804,7 +808,10 @@ describe('Session control projection frames', () => {
         ],
       },
       {
+        // turn/start advances the fork's turnBoundary unit alongside the
+        // list metadata (registration order puts the boundary first).
         type: 'projection', sessionId: session.id, seq: 1, changes: [
+          { key: 'turnBoundary', val: { lastStepBoundary: null, lastStepStartSeq: null, lastTurn: 1, openTurnStartSeq: 1 } },
           { key: 'sessionListMetadata', val: { blank: false, lastPromptAt: 100 } },
         ],
       },

@@ -110,7 +110,9 @@ async function bench(renderQuote = false) {
   const locale = new LocaleRuntime(runtime.ctx)
   runtime.ctx.provide('locale', locale)
   runtime.slots.installLocale(locale)
-  runtime.ctx.provide('shortcuts', { catalog: createSnapshotStore([]) })
+  // stopSequenceMs is part of the real shortcuts service contract; the fork's
+  // stop gate reads it and an absent value would silently refuse every stop.
+  runtime.ctx.provide('shortcuts', { catalog: createSnapshotStore([]), stopSequenceMs: 500 })
   await runtime.mount({ inject: [...injectMenus], apply: applyMenus }, syncedConfig({ resolutionTimeoutMs: 1000 }))
   await runtime.root.declare({
     'main': { kind: 'keyed', scope: 'root' },

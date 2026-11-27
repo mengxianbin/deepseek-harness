@@ -2144,7 +2144,9 @@ describe('JsonlSessionPersistence: durability and crash semantics', () => {
     queueMicrotask(() => { controller.abort(reason) })
 
     await expect(pending).rejects.toBe(reason)
-    expect(discovery).toHaveBeenCalledWith(controller.signal, undefined, undefined)
+    // The list path passes the signal and the fork's session-directory
+    // exclusion set (absent in this request) as the two discovery arguments.
+    expect(discovery).toHaveBeenCalledWith(controller.signal, undefined)
   })
 })
 

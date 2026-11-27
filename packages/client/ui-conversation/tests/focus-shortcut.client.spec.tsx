@@ -6,7 +6,7 @@ import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import type { ISession } from '@deepseek-ai/dsh-api-session-controller/client'
 import {
-  SlotTestRuntime, stubConfigForm, usePinnedBrowserLanguages,
+  SlotTestRuntime, stubConfigForm, syncedConfig, usePinnedBrowserLanguages,
 } from '@deepseek-ai/dsh-client-test-runtime'
 import type { ShortcutCommand, ShortcutContext } from '@deepseek-ai/dsh-client-shortcuts/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
@@ -64,7 +64,9 @@ async function bench(options: { open?: boolean } = {}) {
   await runtime.root.declare({ 'main': { kind: 'keyed', scope: 'root' } }, ({ renderSlot }) => (
     <>{renderSlot('main', {}, { entryKey: 'conversation' })}</>
   ))
-  await runtime.mount({ inject: [...inject], apply })
+  // The activation's config is an explicit mount argument since upstream dropped
+  // apply's default parameter; the synced fields default through the schema.
+  await runtime.mount({ inject: [...inject], apply }, syncedConfig({ busyEnter: 'queue', maxConcurrentFileUploads: 2 }))
   const view = runtime.renderRoot()
   const run = (id: string): void => {
     const resolution = commands.get(id)!.resolve(context)

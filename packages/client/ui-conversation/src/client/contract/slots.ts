@@ -741,7 +741,9 @@ const baseComposerChildren = {
   'conversation.input.right': { kind: 'list', scope: 'session' },
   'conversation.input.model': { kind: 'single', scope: 'session' },
   'conversation.input.activity': { kind: 'single', scope: 'session' },
-  'conversation.composer.dock': { kind: 'list', scope: 'session' },
+  // `conversation.composer.dock` is intentionally absent here: the merged tree
+  // keeps the fork seat (ask-dock-row-1122) where the factory owns the dock row
+  // (apply.ts `conversation.content` children) so it outlives an elected takeover.
 } as const satisfies ChildrenDecl
 
 /** Child slots owned by the built-in input bar. */

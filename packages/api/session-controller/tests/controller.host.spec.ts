@@ -321,11 +321,18 @@ describe('SessionController attention status', () => {
       // stand-in accepts them without a fold of its own. Keyed reads: the
       // status emitters ask `userQuestions` (attention) and `seal`
       // (seal-light-host-state-1109) structurally, and each key must answer
-      // in its own shape.
-      register: () => () => {},
+      // in its own shape. `register` must hand back a projection handle
+      // (session-query reads `stateOf` off the list-metadata handle), and the
+      // list path needs an empty summary column to summarize through.
+      register: () => ({ stateOf: () => ({ blank: false, lastPromptAt: null }) }),
+      summaryKeys: () => [],
+      snapshot: () => ({ asOfSeq: 0, values: {} }),
       stateOf: (_session: unknown, key: string) => key === 'userQuestions'
         ? { questions: { active: questionActive ? [{}] : [] } }
         : null,
+      // The control stream subscribes through the batched onEventChanged API;
+      // its broadcast is not what this test observes, so a no-op dispose is enough.
+      onEventChanged: () => () => {},
       onChanged: (registered: typeof listener) => {
         listener = registered
         return () => { listener = undefined }
@@ -387,10 +394,17 @@ describe('SessionController seal status (seal-light-host-state-1109 裁点2A)', 
     let questionActive = false
     let listener: ((session: { readonly id: SessionId }, key: string) => void) | undefined
     ctx.provide('sessionProjections', {
-      register: () => () => {},
+      // Same stand-in contract as the attention test above: a projection
+      // handle for session-query, an empty summary column for the list path.
+      register: () => ({ stateOf: () => ({ blank: false, lastPromptAt: null }) }),
+      summaryKeys: () => [],
+      snapshot: () => ({ asOfSeq: 0, values: {} }),
       stateOf: (_session: unknown, key: string) => key === 'userQuestions'
         ? { questions: { active: questionActive ? [{}] : [] } }
         : sealValue,
+      // The control stream subscribes through the batched onEventChanged API;
+      // its broadcast is not what this test observes, so a no-op dispose is enough.
+      onEventChanged: () => () => {},
       onChanged: (registered: typeof listener) => {
         listener = registered
         return () => { listener = undefined }

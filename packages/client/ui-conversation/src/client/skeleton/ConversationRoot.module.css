@@ -411,6 +411,18 @@
   padding-bottom: 4px;
 }
 
+/* The docked composer reserves one statistics row before its readings arrive,
+   so the projections landing never change the composer height (upstream fix
+   af4bddbc59 "keep the docked composer seat stable", reseated here with the
+   row; the hero row stays out of the reservation, as `.root:not(.hero) > .dock`
+   did in the bar's sheet). The height matches the readings: a 20px secondary
+   line plus 1px block padding (ui-chat StatsPills `.pill`, ContextMeter
+   `.trigger`). A minimum, not a fixed height, so taller readings still size
+   the row. */
+.dock:not(.dockHero) {
+  min-height: calc(22px + var(--dsh-content-font-delta-secondary, 0px));
+}
+
 /* The hero wrapper keeps its own centered rhythm with no band under the row
    (was `.hero .dock:empty` in the bar's sheet; the row carries the marker
    itself now). An empty hero row stays collapsed. */

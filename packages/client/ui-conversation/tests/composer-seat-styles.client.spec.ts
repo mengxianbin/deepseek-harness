@@ -7,7 +7,6 @@ function readStyles(path: string): string {
 }
 
 const conversationCss = readStyles('../src/client/skeleton/ConversationRoot.module.css')
-const inputBarCss = readStyles('../src/client/skeleton/InputBar.module.css')
 const contextMeterCss = readStyles('../src/client/skeleton/ContextMeter.module.css')
 
 /** Return the body of the rule whose selector list starts with `selector`. */
@@ -45,9 +44,11 @@ describe('docked composer seat styles', () => {
 
 describe('composer statistics row styles', () => {
   it('reserves one reading row in the docked composer only', () => {
-    expect(rule(inputBarCss, '.root:not(.hero) > .dock'))
+    // The row lives at the composer seat in ConversationRoot.module.css since
+    // ask-dock-row-1122; hero mode rides the row's own dockHero class.
+    expect(rule(conversationCss, '.dock:not(.dockHero)'))
       .toContain('min-height: calc(22px + var(--dsh-content-font-delta-secondary, 0px))')
-    expect(rule(inputBarCss, '.hero .dock:empty')).toMatch(/display:\s*none;/)
+    expect(rule(conversationCss, '.dockHero:empty')).toMatch(/display:\s*none;/)
   })
 
   it('sizes the reservation to one reading: a 20px secondary line plus 1px block padding', () => {

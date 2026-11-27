@@ -102,7 +102,10 @@ describe('session.list summary payload', () => {
 
     expect([...ctx.sessionProjections.summaryKeys()]).not.toContain('turnOutline')
 
-    const response = await (await remote(ctx)).list({})
+    // The fork's list contract trims heavy columns by default (F′ flip,
+    // session-list-full-slim-1110); this test pins the registry contract, so
+    // it asks for the full column the escape hatch restores.
+    const response = await (await remote(ctx)).list({ trimHeavyProjections: false })
     if (!response.ok) throw new Error('unreachable')
     const row = response.value.items.find(item => item.sessionId === id)
     const served = Object.keys(row?.projections?.values ?? {})
