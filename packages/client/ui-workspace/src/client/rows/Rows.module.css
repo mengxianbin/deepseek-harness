@@ -521,10 +521,9 @@
   outline-offset: -2px;
 }
 
-/* FORK session-relay-1106: a gated row action (relay's seal, running, or
-   pending reason) stays focusable and hoverable so Tooltip can explain why —
-   a native disabled button would eat the events, same ruling as the message
-   actions' unavailable branch. */
+/* A gated row action (a seal, running, or pending reason) stays focusable
+   and hoverable so Tooltip can explain why — a native disabled button would
+   eat the events, same ruling as the message actions' unavailable branch. */
 .iconButton[data-unavailable] {
   cursor: default;
   opacity: 0.4;
@@ -638,6 +637,34 @@
   line-height: 10px;
   text-align: center;
   font-variant-numeric: tabular-nums;
+}
+
+/* freeze-reclaim §2.1 副状态徽标: the frozen/locked mark rides the status
+   dot's BOTTOM-right corner (the busy count keeps the top one) — the primary
+   state never moves, and the badge is the button for §6.2's human-only
+   unfreeze. Sized for the emoji itself, so no pill competes with the dot's
+   own colour; a hairline halo keeps ❄️ legible over the red error glyph. */
+.freezeWrap {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+}
+.freezeBadge {
+  position: absolute;
+  bottom: -5px;
+  right: -5px;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 10px;
+  line-height: 11px;
+  cursor: pointer;
+  text-shadow: 0 0 2px var(--dsw-alias-canvas-default, Canvas), 0 0 2px var(--dsw-alias-canvas-default, Canvas);
+}
+.freezeBadge:hover {
+  filter: brightness(1.15);
 }
 
 /* Group-header attention counts (queue-zone-1113): the removed global queue
@@ -796,4 +823,33 @@
 .sealLight[data-seal-tone='unreadable']::after {
   background: transparent;
   border: 1.5px solid currentColor;
+}
+
+/* §5.1 预告横幅（freeze-reclaim 分期5）: a preview-announced row unfolds to
+   a two-line strip — line one stays the normal compact row, line two carries
+   the announcement. Only the previewing row pays the wrap; every other row
+   keeps the one-line 32px contract. */
+.sessionRow.previewing {
+  height: auto;
+  min-height: 32px;
+  flex-wrap: wrap;
+  align-content: center;
+  padding-block: 4px;
+}
+
+.freezePreviewBanner {
+  order: 9;
+  flex-basis: 100%;
+  box-sizing: border-box;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-interactive-bg-hover);
+  border-radius: var(--dsw-radius-sm);
+  padding: 1px 6px;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
 }
