@@ -7,9 +7,8 @@ import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/clie
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { allowAllAccess, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
-import { HoverCardGroup, MenuItemButton, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import { HoverCardGroup, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
-import type { MenuOpenState, SessionRowOwnerProps } from '../src/client/contract/slots.ts'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import type { RowDragProps } from '../src/client/rows/Rows.tsx'
 import {
@@ -293,7 +292,10 @@ describe('workspace browser rows', () => {
       homeLabel: 'm-note',
     }
     render(<SessionNodeItem node={node} currentId={undefined} now={0} onOpen={vi.fn()} t={t} />)
-    const title = screen.getByText('Titled')
+    // MarqueeText wraps its children in the travelling inner span, so the
+    // query lands there; the cell that carries the order is its root
+    // (merge对账 2026-11-28).
+    const title = screen.getByText('Titled').parentElement as HTMLElement
     const label = screen.getByText('m-note')
     // The 一眼层 order: title, home label, then the resting strip carrying the time.
     expect(title.nextElementSibling).toBe(label)
@@ -1245,84 +1247,34 @@ describe('workspace browser rows', () => {
     }
   })
 
-  it('session row menu opens without opening the session and Escape closes it', () => {
+  it('renders the session menu only through the context-menu seat, and blank rows own no trigger', () => {
     const onOpen = vi.fn()
+    const openMenu = vi.fn()
+    const renderFactorySlot = vi.fn(renderMenuButton)
+    const rendered = vi.fn()
+    const renderSlot: RowRenderSlot = (name: RowSlotName, owner: object, opts?: object) => {
+      const hookContext = opts !== undefined && 'hookContext' in opts ? opts.hookContext : undefined
+      rendered(name, owner, hookContext)
+      return null
+    }
     const node: SessionNode = {
       id: sid('s1'), title: 'One', blank: false, running: false,
       runningSubagentCount: 0, completed: false, failed: false, updatedAt: 0, pinned: false, archived: false,
     }
-    render(<SessionNodeItem node={node} currentId={undefined} now={0} onOpen={onOpen} t={t} />)
-    const trigger = screen.getByRole('button', { name: '会话“One”的操作' })
-    fireEvent.click(trigger)
-    expect(screen.getByRole('menu')).toBeTruthy()
-    expect(onOpen).not.toHaveBeenCalled()
-    // Escape closes without selecting (Menu onClose path).
-    fireEvent.keyDown(document, { key: 'Escape' })
-    expect(screen.queryByRole('menu')).toBeNull()
-    // The trigger toggles: a second click closes the menu it opened.
-    fireEvent.click(trigger)
-    fireEvent.click(trigger)
-    expect(screen.queryByRole('menu')).toBeNull()
-    expect(onOpen).not.toHaveBeenCalled()
-  })
+    render(<SessionNodeItem node={node} currentId={undefined} now={0} onOpen={onOpen} renderSlot={renderSlot}
+      renderFactorySlot={renderFactorySlot} t={t} />)
 
-  it('renders the menu list with the row identity and open state, and returns focus to the trigger after an entry closes it', async () => {
-    const onOpen = vi.fn()
-    const openMenu = vi.fn()
-    const renderFactorySlot = vi.fn(renderMenuButton)
-    const onEntry = vi.fn()
-    const rendered = vi.fn()
-    // A stub satisfies the generic render signature only with erased parameter
-    // types; it narrows the owner and the occurrence options itself.
-    const renderSlot: RowRenderSlot = (name: RowSlotName, owner: object, opts?: object) => {
-      const { sessionId, displayTitle } = owner as SessionRowOwnerProps
-      const hookContext = opts !== undefined && 'hookContext' in opts ? opts.hookContext : undefined
-      rendered(name, owner, hookContext)
-      if (name !== 'sidebar.workspaces.session.menu.item') return null
-      // The stub stands in for the renderer, which binds this occurrence's
-      // hookContext into the entries' useMenuOpenState hook.
-      const [open, setMenuOpen] = hookContext as MenuOpenState
-      return (
-        <MenuItemButton onSelect={() => {
-          setMenuOpen(false)
-          onEntry(sessionId, displayTitle, open)
-        }}>
-          Export
-        </MenuItemButton>
-      )
-    }
-    const node: SessionNode = {
-      id: sid('s1'), title: 'One', blank: false, running: false,
-      runningSubagentCount: 0, completed: false, updatedAt: 0, pinned: false, archived: false,
-    }
-    render(<SessionNodeItem node={node} currentId={undefined} now={0} onOpen={onOpen} renderSlot={renderSlot} t={t} />)
-
-    // Both lists receive the row identity; only the menu list carries the open state.
-    expect(rendered).toHaveBeenCalledWith(
-      'sidebar.workspaces.session.menu.item', { sessionId: node.id, displayTitle: 'One', blank: false }, [false, expect.any(Function)],
-    )
+    // The row renders no menu list inline: the session menu lives in the
+    // context-menu overlay and the row only offers its factory trigger
+    // (merge对账 2026-11-28 — fork's inline ⋯ Menu retired with the upstream system).
+    expect(rendered).not.toHaveBeenCalledWith('sidebar.workspaces.session.menu.item', expect.anything())
     expect(rendered).toHaveBeenCalledWith(
       'sidebar.workspaces.session.row.action', { sessionId: node.id, displayTitle: 'One', blank: false }, undefined,
     )
-    expect(screen.queryByRole('menuitem')).toBeNull()
-    const trigger = screen.getByRole('button', { name: '会话“One”的操作' })
-    trigger.focus()
-    fireEvent.click(trigger)
-    expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Export'])
-    expect(rendered).toHaveBeenCalledWith(
-      'sidebar.workspaces.session.menu.item', { sessionId: node.id, displayTitle: 'One', blank: false }, [true, expect.any(Function)],
-    )
-    const entry = screen.getByRole('menuitem', { name: 'Export' })
-    expect(screen.getByRole('treeitem').contains(entry)).toBe(false)
-    entry.focus()
-    expect(fireEvent.keyDown(entry, { key: 'Enter', code: 'Enter' })).toBe(true)
-    expect(onOpen).not.toHaveBeenCalled()
-    fireEvent.click(entry)
-    expect(onEntry).toHaveBeenCalledWith(node.id, 'One', true)
-    // The entry dismissed the menu through the state pair; the list returns focus.
-    expect(screen.queryByRole('menu')).toBeNull()
-    await act(async () => { await Promise.resolve() })
-    expect(document.activeElement).toBe(trigger)
+    expect(renderFactorySlot).toHaveBeenLastCalledWith('contextMenu.button', {
+      target: { kind: 'session', value: { sessionId: node.id, displayTitle: 'One' } },
+      label: '会话“One”的操作', className: rowCss.iconButton,
+    })
     expect(onOpen).not.toHaveBeenCalled()
     cleanup()
     openMenu.mockClear()

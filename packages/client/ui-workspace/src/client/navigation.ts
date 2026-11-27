@@ -636,6 +636,14 @@ class UiWorkspaceService extends Service implements UiWorkspace {
       prior.release()
       return
     }
+    // A blank placeholder keeps no history or follow stream worth warming —
+    // the switch-back is instant anyway — so it releases plainly and never
+    // lingers as a live warm handle (union with upstream's recent-view model,
+    // which expects a left blank not to linger; merge对账 2026-11-28).
+    if (this.sessions.list.getSnapshot().byId[prior.sessionId]?.blank === true) {
+      prior.release()
+      return
+    }
     let warm: SessionReference
     try {
       warm = this.sessions.retain(prior.sessionId, { source: 'mainViewWarm' })

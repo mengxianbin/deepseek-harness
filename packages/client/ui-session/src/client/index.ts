@@ -1586,7 +1586,10 @@ function claimStandardProp(kind: StandardMemberKind, name: string, finalProps: S
 }
 
 /** Required Controller, renderer, and access services. */
-export const inject = ['sessions', 'slots', 'remoteAccess']
+// `remote` stays: the api-session/status|error|health listeners below read
+// ctx.remote directly (fork seal/status channel); upstream's shorter list
+// dropped it because upstream dropped those listeners (merge对账 2026-11-28).
+export const inject = ['sessions', 'slots', 'remote', 'remoteAccess']
 
 /**
  * Install the Session root source and scoped adapter.

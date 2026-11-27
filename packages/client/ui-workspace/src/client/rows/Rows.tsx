@@ -9,15 +9,15 @@
  * `sidebar.workspaces.session.row.action` list. Session and Workspace
  * hover cards are suppressed while their menu is open.
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import clsx from 'clsx'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   HoverCard, IconArchiveOutlineRegular, IconCheckOutlineRegular,
-  IconEllipsisOutlineRegular, IconFolderCloseRegular, IconFolderOpenRegular,
+  IconFolderCloseRegular, IconFolderOpenRegular,
   IconNewChatOutlineRegular, IconPinFillRegular,
   IconSleepOutlineRegular,
-  IconTriangleRightFillRegular, IconUnarchiveOutlineRegular, MarqueeText, Menu, relativeTime, StateDot, Tooltip,
+  IconTriangleRightFillRegular, IconUnarchiveOutlineRegular, MarqueeText, relativeTime, StateDot, Tooltip,
   useHoverMarquee, useRowDragPreview,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ShortcutCatalogEntry } from '@deepseek-ai/dsh-client-shortcuts/client'
@@ -25,7 +25,7 @@ import type { StateDotState } from '@deepseek-ai/dsh-client-ui-primitives'
 import { abbreviateHomePath } from '@deepseek-ai/dsh-util-workspace-path'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type {
-  MenuOpenState, SealLightSnapshot, SealRowObserver, SessionDragType, WorkspaceBrowserProps,
+  SealLightSnapshot, SealRowObserver, SessionDragType, WorkspaceBrowserProps,
 } from '../contract/slots.ts'
 import type { GroupNode, SearchResultNode, SessionNode } from '../tree.ts'
 import { SealLight } from './SealLight.tsx'
@@ -830,8 +830,8 @@ export function SearchResultItem({
  * @returns the session row.
  */
 export function SessionNodeItem({
-  node, currentId, now, onOpen, onRenameRequest, renderSlot, useContextMenu, onReveal, drag, home,
-  useSessionAccess, t, watchSessionJobs, seals, sealRows,
+  node, currentId, now, onOpen, onRenameRequest, renderSlot, renderFactorySlot, useContextMenu,
+  useContextMenuTarget, onReveal, drag, home, useSessionAccess, t, watchSessionJobs, seals, sealRows,
 }: {
   useContextMenu: WorkspaceBrowserProps['useContextMenu']
   renderFactorySlot: WorkspaceBrowserProps['renderFactorySlot']
@@ -884,9 +884,11 @@ export function SessionNodeItem({
   const reorderable = useSessionAccess(node.id, 'workspace/insertSessionBefore')
   const draggable = !row.blank && !row.archived
   const reorderDraggable = draggable && drag !== undefined && reorderable
-  const [menuOpen, setMenuOpen] = useState(false)
-  // The menu's open state, bound into the row entries' `useMenuOpenState` hook.
-  const menuOpenState = useMemo((): MenuOpenState => [menuOpen, setMenuOpen], [menuOpen])
+  // The session context menu owns the open state: the hover marquee hold, the
+  // row highlight, and the hover-card suppression all follow the live target
+  // (upstream's useContextMenuTarget — fork's local Menu state retired with
+  // the row's inline ⋯ menu, merge对账 2026-11-28).
+  const menuOpen = useContextMenuTarget(target => target?.kind === 'session' && target.value.sessionId === node.id)
   const dragPreview = useRowDragPreview(css.dragPreview as string, DRAG_PREVIEW_PROPERTIES)
   const rowRef = useRef<HTMLDivElement>(null)
   const titleRef = useRef<HTMLSpanElement>(null)
@@ -1061,30 +1063,11 @@ export function SessionNodeItem({
           row.action entry act without also opening the row, so an entry's
           button needs no propagation handling of its own. */}
       <span className={css.rowActions} onClick={(e) => { e.stopPropagation() }}>
-        {!row.blank && (
-          <Menu
-            open={menuOpen}
-            onClose={() => { setMenuOpen(false) }}
-            portal
-            closeOnPointerLeave
-            anchor={(
-              <button
-                type="button"
-                className={css.iconButton}
-                aria-label={t('actions.session.aria', { name: title })}
-                onClick={() => { setMenuOpen(v => !v) }}
-              >
-                <IconEllipsisOutlineRegular />
-              </button>
-            )}
-          >
-            {renderSlot(
-              'sidebar.workspaces.session.menu.item',
-              { sessionId: node.id, displayTitle: row.title, blank: row.blank },
-              { hookContext: menuOpenState },
-            )}
-          </Menu>
-        )}
+        {!row.blank && renderFactorySlot('contextMenu.button', {
+          target: { kind: 'session', value: { sessionId: node.id, displayTitle: row.title } },
+          label: t('actions.session.aria', { name: title }),
+          className: css.iconButton,
+        })}
         <span className={css.rowQuickActions}>
           {renderSlot('sidebar.workspaces.session.row.action', { sessionId: node.id, displayTitle: row.title, blank: row.blank })}
         </span>

@@ -67,7 +67,11 @@ function officialEntry(id: string): 'plugin' | 'cron' | undefined {
 type PanelMoreProps =
   Pick<SidebarRootComponentProps, 'usePanelInfo' | 't'>
   & Pick<InjectFace<SidebarRootInjected>, 'selectPanel' | 'startSession' | 'trackEntryClick' | 'setPinned'>
-  & Pick<PropsRenderSlots<'sidebar.panellist' | 'sidebar.panellist.actions' | 'sidebar.more.action' | 'sidebar.footer.action'>, 'renderSlot'>
+  & Pick<PropsRenderSlots<'sidebar.panellist.actions' | 'sidebar.more.action' | 'sidebar.footer.action'>, 'renderSlot'>
+  // The panel glyphs ride the `sidebar.panel.icon` factory (upstream seat):
+  // `sidebar.panellist` is no longer a child of the `sidebar` entry, so the
+  // menu renders the factory exactly as the rail rows do.
+  & PropsRenderFactories
   & { readonly panels: readonly SidebarPanelMetadata[] }
   & { readonly unpinned: readonly string[] }
   & { readonly hasEntryActions: boolean }
@@ -199,7 +203,7 @@ const MIMO_RELOGIN_PAGE = '/api/mimo-relogin/page'
  */
 function PanelMore({
   panels, unpinned, hasEntryActions, hasMoreActions, hasFooterActions, rail,
-  usePanelInfo, selectPanel, startSession, setPinned, trackEntryClick, renderSlot, t,
+  usePanelInfo, selectPanel, startSession, setPinned, trackEntryClick, renderSlot, renderFactorySlot, t,
 }: PanelMoreProps) {
   const [open, setOpen] = useState(false)
   const activePanelId = usePanelInfo(info => info.activePanelId)
@@ -219,7 +223,7 @@ function PanelMore({
             ...panels.map(({ id, label }) => ({
               id,
               label,
-              icon: renderSlot('sidebar.panellist', { size: 16, active: id === activePanelId }, { only: id }),
+              icon: renderFactorySlot('sidebar.panel.icon', { id, size: 16, active: id === activePanelId }),
             })),
           ]
           : []),
@@ -624,6 +628,7 @@ export function SidebarRoot({
                 setPinned={setPinned}
                 trackEntryClick={trackEntryClick}
                 renderSlot={renderSlot}
+                renderFactorySlot={renderFactorySlot}
                 t={t}
               />
             </div>
@@ -646,6 +651,7 @@ export function SidebarRoot({
                 setPinned={setPinned}
                 trackEntryClick={trackEntryClick}
                 renderSlot={renderSlot}
+                renderFactorySlot={renderFactorySlot}
                 t={t}
               />
             </>

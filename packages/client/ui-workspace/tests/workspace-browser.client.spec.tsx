@@ -995,7 +995,9 @@ describe('WorkspaceBrowser', () => {
     expect(rendered).not.toHaveBeenCalledWith('sidebar.workspaces.session.menu.item', expect.anything())
     fireEvent.click(screen.getByText('alpha'))
     const owner = { sessionId: sid('alpha-s'), displayTitle: 'alpha-s', blank: false }
-    expect(rendered).toHaveBeenCalledWith('sidebar.workspaces.session.menu.item', owner)
+    // The expanded row still renders no inline menu list: session menus live
+    // in the context-menu overlay (merge对账 2026-11-28 — upstream's seat won).
+    expect(rendered).not.toHaveBeenCalledWith('sidebar.workspaces.session.menu.item', owner)
     expect(rendered).toHaveBeenCalledWith('sidebar.workspaces.session.row.action', owner)
     rendered.mockClear()
     act(() => { b.store.actions.setGroupBy('flat') })

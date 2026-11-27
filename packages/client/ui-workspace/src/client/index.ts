@@ -285,10 +285,23 @@ export function apply(ctx: Context, config: SyncedConfig<WorkspaceNavigationConf
   // `onHardFailure` names the one rejection that has no surface of its own —
   // neither running work (that opens the stop dialog) nor a Host error the
   // caller already reported — for a caller whose chain moved on without it.
+  // The archive notice rides a waterfall so a follow-up provider (the
+  // worktree-cleanup leg) can attach its own copy; the plain notice is the
+  // base case. Restored from upstream in the merge — the declarations and
+  // followup handlers survived, the dispatch had not (merge对账 2026-11-28).
+  const archiveNotice = async (sessionId: SessionId, kind: 'archived' | 'stoppedAndArchived'): Promise<void> => {
+    let message: ArchiveNotice | undefined
+    try {
+      message = await ctx.waterfall('workspace/archive-notice', sessionId, () => Promise.resolve(undefined))
+    } catch (error) {
+      console.warn('session archive notice unavailable:', error)
+    }
+    notify({ kind, sessionId, ...message === undefined ? {} : { message: message.text, tone: message.tone } })
+  }
   const archiveQuietly = (sessionId: SessionId, seal?: SessionSealInfo, onHardFailure?: () => void): void => {
     uiWorkspace.archiveSession(sessionId).then(() => {
       if (seal !== undefined) recordSealOverride(sessionId, seal)
-      notify({ kind: 'archived', sessionId })
+      void archiveNotice(sessionId, 'archived')
     }).catch((reason: unknown) => {
       const activity = activeSessionRefusal(reason)
       if (activity === undefined) {
@@ -428,7 +441,7 @@ export function apply(ctx: Context, config: SyncedConfig<WorkspaceNavigationConf
       // The archive succeeded — the only moment the ledger write-back may
       // fire (FORK archive-seal-gate-ui-1028; contract C4).
       if (options !== undefined) recordSealOverride(sessionId, options.seal, options.reason)
-      notify({ kind: 'stoppedAndArchived', sessionId })
+      await archiveNotice(sessionId, 'stoppedAndArchived')
     },
   })
   const forkInjected = (): ForkSessionInjected => ({
@@ -572,12 +585,6 @@ export function apply(ctx: Context, config: SyncedConfig<WorkspaceNavigationConf
       name: 'sidebar.workspaces',
       children: {
         'sidebar.workspaces.directoryFlow': { kind: 'single', scope: 'root' },
-        // Every row entry reads the menu's open state through a hook bound
-        // from the row's render occurrence (the owner passes the state pair
-        // as hookContext).
-        'sidebar.workspaces.session.menu.item': {
-          kind: 'list', scope: 'root', inject: { hooks: { menuOpenState: menuOpenStateFactory, shortcuts: ctx.shortcuts.catalog } },
-        },
         'sidebar.workspaces.session.row.action': { kind: 'list', scope: 'root' },
         'sidebar.session.row.leading': { kind: 'list', scope: 'root', inline: true },
         'sidebar.session.row.trailing': { kind: 'list', scope: 'root', inline: true },
@@ -589,6 +596,10 @@ export function apply(ctx: Context, config: SyncedConfig<WorkspaceNavigationConf
     },
     WorkspaceBrowser,
   ))
+  // The legacy menu list lives under the context-menu content (one declaring
+  // parent per slot): SessionMenu renders it inside the session context menu,
+  // and its entries read the open state through a hook bound from the row's
+  // render occurrence (the owner passes the state pair as hookContext).
   ctx.slots.inject('contextMenu.content', () => ctx.slots.register({
     name: 'contextMenu.content', key: 'session',
     children: { 'sidebar.workspaces.session.menu.item': {

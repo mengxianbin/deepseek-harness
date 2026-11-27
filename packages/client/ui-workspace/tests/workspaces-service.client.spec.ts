@@ -453,9 +453,13 @@ describe('UiWorkspaceService', () => {
 
   it('keeps a left Session as a recent view until navigation returns to it or disposes', async () => {
     const b = bench({ sessions: sessionState([summary('a'), summary('b'), summary('blank', { blank: true })]) })
-    const live = (): SessionId[] => b.sessions.retained
+    // Distinct sessions: fork's session-switch-warm holds a second handle on
+    // the replaced main alongside the recentViews one, and both are live — the
+    // question here is which sessions stay alive, not how many handles each
+    // carries (merge对账 2026-11-28).
+    const live = (): SessionId[] => [...new Set(b.sessions.retained
       .filter(item => item.release.mock.calls.length === 0)
-      .map(item => item.reference.sessionId)
+      .map(item => item.reference.sessionId))]
     b.uiWorkspace.openSession(sid('a'))
     b.uiWorkspace.openSession(sid('b'))
     expect(b.sessions.retain).toHaveBeenLastCalledWith(sid('a'), { source: 'recentViews' })
@@ -1263,7 +1267,7 @@ describe('UiWorkspaceService', () => {
         sessions: sessionState([], 'pending'),
       })
       expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(
-        sid('saved'), { source: 'mainView', persistedSelection: true },
+        sid('saved'), { source: 'mainView', persistedSelection: true, facets: { conversation: true } },
       )
       expect(b.sessions.create).not.toHaveBeenCalled()
     })
@@ -1278,7 +1282,7 @@ describe('UiWorkspaceService', () => {
 
       b.workspaces.list.set(workspaceState([workspace('a', [sid('saved')])]))
       expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(
-        sid('saved'), { source: 'mainView', persistedSelection: true },
+        sid('saved'), { source: 'mainView', persistedSelection: true, facets: { conversation: true } },
       )
     })
 
@@ -1294,7 +1298,7 @@ describe('UiWorkspaceService', () => {
       await vi.waitFor(() => {
         expect(b.sessions.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: wid('a'), sessionId: sid('saved') })
       })
-      expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('saved'), { source: 'mainView' })
+      expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('saved'), { source: 'mainView', facets: { conversation: true } })
     })
 
     it('keeps a selection persisted before blank knowledge on the catalog path', async () => {
@@ -1309,7 +1313,7 @@ describe('UiWorkspaceService', () => {
 
       b.sessions.list.set(sessionState([summary('saved')]))
       await vi.waitFor(() => {
-        expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('saved'), { source: 'mainView' })
+        expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('saved'), { source: 'mainView', facets: { conversation: true } })
       })
     })
 
@@ -1333,7 +1337,7 @@ describe('UiWorkspaceService', () => {
         workspaces: workspaceState(),
         sessions: sessionState([], 'pending'),
       })
-      expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(address, { source: 'mainView' })
+      expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(address, { source: 'mainView', facets: { conversation: true } })
     })
   })
 

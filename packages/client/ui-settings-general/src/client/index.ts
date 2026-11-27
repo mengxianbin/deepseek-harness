@@ -88,7 +88,7 @@ const NS = 'settings'
  * `uiSession` feeds the restart confirmation's running-Session count;
  * `remoteAccess` gates the host's settings description (upstream 0.2.2).
  */
-export const inject = ['slots', 'locale', 'connection', 'remote', 'remote.settings', 'configForms', 'shortcuts', 'modules', 'uiSession', 'remoteAccess']
+export const inject = ['slots', 'locale', 'connection', 'remote', 'remote.settings', 'configForms', 'shortcuts', 'modules', 'uiSession', 'uiSession.sessionStatus', 'remoteAccess']
 
 /**
  * Register the `settings` dictionaries, the chrome content, and the General

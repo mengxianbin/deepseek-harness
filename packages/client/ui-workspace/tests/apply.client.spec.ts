@@ -16,7 +16,7 @@ import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { apply, inject } from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type { WorkspaceBrowserInjected, WorkspacePickerInjected } from '@deepseek-ai/dsh-client-ui-workspace/client'
 import {
-  type ArchiveSessionInjected, type ForkSessionInjected, menuOpenStateFactory, type PinSessionInjected,
+  type ArchiveSessionInjected, menuOpenStateFactory, type PinSessionInjected,
   type RelaySessionInjected, type RowToastInjected,
   type SessionArchiveConfirmInjected, type SessionRenameDialogInjected,
   type WorkspaceViewStoreHandle,
@@ -740,12 +740,13 @@ describe('ui-workspace apply', () => {
       declare(b.slots, 'sidebar.workspaces', 'shell.overlay')
       if (options.hostSeal !== undefined) {
         // archive-seal-falsered-1116 段3: the Host status leg of the row lamp
-        // (mergeHostSeals' Host-wins input). A composition without ui-session
-        // simply lacks it — provided here before apply, as production has it.
-        const statuses = new Map([[sid(sessionIds[0] ?? 'one'), { seal: options.hostSeal }]])
-        b.ctx.provide('uiSession', {
-          sessionStatus: { getSnapshot: () => statuses, subscribe: () => () => {} },
-        } as never)
+        // (mergeHostSeals' Host-wins input). The bench's status double already
+        // owns `uiSession`, so the verdict is scripted into its table — a second
+        // provide of the service throws (merge对账 2026-11-28).
+        b.status.table.set(new Map([[sid(sessionIds[0] ?? 'one'), {
+          running: false, pendingInteraction: undefined, completionUnread: false,
+          completionFailed: false, seal: options.hostSeal,
+        }]]))
       }
       await b.ctx.plugin({ inject: [...inject], apply }, syncedConfig({ recentViewLimit: 10 })).await()
       const archiveSession = vi.spyOn(b.ctx.uiWorkspace, 'archiveSession')
@@ -1155,8 +1156,8 @@ describe('ui-workspace apply', () => {
     declare(b.slots, 'sidebar.workspaces', 'shell.overlay')
     await b.ctx.plugin({ inject: [...inject], apply }, syncedConfig({ recentViewLimit: 10 })).await()
 
-    const fork = faceOf(entry(b.slots, MENU_ITEM, 'fork')) as ForkSessionInjected
-    fork.forkSession('session' as never)
+    const fork = sessionMenuActions(b.ctx)
+    fork.forkSession(sid('session'))
 
     const toast = faceOf(entry(b.slots, 'shell.overlay', 'workspace.row-toast')) as RowToastInjected
     await vi.waitFor(() => {
@@ -1170,7 +1171,7 @@ describe('ui-workspace apply', () => {
     b.fork.mockRejectedValueOnce(Object.assign(new Error('no completed turn'), {
       name: 'SessionForkError', rpcError: { code: 'session/fork-unavailable' },
     }))
-    fork.forkSession('session' as never)
+    fork.forkSession(sid('session'))
     await vi.waitFor(() => {
       expect(toast.hooks.toast.getSnapshot()).toMatchObject({ kind: 'shortcutForkFailed', reason: 'unavailable' })
     })
