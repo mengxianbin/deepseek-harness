@@ -103,8 +103,25 @@ function sendMethodNotAllowed(res: ServerResponse, allow: 'GET' | 'POST'): void 
   res.end()
 }
 
-/** Collect a bounded request body as UTF-8 text; null past the ceiling (stream drained). */
-async function readBoundedBody(req: IncomingMessage): Promise<string | null> {
+/**
+ * Charset guidance: which hop refused and what the sender must change. Wording
+ * matches the shared `E_CHARSET_INVALID` text in dsh-web's shared/host/http.ts,
+ * so one grep finds the code across both repos.
+ */
+const CHARSET_GUIDANCE =
+  'E_CHARSET_INVALID: request body is not valid UTF-8 (expected UTF-8, RFC 8259). ' +
+  'This host never transcodes; the bad bytes were noticed at the receiving hop. ' +
+  'Fix the sender: encode the JSON body as UTF-8 (Buffer.from(JSON.stringify(v), "utf8")) and send charset=utf-8.'
+
+/**
+ * Outcome of one bounded body read: the three refusals differ (413 vs a charset
+ * 400), so the reader reports which one happened instead of collapsing them into
+ * a single null.
+ */
+type BoundedBody = { text: string } | { tooLarge: true } | { invalidUtf8: true }
+
+/** Collect a bounded request body as strict UTF-8 text. */
+async function readBoundedBody(req: IncomingMessage): Promise<BoundedBody> {
   const chunks: Buffer[] = []
   let size = 0
   // http server streams without setEncoding always yield Buffer chunks.
@@ -113,11 +130,17 @@ async function readBoundedBody(req: IncomingMessage): Promise<string | null> {
     if (size > MAX_BODY_BYTES) {
       // Drain the remainder so the refusal is a readable response, not a socket cut.
       req.resume()
-      return null
+      return { tooLarge: true }
     }
     chunks.push(chunk)
   }
-  return Buffer.concat(chunks, size).toString('utf8')
+  try {
+    // `fatal` so legacy-coded bytes fail loudly instead of silently becoming
+    // U+FFFD and parsing as a well-formed open request.
+    return { text: new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks, size)) }
+  } catch {
+    return { invalidUtf8: true }
+  }
 }
 
 /** Validate one open-route body at the wire: JSON object with string app/path. */
@@ -254,19 +277,23 @@ export function apply(ctx: Context, config: Config): void {
         sendJson(res, 415, { code: 'unsupported-media-type', message: 'content-type must be application/json' })
         return
       }
-      let text: string | null
+      let body: BoundedBody
       try {
-        text = await readBoundedBody(req)
+        body = await readBoundedBody(req)
       } catch {
         // Swallows connection errors mid-body: there is nothing left to answer precisely.
         sendJson(res, 400, { code: 'bad-request', message: 'request body unreadable' })
         return
       }
-      if (text === null) {
+      if ('tooLarge' in body) {
         sendJson(res, 413, { code: 'payload-too-large', message: 'request body is too large' })
         return
       }
-      const parsed = parseOpenBody(text)
+      if ('invalidUtf8' in body) {
+        sendJson(res, 400, { code: 'E_CHARSET_INVALID', message: CHARSET_GUIDANCE })
+        return
+      }
+      const parsed = parseOpenBody(body.text)
       if (parsed === null) {
         sendJson(res, 400, { code: 'bad-request', message: 'request body must be JSON with string "app" and "path"' })
         return
