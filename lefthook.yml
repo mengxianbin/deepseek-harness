@@ -33,6 +33,9 @@ pre-commit:
     - name: vendor manifest guard
       run: scripts/check-vendor-manifest.sh
 
+    - name: mainline direct-commit gate
+      run: python scripts/check-mainline-direct-commit.py
+
 pre-merge-commit:
   jobs:
     - name: translation pairing (staged records)
