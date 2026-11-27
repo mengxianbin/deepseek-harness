@@ -331,18 +331,22 @@
   cursor: pointer;
 }
 
+/* Picked row (ask-highlight-contrast-1127, 2026-11-27): this used to be only
+   interactive-bg-hover (6% tint) — invisible in practice, the user could not
+   see what was already selected and mis-picked an option ("看不见已选中了").
+   Picks now take the brand tint, same package as the answered record card in
+   AskQuestionCard. Hover keeps the 6% tint but must not override the picked
+   background, hence :not(.optionSelected). */
 .optionSelected {
-  background: var(--dsw-alias-interactive-bg-hover);
+  background: var(--dsw-alias-state-business-tertiary);
+  border-color: var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-primary);
 }
 
 @media (hover: hover) {
-  .optionRowInteractive:hover {
+  .optionRowInteractive:hover:not(.optionSelected) {
     background: var(--dsw-alias-interactive-bg-hover);
   }
-}
-
-.optionSelected {
-  border-color: var(--dsw-alias-border-l2);
 }
 
 .option:disabled {
