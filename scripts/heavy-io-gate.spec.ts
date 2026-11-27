@@ -14,6 +14,8 @@ import {
   breakStaleHeavyIoLock,
   defaultHistoryFile,
   defaultLockDirectory,
+  fullcheckTicketPath,
+  fullcheckTicketStatus,
   isFullColdCommand,
   isProcessAlive,
   memoryFloorState,
@@ -36,6 +38,24 @@ function historyPath(name: string): string {
   return join(tmpdir(), `heavy-io-gate-spec-history-${name}.log`)
 }
 
+function ticketPath(name: string): string {
+  return join(tmpdir(), `heavy-io-gate-spec-ticket-${name}.json`)
+}
+
+/** 写一张短效 ticket 夹具（缺省在窗：issuedAt=now-5s, ttl=300s）。 */
+function writeTicket(name: string, overrides: Record<string, unknown> = {}): string {
+  const path = ticketPath(name)
+  writeFileSync(path, JSON.stringify({
+    issuedAt: Date.now() / 1000 - 5,
+    ttlSec: 300,
+    reason: 'spec fixture',
+    actor: 'heavy-io-gate.spec',
+    scope: 'fullcheck',
+    ...overrides,
+  }))
+  return path
+}
+
 function runGate(args: readonly string[], env: Record<string, string>) {
   return spawnSync(process.execPath, [tsxCli, gateScript, ...args], {
     cwd: repositoryRoot,
@@ -46,6 +66,12 @@ function runGate(args: readonly string[], env: Record<string, string>) {
       // Pin the gate ON regardless of the runner's environment (CI=true would
       // silently passthrough every case); per-case env below still overrides.
       CI: 'false',
+      // Same class as the CI pin: running this suite through the sanctioned
+      // `heavy-io-gate.ts "vitest run …"` wrapper injects DSH_HEAVY_IO_HELD=1
+      // into the vitest process, which would otherwise leak into every
+      // spawned gate and turn all queueing cases into held-passthroughs.
+      // Held-specific cases override this with '1' per case.
+      DSH_HEAVY_IO_HELD: '',
       // Default every spawned gate to a scratch history file so tests never
       // append to the machine-wide log; history cases override it per case.
       DSH_HEAVY_IO_HISTORY: join(tmpdir(), 'heavy-io-gate-spec-history.log'),
@@ -53,6 +79,11 @@ function runGate(args: readonly string[], env: Record<string, string>) {
       // now checks the memory floor, and a red machine would otherwise park
       // every case. The dedicated red/green fixtures override per case.
       DSH_HEAVY_IO_FLOOR_MB: '0',
+      // Pin the fullcheck ticket to a path that never exists (fullcheck-token-
+      // short-1127): a real in-window ~/.dsh/fullcheck-ticket.json on the
+      // machine must not flip refuse cases. Cases needing a ticket override
+      // this with a scratch file from writeTicket().
+      DSH_FULLCHECK_TICKET: ticketPath('nonexistent-default'),
       ...env,
     },
   })
@@ -384,8 +415,11 @@ describe('heavy-io gate history log', () => {
           DSH_HEAVY_IO_LOCK_DIR: directory,
           DSH_HEAVY_IO_HISTORY: history,
           DSH_HEAVY_IO_POLL_MS: '50',
-          // Floor pinned green: these raw spawns bypass runGate's defaults.
+          // Floor pinned green: these raw spawns bypass runGate's defaults —
+          // and so must pin HELD off, or a gate-wrapped vitest run (which
+          // injects DSH_HEAVY_IO_HELD=1) would leak a held passthrough here.
           DSH_HEAVY_IO_FLOOR_MB: '0',
+          DSH_HEAVY_IO_HELD: '',
         },
       })
       let stdout = ''
@@ -432,8 +466,10 @@ describe('heavy-io gate history log', () => {
           DSH_HEAVY_IO_LOCK_DIR: directory,
           DSH_HEAVY_IO_HISTORY: history,
           DSH_HEAVY_IO_POLL_MS: '50',
-          // Floor pinned green: these raw spawns bypass runGate's defaults.
+          // Floor pinned green: these raw spawns bypass runGate's defaults —
+          // and so must pin HELD off (see runGate's default above).
           DSH_HEAVY_IO_FLOOR_MB: '0',
+          DSH_HEAVY_IO_HELD: '',
         },
       })
       children.push(child)
@@ -600,7 +636,7 @@ describe('heavy-io gate history log', () => {
 
 describe('heavy-io gate fullcheck token', () => {
   it('classifies full-cold commands and keeps hot/targeted forms queueable', () => {
-    // 全-冷（无 token 必拒）：lint 家族 / 全仓 oxlint sink / 裸全量 vitest / 全量矩阵
+    // 全-冷（无票必拒）：lint 家族 / 全仓 oxlint sink / 裸全量 vitest / 全量矩阵
     expect(isFullColdCommand('pnpm run lint')).toBe(true)
     expect(isFullColdCommand('pnpm lint')).toBe(true)
     expect(isFullColdCommand('tsx scripts/compile-referenced-projects.ts host-contracts && npm run lint:contracts-ready')).toBe(true)
@@ -610,7 +646,7 @@ describe('heavy-io gate fullcheck token', () => {
     expect(isFullColdCommand('vitest run --coverage')).toBe(true)
     expect(isFullColdCommand('tsx scripts/run-gates.ts check-all')).toBe(true)
     expect(isFullColdCommand('pnpm run check:all')).toBe(true)
-    // 重-热 / 定向（无 token 照常排队）：typecheck/build/fast-config/单文件/staged
+    // 重-热 / 定向（无票照常排队）：typecheck/build/fast-config/单文件/staged
     expect(isFullColdCommand('pnpm run typecheck')).toBe(false)
     expect(isFullColdCommand('tsx scripts/build.ts --scope typecheck')).toBe(false)
     expect(isFullColdCommand('pnpm run build:native-system && vitest run --config vitest.fast.config.ts')).toBe(false)
@@ -619,16 +655,55 @@ describe('heavy-io gate fullcheck token', () => {
     expect(isFullColdCommand('node -e "process.exit(7)"')).toBe(false)
   })
 
+  it('judges the short-lived ticket window (in-window pass, everything else fail-closed)', async () => {
+    // 短效语义单测（判据①）：校验式 = 存在 ∧ 五字段齐 ∧ 0 ≤ age ≤ ttlSec；
+    // 下界 0 = 未来时间戳永续证的 fail-closed 补强（§7.5）。
+    const now = Date.now() / 1000
+    const valid = await fullcheckTicketStatus({ DSH_FULLCHECK_TICKET: writeTicket('unit-valid') }, now)
+    expect(valid.ok).toBe(true)
+    expect(valid.detail).toContain('valid')
+
+    const expired = await fullcheckTicketStatus({
+      DSH_FULLCHECK_TICKET: writeTicket('unit-expired', { issuedAt: now - 400 }),
+    }, now)
+    expect(expired.ok).toBe(false)
+    expect(expired.detail).toContain('expired')
+
+    const future = await fullcheckTicketStatus({
+      DSH_FULLCHECK_TICKET: writeTicket('unit-future', { issuedAt: now + 60 }),
+    }, now)
+    expect(future.ok).toBe(false)
+    expect(future.detail).toContain('future')
+
+    const incomplete = await fullcheckTicketStatus({
+      DSH_FULLCHECK_TICKET: writeTicket('unit-incomplete', { ttlSec: undefined }),
+    }, now)
+    expect(incomplete.ok).toBe(false)
+    expect(incomplete.detail).toContain('missing')
+
+    const missing = await fullcheckTicketStatus({ DSH_FULLCHECK_TICKET: ticketPath('unit-absent') }, now)
+    expect(missing.ok).toBe(false)
+    expect(missing.detail).toContain('missing')
+
+    // 落点缝：env 覆盖优先，缺省 = ~/.dsh/fullcheck-ticket.json。
+    expect(fullcheckTicketPath({ DSH_FULLCHECK_TICKET: 'X' })).toBe('X')
+    expect(fullcheckTicketPath({})).toContain('fullcheck-ticket.json')
+
+    for (const name of ['unit-valid', 'unit-expired', 'unit-future', 'unit-incomplete']) {
+      rmSync(ticketPath(name), { force: true })
+    }
+  })
+
   it('refuses a full-cold command before queueing and records a refused line', async () => {
     const directory = lockDir('fullcold-refuse')
     const history = historyPath('fullcold-refuse')
     try {
       await rm(directory, { recursive: true, force: true })
       await rm(history, { force: true })
+      // 无票（runGate 缺省把落点钉到不存在路径）→ 排队前拒绝。
       const result = runGate(['echo npm run lint'], {
         DSH_HEAVY_IO_LOCK_DIR: directory,
         DSH_HEAVY_IO_HISTORY: history,
-        DSH_FULLCHECK_OK: '',
         DSH_HEAVY_IO_POLL_MS: '100',
       })
 
@@ -647,9 +722,70 @@ describe('heavy-io gate fullcheck token', () => {
     }
   }, 90_000)
 
-  it('admits a full-cold command carrying DSH_FULLCHECK_OK=1', async () => {
-    const directory = lockDir('fullcold-token')
-    const history = historyPath('fullcold-token')
+  it('admits a full-cold command holding a valid short-lived ticket', async () => {
+    const directory = lockDir('fullcold-ticket')
+    const history = historyPath('fullcold-ticket')
+    const ticket = writeTicket('admit')
+    try {
+      await rm(directory, { recursive: true, force: true })
+      await rm(history, { force: true })
+      const result = runGate(['echo npm run lint'], {
+        DSH_HEAVY_IO_LOCK_DIR: directory,
+        DSH_HEAVY_IO_HISTORY: history,
+        DSH_FULLCHECK_TICKET: ticket,
+        DSH_HEAVY_IO_POLL_MS: '100',
+      })
+
+      expect(result.error).toBeUndefined()
+      expect(result.status).toBe(0)
+      expect(result.stdout.trim()).toBe('npm run lint')
+      const text = readFileSync(history, 'utf8')
+      expect(text).toMatch(/ acquire pid=\d+ cmd=echo npm run lint/)
+      expect(text).not.toContain(' refused ')
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+      await rm(history, { force: true })
+      rmSync(ticket, { force: true })
+    }
+  }, 90_000)
+
+  it('refuses a full-cold command whose ticket expired (re-issue required)', async () => {
+    const directory = lockDir('fullcold-expired')
+    const history = historyPath('fullcold-expired')
+    const ticket = writeTicket('expired', { issuedAt: Date.now() / 1000 - 400 })
+    try {
+      await rm(directory, { recursive: true, force: true })
+      await rm(history, { force: true })
+      const result = runGate(['echo npm run lint'], {
+        DSH_HEAVY_IO_LOCK_DIR: directory,
+        DSH_HEAVY_IO_HISTORY: history,
+        DSH_FULLCHECK_TICKET: ticket,
+        DSH_HEAVY_IO_POLL_MS: '100',
+      })
+
+      expect(result.error).toBeUndefined()
+      expect(result.status).toBe(2)
+      const output = `${result.stdout}${result.stderr}`
+      expect(output).toContain('full-cold command refused')
+      // 判词三件：现状（已过期 Ns）+ 重取入口（签发脚本）+ 指路设计档。
+      expect(output).toContain('expired')
+      expect(output).toContain('fullcheck-ticket-issue')
+      expect(output).toContain('fullcheck-token-1114.md')
+      expect(existsSync(directory)).toBe(false)
+      const text = readFileSync(history, 'utf8')
+      expect(text).toMatch(/ refused pid=\d+ reason=fullcheck-token cmd=echo npm run lint/)
+      expect(text).not.toContain(' acquire ')
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+      await rm(history, { force: true })
+      rmSync(ticket, { force: true })
+    }
+  }, 90_000)
+
+  it('refuses a leaked DSH_FULLCHECK_OK=1 env without a ticket (hard cut: held-env ≠ authorization)', async () => {
+    // 硬切反例（判据① 泄漏 → 拒）：旧静态 env 挂着也一律拒——授权只认短效票。
+    const directory = lockDir('fullcold-leak-env')
+    const history = historyPath('fullcold-leak-env')
     try {
       await rm(directory, { recursive: true, force: true })
       await rm(history, { force: true })
@@ -661,11 +797,12 @@ describe('heavy-io gate fullcheck token', () => {
       })
 
       expect(result.error).toBeUndefined()
-      expect(result.status).toBe(0)
-      expect(result.stdout.trim()).toBe('npm run lint')
+      expect(result.status).toBe(2)
+      expect(`${result.stdout}${result.stderr}`).toContain('full-cold command refused')
+      expect(existsSync(directory)).toBe(false)
       const text = readFileSync(history, 'utf8')
-      expect(text).toMatch(/ acquire pid=\d+ cmd=echo npm run lint/)
-      expect(text).not.toContain(' refused ')
+      expect(text).toMatch(/ refused pid=\d+ reason=fullcheck-token cmd=echo npm run lint/)
+      expect(text).not.toContain(' acquire ')
     } finally {
       await rm(directory, { recursive: true, force: true })
       await rm(history, { force: true })
@@ -681,7 +818,6 @@ describe('heavy-io gate fullcheck token', () => {
       const result = runGate(['node -e "process.stdout.write(\'hot\')"'], {
         DSH_HEAVY_IO_LOCK_DIR: directory,
         DSH_HEAVY_IO_HISTORY: history,
-        DSH_FULLCHECK_OK: '',
         DSH_HEAVY_IO_POLL_MS: '100',
       })
 
@@ -699,7 +835,7 @@ describe('heavy-io gate fullcheck token', () => {
 
   it('refuses full-cold even under a leaked DSH_HEAVY_IO_HELD (2026-11-14 17:12 incident)', async () => {
     // 持久壳 HELD 泄漏实证：两棵全量 lint 以 reason=held 绕闸并发跑 2h。
-    // 持证检查必须排在 held/off 透传之前——泄漏的 HELD 不得连证一起绕过。
+    // 票检必须排在 held/off 透传之前——泄漏的 HELD 不得连票一起绕过。
     const directory = lockDir('fullcold-held-refuse')
     const history = historyPath('fullcold-held-refuse')
     try {
@@ -709,7 +845,6 @@ describe('heavy-io gate fullcheck token', () => {
         DSH_HEAVY_IO_LOCK_DIR: directory,
         DSH_HEAVY_IO_HISTORY: history,
         DSH_HEAVY_IO_HELD: '1',
-        DSH_FULLCHECK_OK: '',
         DSH_HEAVY_IO_POLL_MS: '100',
       })
 
@@ -726,9 +861,10 @@ describe('heavy-io gate fullcheck token', () => {
     }
   }, 90_000)
 
-  it('passes nested full-cold carrying both HELD and the token (authorized parent tree)', async () => {
-    const directory = lockDir('fullcold-held-token')
-    const history = historyPath('fullcold-held-token')
+  it('passes nested full-cold under HELD carrying a valid ticket (authorized parent tree)', async () => {
+    const directory = lockDir('fullcold-held-ticket')
+    const history = historyPath('fullcold-held-ticket')
+    const ticket = writeTicket('held-ticket')
     try {
       await rm(directory, { recursive: true, force: true })
       await rm(history, { force: true })
@@ -736,7 +872,7 @@ describe('heavy-io gate fullcheck token', () => {
         DSH_HEAVY_IO_LOCK_DIR: directory,
         DSH_HEAVY_IO_HISTORY: history,
         DSH_HEAVY_IO_HELD: '1',
-        DSH_FULLCHECK_OK: '1',
+        DSH_FULLCHECK_TICKET: ticket,
         DSH_HEAVY_IO_POLL_MS: '100',
       })
 
@@ -749,6 +885,7 @@ describe('heavy-io gate fullcheck token', () => {
     } finally {
       await rm(directory, { recursive: true, force: true })
       await rm(history, { force: true })
+      rmSync(ticket, { force: true })
     }
   }, 90_000)
 })
@@ -789,6 +926,9 @@ describe('heavy-io gate memory floor (heavy-admit-floor-1124)', () => {
           DSH_HEAVY_IO_HISTORY: history,
           DSH_HEAVY_IO_POLL_MS: '50',
           DSH_HEAVY_IO_FLOOR_MB: '999999999',
+          // Raw spawn bypasses runGate's defaults: pin HELD off so a
+          // gate-wrapped vitest run cannot leak a held passthrough here.
+          DSH_HEAVY_IO_HELD: '',
         },
       })
       let stdout = ''
@@ -859,12 +999,11 @@ describe('heavy-io gate memory floor (heavy-admit-floor-1124)', () => {
       expect(passText).toMatch(/ passthrough pid=\d+ reason=off /)
       expect(passText).not.toContain(' floor-red ')
 
-      // 全-冷无证仍排队前拒绝（拒绝序先于地板检，exit 2 语义不漂）。
+      // 全-冷无票仍排队前拒绝（拒绝序先于地板检，exit 2 语义不漂）。
       rmSync(history, { force: true })
       const refused = runGate(['echo npm run lint'], {
         DSH_HEAVY_IO_LOCK_DIR: directory,
         DSH_HEAVY_IO_HISTORY: history,
-        DSH_FULLCHECK_OK: '',
         DSH_HEAVY_IO_POLL_MS: '100',
         DSH_HEAVY_IO_FLOOR_MB: '999999999',
       })
