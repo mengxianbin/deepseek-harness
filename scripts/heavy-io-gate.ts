@@ -14,13 +14,16 @@
  *
  * Usage: `tsx scripts/heavy-io-gate.ts "<shell command>"`.
  * CI (`CI=true`) passes straight through. Full-cold commands (full-repo lint /
- * test matrices, 三级准入) require the `DSH_FULLCHECK_OK=1` token and are
- * refused *before* queueing without it (default-deny, 2026-11-14
- * fullcheck-token — design: m-note content/tech/ai/dsh/fullcheck-token-1114.md);
- * that check runs BEFORE the `DSH_HEAVY_IO=0` / `DSH_HEAVY_IO_HELD=1`
- * passthroughs, because a leaked held-env in a persistent shell once ran two
- * full lints unserialized for 2 h (2026-11-14 17:12/17:18). Hot commands keep
- * the off/held passthrough semantics unchanged.
+ * test matrices, 三级准入) require a short-lived ticket —
+ * `~/.dsh/fullcheck-ticket.json`, five fields, TTL 300s (fullcheck-token-short-1127 ·
+ * design: m-note content/tech/ai/dsh/fullcheck-token-1114.md §七) — and are
+ * refused *before* queueing without a valid one (default-deny, 2026-11-14
+ * fullcheck-token → short-lived hard cut 2026-11-27: the legacy static
+ * `DSH_FULLCHECK_OK=1` env prefix is retired — a leaked held-env is not
+ * permanent authorization); the check runs BEFORE the `DSH_HEAVY_IO=0` /
+ * `DSH_HEAVY_IO_HELD=1` passthroughs, because a leaked held-env in a persistent
+ * shell once ran two full lints unserialized for 2 h (2026-11-14 17:12/17:18).
+ * Hot commands keep the off/held passthrough semantics unchanged.
  *
  * Queue release additionally requires a green memory floor
  * (heavy-admit-floor-1124 · 口子②): a waiter polls `os.freemem()` against the
@@ -369,14 +372,67 @@ export function isFullColdCommand(command: string): boolean {
 }
 
 /**
- * Whether the fullcheck token authorizes full-cold execution.
- * Static env by design — no rotation, no state, one string comparison
- * (decision record Q3: m-note content/tech/ai/dsh/fullcheck-token-1114.md).
+ * Resolve the fullcheck ticket file path.
+ * `DSH_FULLCHECK_TICKET` overrides the location (fixture/isolation seam, the
+ * same convention as `DSH_HEAVY_IO_HISTORY`).
  * @param env - Environment of this process.
- * @returns true when DSH_FULLCHECK_OK=1 is present.
+ * @returns the ticket file path to read.
  */
-export function fullcheckAuthorized(env: NodeJS.ProcessEnv): boolean {
-  return env.DSH_FULLCHECK_OK === '1'
+export function fullcheckTicketPath(env: NodeJS.ProcessEnv): string {
+  return env.DSH_FULLCHECK_TICKET ?? join(homedir(), '.dsh', 'fullcheck-ticket.json')
+}
+
+/** The five required ticket fields (fullcheck-token-short-1127 · design §7.1). */
+const FULLCHECK_TICKET_FIELDS = ['issuedAt', 'ttlSec', 'reason', 'actor', 'scope'] as const
+
+/**
+ * Short-lived fullcheck ticket verdict (fullcheck-token-short-1127 · design
+ * m-note content/tech/ai/dsh/fullcheck-token-1114.md §7): the command is
+ * authorized only while the ticket exists with all five fields and
+ * `0 <= now - issuedAt <= ttlSec` (the lower bound is the fail-closed guard
+ * against a future-dated ticket that would never expire; recorded §7.5).
+ *
+ * Every failure degrades to `{ ok: false, detail }` — this runs on the
+ * default-deny path, so an error must read as "no ticket", never as an
+ * exception that could be mistaken for a pass. Checked once at admission,
+ * never revoked mid-flight.
+ * @param env - Environment supplying the ticket path override.
+ * @param nowSec - Epoch seconds to judge the window against (fixture seam).
+ * @returns whether the ticket authorizes full-cold, plus the human detail.
+ */
+export async function fullcheckTicketStatus(
+  env: NodeJS.ProcessEnv,
+  nowSec: number = Date.now() / 1000,
+): Promise<{ ok: boolean; detail: string }> {
+  let raw: string
+  try {
+    raw = await readFile(fullcheckTicketPath(env), 'utf8')
+  } catch {
+    return { ok: false, detail: 'missing (never issued)' }
+  }
+  let ticket: unknown
+  try {
+    ticket = JSON.parse(raw)
+  } catch {
+    return { ok: false, detail: 'unreadable or not JSON' }
+  }
+  if (typeof ticket !== 'object' || ticket === null || Array.isArray(ticket)) {
+    return { ok: false, detail: 'malformed (not an object)' }
+  }
+  const record = ticket as Record<string, unknown>
+  for (const field of FULLCHECK_TICKET_FIELDS) {
+    if (!(field in record)) return { ok: false, detail: `incomplete (missing ${field})` }
+  }
+  const issuedAt = Number(record.issuedAt)
+  const ttlSec = Number(record.ttlSec)
+  if (!Number.isFinite(issuedAt) || !Number.isFinite(ttlSec)) {
+    return { ok: false, detail: 'invalid field type' }
+  }
+  if (ttlSec <= 0) return { ok: false, detail: 'invalid (ttlSec <= 0)' }
+  const age = nowSec - issuedAt
+  if (age < 0) return { ok: false, detail: `not yet valid (issuedAt ${Math.round(-age)}s in future)` }
+  if (age > ttlSec) return { ok: false, detail: `expired ${Math.round(age - ttlSec)}s ago` }
+  return { ok: true, detail: `valid (${Math.round(ttlSec - age)}s left)` }
 }
 
 /** Memory floor as a share of physical total — the dispatch pre-read line (FreeMB ≥10%). */
@@ -445,19 +501,26 @@ export async function enterHeavyIoGate(
     })
     return undefined
   }
-  // 三级准入（fullcheck-token 2026-11-14）：全-冷命令 default-deny——排队前
-  // 拒绝（不是排队），history 留 refused 行供审计。**置于 off/held 透传之前**：
-  // 2026-11-14 17:12/17:18 实证，持久壳 DSH_HEAVY_IO_HELD 泄漏曾让两棵全量
-  // lint 以 reason=held 绕闸并发跑 2 小时（free 0.2G 打穿）——HELD/OFF 不得绕证；
-  // 合法嵌套不受影响（持证父生出的子树继承 DSH_FULLCHECK_OK，决策记录 Q2）。
-  if (isFullColdCommand(command) && !fullcheckAuthorized(env)) {
-    recordHistory(historyFile(env), 'refused', command, { reason: 'fullcheck-token' })
-    throw new Error(
-      `heavy-io-gate: full-cold command refused (DSH_FULLCHECK_OK missing): ${command}\n`
-      + 'Full-repo checks are cold-path only (design: m-note content/tech/ai/dsh/fullcheck-token-1114.md). '
-      + 'Iterate with staged lint / targeted tests; run full checks only via an authorized runner, '
-      + 'or after explicit approval prefix DSH_FULLCHECK_OK=1.',
-    )
+  // 三级准入（fullcheck-token 2026-11-14 → 短效硬切 2026-11-27
+  // fullcheck-token-short-1127）：全-冷命令 default-deny——排队前拒绝（不是
+  // 排队），history 留 refused 行供审计。授权载体 = 短效 ticket 文件
+  //（五字段 + TTL 300s，准入时读一次）；旧静态 env DSH_FULLCHECK_OK=1 已退役
+  // （leaked held-env ≠ 永久授权）。**置于 off/held 透传之前**：2026-11-14
+  // 17:12/17:18 实证，持久壳 DSH_HEAVY_IO_HELD 泄漏曾让两棵全量 lint 以
+  // reason=held 绕闸并发跑 2 小时（free 0.2G 打穿）——HELD/OFF 不得绕证；
+  // 合法嵌套不受影响（ticket 文件全机同落点，子树各查各的仍同证）。
+  if (isFullColdCommand(command)) {
+    const ticket = await fullcheckTicketStatus(env)
+    if (!ticket.ok) {
+      recordHistory(historyFile(env), 'refused', command, { reason: 'fullcheck-token' })
+      throw new Error(
+        `heavy-io-gate: full-cold command refused (fullcheck ticket ${ticket.detail}): ${command}\n`
+        + 'Full-repo checks are cold-path only (design: m-note content/tech/ai/dsh/fullcheck-token-1114.md §七). '
+        + 'Issue a short-lived ticket: python scripts/dsh/fullcheck-ticket-issue.py --reason "…" (TTL 300s, expired → re-issue). '
+        + 'Legacy DSH_FULLCHECK_OK=1 env prefix is retired and no longer authorizes; '
+        + 'iterate with staged lint / targeted tests instead.',
+      )
+    }
   }
   const reason = passthroughReason(env)
   if (reason !== undefined) {
