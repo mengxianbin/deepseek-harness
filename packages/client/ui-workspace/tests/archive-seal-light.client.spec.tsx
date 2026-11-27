@@ -16,7 +16,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { allowAllAccess, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
+import { allowAllAccess, contextMenuHook, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {
   SealLightSeal, SealLightSnapshot, SealRowObserver, WorkspaceBrowserProps,
@@ -530,6 +530,9 @@ describe('the lamp’s seat on a Session row (design §三 / §六.6)', () => {
         onOpen={vi.fn()}
         onRenameRequest={vi.fn()}
         renderSlot={() => null}
+        renderFactorySlot={() => null}
+        useContextMenu={contextMenuHook()}
+        useContextMenuTarget={selector => selector(null)}
         seals={snapshot}
         sealRows={sealRows}
         useSessionAccess={allowAllAccess.useSessionAccess}
@@ -576,6 +579,9 @@ describe('the lamp’s seat on a Session row (design §三 / §六.6)', () => {
         onOpen={vi.fn()}
         onRenameRequest={vi.fn()}
         renderSlot={() => null}
+        renderFactorySlot={() => null}
+        useContextMenu={contextMenuHook()}
+        useContextMenuTarget={selector => selector(null)}
         seals={seals({ verdict: 'DONE' })}
         useSessionAccess={allowAllAccess.useSessionAccess}
         t={t}

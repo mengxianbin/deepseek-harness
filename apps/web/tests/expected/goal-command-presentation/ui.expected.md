@@ -1,6 +1,7 @@
 - banner:
   - navigation "Session hierarchy": workspace
   - button "Chat"
+  - button "Session panel"
   - button "More actions"
   - button "Open right sidebar"
 - group "Command input": /goal

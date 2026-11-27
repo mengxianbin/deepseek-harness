@@ -17,7 +17,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import type { ChangeEvent, KeyboardEvent, MouseEvent } from 'react'
 import clsx from 'clsx'
 import {
-  focusWithoutRing, IconPlusOutlineMedium, IconWarningOutlineRegular, isMobileDevice, Toast, Tooltip,
+  focusWithoutRing, IconPlusOutlineMedium, IconTriangleRightFillRegular, IconWarningOutlineRegular, isMobileDevice, Toast, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 // Type-only: the `plan` projection key merge (the TodoDock posture — the
 // composer reads a host-computed value; the domain owns the key).
@@ -28,7 +28,7 @@ import type {} from '@deepseek-ai/dsh-goal/client'
 // wire types: apiproxy's sessions contract declares it, and client-runtime's
 // api-remotes import already places it in every client program.
 import type { Translate } from '@deepseek-ai/dsh-client-ui-slots'
-import type { ComposerBarProps } from '../contract/slots.ts'
+import type { ComposerBarProps, inputBarChildren } from '../contract/slots.ts'
 import type { SwallowKind } from '../stop-gate.ts'
 import { DraftEditor } from '../input/editor/DraftEditor.tsx'
 import {
@@ -41,15 +41,15 @@ import { isImageMediaType } from '../service.ts'
 import { observeControlRow } from './control-row-layout.ts'
 import css from './InputBar.module.css'
 
-export type InputBarProps = ComposerBarProps
+export type InputBarProps = ComposerBarProps<keyof typeof inputBarChildren>
 
 export const InputBar = memo(function InputBar({
   useSession, useInput, inputActions, keyboard, addFiles, removeAttachment, resolveDraftAttachments,
-  retryFileUpload,
-  toggleCommandMenu, stop, stopGate, t,
-  renderSlot, useBusyEnter, useFileUploads, useNotices, useLexicon, useMenuLauncher, useStopShortcut,
+  retryFileUpload, registerFileIntake,
+  toggleCommandMenu, stop, stopGate, retry, t,
+  renderSlot, renderSlotChain, useBusyEnter, useFileUploads, useNotices, useLexicon, useMenuLauncher, useStopShortcut,
   useAccess,
-  useProjection, sessionId, variant, disabled: inert = false, blocked,
+  useProjection, sessionId, variant, occurrence, disabled: inert = false, blocked,
   workspacePickerOpen = false, onRequestWorkspace,
   placeholder, accessory, activity, onActiveChange,
 }: InputBarProps) {
@@ -71,6 +71,14 @@ export const InputBar = memo(function InputBar({
   // arrives through the owner props and reports back through onActiveChange.
   const promptError = useSession(s => s.promptError) ?? null
   const running = useSession(s => s.running) ?? false
+  const retryableFailure = useProjection('conversationContinuation') ?? undefined
+  const pendingHumanInput = useProjection('inbox', inbox =>
+    inbox?.['next-step'].some(message =>
+      typeof message === 'object' && message !== null && 'source' in message
+      && typeof message.source === 'object' && message.source !== null && 'kind' in message.source
+      && message.source.kind === 'user') ?? false)
+  const historyOpen = useSession(s => s.openState === 'open') ?? false
+  const submissionPending = useSession(s => s.pendingSubmissions.length > 0) ?? false
   const subagent = useSession(s => s.subagent) ?? null
   const removed = useSession(s => s.removed) ?? false
   // Plan mode swaps the composer placeholder (the projection is the folded
@@ -172,15 +180,8 @@ export const InputBar = memo(function InputBar({
   const cardRef = useRef<HTMLDivElement | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
 
-  // A continuable child without its live parent cannot accept human input,
-  // but its independent Stop below stays available while it runs.
   const continuable = subagent?.address.mode === 'continuable'
-  const parentOffline = continuable && subagent.parentAvailable !== true
-  // Running input stays free; locked = session removed, the
-  // inert no-workspace state, the machine faces absent (no session), or a
-  // parent-offline continuable child. An owner block also disables input;
-  // adjudicating and submitting render read-only so the draft stays visible.
-  const disabled = removed || inert || !live || blocked !== undefined || parentOffline
+  const disabled = removed || inert || !live || blocked !== undefined
   const locked = disabled
   // The model seat is the ONE control a block leaves live: every block this
   // contract has is cleared by choosing a model, so locking it too would leave
@@ -347,6 +348,17 @@ export const InputBar = memo(function InputBar({
     return installDraftKeyboardDismissal(editor, cardRef)
   }, [editor])
 
+  // A document paste outside an editable control addresses at most one
+  // mounted composer; the shared route elects it from focus and the main
+  // occurrence.
+  useEffect(() => registerFileIntake({
+    // The card is an unconditional descendant attached before this effect.
+    card: cardRef.current as HTMLDivElement,
+    occurrence,
+    accepts: () => gate.current.canAcceptDrop,
+    add: (files, directories) => { gate.current.intakeFiles(files, directories) },
+  }), [registerFileIntake, occurrence])
+
   // Button presses steal focus from the editor; suppress at mousedown so
   // typing continues seamlessly. Lexical's focus() carries preventScroll and
   // restores the previous selection, so no reveal is needed: the caret has
@@ -401,8 +413,12 @@ export const InputBar = memo(function InputBar({
   // exposes Stop independently, and so does a running session while a
   // message waits for the Host.
   const primaryStops = running && subagent === null && !sending && (empty || blocked !== undefined)
+  const primaryRetries = !running && subagent === null && empty && retryableFailure !== undefined
+    && !pendingHumanInput && historyOpen && !submissionPending && !disabled && input.queue.length === 0
+    && input.phase === 'plain' && retry !== undefined
   // Disabled native buttons may omit mouseleave; their tooltip must close from state.
-  const primaryDisabled = primaryStops ? stopAction === undefined : empty || disabled || machineBusy || uploadsPending
+  const primaryDisabled = primaryStops ? stopAction === undefined
+    : (!primaryRetries && empty) || disabled || machineBusy || uploadsPending
   const interruptible = running && (continuable || (sending && subagent === null))
   // Stamp the Send→Stop flip while rendering: the stop path reads the gate
   // synchronously and must not wait for a render effect. The ref only advances
@@ -420,12 +436,18 @@ export const InputBar = memo(function InputBar({
     ? t('input.stop')
     : sending
       ? t('input.sending')
-      : running && steeringAvailable && !disabled && !uploadsPending && plainMessageDraft
-        ? t(primarySubmitMode === 'steer' ? 'input.send.steer' : 'input.send.queue')
-        : t('input.send')
+      : primaryRetries
+        ? t('input.continue')
+        : running && steeringAvailable && !disabled && !uploadsPending && plainMessageDraft
+          ? t(primarySubmitMode === 'steer' ? 'input.send.steer' : 'input.send.queue')
+          : t('input.send')
   const onPrimary = (): void => {
     if (primaryStops) {
       stopAction?.('primary')
+      return
+    }
+    if (primaryRetries) {
+      retry(retryableFailure)
       return
     }
     if (keyboard === undefined) return // absent machine: the button is disabled
@@ -456,16 +478,14 @@ export const InputBar = memo(function InputBar({
   // reset the fold bookkeeping so a stale focus flag cannot hold the bar open.
   useEffect(() => { setDraftFocused(false) }, [sessionId, locked])
 
-  const placeholderText = placeholder ?? (parentOffline
-    ? t('placeholder.parentOffline')
-    : disabled
-      ? t('placeholder.unavailable')
-      // The steer hint deliberately outranks the plan placeholder:
-      // while it shows, the whole-queue gesture is genuinely available
-      // (the gate never consults plan mode), so the actionable hint wins.
-      : canSteerQueue
-        ? t('placeholder.steerQueue')
-        : planActive ? t('placeholder.plan') : t('placeholder.default'))
+  const placeholderText = placeholder ?? (disabled
+    ? t('placeholder.unavailable')
+    // The steer hint deliberately outranks the plan placeholder:
+    // while it shows, the whole-queue gesture is genuinely available
+    // (the gate never consults plan mode), so the actionable hint wins.
+    : canSteerQueue
+      ? t('placeholder.steerQueue')
+      : planActive ? t('placeholder.plan') : t('placeholder.default'))
 
   return (
     <div className={clsx(css.root, variant === 'hero' && css.hero)}>
@@ -533,6 +553,8 @@ export const InputBar = memo(function InputBar({
           editorDisabled={editorDisabled}
           phase={input?.phase ?? 'inert'}
           placeholderText={placeholderText}
+          placeholderSessionId={editable && !canSteerQueue ? sessionId : undefined}
+          renderSlotChain={renderSlotChain}
           ariaLabel={workspaceTrigger ? t('hero.chooseWorkspace') : placeholderText}
           workspaceTrigger={workspaceTrigger}
           workspacePickerOpen={workspacePickerOpen}
@@ -542,7 +564,7 @@ export const InputBar = memo(function InputBar({
         />
         <div ref={rowRef} className={css.row}>
           <div className={css.tools} hidden={activity}>
-            <Tooltip label={t('input.commands')} side="top" delayMs={500}>
+            <Tooltip label={t('input.commands')} side="top" delayMs={500} portal>
               <button
                 type="button"
                 className={css.add}
@@ -583,7 +605,7 @@ export const InputBar = memo(function InputBar({
               {renderSlot('conversation.input.activity', { locked, onActiveChange })}
             </div>}
             {interruptible && !cancelDenied && (
-              <Tooltip label={t('input.stop')} shortcutKeys={stopKeys} side="top" delayMs={500} disabled={stopAction === undefined}>
+              <Tooltip label={t('input.stop')} shortcutKeys={stopKeys} side="top" delayMs={500} disabled={stopAction === undefined} portal>
                 <button
                   type="button"
                   className={clsx(css.primary, swallowed && css.primarySwallowed)}
@@ -599,7 +621,7 @@ export const InputBar = memo(function InputBar({
               </Tooltip>
             )}
             {(primaryStops ? cancelDenied : promptDenied) ? null : (
-              <Tooltip label={primaryStops ? t('input.stop') : primaryLabel} shortcutKeys={primaryStops ? stopKeys : undefined} side="top" delayMs={500} disabled={primaryDisabled}>
+              <Tooltip label={primaryStops ? t('input.stop') : primaryLabel} shortcutKeys={primaryStops ? stopKeys : undefined} side="top" delayMs={500} disabled={primaryDisabled} portal>
                 <button
                   type="button"
                   className={clsx(css.primary, swallowed && css.primarySwallowed)}
@@ -619,6 +641,8 @@ export const InputBar = memo(function InputBar({
                       <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeOpacity="0.35" strokeWidth="2" />
                       <path d="M8 2a6 6 0 0 1 6 6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                     </svg>
+                  ) : primaryRetries ? (
+                    <IconTriangleRightFillRegular size={16} className={css.continueIcon} />
                   ) : (
                     <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
                       <path d="M8.3125 0.980183C8.66767 1.0531 8.97902 1.20418 9.2627 1.43233C9.48724 1.61297 9.73029 1.85793 9.97949 2.10714L14.707 6.83468L13.293 8.24874L9 3.95577V15.0417H7V3.95577L2.70703 8.24874L1.29297 6.83468L6.02051 2.10714C6.26971 1.85793 6.51277 1.61297 6.7373 1.43233C6.97662 1.23986 7.28445 1.04402 7.6875 0.980183C7.8973 0.947006 8.1031 0.95516 8.3125 0.980183Z" fill="currentColor" />

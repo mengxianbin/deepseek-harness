@@ -6,7 +6,7 @@ import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent, AgentFactory } from '@deepseek-ai/dsh-agent'
 import { agentPresetProjectionDefinition } from '@deepseek-ai/dsh-agent-preset-registry'
-import SessionStore, { SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { SESSION_FORMAT_VERSION, type SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionHeader } from '@deepseek-ai/dsh-session'
 import { SessionAlreadyOwnedError } from '@deepseek-ai/dsh-session-persistence'
 import type { SessionObservation } from '@deepseek-ai/dsh-session-query'
@@ -17,6 +17,7 @@ import {
   ApiSessionCwdConflict,
 } from '../src/agent.ts'
 import { installSessionReadTestServices, testSessionPersistence } from './test-remote.ts'
+import { brandString } from '@deepseek-ai/dsh-brand'
 
 const roots: Context[] = []
 
@@ -35,7 +36,7 @@ async function harness(): Promise<{ ctx: Context; agents: ApiSessionAgentControl
   await ctx.plugin(SessionStore)
   await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(AgentRegistry)
-  installSessionReadTestServices(ctx)
+  await installSessionReadTestServices(ctx)
   await ctx.sessionProjections.register(agentPresetProjectionDefinition)
   ctx.provide('agentDefaultModel', {
     currentSelection: () => ({ provider: 'fixture', model: 'fixture-model' }),
@@ -49,7 +50,7 @@ async function harness(): Promise<{ ctx: Context; agents: ApiSessionAgentControl
 function header(id: string, cwd: string | null = '/workspace'): SessionHeader {
   return {
     version: SESSION_FORMAT_VERSION,
-    id: SessionId(id),
+    id: brandString<SessionId>(id),
     createdAt: 1,
     isSeeded: false,
     ...(cwd === null ? {} : { cwd }),
@@ -101,9 +102,9 @@ function publicationContractFactory(ctx: Context): AgentFactory {
 
 describe('ApiSession identity failures', () => {
   it('describes cwd conflicts with and without a recorded cwd', () => {
-    expect(new ApiSessionCwdConflict(SessionId('missing-cwd'), '/wanted', undefined).message)
+    expect(new ApiSessionCwdConflict(brandString<SessionId>('missing-cwd'), '/wanted', undefined).message)
       .toContain('records no cwd')
-    expect(new ApiSessionCwdConflict(SessionId('wrong-cwd'), '/wanted', '/existing').message)
+    expect(new ApiSessionCwdConflict(brandString<SessionId>('wrong-cwd'), '/wanted', '/existing').message)
       .toContain('belongs to "/existing"')
   })
 })
@@ -183,7 +184,7 @@ describe('ApiSession Agent lookup and recovery', () => {
     if (host === undefined) throw new Error('Agent Context resolver was not registered')
 
     await expect(host.resolve(live.id)).resolves.toBe(live.ctx)
-    await expect(host.resolve(SessionId('missing'))).rejects.toMatchObject({ code: 'session/not-found' })
+    await expect(host.resolve(brandString<SessionId>('missing'))).rejects.toMatchObject({ code: 'session/not-found' })
   })
 
   it('returns raced ordinary Agents and ownership failures after resume throws', async () => {
@@ -208,7 +209,7 @@ describe('ApiSession Agent lookup and recovery', () => {
     })
     vi.spyOn(child.ctx.agents, 'resume').mockImplementation(async () => {
       child.ctx.sessions.create(childMeta.id, {
-        meta: { ...childMeta, parentSession: SessionId('parent'), origin: 'subagent' },
+        meta: { ...childMeta, parentSession: brandString<SessionId>('parent'), origin: 'subagent' },
       })
       throw new Error('raced child publication')
     })
@@ -223,7 +224,7 @@ describe('ApiSession Agent lookup and recovery', () => {
       list: () => Promise.resolve([]),
       inspect: vi.fn(),
     })
-    await expect(missing.agents.resolveAgent(SessionId('missing'))).resolves.toMatchObject({
+    await expect(missing.agents.resolveAgent(brandString<SessionId>('missing'))).resolves.toMatchObject({
       error: { code: 'session/not-found' },
     })
 
@@ -299,7 +300,7 @@ describe('ApiSession creation', () => {
     child.ctx.provide('agentPresets', {
       resolve: () => {
         child.ctx.sessions.create(childMeta.id, {
-          meta: { ...childMeta, parentSession: SessionId('parent'), origin: 'subagent' },
+          meta: { ...childMeta, parentSession: brandString<SessionId>('parent'), origin: 'subagent' },
         })
         return Promise.resolve({ id: 'standard' })
       },

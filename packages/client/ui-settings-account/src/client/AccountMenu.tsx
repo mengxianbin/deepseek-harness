@@ -4,7 +4,6 @@ import { IconSettingsOutlineMedium, Toast, Tooltip } from '@deepseek-ai/dsh-clie
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { AccountSectionInjected } from './AccountSection.tsx'
 import { SignInDialog } from './SignInDialog.tsx'
-import { AccountNoticeStack } from './AccountNotice.tsx'
 import css from './AccountMenu.module.css'
 
 /** Account launcher composed by the settings shell. */
@@ -29,10 +28,9 @@ export type AccountMenuProps = PropsRuntime<'settings.launcher'> & PropsLocale<'
  */
 export function AccountMenu({
   subscribeSessionExpired, subscribeModelSignInRequired, wide, settingsShortcut, openSettings, openOnboarding, settingsOpen,
-  useAccount, useTheme, refreshAccount, bonusNoticeShown, bonusNoticeDismissed,
+  useAccount, useTheme, refreshAccount,
   showLogin, start, cancel, t,
 }: AccountMenuProps) {
-  const anchor = useRef<HTMLDivElement>(null)
   // The launcher outlives the panel, so a false-to-true edge is one Settings entry:
   // re-renders, section switches and tab switches inside one open must not read again.
   const settingsWasOpen = useRef(false)
@@ -47,17 +45,15 @@ export function AccountMenu({
   useEffect(() => subscribeModelSignInRequired?.(() => { setSignInNotice(value => value + 1) }), [subscribeModelSignInRequired])
   const [expiryNotice, setExpiryNotice] = useState(false)
   useEffect(() => subscribeSessionExpired?.(() => { setExpiryNotice(true) }), [subscribeSessionExpired])
+  const anchor = useRef<HTMLDivElement>(null)
   // FORK (settings-launcher): the base More-menu machinery (profile label,
   // open/busy state, requestSignOut/beginSignIn) left with the menu. Upstream
   // (0.2.2) insets the root while signed in on the wide foot; the gear keeps
-  // that attribute.
+  // that attribute. The base bonus-notice stack left with the menu too: the
+  // shell now hosts notices through the `settings.notice` seat (AccountNotices).
   return <div ref={anchor} className={css.root} data-inset={signedIn && wide}>
     {signInNotice > 0 && <Toast key={signInNotice} text={t('modelSignInRequired')} onDone={() => { setSignInNotice(0) }} />}
     {expiryNotice && <Toast text={t('sessionExpired')} onDone={() => { setExpiryNotice(false) }} />}
-    {signedIn && !account.desktopOnboardingVisible && !account.onboarding && account.notices && <AccountNoticeStack
-      notices={account.notices}
-      anchor={anchor} title={t('bonusNoticeTitle')} closeLabel={t('close')}
-      onShown={bonusNoticeShown} onDismiss={bonusNoticeDismissed} />}
     <Tooltip label={t('settings')} shortcutKeys={settingsShortcut?.keys} delayMs={500} disabled={settingsOpen}>
       <button
         type="button"

@@ -1,33 +1,29 @@
 /** Host HTTP bridge for browser-client RPC. */
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context, Volatile } from '@deepseek-ai/cordis'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-attachment'
-import type {} from '@deepseek-ai/dsh-credentials'
 // Activates the webServer Context merge used below.
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import { API_PATH } from './api-path.ts'
-import { CONNECT_PATH, REFRESH_PATH } from './connect-protocol.ts'
+import { REFRESH_PATH } from './connect-protocol.ts'
 import { bridge, DEFAULT_MAX_REQUEST_BODY_BYTES } from './http-bridge.ts'
 import { assertTrustedAuthority } from './api-request-trust.ts'
-import { BrowserAuth } from './browser-auth.ts'
 import { HostConnectionService } from './rpc-host.ts'
+import { ConnectionAuthentication } from './authentication.ts'
 import { ConnectionRecoveryConfigSchema, resolveConnectionConfig, type ConnectionRecoveryConfig } from './recovery-config.ts'
 
 export type {
+  AuthenticationProvider,
   PeerAdmission,
-  ConnectionAdmission,
   ConnectionFetchMethod,
   ConnectionFetchHandler,
   ConnectionFetchRoute,
-  ConnectionIndexRequest,
-  ConnectionIndexResponse,
   ConnectionRpcEndpointMatcher,
   ConnectionRpcAttachment,
   ConnectionRpcFailure,
   ConnectionRpcHandler,
   ConnectionRpcHandlerResult,
-  ConnectionRequestRejection,
   ConnectionRpcResult,
   ConnectionRequestBodyMode,
   ConnectionTrustRequest,
@@ -52,6 +48,7 @@ export {
   serverResponseSchema,
 } from './rpc-schema.ts'
 export { HostConnectionService } from './rpc-host.ts'
+export { ConnectionAuthentication } from './authentication.ts'
 
 export { API_PATH } from './api-path.ts'
 
@@ -106,12 +103,12 @@ function assertImageBodyCapacity(ctx: Context, maxRequestBodyBytes: number): voi
 }
 
 /** Services required before providing Connection. */
-export const inject = ['credentials']
+export const inject: string[] = []
 
 /** Browser authentication, request limits, and connection recovery configuration. */
 export interface ConnectionConfig {
-  /** Browser recovery timing, injected into each served page. */
-  recovery?: ConnectionRecoveryConfig
+  /** Browser recovery timing; the browser receives it through its synced Config and reads it once when the plugin activates. */
+  recovery?: Volatile<ConnectionRecoveryConfig>
   /**
    * Authorities this deployment serves beyond loopback: exact `host:port`, or
    * port-less `host` matching any port. The fence accepts loopback and the
@@ -119,7 +116,10 @@ export interface ConnectionConfig {
    * an entry here. A non-canonical or non-bare authority fails plugin load.
    */
   trustedHosts?: string[]
-  /** Absolute browser and API cookie lifetime in days. Default: 30. */
+  /**
+   * Absolute browser-cookie lifetime window in days the heartbeat cadence derives from;
+   * mirrors the Token plugin's `cookieMaxAgeDays`. Default: 30.
+   */
   cookieMaxAgeDays?: number
   /**
    * Page heartbeat interval in ms that re-issues the browser cookie before
@@ -131,8 +131,9 @@ export interface ConnectionConfig {
   maxRequestBodyBytes?: number
 }
 
-export const Config: z<ConnectionConfig> = z.object({
-  recovery: ConnectionRecoveryConfigSchema.default({}),
+/** Host request limits and trusted authorities; `recovery` is synced to the browser. */
+export const Config: z<Omit<ConnectionConfig, 'recovery'> & { recovery?: ConnectionRecoveryConfig }, ConnectionConfig> = z.object({
+  recovery: ConnectionRecoveryConfigSchema.default({}).volatile(),
   trustedHosts: z.array(String).default([]),
   cookieMaxAgeDays: z.natural().min(1).default(30),
   cookieRefreshIntervalMs: z.natural().max(MAX_TIMER_MS),
@@ -141,13 +142,15 @@ export const Config: z<ConnectionConfig> = z.object({
 
 /**
  * Provides carrier-neutral RPC and Fetch registries. When `webServer` is
- * present, the plugin also mounts the `/api` browser transport with Host/Origin
- * checks and persistent browser authentication.
+ * present, the plugin applies Host/Origin checks and registered authentication
+ * to WebServer routes and mounts the `/api` browser transport.
  * @param ctx - Host plugin context.
  * @param config - resolved plugin config (schema defaults applied).
  */
-export async function apply(ctx: Context, config?: ConnectionConfig): Promise<void> {
-  const recovery = resolveConnectionConfig(config?.recovery)
+export function apply(ctx: Context, config?: ConnectionConfig): void {
+  // Config boundary: the schema admits a NaN backoff factor, which the synced Config projection cannot carry as lossless
+  // JSON; rejecting it at load keeps a row with an unprojectable recovery value off the graph.
+  resolveConnectionConfig(config?.recovery?.get())
   // The Loader resolves schema defaults; hand-built test contexts may pass none.
   const trustedHosts = config?.trustedHosts ?? []
   const cookieMaxAgeDays = config?.cookieMaxAgeDays ?? 30
@@ -157,42 +160,52 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
   // silently authorizing its hostname prefix at request time.
   for (const entry of trustedHosts) assertTrustedAuthority(entry)
   assertImageBodyCapacity(ctx, maxRequestBodyBytes)
-  const connection = new HostConnectionService(
-    ctx,
-    trustedHosts,
-    await BrowserAuth.create(ctx.root, ctx.credentials, cookieMaxAgeDays),
-  )
-  ctx.inject(['webServer'], (webCtx) => {
-    assertImageBodyCapacity(webCtx, maxRequestBodyBytes)
-    webCtx.on('webserver/index-inject', (table) => {
-      table.push({ kind: 'global', name: '__DSH_CONNECTION_RECOVERY__', value: recovery })
-      if (cookieRefreshIntervalMs > 0) {
-        table.push({ kind: 'global', name: '__DSH_COOKIE_REFRESH__', value: { intervalMs: cookieRefreshIntervalMs } })
-      }
-    })
-    const fetchHandler = connection.createSharedFetchHandler(API_PATH)
-    const route: WebRoute = {
-      kind: 'prefix',
-      path: API_PATH,
-      handler: async (req, res) => {
-        const admission = connection.admit(req)
-        if ('rejection' in admission) {
-          res.writeHead(admission.rejection)
-          res.end(admission.rejection === 401 ? 'unauthorized' : 'forbidden')
-          return
+  // The cookie-refresh heartbeat stands down the moment this fiber disposes, so
+  // a route handler surviving in a test's hand answers like a dead Host.
+  let active = true
+  ctx.effect(() => () => { active = false }, 'client-connection: cookie refresh fence')
+  new ConnectionAuthentication(ctx)
+  ctx.inject(['connection.authentication'], (connectionCtx) => {
+    const connection = new HostConnectionService(connectionCtx, trustedHosts)
+    connectionCtx.inject(['webServer'], (webCtx) => {
+      assertImageBodyCapacity(webCtx, maxRequestBodyBytes)
+      // The heartbeat exchanges the browser cookie; only the served page
+      // without an explicit transport uses that cookie carrier.
+      webCtx.on('webserver/index-inject', (table) => {
+        if (cookieRefreshIntervalMs > 0) {
+          table.push({ kind: 'global', name: '__DSH_COOKIE_REFRESH__', value: { intervalMs: cookieRefreshIntervalMs } })
         }
-        await webCtx.waterfall('connection/request', req, res, () => bridge(req, res, fetchHandler, admission.peer, maxRequestBodyBytes))
-      },
-    }
-    webCtx.effect(() => webCtx.webServer.register(route), 'client-connection: /api route')
-    webCtx.effect(() => webCtx.webServer.register({
-      kind: 'exact', path: CONNECT_PATH,
-      handler: (req, res) => { connection.authorizeConnect(req, res) },
-    }), 'client-connection: /connect route')
-    webCtx.effect(() => webCtx.webServer.register({
-      kind: 'exact', path: REFRESH_PATH,
-      handler: (req, res) => { connection.authorizeRefresh(req, res) },
-    }), 'client-connection: /refresh route')
+      })
+      const fetchHandler = connection.createSharedFetchHandler(API_PATH)
+      const route: WebRoute = {
+        kind: 'prefix',
+        path: API_PATH,
+        auth: 'required',
+        handler: async (req, res, peer) => {
+          if (peer === undefined || res.destroyed) return
+          await webCtx.waterfall('connection/request', req, res, () => bridge(req, res, fetchHandler, peer, maxRequestBodyBytes))
+        },
+      }
+      webCtx.effect(() => webCtx.webServer.register(route), 'client-connection: /api route')
+      // Fork cookie rotation: anonymous because the handler itself owns the
+      // structured 401 an expired cookie earns; the trust fence still runs
+      // first through `webserver/authorize`.
+      webCtx.effect(() => webCtx.webServer.register({
+        kind: 'exact',
+        path: REFRESH_PATH,
+        auth: 'anonymous',
+        handler: (request, response) => {
+          const refuse = (): void => {
+            response.writeHead(401, { 'cache-control': 'no-store', 'content-type': 'text/plain; charset=utf-8' })
+            response.end('unauthorized')
+          }
+          if (!active) { refuse(); return }
+          const auth = ctx.get('browserAuth')
+          if (auth === undefined) { refuse(); return }
+          auth.refreshCookie(request, response, webCtx.webServer.protocol === 'https:')
+        },
+      }), 'client-connection: /refresh route')
+    })
   })
   ctx.inject(['attachments'], (attachmentCtx) => {
     assertImageBodyCapacity(attachmentCtx, maxRequestBodyBytes)

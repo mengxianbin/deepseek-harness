@@ -7,7 +7,6 @@
  */
 import { Context } from '@deepseek-ai/cordis'
 import { HostConnectionService } from '@deepseek-ai/dsh-client-connection'
-import type { BrowserAuth } from '@deepseek-ai/dsh-client-connection/src/browser-auth.ts'
 import { describe, expect, it } from 'vitest'
 import { registerServerStartedAt } from '../src/server-started-at-host.ts'
 import { SERVER_STARTED_AT_PATH, resolveServerStartedAt } from '../src/server-started-at.ts'
@@ -15,7 +14,7 @@ import { SERVER_STARTED_AT_PATH, resolveServerStartedAt } from '../src/server-st
 /** Fresh context, real Connection fetch registry, and request helpers over the start-time route. */
 function fixture() {
   const ctx = new Context()
-  const connection = new HostConnectionService(ctx, [], {} as BrowserAuth)
+  const connection = new HostConnectionService(ctx, [])
   const handler = connection.createSharedFetchHandler('/api')
   const get = () => handler.fetch(new Request(`http://localhost${SERVER_STARTED_AT_PATH}`, { method: 'GET' }),
     connection.browserPeer)

@@ -1,4 +1,5 @@
 /**
+ * Executable lint checks use private copies of repository sources and configuration.
  * Process-spawning cases set Vitest's case timeout to 90 seconds, including
  * plain local runs without a CI override. Configuration-only cases keep the default.
  *
@@ -8,13 +9,46 @@
  * keeps the project-free staged-config contract and the configuration assertions.
  * Spawn helpers live in `oxlint-executable-support.ts`, shared by both files.
  */
-import { existsSync } from 'node:fs'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { join, relative } from 'node:path'
+import { spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import { existsSync, globSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { cp, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { basename, join, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { flattenDiagnosticMessageText, parseConfigFileTextToJson } from 'typescript'
-import { describe, expect, it } from 'vitest'
-import { normalizedOutput, repositoryRoot, runOxlint, runRepositoryOxlint } from './oxlint-executable-support.ts'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+
+const sourceRepositoryRoot = fileURLToPath(new URL('..', import.meta.url))
+let repositoryRoot = ''
+
+// Probes belong to a private copy: repository compiler scans run in other workers and processes.
+beforeAll(async () => {
+  repositoryRoot = await mkdtemp(join(tmpdir(), 'dsh-oxlint-contract-'))
+  repositoryRoot = await realpath(repositoryRoot)
+  const files = [
+    ...globSync('tsconfig*.json', { cwd: sourceRepositoryRoot }),
+    '.oxlintrc.json', '.oxlintrc.staged.json', 'package.json', 'lefthook.yml',
+    'apps', 'native', 'packages', 'python', 'scripts', 'vendor', 'website',
+  ]
+  for (const path of files) {
+    await cp(join(sourceRepositoryRoot, path), join(repositoryRoot, path), {
+      recursive: true,
+      async filter(source) {
+        if (['node_modules', 'lib', '.typecheck'].includes(basename(source))) return false
+        return (await lstat(source)).isDirectory() || /\.(?:json|[cm]?[jt]sx?)$/u.test(source) || source.endsWith('lefthook.yml')
+      },
+    })
+  }
+  await symlink(join(sourceRepositoryRoot, 'node_modules'), join(repositoryRoot, 'node_modules'),
+    process.platform === 'win32' ? 'junction' : 'dir')
+}, 90_000)
+
+afterAll(async () => {
+  if (repositoryRoot !== '') await rm(repositoryRoot, { recursive: true, force: true })
+}, 90_000)
+const oxlintCli = fileURLToPath(new URL('../node_modules/oxlint/bin/oxlint', import.meta.url))
+const tsxCli = fileURLToPath(new URL('../node_modules/tsx/dist/cli.mjs', import.meta.url))
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -24,7 +58,142 @@ function isUnknownArray(value: unknown): value is unknown[] {
   return Array.isArray(value)
 }
 
+function runRepositoryOxlint(args: readonly string[], env: NodeJS.ProcessEnv = {}) {
+  return spawnSync(process.execPath, [tsxCli, join(sourceRepositoryRoot, 'scripts/run-oxlint.ts'), ...args], {
+    cwd: repositoryRoot,
+    encoding: 'utf8',
+    env: { ...process.env, NO_COLOR: '1', ...env },
+  })
+}
+
+function runOxlint(args: readonly string[], env: NodeJS.ProcessEnv = {}) {
+  return spawnSync(process.execPath, [oxlintCli, ...args], {
+    cwd: repositoryRoot,
+    encoding: 'utf8',
+    env: { ...process.env, NO_COLOR: '1', ...env },
+  })
+}
+
+function normalizedOutput(result: ReturnType<typeof runOxlint>): string {
+  return `${result.stdout}${result.stderr}`.replaceAll('\\', '/')
+}
+
+async function writeContractConfig(suffix: string): Promise<string> {
+  const path = join(repositoryRoot, `.oxlintrc.contract-${suffix}.json`)
+  await writeFile(path, JSON.stringify({ extends: ['./.oxlintrc.json'], ignorePatterns: [] }))
+  return path
+}
+
 describe('Oxlint executable contract', () => {
+  it('discovers the owning TypeScript project for every file class', async () => {
+    const suffix = randomUUID()
+    const configPath = await writeContractConfig(suffix)
+    const probes = [
+      ['host package source', 'packages/fs/fs-observation-policy/src', 'packages/fs/fs-observation-policy/tsconfig.json'],
+      ['host package test', 'packages/fs/fs-observation-policy/tests', 'tsconfig.host.json'],
+      ['client package source', 'packages/client/ui-primitives/src', 'packages/client/ui-primitives/tsconfig.json'],
+      // A test under packages/client states its face in the filename, so the
+      // probe carries the Client suffix to reach the Client aggregate.
+      ['client package test', 'packages/client/ui-trajectory/tests', 'tsconfig.client.json', '.client.ts'],
+      ['CLI profile test', 'apps/cli/tests/profiles/headless/tests', 'tsconfig.host.json'],
+      ['website', 'website', 'tsconfig.host.json'],
+    ] as const
+    const source = `export function probePromise(): Promise<void> {
+  return Promise.resolve()
+}
+
+probePromise()
+`
+
+    try {
+      const paths: Array<readonly [label: string, path: string, tsconfig: string]> = []
+      for (const [label, parent, tsconfig, extension = '.ts'] of probes) {
+        const path = join(repositoryRoot, parent, `oxlint-contract-${suffix}${extension}`)
+        await writeFile(path, source)
+        paths.push([label, relative(repositoryRoot, path), tsconfig])
+        expect(existsSync(join(sourceRepositoryRoot, relative(repositoryRoot, path)))).toBe(false)
+      }
+      const clientScript = 'scripts/client-bundle-purity.spec.ts'
+
+      const result = runOxlint([
+        '--config',
+        relative(repositoryRoot, configPath),
+        '--format',
+        'unix',
+        ...paths.map(([, path]) => path),
+        clientScript,
+      ], { OXC_LOG: 'debug' })
+      const output = normalizedOutput(result)
+
+      expect(result.error).toBeUndefined()
+      expect(result.status, output).toBe(1)
+      for (const [label, path, tsconfig] of paths) {
+        expect(output, label).toContain(`${path.replaceAll('\\', '/')}:5:1: Promises must be awaited`)
+        expect(output, `${label} project`).toContain(
+          `Got tsconfig for file ${join(repositoryRoot, path).replaceAll('\\', '/')}: ${join(repositoryRoot, tsconfig).replaceAll('\\', '/')}`,
+        )
+      }
+      expect(output.match(/typescript\(no-floating-promises\)/g)).toHaveLength(probes.length)
+      expect(output, 'client aggregate script project').toContain(
+        `Got tsconfig for file ${join(repositoryRoot, clientScript).replaceAll('\\', '/')}: ${join(repositoryRoot, 'tsconfig.client.json').replaceAll('\\', '/')}`,
+      )
+      expect(output).not.toContain('Unmatched file:')
+    } finally {
+      await Promise.all([
+        ...probes.map(([, parent, , extension = '.ts']) =>
+          rm(join(repositoryRoot, parent, `oxlint-contract-${suffix}${extension}`), { force: true })),
+        rm(configPath, { force: true }),
+      ])
+    }
+  }, 90_000)
+
+  it('runs JavaScript compatibility and nursery rules', async () => {
+    const suffix = randomUUID()
+    const configPath = await writeContractConfig(suffix)
+    const path = join(repositoryRoot, 'scripts', `oxlint-contract-${suffix}.ts`)
+    const source = `export function firstProbe(): number {
+  const first = 1
+  const second = 2
+  return first + second
+}
+
+export function secondProbe(): number {
+  const first = 1
+  const second = 2
+  return first + second
+}
+
+export function hasValue(value: string): boolean {
+  return value !== undefined
+}
+
+export const longProbe = 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1
+`
+
+    try {
+      await writeFile(path, source)
+      const result = runOxlint([
+        '--config',
+        relative(repositoryRoot, configPath),
+        '--format',
+        'unix',
+        relative(repositoryRoot, path),
+      ])
+      const output = normalizedOutput(result)
+
+      expect(result.error).toBeUndefined()
+      expect(result.status, output).toBe(1)
+      expect(output).toContain('@stylistic(max-len)')
+      expect(output).toContain('sonarjs(no-identical-functions)')
+      expect(output).toContain('typescript(no-unnecessary-condition)')
+    } finally {
+      await Promise.all([
+        rm(path, { force: true }),
+        rm(configPath, { force: true }),
+      ])
+    }
+  }, 90_000)
+
   it('keeps the complete stylistic contract in Oxlint', async () => {
     const oxlintPath = join(repositoryRoot, '.oxlintrc.json')
     const result = parseConfigFileTextToJson(oxlintPath, await readFile(oxlintPath, 'utf8'))
@@ -90,7 +259,7 @@ describe('Oxlint executable contract', () => {
     )
     expect(packageJson.devDependencies).not.toHaveProperty('eslint')
     expect(packageJson.devDependencies).not.toHaveProperty('@typescript-eslint/parser')
-    expect(existsSync(join(repositoryRoot, 'eslint.format.config.mjs'))).toBe(false)
+    expect(existsSync(join(sourceRepositoryRoot, 'eslint.format.config.mjs'))).toBe(false)
 
     const lefthook = await readFile(join(repositoryRoot, 'lefthook.yml'), 'utf8')
     expect(lefthook).toContain('scripts/run-oxlint.ts --config .oxlintrc.staged.json --fix')

@@ -13,6 +13,8 @@ import {
   type ConnectionHandle,
   type ConnectionState,
 } from '../src/client/index.ts'
+import type { ConnectionRecoveryConfig } from '../src/recovery-config.ts'
+import { syncedConnectionConfig as synced } from './synced-config.client.ts'
 
 type Win = {
   location?: { hostname: string; origin?: string }
@@ -66,22 +68,19 @@ function installGeneration(handle: ConnectionHandle): GenerationProbe {
   return probe
 }
 
-async function mount(): Promise<ConnectionHandle> {
+async function mount(recovery?: ConnectionRecoveryConfig): Promise<ConnectionHandle> {
   const ctx = new Context()
-  await ctx.plugin({ apply, inject: [] })
+  await ctx.plugin({ apply, inject: [] }, synced(recovery))
   const handle = ctx.get('connection') as ConnectionHandle | undefined
   if (handle === undefined) throw new Error('ctx.connection not provided')
   return handle
 }
 
 describe('connection client apply', () => {
-  it('uses Host bootstrap timing when Gateway starts without overrides', async () => {
+  it('uses Host-synced timing when Gateway starts without overrides', async () => {
     vi.useFakeTimers()
-    vi.stubGlobal('__DSH_CONNECTION_RECOVERY__', {
-      backoffBaseMs: 10, backoffMaxMs: 10, generationReadyTimeoutMs: 20,
-    })
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    const handle = await mount()
+    const handle = await mount({ backoffBaseMs: 10, backoffMaxMs: 10, generationReadyTimeoutMs: 20 })
     const signals: AbortSignal[] = []
     handle.registerGenerationSource(signal => new Promise<void>((resolve) => {
       signals.push(signal)
@@ -101,10 +100,9 @@ describe('connection client apply', () => {
     }
   })
 
-  it.each([{ generationReadyTimeoutMs: 0 }, { backoffFactor: NaN }])('rejects malformed bootstrap recovery before publishing the service: %j', (recovery) => {
-    vi.stubGlobal('__DSH_CONNECTION_RECOVERY__', recovery)
+  it.each([{ generationReadyTimeoutMs: 0 }, { backoffFactor: NaN }])('rejects malformed synced recovery before publishing the service: %j', (recovery) => {
     const ctx = new Context()
-    expect(() => { apply(ctx) }).toThrow()
+    expect(() => { apply(ctx, synced(recovery)) }).toThrow()
     expect(ctx.get('connection')).toBeUndefined()
   })
 
@@ -486,7 +484,7 @@ describe('connection client apply', () => {
     const fetchSpy = vi.fn(async () => ({ status: 204 }))
     vi.stubGlobal('fetch', fetchSpy)
     const ctx = new Context()
-    await ctx.plugin({ apply, inject: [] })
+    await ctx.plugin({ apply, inject: [] }, synced())
 
     expect(fetchSpy).toHaveBeenCalledExactlyOnceWith('/refresh', { method: 'GET' })
   })
@@ -499,20 +497,20 @@ describe('connection client apply', () => {
     ;(globalThis as Win).location = { hostname: 'localhost' }
     ;(globalThis as Win).__DSH_COOKIE_REFRESH__ = { intervalMs: 0 }
     const malformed = new Context()
-    await malformed.plugin({ apply, inject: [] })
+    await malformed.plugin({ apply, inject: [] }, synced())
     expect(fetchSpy).not.toHaveBeenCalled()
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('malformed __DSH_COOKIE_REFRESH__'))
 
     ;(globalThis as Win).__DSH_COOKIE_REFRESH__ = { intervalMs: 3_600_000 }
     ;(globalThis as Win).__DSH_TRANSPORT__ = { rpc: {} as ClientConnectionRpc }
     const transported = new Context()
-    await transported.plugin({ apply, inject: [] })
+    await transported.plugin({ apply, inject: [] }, synced())
     expect(fetchSpy).not.toHaveBeenCalled()
 
     delete (globalThis as Win).__DSH_TRANSPORT__
     delete (globalThis as Win).location
     const headless = new Context()
-    await headless.plugin({ apply, inject: [] })
+    await headless.plugin({ apply, inject: [] }, synced())
     expect(fetchSpy).not.toHaveBeenCalled()
 
     warnSpy.mockRestore()

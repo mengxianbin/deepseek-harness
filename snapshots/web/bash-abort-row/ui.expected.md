@@ -1,5 +1,6 @@
 - banner:
   - navigation "Session hierarchy": "Run two shell commands: wait"
+  - button "Session panel"
   - button "More actions"
   - button "Open right sidebar"
   - tablist:
@@ -16,6 +17,7 @@
   - time: {{clock}}
 - button "Ran commands" [expanded]
 - time: {{clock}}
+- button "Context injection runtime-context"
 - 'button "Failed Bash Error: tool call aborted" [expanded]'
 - text: "IN { \"command\": \"node -e \\\"const fs=require('node:fs'); fs.writeFileSync('started.tmp', 'started'); fs.renameSync('started.tmp', 'started.txt'); setInterval(() => {}, 1000)\\\"\", \"description\": \"Wait until cancellation\" } OUT Error: tool call aborted"
 - button "Inspect"

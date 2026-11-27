@@ -318,7 +318,6 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface GlobalStandardProps {
     /** Session list and current selection. */
     useSessions: UseSessions
-    useSessionStatus: UseSessionStatus
     useSessionRetainInfo: UseSessionRetainInfo
     /** Whether the current Peer may call `action` on one Session resource. */
     useSessionAccess: (sessionId: SessionId, action: RemoteEndpoint) => boolean
@@ -371,9 +370,16 @@ declare module '@deepseek-ai/dsh-api-session-controller/client' {
 declare module '@deepseek-ai/cordis' {
   interface Context {
     /** Session Controller adapter and session-scoped source registry. */
-    uiSession: UiSession
+    uiSession: UiSessionService
   }
 }
+
+/**
+ * Type of `ctx.uiSession`: the {@link UiSession} service plus the sub-services other Client packages provide beneath
+ * it. A package declares its sub-service `x`, provided as the Cordis service `uiSession.x` and read as
+ * `ctx.uiSession.x`, by merging a member into this interface; Typert analysis rejects members merged into the class.
+ */
+export interface UiSessionService extends UiSession {}
 
 type SessionSourceRoster = readonly string[] | undefined
 type StandardMemberKind = 'hook' | 'keyed hook' | 'prop'
@@ -559,15 +565,35 @@ export class UiSession extends Service {
   private readonly knownMainIds = new Set<SessionId>()
   private statusSnapshot: SessionStatusSnapshot = new Map()
   private readonly statusListeners = new Set<() => void>()
+  private readonly pendingListeners = new Set<() => void>()
   private mainRetainId: SessionId | undefined
   private disposeMainRetain = (): void => {}
   private active = true
-  /** Root source combining running, pending-interaction, and completion-reminder facts. */
+  /**
+   * Fork status engine's raw table: running, pending interaction, completion
+   * reminders, and the rich per-Session facts (outcome, jobs, heartbeat, read
+   * mark, deliverable receipt, seal) this controller derives. The
+   * `ui-session-status` face captures it in `apply()` and folds it into the
+   * published union; with that plugin absent the dotted lookup falls through
+   * to this field and the raw table is itself the `uiSession.sessionStatus`
+   * service.
+   */
   readonly sessionStatus: HostObservable<SessionStatusSnapshot> = {
     getSnapshot: () => this.statusSnapshot,
     subscribe: (listener) => {
       this.statusListeners.add(listener)
       return () => { this.statusListeners.delete(listener) }
+    },
+  }
+  /**
+   * Read-only view of every Session's highest-precedence pending interaction. The snapshot keeps its
+   * reference until an effective request changes; a throwing listener is reported without stopping later listeners.
+   */
+  readonly pendingInteractions: HostObservable<ReadonlyMap<SessionId, SessionPendingInteraction>> = {
+    getSnapshot: () => this.pendingSnapshot,
+    subscribe: (listener) => {
+      this.pendingListeners.add(listener)
+      return () => { this.pendingListeners.delete(listener) }
     },
   }
   /**
@@ -978,6 +1004,7 @@ export class UiSession extends Service {
     if (samePendingInteractions(this.pendingSnapshot, projected)) return
     this.pendingSnapshot = projected
     this.publishStatus()
+    notifySubscribers(this.pendingListeners, '[ui-session] pending interactions')
   }
 
   /**
@@ -1558,8 +1585,8 @@ function claimStandardProp(kind: StandardMemberKind, name: string, finalProps: S
   finalProps.add(propName)
 }
 
-/** Required Controller, renderer, Remote, and access services. */
-export const inject = ['sessions', 'slots', 'remote', 'remoteAccess']
+/** Required Controller, renderer, and access services. */
+export const inject = ['sessions', 'slots', 'remoteAccess']
 
 /**
  * Install the Session root source and scoped adapter.
@@ -1587,7 +1614,6 @@ export function apply(ctx: Context): void {
   ctx.slots.provideRoot({
     hooks: {
       sessions: ctx.sessions.list,
-      sessionStatus: service.sessionStatus,
       sessionHealth: service.sessionHealth,
     },
     keyedHooks: {

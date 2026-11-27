@@ -9,6 +9,7 @@
     "src/index.ts",
     "src/types.ts",
     "src/remote-events.ts",
+    "src/session-resource.ts",
     "src/agent.ts",
     "src/assistant-stream.ts",
     "src/catalog.ts",
@@ -33,7 +34,8 @@
     "src/media-references.ts",
     "src/publication-gate.ts",
     "src/archived-session-gate.ts",
-    "src/skill-catalog.ts"
+    "src/skill-catalog.ts",
+    "src/continuation.ts"
   ],
   "references": [
     {
@@ -143,6 +145,9 @@
     },
     {
       "path": "../../session/working-directory"
+    },
+    {
+      "path": "../../util/brand"
     }
   ]
 }

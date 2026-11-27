@@ -1,4 +1,9 @@
 - button "收起侧边栏"
+- navigation "全局面板":
+  - button "插件"
+  - button "自动化任务"
+  - button "从侧边栏取消固定自动化任务"
+  - button "更多"
 - button "搜索会话"
 - textbox "搜索会话名称"
 - button "视图选项"

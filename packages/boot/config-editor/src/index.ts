@@ -3,8 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { Context, FiberState, Service } from '@deepseek-ai/cordis'
-import { entryListSchema, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
-import yaml from 'js-yaml'
+import { parseEntryYaml, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import type { Entry, EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-hmr'
 import {
@@ -135,7 +134,7 @@ export class ConfigEditor extends Service {
       await withFileLock(join(this.ownerContext.profileContext.dir, 'package.json'), async () => {
         if (!this.entries().includes(entry) || entry.fiber === undefined) throw new Error('Configuration entry is no longer available')
         const beforePatches = readProfilePatches('dsh', this.ownerContext.profileContext)
-        await reconcileProfilePatches(this.ownerContext.root, beforePatches, 'dsh')
+        await reconcileProfilePatches(this.ownerContext[Context.root], beforePatches, 'dsh')
         if (!this.entries().includes(entry)) throw new Error('Configuration entry changed during reload')
         const current = structuredClone((entry.options.config ?? {}) as Record<string, unknown>)
         const profile = this.ownerContext.profileContext
@@ -179,7 +178,7 @@ export class ConfigEditor extends Service {
         } })
         // The document sits in the local slot, above bundle, profile, and home:
         // only a `--patch` overlay applied after it can still change the outcome.
-        const documentPatches = yaml.load(String(document), { schema: entryListSchema }) as PatchOptions[]
+        const documentPatches = parseEntryYaml(String(document)) as PatchOptions[]
         const patches = readProfilePatches('dsh', profile, loaded, documentPatches)
         const effective = flatten(composeEntries([patches])).find(row => row.id === entry.options.id)
         if (!isDeepStrictEqual(effective?.config ?? {}, next)) {
@@ -187,10 +186,10 @@ export class ConfigEditor extends Service {
         }
         await writeFileAtomic(path, String(document), { mode: 0o600 })
         try {
-          await reconcileProfilePatches(this.ownerContext.root, patches, 'dsh', [entry.options.id])
+          await reconcileProfilePatches(this.ownerContext[Context.root], patches, 'dsh', [entry.options.id])
         } catch (error) {
           await writeFileAtomic(path, before, { mode: 0o600 })
-          await reconcileProfilePatches(this.ownerContext.root, beforePatches, 'dsh')
+          await reconcileProfilePatches(this.ownerContext[Context.root], beforePatches, 'dsh')
           throw error
         }
         // A committed patch write is the configuration-change audit point: the

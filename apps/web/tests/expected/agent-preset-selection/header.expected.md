@@ -1,4 +1,4 @@
 - navigation "Session hierarchy": Seeded turn
-- button "1 subagent"
+- button "Session panel"
 - button "More actions"
 - button "Open right sidebar"

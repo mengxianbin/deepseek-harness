@@ -1,5 +1,6 @@
 - banner:
   - navigation "Session hierarchy": Use read_image to inspect red.png.
+  - button "Session panel"
   - button "More actions"
   - button "Open right sidebar"
   - tablist:
@@ -16,6 +17,7 @@
   - time: {{clock}}
 - button "Read images" [expanded]
 - time: {{clock}}
+- button "Context injection runtime-context"
 - button "Read image red.png" [expanded]:
   - text: Read image
   - button "red.png"

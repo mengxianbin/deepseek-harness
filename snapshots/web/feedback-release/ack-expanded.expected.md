@@ -1,6 +1,7 @@
 - banner:
   - navigation "Session hierarchy": Reply with the single word
   - button "Chat"
+  - button "Session panel"
   - button "More actions"
   - button "Open right sidebar"
 - text: Reply with the single word LIGHTHOUSE and stop. {{clock}}
@@ -12,6 +13,9 @@
   - text: →
   - time: {{clock}}
 - button "Analysis completed" [expanded]
+- button "Context injection runtime-context"
+- button "Context injection skill-catalog"
+- button "Context injection time-context"
 - button "Think The user wants me to reply with a single word. Let me comply."
 - paragraph: LIGHTHOUSE
 - button "Copy"

@@ -1,9 +1,11 @@
-- list "Background jobs":
-  - listitem:
-    - button "Finished 1" [expanded]
-    - button "Clear"
-  - listitem:
-    - 'button "Hide live output of node -e \"console.log(''streamed-'' + ''marker-line''); const fs=require(''node:fs''); const deadline=Date.now()+600000; (function tick(){ if (fs.existsSync(''.live-job-stream.release'')) return; if (Date.now()>deadline) return; setTimeout(tick, 200) })()\"" [expanded]': "bash node -e \"console.log('streamed-' + 'marker-line'); const fs=require('node:fs'); const deadline=Date.now()+600000; (function tick(){ if (fs.existsSync('.live-job-stream.release')) return; if (Date.now()>deadline) return; setTimeout(tick, 200) })()\" killed before exit; web e2e cancellation {{duration}}"
-    - text: "$ node -e \"console.log('streamed-' + 'marker-line'); const fs=require('node:fs'); const deadline=Date.now()+600000; (function tick(){ if (fs.existsSync('.live-job-stream.release')) return; if (Date.now()>deadline) return; setTimeout(tick, 200) })()\""
-    - button "Copy"
-    - text: streamed-marker-line
+- region "Background jobs":
+  - heading "Background jobs" [level=2]
+  - list:
+    - listitem:
+      - button "Finished 1" [expanded]
+      - button "Clear"
+    - listitem:
+      - 'button "Hide live output of node -e \"console.log(''streamed-'' + ''marker-line''); const fs=require(''node:fs''); const deadline=Date.now()+600000; (function tick(){ if (fs.existsSync(''.live-job-stream.release'')) return; if (Date.now()>deadline) return; setTimeout(tick, 200) })()\"" [expanded]': "node -e \"console.log('streamed-' + 'marker-line'); const fs=require('node:fs'); const deadline=Date.now()+600000; (function tick(){ if (fs.existsSync('.live-job-stream.release')) return; if (Date.now()>deadline) return; setTimeout(tick, 200) })()\" bash · killed before exit; web e2e cancellation {{duration}}"
+      - text: "$ node -e \"console.log('streamed-' + 'marker-line'); const fs=require('node:fs'); const deadline=Date.now()+600000; (function tick(){ if (fs.existsSync('.live-job-stream.release')) return; if (Date.now()>deadline) return; setTimeout(tick, 200) })()\""
+      - button "Copy"
+      - text: streamed-marker-line

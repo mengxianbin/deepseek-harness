@@ -12,6 +12,8 @@ import { createWebConnectionRpc, type RpcFetch, type RpcStreamOpen } from './rpc
 import { isLoopbackHostname } from '../loopback-hostname.ts'
 import type { ClientConnectionRpc } from '../rpc.ts'
 import { resolveConnectionConfig } from '../recovery-config.ts'
+import type { SyncedConfig } from '@deepseek-ai/dsh-client-config/types'
+import type { ConnectionConfig } from '../types.ts'
 import type { ConnectionInteractions } from '../connect-protocol.ts'
 import { openConnectionWebSocket, type ConnectionWebSocket, type ConnectionWebSocketFactory } from './socket.ts'
 import { resolveCookieRefresh, startCookieRefresh, type CookieRefreshConfig } from './cookie-refresh.ts'
@@ -125,7 +127,6 @@ export interface ClientTransportHooks {
 /** Page global carrying {@link ClientTransportHooks}; absent in the served web app. */
 interface ClientTransportGlobal {
   __DSH_TRANSPORT__?: ClientTransportHooks
-  __DSH_CONNECTION_RECOVERY__?: unknown
   __DSH_COOKIE_REFRESH__?: unknown
 }
 
@@ -352,8 +353,9 @@ export function installConnection(ctx: Context, options: ConnectionInstallOption
 /**
  * Client plugin body: read the page composition and install its Connection service.
  * @param ctx - client Cordis context.
+ * @param config - Host-synced recovery timing, read once here; an absent value uses the recovery defaults.
  */
-export function apply(ctx: Context): void {
+export function apply(ctx: Context, config: SyncedConfig<ConnectionConfig>): void {
   const globals = globalThis as ClientTransportGlobal
   const pageLocation = typeof location === 'undefined' ? undefined : location
   const transport = globals.__DSH_TRANSPORT__
@@ -364,7 +366,7 @@ export function apply(ctx: Context): void {
   }
   installConnection(ctx, {
     ...(transport === undefined ? {} : { transport }),
-    recovery: resolveConnectionConfig(globals.__DSH_CONNECTION_RECOVERY__),
+    recovery: resolveConnectionConfig(config.recovery.get()),
     // The heartbeat exchanges the browser cookie; only the served page without
     // an explicit transport uses that cookie carrier.
     ...(transport === undefined && pageLocation !== undefined && cookieRefresh !== undefined ? { cookieRefresh } : {}),

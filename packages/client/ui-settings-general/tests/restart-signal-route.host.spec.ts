@@ -10,7 +10,6 @@
  */
 import { Context } from '@deepseek-ai/cordis'
 import { HostConnectionService } from '@deepseek-ai/dsh-client-connection'
-import type { BrowserAuth } from '@deepseek-ai/dsh-client-connection/src/browser-auth.ts'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -40,7 +39,7 @@ afterEach(() => {
 /** Fresh context, real Connection fetch registry, and request helpers over `/api/restart-signal/state`. */
 function fixture() {
   const ctx = new Context()
-  const connection = new HostConnectionService(ctx, [], {} as BrowserAuth)
+  const connection = new HostConnectionService(ctx, [])
   const handler = connection.createSharedFetchHandler('/api')
   const post = (body?: string) => handler.fetch(new Request(`http://localhost${RESTART_SIGNAL_STATE_PATH}`, {
     method: 'POST',

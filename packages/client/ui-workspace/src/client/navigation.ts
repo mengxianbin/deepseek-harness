@@ -13,7 +13,8 @@ import type {
 } from '@deepseek-ai/dsh-api-session-controller/client'
 // Type-only: pulls the `agentPreset` Session projection value into this program.
 import type {} from '@deepseek-ai/dsh-agent-preset-registry/types'
-import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
+import { createSnapshotStore, type ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
+import type {} from '@deepseek-ai/dsh-client-ui-session-status/client'
 import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
 import type {
   IWorkspaces, WorkspaceId, WorkspaceSnapshot, WorkspaceView,
@@ -23,6 +24,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type { DraftInitializationOptions } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { RowToast } from './contract/slots.ts'
 import { pinOrderAccounts, pinOrderSource } from './pin-order.ts'
+import { RecentSessionViews } from './recent-views.ts'
 import type { WorkspaceViewStoreActions } from './stores.ts'
 
 /**
@@ -198,6 +200,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
    * `mainViewWarm` key keeps `retainedBy.mainView` exclusive to the real main.
    */
   private readonly warmReferences: SessionReference[] = []
+  private readonly recentViews: RecentSessionViews
   private restorationNavigation: AbortSignal | undefined
 
   /**
@@ -207,6 +210,8 @@ class UiWorkspaceService extends Service implements UiWorkspace {
    * @param sessions - pure Session Controller.
    * @param view - the browser's viewing-store write set (one instance shared with its registration).
    * @param notify - show one notice through the Workspace notice channel.
+   * @param recentViewLimit - Host-synced count of recently viewed Sessions needing no attention kept
+   * besides the main-view Session; absent until a value arrives, and followed while it changes.
    */
   constructor(
     ctx: Context,
@@ -215,10 +220,13 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     private readonly sessions: ISessions,
     private readonly view: Pick<WorkspaceViewStoreActions, 'pinSessionOrder'>,
     private readonly notify: (toast: RowToast) => void,
+    recentViewLimit: ObservableSnapshot<number | undefined>,
   ) {
     super(ctx, 'uiWorkspace')
+    this.recentViews = new RecentSessionViews(sessions, workspaces, ctx.uiSession.sessionStatus, recentViewLimit)
     ctx.effect(() => {
       const stop = this.watchNavigation()
+      const stopRecentViews = this.recentViews.start()
       return () => {
         stop()
         this.lifetime.abort()
@@ -226,6 +234,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
         this.mainReference = undefined
         reference?.release()
         for (const warm of this.warmReferences.splice(0)) warm.release()
+        stopRecentViews()
       }
     }, 'ui-workspace: Workspace navigation policy')
   }
@@ -603,6 +612,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     const previous = this.mainReference
     this.mainReference = undefined
     this.selection.set({})
+    this.recentViews.show(undefined)
     previous?.release()
     this.ctx.layout.selectPanel(null)
   }
@@ -656,10 +666,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     persistedSelection = false,
   ): void {
     signal.throwIfAborted()
-    const reference = this.sessions.retain(target, {
-      source: 'mainView',
-      ...(persistedSelection ? { persistedSelection: true } : {}),
-    })
+    const reference = this.sessions.retain(target, { source: 'mainView', facets: { conversation: true }, ...(persistedSelection ? { persistedSelection: true } : {}) })
     try {
       signal.throwIfAborted()
       beforeOpen?.(reference.sessionId)
@@ -692,6 +699,8 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     const prior = this.mainReference
     this.mainReference = reference
     this.warmMain(prior, reference.sessionId)
+    // Both main references are held here, so the previous Session moves to the recent views without a gap.
+    this.recentViews.show(reference.sessionId)
     if (panel === 'reveal') this.ctx.layout.selectPanel(null)
   }
 

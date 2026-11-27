@@ -138,7 +138,6 @@ export function apply(ctx: ClientContext): void {
       available: session => sessions.subagentAddress(session.sessionId) === undefined,
       ui: {
         kind: 'popupSelect',
-        searchMode: 'fuzzy-label',
         searchLabels: () => ({
           placeholder: t('search.placeholder'),
           empty: t('empty.models'),
@@ -178,6 +177,8 @@ export function apply(ctx: ClientContext): void {
       locale: NS,
       children: {
         'conversation.input.model.label': { kind: 'single', scope: 'session', inline: true },
+        'conversation.input.model.options': { kind: 'list', scope: 'session' },
+        'conversation.input.model.pane': { kind: 'keyed', scope: 'session' },
       },
       inject: (sessionId): ModelSelectInjected => {
         const directory = models.directoryFor(sessionId)

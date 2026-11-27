@@ -1,5 +1,6 @@
 - banner:
   - navigation "Session hierarchy": Use the ask_user_question tool to
+  - button "Session panel"
   - button "More actions"
   - button "Open right sidebar"
   - tablist:
@@ -8,6 +9,9 @@
   - button "More conversation views"
 - text: Use the ask_user_question tool to ask me exactly one question with id "checkpoint", question "Ready to continue?", header "Checkpoint", and options labeled "Yes" and "No". After I answer, reply with one short sentence acknowledging my answer and stop. {{clock}}
 - button "Copy"
+- button "Context injection runtime-context"
+- button "Context injection skill-catalog"
+- button "Context injection time-context"
 - text: Running
 - button "Ask question waiting"
 - status: Deep diving

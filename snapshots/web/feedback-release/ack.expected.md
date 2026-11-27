@@ -1,6 +1,7 @@
 - banner:
   - navigation "Session hierarchy": Reply with the single word
   - button "Chat"
+  - button "Session panel"
   - button "More actions"
   - button "Open right sidebar"
 - text: Reply with the single word LIGHTHOUSE and stop. {{clock}}

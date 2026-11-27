@@ -1,5 +1,6 @@
 - banner:
   - navigation "Session hierarchy": Begin your reply with the
+  - button "Session panel"
   - button "More actions"
   - button "Open right sidebar"
   - tablist:

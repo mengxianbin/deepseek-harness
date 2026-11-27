@@ -1,4 +1,9 @@
 - button "Collapse sidebar"
+- navigation "Global panels":
+  - button "Plugins"
+  - button "Automation tasks"
+  - button "Unpin Automation tasks from sidebar"
+  - button "More"
 - button "Search sessions"
 - textbox "Search session names"
 - button "View options"

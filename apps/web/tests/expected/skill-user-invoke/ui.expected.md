@@ -1,6 +1,7 @@
 - banner:
   - navigation "Session hierarchy": /user-invoke-demo @"meeting notes-this-i
   - button "Chat"
+  - button "Session panel"
   - button "More actions"
   - button "Open right sidebar"
 - button "/user-invoke-demo"

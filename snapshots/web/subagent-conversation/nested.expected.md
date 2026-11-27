@@ -5,6 +5,7 @@
     - 'button "Switch subagent: event-sourcing researcher"': event-sourcing researcher
     - text: /
     - 'button "Switch subagent: example editor"': example editor
+  - button "Session panel"
   - button "More actions"
   - button "Open right sidebar"
   - tablist:
@@ -19,6 +20,7 @@
   - time: {{clock}}
   - text: →
   - time: {{clock}}
-- status:
-  - strong: This subagent is read-only for now
-  - text: The parent session is offline; reopen it to continue sending messages.
+- textbox "Message or run a task, / commands, @ files or sessions"
+- button "Add files or run commands"
+- 'button "Access mode, current: Workspace Write"': Workspace Write
+- button "Send message" [disabled]

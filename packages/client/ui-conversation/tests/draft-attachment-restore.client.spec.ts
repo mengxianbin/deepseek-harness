@@ -3,6 +3,7 @@
 import { randomUUID } from 'node:crypto'
 import { Context } from '@deepseek-ai/cordis'
 import { makeTranslate, SlotTestRuntime, TestSessions } from '@deepseek-ai/dsh-client-test-runtime'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { SessionId } from '@deepseek-ai/dsh-session/types'
 import { afterEach, beforeEach, expect, it, onTestFinished, vi } from 'vitest'
 import type { DraftAttachmentId } from '../src/client/contract/input.ts'
@@ -57,7 +58,7 @@ async function page() {
   const fiber = runtime.ctx.plugin(ConversationController, {
     input: hub,
     blocks: new ComposerBlockRegistry(),
-    maxConcurrentFileUploads: 2,
+    maxConcurrentFileUploads: createSnapshotStore(2),
   })
   await fiber.await()
   const root = runtime.ctx.get('conversation') as ConversationController

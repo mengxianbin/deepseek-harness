@@ -1,6 +1,8 @@
 /** Default model references remain live without a settings service. */
 import { Context } from '@deepseek-ai/cordis'
 import { expect, it, onTestFinished, vi } from 'vitest'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import type { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import DefaultModel from '../src/index.ts'
 import { liveConfig } from '../../../settings/settings/tests/live-config.ts'
 
@@ -23,11 +25,10 @@ it('reads live direction from volatile config and never carries an effort', asyn
 
 it('persists the direction through its owning profile entry and drops any effort', async () => {
   const { configurationFixture } = await import('../../../settings/settings/tests/configuration-fixture.ts')
-  const { ReasoningEffortId } = await import('@deepseek-ai/dsh-llm')
   const { ctx } = await configurationFixture({ hmr: false })
   // An effort rides along and is written away rather than stored: effort
   // belongs to the model-level memory, not to the deployment default.
-  await ctx.agentDefaultModel.saveSelection({ provider: 'test', model: 'next', reasoningEffort: ReasoningEffortId('high') })
+  await ctx.agentDefaultModel.saveSelection({ provider: 'test', model: 'next', reasoningEffort: brandString<ReasoningEffortId>('high') })
   expect(ctx.agentDefaultModel.currentSelection()).toEqual({ provider: 'test', model: 'next' })
   expect(ctx.agentDefaultModel.currentSelection().reasoningEffort).toBeUndefined()
   await ctx.agentDefaultModel.saveSelection({ provider: 'test', model: 'final' })

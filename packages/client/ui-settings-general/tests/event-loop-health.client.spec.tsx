@@ -19,6 +19,7 @@ const unusedHook = (() => { throw new Error('unused by the health card') }) as n
 const kit = {
   useSessions: unusedHook, useSessionStatus: unusedHook, usePanelInfo: unusedHook,
   useSessionRetainInfo: unusedHook, useResource: unusedHook, useWorkspaces: unusedHook,
+  useContextMenu: unusedHook,
   ...allowAllAccess,
 }
 

@@ -37,7 +37,6 @@ type ColdRepairCue = Pick<SessionRecord, 'header' | 'formatStatus'>
  */
 const COLD_REPAIR_ATTEMPT_LIMIT = 3
 
-
 /**
  * Projection keys a `trimHeavyProjections` list omits: every reader of these
  * keys opens its Session first (an exact `session/projections` baseline then
@@ -56,11 +55,6 @@ const SESSION_LIST_OMITTED_PROJECTION_KEYS: ReadonlySet<string> = new Set([
   'tokenUsage',
   'turnOutline',
 ])
-
-const sessionListMetadataSchema: z.ZodType<SessionListMetadata> = z.object({
-  blank: z.boolean(),
-  lastPromptAt: z.number().nullable(),
-})
 
 /**
  * End reasons the row marker has a stable meaning for; plugin-merged variants stay folded away.
@@ -157,25 +151,6 @@ const imageLimitsSchema = z.object({
 }) as unknown as z.ZodType<ImageAttachmentLimits>
 
 /**
- * Advance the Session-list metadata projection by one committed event.
- * @param state - metadata before the event.
- * @param event - next committed Session event.
- * @returns the original or advanced metadata value.
- */
-export function applySessionListMetadata(
-  state: SessionListMetadata,
-  event: SessionEvent,
-): SessionListMetadata {
-  const blank = state.blank && event.type !== 'turn/start'
-  const lastPromptAt = event.type === 'user/message' && event.data.source.kind === 'user'
-    ? event.time
-    : state.lastPromptAt
-  return blank === state.blank && lastPromptAt === state.lastPromptAt
-    ? state
-    : { blank, lastPromptAt }
-}
-
-/**
  * Return the longest prefix containing at most `maximum` Unicode code points.
  * @param value - source text.
  * @param maximum - maximum number of Unicode code points.
@@ -225,14 +200,6 @@ export class ApiSessionList {
       this.repairQueue.length = 0
     }, 'apiSessionList.coldRepairStop')
 
-    await this.ctx.sessionProjections.register<'sessionListMetadata', SessionListMetadata>({
-      key: 'sessionListMetadata',
-      stateSchema: sessionListMetadataSchema,
-      init: () => ({ blank: true, lastPromptAt: null }),
-      apply: applySessionListMetadata,
-      wire: { viewSchema: sessionListMetadataSchema, view: state => state },
-      stateVersion: 1,
-    })
     await this.ctx.sessionProjections.register<'imageLimits', null>({
       key: 'imageLimits',
       stateSchema: z.null(),
@@ -268,6 +235,12 @@ export class ApiSessionList {
 
   /**
    * Build one current attached-Session summary.
+   * Blankness and recency come from `sessionQuery.getListMetadata`; projection
+   * hints carry every summary key computed through `snapshot`. The first call
+   * for a Session computes these projections over its whole in-memory log, and
+   * later calls advance them incrementally. The metadata read and the hint with
+   * the same key come from one cell; the metadata read does not depend on any
+   * other unit's view.
    * @param session - attached Session to summarize.
    * @param trimHeavyProjections - when true, drop the display-heavy projection
    *   keys from the list hints; omitted keeps every value the source holds
@@ -275,15 +248,15 @@ export class ApiSessionList {
    * @returns current list metadata and available projections.
    */
   summaryFor(session: Session, trimHeavyProjections = false): SessionSummary {
+    const metadata = this.ctx.sessionQuery.getListMetadata(session)
     const projections = this.projectionsFor(session.header, session, trimHeavyProjections)
-    const metadata = projections?.values.sessionListMetadata
     return {
       sessionId: session.id,
       updatedAt: updatedAt(session.header, metadata),
       agentAvailable: this.ctx.agents.get(session.id)?.session === session,
       formatStatus: 'current',
       running: this.ctx.agents.get(session.id)?.status === 'running',
-      blank: metadata?.blank ?? session.seq === 0,
+      blank: metadata.blank,
       ...listFields(session.header),
       ...(projections === undefined ? {} : { projections }),
     }
@@ -512,9 +485,9 @@ export class ApiSessionList {
       // itself summary-excluded.
       const keys = this.ctx.sessionProjections.summaryKeys()
       if (session !== undefined) {
-        // The live registry computed the block for this Session: its watermark
+        // The live registry computes the block for this Session: its watermark
         // shares the sequence space of the Session's baselines and frames.
-        return hintsOf('sequenced', this.ctx.sessionProjections.cachedSnapshot(session, keys), trimHeavyProjections)
+        return hintsOf('sequenced', this.ctx.sessionProjections.snapshot(session, keys), trimHeavyProjections)
       }
       // A cold row reads the persisted cache by header alone; the cache serves
       // seeded and unseeded lifecycles alike because a listing never seeds a

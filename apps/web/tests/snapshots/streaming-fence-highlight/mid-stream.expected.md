@@ -1,10 +1,14 @@
 - banner:
   - navigation "Session hierarchy": Stream one TypeScript fence for
   - button "Chat"
+  - button "Session panel"
   - button "More actions"
   - button "Open right sidebar"
 - text: Stream one TypeScript fence for the highlighting snapshot. {{clock}}
 - button "Copy"
+- button "Context injection runtime-context"
+- button "Context injection skill-catalog"
+- button "Context injection time-context"
 - text: ts
 - button "Wrap lines" [pressed]
 - button "Copy"

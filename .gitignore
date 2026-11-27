@@ -32,14 +32,16 @@ mise.toml
 dist-exe/
 /dist/
 apps/desktop/.desktop-build/
+apps/desktop/.desktop-dev/
 python/sdk-runtime/src/deepseek_harness_runtime/runtime/
-python/**/__pycache__/
+__pycache__/
 python/**/.pytest_cache/
-packages/**/__pycache__/
 apps/web/dist/
+apps/cli/docs/
 .artifacts/
 .dsh-build/
 .dsh-report/
+.ui-review/
 .playwright-mcp/
 .orig
 .worktrees/
@@ -56,7 +58,6 @@ native/system/test/bin/
 /.wt-meta.yaml
 packages/api/workspace-files/src/client/watch-status.d.ts*
 packages/api/workspace-files/src/client/watch-status.js*
-
 # 本地临时与运行态（规则 = m-note content/tech/ai/dsh/temp-file-directory-rules.md，2026-11-01）
 /.tmp/
 /.build-*.log
@@ -66,7 +67,6 @@ packages/api/workspace-files/src/client/watch-status.js*
 /.anonymous-user-id
 packages/util/home-paths/src/index.js*
 packages/util/home-paths/src/index.d.ts*
-
 # src 原地发射产物（规则同上，2026-11-05 批；发射源未定位挂账，见 m-note temp-file-directory-rules §3.2 批注）
 packages/llm/deepseek-llm-api-extensions/src/*.js
 packages/llm/deepseek-llm-api-extensions/src/*.js.map
@@ -80,10 +80,10 @@ packages/test-support/loader-smoke/src/*.d.ts*
 packages/test-support/session-snapshot/src/*.js
 packages/test-support/session-snapshot/src/*.js.map
 packages/test-support/session-snapshot/src/*.d.ts*
-
 # 运行态快照与 fork 临时审计（2026-11-12 用户裁 ignore）
 /fork-audit/
 /restart-signal-runtime.json
-
 # dsh 数据根本机覆盖（键同入库 data-root.json，机器相关取值；dsh-home-configfile-1113）
 data-root.local.json
+# Generated company-signed CUA release record.
+/packages/experimental/cua-macos/cua-helper.json

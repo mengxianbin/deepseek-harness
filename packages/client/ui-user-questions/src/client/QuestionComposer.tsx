@@ -980,7 +980,7 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
               title={t(pending.dismissal === 'hide' ? 'nav.close' : 'nav.cancel')}
               disabled={busy !== null} onClick={dismissFlow}
             >
-              <IconCloseOutlineRegular />
+              <IconCloseOutlineRegular size={15} />
             </button>
           </div>
         </header>

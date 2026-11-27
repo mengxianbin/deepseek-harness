@@ -70,6 +70,8 @@ export interface HeroShellProps {
    * nothing here and the slot contract stays untouched.
    */
   renderSlot: ConversationContentProps['renderSlot']
+  /** Text shown instead of the default headline and preview badge. */
+  headline?: string | undefined
   /** Overlay content after the stack (modals). */
   children?: ReactNode
 }
@@ -79,14 +81,14 @@ export interface HeroShellProps {
  * @param props - see {@link HeroShellProps}.
  * @returns the centered hero element tree.
  */
-export function HeroShell({ t, children }: HeroShellProps) {
+export function HeroShell({ t, headline, children }: HeroShellProps) {
   return (
     <div className={css.root}>
       <div className={css.stack}>
         <div className={css.headline}>
           <span className={css.titleGroup}>
             {/* Own element: keeps the headline text addressable on its own. */}
-            <span>{t('hero.headline')}</span>
+            <span>{headline ?? t('hero.headline')}</span>
           </span>
         </div>
         <div className={css.body}>

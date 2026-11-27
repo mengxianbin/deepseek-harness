@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
+import { contextMenuHook } from '@deepseek-ai/dsh-client-test-runtime'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { GlobalStandardProps } from '@deepseek-ai/dsh-client-ui-slots'
 import { Profiler } from 'react'
-import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { allowAllAccess, bindSnapshotSelector, makeTranslate, RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
@@ -10,19 +11,20 @@ import type { SessionHealthReport } from '@deepseek-ai/dsh-api-session-controlle
 import type {
   WorkspaceId, WorkspaceSnapshot, WorkspaceView,
 } from '@deepseek-ai/dsh-api-workspace-controller/client'
-import type {
-  SessionPendingInteraction, SessionStatus, SessionStatusSnapshot,
-} from '@deepseek-ai/dsh-client-ui-session/client'
+import type { SessionStatus, SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session-status/client'
+import type { SessionPendingInteraction } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import type {
-  DirectoryFlowOwnerProps, SealLightSnapshot, WorkspaceBrowserProps,
+  DirectoryFlowOwnerProps, SealLightSnapshot, WorkspaceActionRequest, WorkspaceBrowserProps,
 } from '../src/client/contract/slots.ts'
 import { createWorkspaceShortcutControls } from '../src/client/shortcuts.ts'
 import { createWorkspaceViewStore, FLAT_SESSION_ORDER_KEY } from '../src/client/stores.ts'
 import { UNGROUPED_KEY } from '../src/client/tree.ts'
 import { fittedSessionWatermarkFor, WorkspaceBrowser } from '../src/client/rows/WorkspaceBrowser.tsx'
+import { renderMenuButton } from './menu-button.tsx'
+import rowCss from '../src/client/rows/Rows.module.css'
 import { zh } from '../src/client/locales.ts'
 
 // Every fixture carries the resource hook the resources plugin merges into GlobalStandardProps.
@@ -89,6 +91,11 @@ function hook<T>(snapshot: T) {
   return function select<S>(selector: (state: T) => S): S { return selector(snapshot) }
 }
 
+/** jsdom lacks DragEvent — fireEvent builds no dataTransfer, which a Session row reads at drag end. */
+function dragEnd(row: Element, dropEffect: DataTransfer['dropEffect'] = 'none'): void {
+  fireEvent.dragEnd(row, { dataTransfer: { dropEffect } })
+}
+
 /** jsdom lacks DragEvent — the fireEvent fallback drops clientY, so pin it on the built event. */
 function fireDrag(row: HTMLElement, kind: 'dragOver' | 'drop', clientY: number): void {
   const event = kind === 'dragOver' ? createEvent.dragOver(row) : createEvent.drop(row)
@@ -109,10 +116,17 @@ const renderDirectoryFlowOnly: WorkspaceBrowserProps['renderSlot'] = (name: stri
     ? <div data-testid="directory-flow" />
     : null
 
+// Mounted outside a sidebar, the browser binds its list area to nothing.
+const SECTION_SCROLLER = { bindScrollerRef: () => {} }
+
 function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
   const controls = createWorkspaceShortcutControls()
+  const request = createSnapshotStore<WorkspaceActionRequest | null>(null)
   const store = createWorkspaceViewStore().create()
   const props: WorkspaceBrowserProps = {
+    useWorkspaceActionRequest: bindSnapshotSelector(request),
+    settleWorkspaceAction: () => { request.set(null) },
+    useContextMenuTarget: selector => selector(null),
     useShortcuts: select => select([]),
     useWorkspaceShortcuts: bindSnapshotSelector(controls.state),
     requestSearch: controls.search,
@@ -125,7 +139,9 @@ function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
     useSessions: hook(sessionState([])),
     useSessionStatus: hook(noPendingInteraction),
     useSessionRetainInfo: () => undefined,
-    usePanelInfo, useResource,
+    usePanelInfo,
+    useContextMenu: contextMenuHook(),
+    useResource,
     useWorkspaces: hook(workspaceState([])),
     ...allowAllAccess,
     useStore: bindSnapshotSelector(store),
@@ -135,6 +151,7 @@ function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
     searchSessions: vi.fn(async () => ({ items: [], hasMore: false })),
     searchResultLimit: 20,
     refreshSessions: vi.fn(),
+    useSectionScroller: () => SECTION_SCROLLER,
     notifyArchivedNotOpenable: vi.fn(),
     renameWorkspace: vi.fn(async () => {}),
     deleteWorkspace: vi.fn(async () => {}),
@@ -149,11 +166,15 @@ function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
     useSealLight: hook(new Map() as SealLightSnapshot),
     sealRows: { watch: vi.fn(() => () => {}), reportRunning: vi.fn() },
     renderSlot: renderDirectoryFlowOnly,
+    renderFactorySlot: renderMenuButton,
     t,
     ...overrides,
   }
   const view = render(<WorkspaceBrowser {...props} />)
-  return { view, props, store, controls }
+  return { view, props, store, controls, openDialog: (workspaceId: WorkspaceId, displayTitle: string, action: 'rename' | 'delete') => {
+    const storedTitle = props.useWorkspaces(state => state.items.find(row => row.workspaceId === workspaceId)?.title ?? displayTitle)
+    act(() => { request.set({ action, workspaceId, displayTitle, storedTitle }) })
+  } }
 }
 
 /** Re-render with (possibly) changed props — WorkspaceBrowser has no side channel. */
@@ -177,6 +198,42 @@ const groupHeaderTitle = (title: string, root: ParentNode = document): HTMLEleme
 }
 
 describe('WorkspaceBrowser', () => {
+  it.each(['workspace', 'flat', 'ungrouped'] as const)('passes the standard menu factory through the %s list', (mode) => {
+    const preferences = createWorkspaceViewStore().create()
+    preferences.actions.setGroupBy(mode === 'flat' ? 'flat' : 'workspace')
+    preferences.actions.setGroupExpanded(mode === 'ungrouped' ? UNGROUPED_KEY : 'alpha', true)
+    const renderFactorySlot = vi.fn(renderMenuButton)
+    mount({
+      useSessions: hook(sessionState([summary('session-one', 10)])),
+      useWorkspaces: hook(workspaceState(mode === 'ungrouped' ? [] : [workspace('alpha', ['session-one'])])),
+      renderFactorySlot,
+    })
+    expect(renderFactorySlot).toHaveBeenCalledWith('contextMenu.button', {
+      target: { kind: 'session', value: { sessionId: sid('session-one'), displayTitle: 'session-one' } },
+      label: '会话“session-one”的操作', className: rowCss.iconButton,
+    })
+    if (mode === 'workspace') {
+      expect(renderFactorySlot).toHaveBeenCalledWith('contextMenu.button', {
+        target: { kind: 'workspace', value: { workspaceId: wid('alpha'), path: '/projects/alpha', displayTitle: 'alpha' } },
+        label: '工作区“alpha”的操作', className: rowCss.iconButton,
+      })
+    }
+  })
+
+  it('binds the list area as the section scroller only while the sidebar is wide', () => {
+    const bindScrollerRef = vi.fn()
+    const browser = mount({ useSectionScroller: () => ({ bindScrollerRef }) })
+    const list = browser.view.container.querySelector<HTMLElement>('[data-sidebar-list-area]')!
+    expect(bindScrollerRef).toHaveBeenLastCalledWith(list)
+    rerender(browser, { wide: false })
+    expect(bindScrollerRef).toHaveBeenLastCalledWith(null)
+    expect(browser.view.container.querySelector('[data-sidebar-list-area]')).toBe(list)
+    rerender(browser, { wide: true })
+    expect(bindScrollerRef).toHaveBeenLastCalledWith(list)
+    browser.view.unmount()
+    expect(bindScrollerRef).toHaveBeenLastCalledWith(null)
+  })
+
   it.each(['workspace', 'flat', 'ungrouped'] as const)('keeps %s recency independent of arrival order and saved manual positions', (mode) => {
     localStorage.clear()
     const preferences = createWorkspaceViewStore().create()
@@ -285,9 +342,9 @@ describe('WorkspaceBrowser', () => {
     preferences.actions.setGroupExpanded('alpha', true)
     localStorage.setItem('dsh.workspace.view.v5', JSON.stringify(preferences.getSnapshot()))
     const statuses = hook<SessionStatusSnapshot>(new Map([
-      [sid('running-s'), { running: true, pendingInteraction: undefined, completionUnread: false }],
-      [sid('completed-s'), { running: false, pendingInteraction: undefined, completionUnread: true }],
-      [sid('silent-s'), { running: false, pendingInteraction: undefined, completionUnread: false }],
+      [sid('running-s'), { running: true, pendingInteraction: undefined, completionUnread: false, completionFailed: false }],
+      [sid('completed-s'), { running: false, pendingInteraction: undefined, completionUnread: true, completionFailed: false }],
+      [sid('silent-s'), { running: false, pendingInteraction: undefined, completionUnread: false, completionFailed: false }],
     ]))
     const b = mount({
       useSessions: hook(sessionState([
@@ -318,9 +375,9 @@ describe('WorkspaceBrowser', () => {
     // busy-s 是最活跃的一行，却有后台任务在跑：行面画齿轮、档位必须跟齿轮走，
     // 否则一行「正在干活」的会话会被塞进待验收的绿勾堆中间。
     const statuses = hook<SessionStatusSnapshot>(new Map([
-      [sid('busy-s'), { running: false, pendingInteraction: undefined, completionUnread: true, activeJobCount: 1 }],
-      [sid('completed-s'), { running: false, pendingInteraction: undefined, completionUnread: true }],
-      [sid('silent-s'), { running: false, pendingInteraction: undefined, completionUnread: false }],
+      [sid('busy-s'), { running: false, pendingInteraction: undefined, completionUnread: true, completionFailed: false, activeJobCount: 1 }],
+      [sid('completed-s'), { running: false, pendingInteraction: undefined, completionUnread: true, completionFailed: false }],
+      [sid('silent-s'), { running: false, pendingInteraction: undefined, completionUnread: false, completionFailed: false }],
     ]))
     const b = mount({
       useSessions: hook(sessionState([
@@ -924,7 +981,7 @@ describe('WorkspaceBrowser', () => {
     expect(requestSessionRename).toHaveBeenCalledTimes(2)
   })
 
-  it('renders both Session row lists for every visible row in the grouped tree and the flat list', () => {
+  it('renders row actions inline while Session menus belong to the global overlay', () => {
     const rendered = vi.fn()
     const renderSlot: WorkspaceBrowserProps['renderSlot'] = (name: string, owner: object) => {
       rendered(name, owner)
@@ -942,7 +999,7 @@ describe('WorkspaceBrowser', () => {
     expect(rendered).toHaveBeenCalledWith('sidebar.workspaces.session.row.action', owner)
     rendered.mockClear()
     act(() => { b.store.actions.setGroupBy('flat') })
-    expect(rendered).toHaveBeenCalledWith('sidebar.workspaces.session.menu.item', owner)
+    expect(rendered).not.toHaveBeenCalledWith('sidebar.workspaces.session.menu.item', owner)
     expect(rendered).toHaveBeenCalledWith('sidebar.workspaces.session.row.action', owner)
   })
 
@@ -1035,7 +1092,7 @@ describe('WorkspaceBrowser', () => {
     })
     const status = (id: string, value: Partial<SessionStatus>) =>
       hook<SessionStatusSnapshot>(new Map([[sid(id), {
-        running: false, pendingInteraction: undefined, completionUnread: false, ...value,
+        running: false, pendingInteraction: undefined, completionUnread: false, completionFailed: false, ...value,
       }]]))
     const expectVisible = (count: number) => {
       // The title cell, not the row text: every row also carries the group's
@@ -1078,7 +1135,7 @@ describe('WorkspaceBrowser', () => {
     })
     fireEvent.click(screen.getByText('alpha'))
     const running = (value: boolean) => hook<SessionStatusSnapshot>(new Map([[sid('session-9'), {
-      running: value, pendingInteraction: undefined, completionUnread: false,
+      running: value, pendingInteraction: undefined, completionUnread: false, completionFailed: false,
     }]]))
     rerender(b, { useSessionStatus: running(true) })
     rerender(b, { useSessionStatus: running(false) })
@@ -1101,15 +1158,15 @@ describe('WorkspaceBrowser', () => {
     })
     fireEvent.click(screen.getByText('alpha'))
     const running = (...ids: string[]) => hook<SessionStatusSnapshot>(new Map(ids.map(id => [sid(id), {
-      running: true, pendingInteraction: undefined, completionUnread: false,
+      running: true, pendingInteraction: undefined, completionUnread: false, completionFailed: false,
     }])))
     rerender(b, {
       useSessions: hook(sessionState(items, { main: sid('session-53') })),
       useSessionStatus: hook<SessionStatusSnapshot>(new Map([
-        [sid('session-55'), { running: true, pendingInteraction: undefined, completionUnread: false }],
-        [sid('session-56'), { running: false, pendingInteraction: undefined, completionUnread: true }],
+        [sid('session-55'), { running: true, pendingInteraction: undefined, completionUnread: false, completionFailed: false }],
+        [sid('session-56'), { running: false, pendingInteraction: undefined, completionUnread: true, completionFailed: false }],
         [sid('session-57'), {
-          running: false, completionUnread: false,
+          running: false, completionUnread: false, completionFailed: false,
           pendingInteraction: { key: 'question:1', kind: 'question', sessionId: sid('session-57') } as SessionPendingInteraction,
         }],
       ])),
@@ -1280,7 +1337,7 @@ describe('WorkspaceBrowser', () => {
     const session5 = screen.getByText('session-5').closest('[role="treeitem"]') as HTMLElement
     fireEvent.dragStart(session5, { dataTransfer: dragData() })
     fireDrag(blankRow, 'drop', 205)
-    fireEvent.dragEnd(session5)
+    dragEnd(session5)
     expect(b.store.getSnapshot().sessionOrderByAccount.alpha)
       .toEqual(['blank', 'session-5', 'session-1', 'session-2', 'session-3', 'session-4', 'session-6'])
     expect(screen.getByText('session-5')).toBeTruthy()
@@ -1556,18 +1613,15 @@ describe('WorkspaceBrowser', () => {
     expect(startSession).toHaveBeenCalledWith(wid('alpha'))
   })
 
-  it('auto-expands the Ungrouped bucket for a loose current session; its header has no menu and its ＋ is inert', () => {
-    const startSession = vi.fn()
+  it('auto-expands the Ungrouped bucket for a loose current session; its header has neither menu nor ＋', () => {
     mount({
       useSessions: hook(sessionState([summary('loose', 1)], { main: sid('loose') })),
       useWorkspaces: hook(workspaceState([workspace('alpha', [])])),
-      startSession,
     })
     // The loose session's group is UNGROUPED_KEY: expanded by the effect.
     expect(screen.getByText('loose')).toBeTruthy()
     expect(screen.queryByRole('button', { name: '工作区“未分组”的操作' })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: '在“未分组”中新建会话' }))
-    expect(startSession).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: '在“未分组”中新建会话' })).toBeNull()
   })
 
   it('keeps an already-expanded group when the selection moves within it', () => {
@@ -2303,6 +2357,21 @@ describe('WorkspaceBrowser', () => {
     b.view.unmount()
   })
 
+  it('expands an inert drawer with retained wide content before focusing search', () => {
+    vi.useFakeTimers()
+    try {
+      const expandSidebar = vi.fn(() => { b.view.container.removeAttribute('inert') })
+      const b = mount({ wide: true, expandSidebar })
+      b.view.container.setAttribute('inert', '')
+      act(() => { b.controls.search() })
+      expect(expandSidebar).toHaveBeenCalledOnce()
+      act(() => { vi.advanceTimersByTime(300) })
+      expect(document.activeElement).toBe(screen.getByPlaceholderText('搜索会话名称'))
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('rail state renders icon controls that request expansion', () => {
     vi.useFakeTimers()
     try {
@@ -2445,7 +2514,7 @@ describe('WorkspaceBrowser', () => {
     Object.defineProperty(outsideDrop, 'dataTransfer', { value: dragData() })
     fireEvent(document.body, outsideDrop)
     expect(outsideDrop.defaultPrevented).toBe(true)
-    fireEvent.dragEnd(source)
+    dragEnd(source)
     expect(insertWorkspaceBefore).toHaveBeenCalledWith(wid('tail'), wid('beta'))
   })
 
@@ -2506,7 +2575,7 @@ describe('WorkspaceBrowser', () => {
     fireEvent.dragStart(two, { dataTransfer: dragData() })
     fireDrag(one, 'dragOver', 105)
     fireDrag(one, 'drop', 105)
-    fireEvent.dragEnd(two)
+    dragEnd(two)
     expect(b.store.getSnapshot().sessionOrderByAccount.alpha).toEqual(['three', 'two', 'one', 'four'])
     expect(screen.getAllByRole('treeitem').slice(1).map(row => row.textContent)).toEqual([
       expect.stringContaining('two'), expect.stringContaining('one'),
@@ -2545,14 +2614,14 @@ describe('WorkspaceBrowser', () => {
     fireEvent.dragStart(one, { dataTransfer: dragData() })
     fireDrag(two, 'dragOver', 105)
     fireDrag(two, 'drop', 105)
-    fireEvent.dragEnd(one)
+    dragEnd(one)
     expect(b.store.getSnapshot().sessionOrderByAccount.alpha).toEqual(before)
 
     // …and an unpinned source ignores pinned targets.
     fireEvent.dragStart(two, { dataTransfer: dragData() })
     fireDrag(one, 'dragOver', 105)
     fireDrag(one, 'drop', 105)
-    fireEvent.dragEnd(two)
+    dragEnd(two)
     expect(b.store.getSnapshot().sessionOrderByAccount.alpha).toEqual(before)
   })
 
@@ -2581,7 +2650,7 @@ describe('WorkspaceBrowser', () => {
     rerender(b, {
       useWorkspaces: hook(workspaceState([workspace('alpha', ['one', 'two', 'three'])], [], [sid('one')])),
     })
-    fireEvent.dragEnd(within(b.view.container).getByText('one').closest('[role="treeitem"]') as HTMLElement)
+    dragEnd(within(b.view.container).getByText('one').closest('[role="treeitem"]') as HTMLElement)
     expect(b.store.getSnapshot().sessionOrderByAccount.alpha).toEqual(before)
 
     // The source unpins in flight.
@@ -2596,7 +2665,7 @@ describe('WorkspaceBrowser', () => {
     rerender(b, {
       useWorkspaces: hook(workspaceState([workspace('alpha', ['one', 'two', 'three'])], [], [sid('two')])),
     })
-    fireEvent.dragEnd(within(b.view.container).getByText('one').closest('[role="treeitem"]') as HTMLElement)
+    dragEnd(within(b.view.container).getByText('one').closest('[role="treeitem"]') as HTMLElement)
     expect(b.store.getSnapshot().sessionOrderByAccount.alpha).toEqual(before)
   })
 
@@ -2627,7 +2696,7 @@ describe('WorkspaceBrowser', () => {
     fireEvent.dragStart(three, { dataTransfer: dragData() })
     fireDrag(one, 'dragOver', 105)
     fireDrag(one, 'drop', 105)
-    fireEvent.dragEnd(three)
+    dragEnd(three)
     expect(b.store.getSnapshot().sessionOrderByAccount[FLAT_SESSION_ORDER_KEY])
       .toEqual(['two', 'one', 'three'])
   })
@@ -2648,7 +2717,7 @@ describe('WorkspaceBrowser', () => {
       })
       fireEvent.dragStart(source, { dataTransfer: dragData() })
       fireDrag(target, 'drop', 180)
-      fireEvent.dragEnd(source)
+      dragEnd(source)
     }
 
     dragAfter('one', 'three')
@@ -2713,7 +2782,7 @@ describe('WorkspaceBrowser', () => {
     })
     const dataTransfer = dragData()
     fireEvent.dragStart(one, { dataTransfer })
-    fireEvent.dragEnd(one)
+    dragEnd(one)
     // The drag ended: rows no longer accept drops.
     fireDrag(two, 'drop', 180)
     expect(b.store.getSnapshot().sessionOrderByAccount.alpha).toBeUndefined()
@@ -2741,13 +2810,43 @@ describe('WorkspaceBrowser', () => {
     Object.defineProperty(outsideDrop, 'dataTransfer', { value: dragData() })
     fireEvent(document.body, outsideDrop)
     expect(outsideDrop.defaultPrevented).toBe(true)
-    fireEvent.dragEnd(one)
+    dragEnd(one)
     expect(b.store.getSnapshot().sessionOrderByAccount.alpha).toEqual(['two', 'one'])
+  })
+
+  it('discards the last Session marker when another drop target claims the Session as a copy', () => {
+    const b = mount({
+      useSessions: hook(sessionState([summary('one', 2), summary('two', 1)])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['one', 'two'])])),
+    })
+    fireEvent.click(screen.getByText('alpha'))
+    const [one, two] = screen.getAllByRole('treeitem').slice(1) as [HTMLElement, HTMLElement]
+    const rect = () => ({
+      top: 150, bottom: 184, left: 0, right: 200, width: 200, height: 34, x: 0, y: 150, toJSON: () => ({}),
+    })
+    two.getBoundingClientRect = rect
+    fireEvent.dragStart(one, { dataTransfer: dragData() })
+    fireDrag(two, 'dragOver', 180)
+    dragEnd(one, 'copy')
+    expect(b.store.getSnapshot().sessionOrderByAccount.alpha).toBeUndefined()
+
+    fireEvent.click(screen.getByRole('button', { name: '视图选项' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '单列表' }))
+    const flatOne = screen.getByText('one').closest('[role="treeitem"]') as HTMLElement
+    const flatTwo = screen.getByText('two').closest('[role="treeitem"]') as HTMLElement
+    flatTwo.getBoundingClientRect = rect
+    fireEvent.dragStart(flatOne, { dataTransfer: dragData() })
+    fireDrag(flatTwo, 'dragOver', 180)
+    dragEnd(flatOne, 'copy')
+    expect(b.store.getSnapshot().sessionOrderByAccount[FLAT_SESSION_ORDER_KEY]).toBeUndefined()
+    // The marker is gone: an ordinary drag end afterwards commits nothing.
+    dragEnd(flatOne)
+    expect(b.store.getSnapshot().sessionOrderByAccount[FLAT_SESSION_ORDER_KEY]).toBeUndefined()
   })
 
   it('labels an unrenamed default Workspace in the reader’s language and every other title verbatim', () => {
     const renameWorkspace = vi.fn(async () => {})
-    mount({
+    const browser = mount({
       useWorkspaces: hook(workspaceState([
         workspace('alpha', [], 'default-workspace'),
         workspace('beta', [], 'default-workspace backup'),
@@ -2759,8 +2858,7 @@ describe('WorkspaceBrowser', () => {
     // The dialog edits the text on screen, and the stored title — not that
     // text — decides whether confirming saves. So confirming the untouched
     // prefill pins the localized name and the row stops following the language.
-    fireEvent.click(screen.getByRole('button', { name: '工作区“默认工作区”的操作' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '重命名' }))
+    browser.openDialog(wid('alpha'), '默认工作区', 'rename')
     expect(screen.getByLabelText<HTMLInputElement>('工作区名称').value).toBe('默认工作区')
     expect(screen.queryByRole('alert')).toBeNull()
     const confirm = screen.getByRole<HTMLButtonElement>('button', { name: '重命名' })
@@ -2772,12 +2870,11 @@ describe('WorkspaceBrowser', () => {
   it('renames a workspace through the row menu dialog', async () => {
     let resolveRename!: () => void
     const renameWorkspace = vi.fn(() => new Promise<void>((resolve) => { resolveRename = resolve }))
-    mount({
+    const browser = mount({
       useWorkspaces: hook(workspaceState([workspace('alpha', [], 'Alpha'), workspace('beta', [], 'Beta')])),
       renameWorkspace,
     })
-    fireEvent.click(screen.getByRole('button', { name: '工作区“Alpha”的操作' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '重命名' }))
+    browser.openDialog(wid('alpha'), 'Alpha', 'rename')
     const input = screen.getByLabelText<HTMLInputElement>('工作区名称')
     expect(input.value).toBe('Alpha')
     // Unchanged and blank names stay blocked.
@@ -2801,18 +2898,21 @@ describe('WorkspaceBrowser', () => {
 
   it('rename via Enter, failure surfaces the error, Cancel closes', async () => {
     const renameWorkspace = vi.fn(async () => { throw new Error('rename conflict') })
-    mount({
+    const browser = mount({
       useWorkspaces: hook(workspaceState([workspace('alpha', [], 'Alpha')])),
       renameWorkspace,
     })
-    fireEvent.click(screen.getByRole('button', { name: '工作区“Alpha”的操作' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '重命名' }))
+    browser.openDialog(wid('alpha'), 'Alpha', 'rename')
     const input = screen.getByLabelText<HTMLInputElement>('工作区名称')
     // Enter with a blocked draft (unchanged) does nothing.
     fireEvent.keyDown(input, { key: 'Enter' })
     expect(renameWorkspace).not.toHaveBeenCalled()
     fireEvent.change(input, { target: { value: 'Renamed' } })
     fireEvent.keyDown(input, { key: 'a' })
+    fireEvent.compositionStart(input)
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(renameWorkspace).not.toHaveBeenCalled()
+    fireEvent.compositionEnd(input)
     fireEvent.keyDown(input, { key: 'Enter' })
     expect(renameWorkspace).toHaveBeenCalledWith(wid('alpha'), 'Renamed')
     await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe('rename conflict') })
@@ -2825,12 +2925,11 @@ describe('WorkspaceBrowser', () => {
 
   it('reports non-Error rename failures as text', async () => {
     const renameWorkspace = vi.fn(async () => { throw 'denied' })
-    mount({
+    const browser = mount({
       useWorkspaces: hook(workspaceState([workspace('alpha', [], 'Alpha')])),
       renameWorkspace,
     })
-    fireEvent.click(screen.getByRole('button', { name: '工作区“Alpha”的操作' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '重命名' }))
+    browser.openDialog(wid('alpha'), 'Alpha', 'rename')
     fireEvent.change(screen.getByLabelText('工作区名称'), { target: { value: 'Other' } })
     fireEvent.click(screen.getByRole('button', { name: '重命名' }))
     await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe('denied') })
@@ -2843,8 +2942,7 @@ describe('WorkspaceBrowser', () => {
       useWorkspaces: hook(workspaceState([workspace('alpha', ['session'], 'Alpha')])),
       deleteWorkspace,
     })
-    fireEvent.click(screen.getByRole('button', { name: '工作区“Alpha”的操作' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '删除工作区' }))
+    browser.openDialog(wid('alpha'), 'Alpha', 'delete')
     const dialog = screen.getByRole('dialog', { name: '删除工作区' })
     expect(dialog.textContent).toContain('将把“Alpha”从工作区列表中移除')
     expect(dialog.textContent).toContain('文件夹与会话记录会保留')
@@ -2874,12 +2972,11 @@ describe('WorkspaceBrowser', () => {
     const deleteWorkspace = vi.fn()
       .mockRejectedValueOnce(new Error('storage unavailable'))
       .mockRejectedValueOnce('denied')
-    mount({
+    const browser = mount({
       useWorkspaces: hook(workspaceState([workspace('alpha', [], 'Alpha')])),
       deleteWorkspace,
     })
-    fireEvent.click(screen.getByRole('button', { name: '工作区“Alpha”的操作' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '删除工作区' }))
+    browser.openDialog(wid('alpha'), 'Alpha', 'delete')
     fireEvent.click(screen.getByRole('button', { name: '删除工作区' }))
     await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe('storage unavailable') })
     expect(screen.getByRole('dialog', { name: '删除工作区' })).toBeTruthy()
@@ -2891,13 +2988,12 @@ describe('WorkspaceBrowser', () => {
 
   it('Cancel, Escape, and Close dismiss deletion without calling the action', () => {
     const deleteWorkspace = vi.fn(async () => {})
-    mount({
+    const browser = mount({
       useWorkspaces: hook(workspaceState([workspace('alpha', [], 'Alpha')])),
       deleteWorkspace,
     })
     const open = () => {
-      fireEvent.click(screen.getByRole('button', { name: '工作区“Alpha”的操作' }))
-      fireEvent.click(screen.getByRole('menuitem', { name: '删除工作区' }))
+      browser.openDialog(wid('alpha'), 'Alpha', 'delete')
     }
     open()
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
@@ -2986,7 +3082,7 @@ describe('Workspace tree grouping', () => {
     fireEvent.click(screen.getByText('Child'))
     fireEvent.click(groupHeaderTitle('Projects'))
     const status = (running: boolean) => hook<SessionStatusSnapshot>(new Map([[sid('child-8'), {
-      running, pendingInteraction: undefined, completionUnread: false,
+      running, pendingInteraction: undefined, completionUnread: false, completionFailed: false,
     }]]))
     rerender(b, { useSessionStatus: status(true) })
     rerender(b, { useSessionStatus: status(false) })
@@ -3045,7 +3141,7 @@ describe('Workspace tree grouping', () => {
     fireEvent.dragStart(source, { dataTransfer: dragData() })
     fireDrag(section('Child'), 'dragOver', 190)
     fireDrag(section('Child'), 'drop', 190)
-    fireEvent.dragEnd(source)
+    dragEnd(source)
     expect(b.props.insertWorkspaceBefore).toHaveBeenCalledExactlyOnceWith(wid('outside'), wid('tail'))
   })
 
@@ -3059,7 +3155,7 @@ describe('Workspace tree grouping', () => {
     const source = screen.getByText('Projects').closest('[role="treeitem"]')!
     fireEvent.dragStart(source, { dataTransfer: dragData() })
     fireDrag(section('outside'), 'drop', 10)
-    fireEvent.dragEnd(source)
+    dragEnd(source)
     expect(b.props.insertWorkspaceBefore).not.toHaveBeenCalled()
   })
 
@@ -3070,7 +3166,7 @@ describe('Workspace tree grouping', () => {
     const source = screen.getByText('Projects').closest('[role="treeitem"]')!
     fireEvent.dragStart(source, { dataTransfer: dragData() })
     fireDrag(section('outside'), 'drop', 100)
-    fireEvent.dragEnd(source)
+    dragEnd(source)
     expect(b.props.insertWorkspaceBefore).toHaveBeenCalledExactlyOnceWith(root.workspaceId, undefined)
     rerender(b, { useWorkspaces: hook(workspaceState([team, child, other, outside, root])) })
     // The title span, not the whole row: every group row now carries its
@@ -3117,15 +3213,15 @@ describe('Workspace tree grouping', () => {
     fireDrag(beta.parentElement as HTMLElement, 'dragOver', 100)
     fireDrag(outside.parentElement as HTMLElement, 'dragOver', 100)
     fireDrag(outside.parentElement as HTMLElement, 'drop', 100)
-    fireEvent.dragEnd(alpha)
+    dragEnd(alpha)
     expect(b.props.insertWorkspaceBefore).not.toHaveBeenCalled()
     fireEvent.dragStart(beta, { dataTransfer: dragData() })
     fireDrag(alpha.parentElement as HTMLElement, 'drop', 100)
-    fireEvent.dragEnd(beta)
+    dragEnd(beta)
     expect(b.props.insertWorkspaceBefore).not.toHaveBeenCalled()
     fireEvent.dragStart(alpha, { dataTransfer: dragData() })
     fireDrag(beta.parentElement as HTMLElement, 'drop', 100)
-    fireEvent.dragEnd(alpha)
+    dragEnd(alpha)
     expect(b.props.insertWorkspaceBefore).toHaveBeenCalledOnce()
     expect(b.props.insertWorkspaceBefore).toHaveBeenCalledWith(wid('alpha'), wid('gamma'))
   })
@@ -3199,6 +3295,7 @@ describe('Workspace tree grouping', () => {
         running: false,
         pendingInteraction: { key: 'question:1', kind: 'question', sessionId: sid('session-7') } as SessionPendingInteraction,
         completionUnread: false,
+        completionFailed: false,
       }]])),
     })
     expect(document.querySelector('[data-row-key="queue"]')).toBeNull()
@@ -3224,14 +3321,14 @@ describe('Workspace tree grouping', () => {
         [workspace('alpha', items.map(item => item.id))], [], ['failed-new', 'pinned-mid'].map(sid),
       )),
       useSessionStatus: hook<SessionStatusSnapshot>(new Map([
-        [sid('failed-new'), { running: false, pendingInteraction: undefined, completionUnread: true, completionOutcome: 'failed' }],
-        [sid('failed-old'), { running: false, pendingInteraction: undefined, completionUnread: true, completionOutcome: 'failed' }],
+        [sid('failed-new'), { running: false, pendingInteraction: undefined, completionUnread: true, completionOutcome: 'failed', completionFailed: true }],
+        [sid('failed-old'), { running: false, pendingInteraction: undefined, completionUnread: true, completionOutcome: 'failed', completionFailed: true }],
         [sid('ask-new'), {
-          running: false, completionUnread: false,
+          running: false, completionUnread: false, completionFailed: false,
           pendingInteraction: { key: 'question:1', kind: 'question', sessionId: sid('ask-new') } as SessionPendingInteraction,
         }],
         [sid('ask-old'), {
-          running: false, completionUnread: false,
+          running: false, completionUnread: false, completionFailed: false,
           pendingInteraction: { key: 'question:2', kind: 'question', sessionId: sid('ask-old') } as SessionPendingInteraction,
         }],
       ])),
@@ -3258,9 +3355,9 @@ describe('Workspace tree grouping', () => {
         workspace('beta', ['other']),
       ])),
       useSessionStatus: hook<SessionStatusSnapshot>(new Map([
-        [sid('failed-new'), { running: false, pendingInteraction: undefined, completionUnread: true, completionOutcome: 'failed' }],
+        [sid('failed-new'), { running: false, pendingInteraction: undefined, completionUnread: true, completionOutcome: 'failed', completionFailed: true }],
         [sid('ask-old'), {
-          running: false, completionUnread: false,
+          running: false, completionUnread: false, completionFailed: false,
           pendingInteraction: { key: 'question:1', kind: 'question', sessionId: sid('ask-old') } as SessionPendingInteraction,
         }],
       ])),
@@ -3290,14 +3387,14 @@ describe('Workspace tree grouping', () => {
       useSessions: hook(sessionState(items)),
       useWorkspaces: hook(workspaceState([])),
       useSessionStatus: hook<SessionStatusSnapshot>(new Map([
-        [sid('failed-new'), { running: false, pendingInteraction: undefined, completionUnread: true, completionOutcome: 'failed' }],
-        [sid('failed-old'), { running: false, pendingInteraction: undefined, completionUnread: true, completionOutcome: 'failed' }],
+        [sid('failed-new'), { running: false, pendingInteraction: undefined, completionUnread: true, completionOutcome: 'failed', completionFailed: true }],
+        [sid('failed-old'), { running: false, pendingInteraction: undefined, completionUnread: true, completionOutcome: 'failed', completionFailed: true }],
         [sid('ask-new'), {
-          running: false, completionUnread: false,
+          running: false, completionUnread: false, completionFailed: false,
           pendingInteraction: { key: 'question:1', kind: 'question', sessionId: sid('ask-new') } as SessionPendingInteraction,
         }],
         [sid('ask-old'), {
-          running: false, completionUnread: false,
+          running: false, completionUnread: false, completionFailed: false,
           pendingInteraction: { key: 'question:2', kind: 'question', sessionId: sid('ask-old') } as SessionPendingInteraction,
         }],
       ])),

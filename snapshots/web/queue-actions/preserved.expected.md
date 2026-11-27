@@ -1,6 +1,7 @@
 - banner:
   - navigation "Session hierarchy": Reply with a one-sentence description
   - button "Chat"
+  - button "Session panel"
   - button "More actions"
   - button "Open right sidebar"
 - text: Reply with a one-sentence description of event sourcing, then stop. {{clock}}
@@ -11,6 +12,7 @@
   - time: {{clock}}
   - text: →
   - time: {{clock}}
+- button "Injected context"
 - paragraph: partial
 - text: Stopped
 - time: {{clock}}

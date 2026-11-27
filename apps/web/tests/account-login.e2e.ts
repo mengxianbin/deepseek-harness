@@ -30,6 +30,7 @@ async function mockPlatform() {
   let state: string | undefined
   let redirectUri: string | undefined
   let avatarRequests = 0
+  let notificationLists = 0
   const server: Server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
     const reply = (payload: unknown): void => {
@@ -88,15 +89,18 @@ async function mockPlatform() {
       reply({ normal_wallets: [{ currency: 'CNY', balance: '1.00' }], bonus_wallets: [] })
       return
     }
-    if (url.pathname === '/api/v0/users/get_unnotified_bonuses') { reply([]); return }
+    if (url.pathname === '/api/v0/users/notifications/list') {
+      notificationLists++
+      reply({ next_poll_after: 600, notifications: [] }); return
+    }
     res.writeHead(404).end()
   })
   await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve) })
   const address = server.address()
   if (address === null || typeof address === 'string') throw new Error('account login: missing mock listener')
-  const origin = `http://127.0.0.1:${String(address.port)}`
+  const origin = `http://localhost:${String(address.port)}`
   return {
-    origin, inits, pages, avatarRequests: () => avatarRequests,
+    origin, inits, pages, avatarRequests: () => avatarRequests, notificationLists: () => notificationLists,
     close: () => new Promise<void>((resolve) => { server.close(() => { resolve() }); server.closeAllConnections() }),
   }
 }

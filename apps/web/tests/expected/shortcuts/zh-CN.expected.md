@@ -65,6 +65,9 @@
       - listitem:
         - button "修改聚焦会话列表快捷键"
         - text: 聚焦会话列表 ⌥ ⌘ 1
+      - listitem:
+        - button "修改切换已读/未读快捷键"
+        - text: 切换已读/未读 ⇧ ⌘ U
   - region "文本输入":
     - heading "文本输入" [level=3]
     - list:

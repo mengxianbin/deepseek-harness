@@ -59,7 +59,7 @@ describe('startup-barrier mode', () => {
       listenerDone = true
     })
     const agent = stubAgent('barrier-park')
-    const detach = ctx.agents.enter(agent, undefined)
+    const detach = ctx.agents.enter(agent)
     await ctx.agents.announce(agent, 'startup')
     // Announce completed while the listener is still in flight.
     expect(listenerDone).toBe(false)
@@ -88,7 +88,7 @@ describe('startup-barrier mode', () => {
     ctx.on('agent/created', () => { throw new Error('late veto') })
     ctx.on('agent/created', () => { heard.push('later listener') })
     const agent = stubAgent('barrier-failure')
-    const detach = ctx.agents.enter(agent, undefined)
+    const detach = ctx.agents.enter(agent)
 
     // The create path no longer observes the failure as a rejection.
     await expect(ctx.agents.announce(agent, 'startup')).resolves.toBeUndefined()

@@ -7,7 +7,8 @@
  * @module dsh-agent-loop/tests/cancel
  */
 import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
-import { ToolCallId, createUserMessage, expandAssistantStream } from '@deepseek-ai/dsh-llm'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import { type ToolCallId, createUserMessage, expandAssistantStream } from '@deepseek-ai/dsh-llm'
 
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -72,7 +73,7 @@ describe('Agent.cancel()', () => {
     const adapter = new MockAdapter([textResponse('next turn')])
     const ctx = await harness(adapter)
     try {
-      const agent = await ctx.agentLoop.create(SessionId('cancel-mutated-cause'), { provider: 'mock', model: 'mock' })
+      const agent = await ctx.agentLoop.create(brandString<SessionId>('cancel-mutated-cause'), { provider: 'mock', model: 'mock' })
       const errors: unknown[] = []
       ctx.on('agent/error', ({ error }) => { errors.push(error) })
       ctx.on('agent/request', ({ signal, turn }, next) => {
@@ -153,7 +154,7 @@ describe('Agent.cancel()', () => {
   it('cancel() on an idle agent with nothing queued is a no-op; the next prompt runs (F2 leak guard)', async () => {
     const adapter = new MockAdapter([textResponse('reply')])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('a1'), { provider: 'mock', model: 'mock' })
 
     // The loop is parked at the idle wait with nothing queued. A cancel here must
     // NOT arm the marker — otherwise the next legitimate prompt would be dropped.
@@ -170,7 +171,7 @@ describe('Agent.cancel()', () => {
   it('cancel({ keepInbox: true }) does not restore work already claimed by a waking send', async () => {
     const adapter = new MockAdapter([textResponse('wake reply')])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('a1'), { provider: 'mock', model: 'mock' })
 
     agent.followup(createUserMessage({
       content: [{ type: 'text', text: 'preserved' }],
@@ -209,7 +210,7 @@ describe('Agent.cancel()', () => {
       textResponse('wake reply'),
     ])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('keep-after-abort'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('keep-after-abort'), { provider: 'mock', model: 'mock' })
 
     send(agent, 'active')
     await new Promise(resolve => setTimeout(resolve, 30))
@@ -231,7 +232,7 @@ describe('Agent.cancel()', () => {
   it('cancel({ keepInbox: true }) latches a waking send landing in the abort-to-idle window', async () => {
     const adapter = new MockAdapter(['hang', textResponse('B reply')])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('latch-window'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('latch-window'), { provider: 'mock', model: 'mock' })
 
     send(agent, 'active')
     await new Promise(resolve => setTimeout(resolve, 30))
@@ -256,7 +257,7 @@ describe('Agent.cancel()', () => {
   it('cancel() without keepInbox clears a latched wake alongside the inbox', async () => {
     const adapter = new MockAdapter(['hang', textResponse('C reply')])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('latch-cleared'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('latch-cleared'), { provider: 'mock', model: 'mock' })
 
     send(agent, 'active')
     await new Promise(resolve => setTimeout(resolve, 30))
@@ -278,7 +279,7 @@ describe('Agent.cancel()', () => {
   it('removing the latched wake before convergence suppresses the replay', async () => {
     const adapter = new MockAdapter(['hang'])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('removed-latched-wake'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('removed-latched-wake'), { provider: 'mock', model: 'mock' })
 
     send(agent, 'active')
     await new Promise(resolve => setTimeout(resolve, 30))
@@ -305,7 +306,7 @@ describe('Agent.cancel()', () => {
     // be latched across the whole window, not just the same-tick case.
     const adapter = new MockAdapter(['hang-slow', textResponse('B reply')])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('slow-convergence'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('slow-convergence'), { provider: 'mock', model: 'mock' })
 
     send(agent, 'A')
     await new Promise(resolve => setTimeout(resolve, 30))
@@ -324,29 +325,60 @@ describe('Agent.cancel()', () => {
     const adapter = new MockAdapter(['hang-slow', textResponse('late reply')])
     const ctx = await harness(adapter)
     const handle = await ctx.agents.create({
-      sessionId: SessionId('dispose-window-wake'),
+      sessionId: brandString<SessionId>('dispose-window-wake'),
       agentOptions: { provider: 'mock', model: 'mock' },
     })
     const agent = handle.agent
 
+    const streaming = Promise.withResolvers<undefined>()
+    ctx.on('agent/assistant-stream', ({ frame }) => { if (frame.type === 'chunk') streaming.resolve(undefined) })
     send(agent, 'active')
-    await new Promise(resolve => setTimeout(resolve, 30))
-
-    // Dispose cancels with `{ kind: 'disposed' }`; a wake landing in the
-    // abort-to-idle window must not latch, so `whenIdle()` does not wait on
-    // a model turn over the session being torn down.
+    await streaming.promise
     const disposal = handle.dispose()
-    setTimeout(() => { send(agent, 'late wake') }, 10)
+    send(agent, 'late wake')
     await disposal
 
     expect(adapter.requests).toHaveLength(1)
     expect(userTexts(agent)).toEqual(['active'])
   })
 
+  it.each(['before scope cleanup', 'during scope cleanup'])('does not start an idle Agent after disposal begins %s', async (window) => {
+    const adapter = new MockAdapter([textResponse('late reply')])
+    const ctx = await harness(adapter)
+    const cleanupStarted = Promise.withResolvers<undefined>()
+    const releaseCleanup = Promise.withResolvers<undefined>()
+    let disposal: Promise<void> | undefined
+    try {
+      const handle = await ctx.agents.create({
+        sessionId: brandString<SessionId>('idle-disposal-wake'),
+        agentOptions: { provider: 'mock', model: 'mock' },
+      })
+      const agent = handle.agent
+      agent.ctx.effect(() => async () => {
+        cleanupStarted.resolve(undefined)
+        await releaseCleanup.promise
+      })
+      disposal = handle.dispose()
+      if (window === 'during scope cleanup') await cleanupStarted.promise
+      send(agent, 'late wake')
+      await agent.whenIdle()
+
+      expect(agent.session.snapshotEvents().filter(event => event.type === 'turn/start')).toHaveLength(0)
+      expect(adapter.requests).toHaveLength(0)
+    } finally {
+      releaseCleanup.resolve(undefined)
+      try {
+        await disposal
+      } finally {
+        await ctx.fiber.dispose()
+      }
+    }
+  })
+
   it('cancel after waking send closes its synchronously opened turn with only the synthetic abort step', async () => {
     const adapter = new MockAdapter([textResponse('should not run')])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('a1'), { provider: 'mock', model: 'mock' })
 
     send(agent, 'drop me first')
     send(agent, 'drop me second')
@@ -368,7 +400,7 @@ describe('Agent.cancel()', () => {
     const adapter = new MockAdapter([textResponse('should not run')])
     const ctx = await harness(adapter)
     const handle = await ctx.agents.create({
-      sessionId: SessionId('dispose-running-session'),
+      sessionId: brandString<SessionId>('dispose-running-session'),
       agentOptions: { provider: 'mock', model: 'mock' },
     })
     const agent = handle.agent
@@ -396,7 +428,7 @@ describe('Agent.cancel()', () => {
   it('a whenIdle() waiter registered BEFORE a pre-step cancel resolves (F1 hang guard)', async () => {
     const adapter = new MockAdapter([textResponse('x')])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('a1'), { provider: 'mock', model: 'mock' })
 
     // This waiter cannot rely on a running→idle transition because cancellation
     // drops the turn before it runs; the skip path must settle it directly.
@@ -415,7 +447,7 @@ describe('Agent.cancel()', () => {
   it('idle-listener cancellation settles its waiter without cancelling later work', async () => {
     const adapter = new MockAdapter([textResponse('first reply'), textResponse('later reply')])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('idle-listener-cancel'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('idle-listener-cancel'), { provider: 'mock', model: 'mock' })
 
     const replacementRegistered = Promise.withResolvers<undefined>()
     let replacementObservation: Promise<{ status: string; requests: number; turns: number }> | undefined
@@ -457,7 +489,7 @@ describe('Agent.cancel()', () => {
       textResponse('wake reply'),
     ])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('idle-listener-post-cancel-send'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('idle-listener-post-cancel-send'), { provider: 'mock', model: 'mock' })
 
     const replacementRegistered = Promise.withResolvers<undefined>()
     let replacementIdle: Promise<void> | undefined
@@ -494,7 +526,7 @@ describe('Agent.cancel()', () => {
   it('cancel() mid-step aborts the active turn and drops every queued tail item', async () => {
     const adapter = new MockAdapter(['hang'])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('a1'), { provider: 'mock', model: 'mock' })
 
     const reasons: TurnEndReason[] = []
     ctx.on('session/event', (_s, event) => { if (event.type === 'turn/end') reasons.push(event.data.reason) })
@@ -528,7 +560,7 @@ describe('Agent.cancel()', () => {
         return [{ type: 'text', text: 'ran' }]
       },
     }))
-    const agent = await ctx.agentLoop.create(SessionId('cancel-after-assistant-message'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('cancel-after-assistant-message'), { provider: 'mock', model: 'mock' })
     const dispose = ctx.on('session/event', (session, event) => {
       if (session === agent.session && event.type === 'assistant/message') {
         agent.cancel({ kind: 'user' })
@@ -570,7 +602,7 @@ describe('Agent.cancel()', () => {
   it('a prompt sent AFTER a cancelled turn settles runs normally (marker reset)', async () => {
     const adapter = new MockAdapter(['hang', textResponse('second reply')])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('a1'), { provider: 'mock', model: 'mock' })
 
     // First turn hangs; cancel it mid-step.
     send(agent, 'first')
@@ -592,7 +624,7 @@ describe('Agent.cancel()', () => {
   it('cancel mid-stream finalizes the streamed prefix onto the surface', async () => {
     const adapter = new MockAdapter(['hang', textResponse('after')])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('partial-finalize'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('partial-finalize'), { provider: 'mock', model: 'mock' })
 
     send(agent, 'go')
     await new Promise(r => setTimeout(r, 30))
@@ -633,7 +665,7 @@ describe('Agent.cancel()', () => {
     }
     const adapter = new MockAdapter([response])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('terminal-cancel-replay'), {
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('terminal-cancel-replay'), {
       provider: 'mock', model: 'mock',
     })
     ctx.on('agent/assistant-stream', ({ agent: subject, frame }) => {
@@ -667,7 +699,7 @@ describe('Agent.cancel()', () => {
       ],
     }])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('reasoning-finalize'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('reasoning-finalize'), { provider: 'mock', model: 'mock' })
 
     send(agent, 'go')
     await new Promise(r => setTimeout(r, 30))
@@ -689,11 +721,11 @@ describe('Agent.cancel()', () => {
         { type: 'text-delta', index: 0, text: 'reading the file' },
         { type: 'block-end', index: 0, block: { type: 'text', text: 'reading the file' } },
         { type: 'block-start', index: 1, blockType: 'tool-call' },
-        { type: 'tool-call-delta', index: 1, id: ToolCallId('c1'), name: 'read', argumentsDelta: '{"pa' },
+        { type: 'tool-call-delta', index: 1, id: brandString<ToolCallId>('c1'), name: 'read', argumentsDelta: '{"pa' },
       ],
     }])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('tool-call-drop'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('tool-call-drop'), { provider: 'mock', model: 'mock' })
 
     send(agent, 'go')
     await new Promise(r => setTimeout(r, 30))
@@ -714,7 +746,7 @@ describe('Agent.cancel()', () => {
       { type: 'finish', reason: { kind: 'error', failure: { message: 'boom', code: 'SERVER_ERROR' } } },
     ]])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('recovery-cancel'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('recovery-cancel'), { provider: 'mock', model: 'mock' })
     // Cancellation lands while agent/request-error is in flight — the window
     // dsh-llm-retry opens when its backoff waits after appending llm/retry.
     ctx.on('agent/request-error', async ({ agent: subject }) => {
@@ -741,7 +773,7 @@ describe('Agent.cancel()', () => {
       textResponse('recovered'),
     ])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('retry-discards-content'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('retry-discards-content'), { provider: 'mock', model: 'mock' })
     ctx.on('agent/request-error', async () => ({ kind: 'retry' as const }))
 
     send(agent, 'go')
@@ -773,7 +805,7 @@ describe('Agent.cancel()', () => {
       { type: 'text-delta', index: 0, text: 'partial before failure' },
     ]])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('provider-stream-rejection'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('provider-stream-rejection'), { provider: 'mock', model: 'mock' })
     ctx.on('llm/stream', async function* (_options, next) {
       for await (const chunk of next()) {
         yield chunk
@@ -797,11 +829,11 @@ describe('Agent.cancel()', () => {
     const adapter = new MockAdapter([{
       hangAfter: [
         { type: 'block-start', index: 0, blockType: 'tool-call' },
-        { type: 'tool-call-delta', index: 0, id: ToolCallId('c1'), name: 'read', argumentsDelta: '{"pa' },
+        { type: 'tool-call-delta', index: 0, id: brandString<ToolCallId>('c1'), name: 'read', argumentsDelta: '{"pa' },
       ],
     }])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('nothing-to-finalize'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('nothing-to-finalize'), { provider: 'mock', model: 'mock' })
 
     send(agent, 'go')
     await new Promise(r => setTimeout(r, 30))
@@ -814,7 +846,7 @@ describe('Agent.cancel()', () => {
   it('cancel from a synchronous step/start session-event listener drops the step (post-step-start window)', async () => {
     const adapter = new MockAdapter([textResponse('should not stream')])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('a1'), { provider: 'mock', model: 'mock' })
 
     // A step/start session-event listener fires AFTER step/start is appended
     // (and after the pre-step extension point), so cancelling there lands in the SECOND
@@ -855,7 +887,7 @@ describe('Agent.cancel()', () => {
     ctx.llm.registerAdapter(['mock'], adapter)
 
     const handle = await ctx.agents.create({
-      sessionId: SessionId('dispose-step-start-session'),
+      sessionId: brandString<SessionId>('dispose-step-start-session'),
       agentOptions: { provider: 'mock', model: 'mock' },
     })
     const agent = handle.agent
@@ -881,7 +913,7 @@ describe('Agent.cancel()', () => {
   it('cancel during the stopping window ends the turn aborted and runs no further step', async () => {
     const adapter = new MockAdapter([textResponse('one'), textResponse('two')])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('a1'), { provider: 'mock', model: 'mock' })
 
     let steps = 0
     const reasons: TurnEndReason[] = []
@@ -910,7 +942,7 @@ describe('Agent.cancel()', () => {
   it('cancel from a synchronous agent/status(running) listener drops the turn (window 2)', async () => {
     const adapter = new MockAdapter([textResponse('should not run')])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('a1'), { provider: 'mock', model: 'mock' })
 
     // `agent/status` is synchronous, so cancellation can land before the
     // durable turn-start commit and must drop the reserved work.
@@ -933,7 +965,7 @@ describe('Agent.cancel()', () => {
   it('a running-listener cancellation replays replacement work at convergence', async () => {
     const adapter = new MockAdapter([textResponse('A reply'), textResponse('B reply')])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('a1'), { provider: 'mock', model: 'mock' })
 
     let replaced = false
     const dispose = ctx.on('agent/status', ({ agent: subject, status }) => {
@@ -964,7 +996,7 @@ describe('Agent.cancel()', () => {
   it('a prompt queued during pre-step cancellation replays at convergence', async () => {
     const adapter = new MockAdapter([textResponse('A reply'), textResponse('B reply')])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('a1'), { provider: 'mock', model: 'mock' })
 
     send(agent, 'A')
     const idle = agent.whenIdle()
@@ -990,7 +1022,7 @@ describe('Agent.cancel()', () => {
   it("cancel clears the turn's steering — it is not re-enqueued as a fresh turn", async () => {
     const adapter = new MockAdapter(['hang'])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('a1'), { provider: 'mock', model: 'mock' })
 
     send(agent, 'go')
     await new Promise(r => setTimeout(r, 30))
@@ -1022,7 +1054,7 @@ describe('Agent.cancel()', () => {
       textResponse('wake reply'),
     ])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('abort-observer-replacement'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('abort-observer-replacement'), { provider: 'mock', model: 'mock' })
 
     send(agent, 'original')
     await expect.poll(() => adapter.requests.length).toBe(1)
@@ -1065,7 +1097,7 @@ describe('Agent.cancel()', () => {
   it('keeps the first typed cause for an active turn', async () => {
     const adapter = new MockAdapter(['hang'])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId('typed-first-wins'), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('typed-first-wins'), { provider: 'mock', model: 'mock' })
     const supplied: { kind: 'parent' | 'user' } = { kind: 'parent' }
 
     send(agent, 'go')
@@ -1088,7 +1120,7 @@ describe('Agent.cancel()', () => {
     const adapter = new MockAdapter(['hang'])
     const ctx = await harness(adapter)
     const handle = await ctx.agents.create({
-      sessionId: SessionId('cancel-dispose-race'),
+      sessionId: brandString<SessionId>('cancel-dispose-race'),
       agentOptions: { provider: 'mock', model: 'mock' },
     })
     const { agent } = handle
@@ -1113,7 +1145,7 @@ describe('Agent.cancel()', () => {
       ? [toolCallResponse('blocked-tool', 'blocked', {})]
       : [textResponse('done')])
     const ctx = await harness(adapter)
-    const agent = await ctx.agentLoop.create(SessionId(`cooperative-${stage}`), { provider: 'mock', model: 'mock' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>(`cooperative-${stage}`), { provider: 'mock', model: 'mock' })
     const started = Promise.withResolvers<undefined>()
     const blockUntilAbort = async (signal: AbortSignal): Promise<void> => {
       started.resolve(undefined)

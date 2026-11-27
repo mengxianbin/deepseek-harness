@@ -1,5 +1,6 @@
 - banner:
   - navigation "Session hierarchy": Use only Cordis tools. First
+  - button "Session panel"
   - button "More actions"
   - button "Open right sidebar"
   - tablist:
@@ -19,6 +20,7 @@
   - text: →
   - time: 9/1 {{clock}}
 - button "Called tools" [expanded]
+- button "Context injection runtime-context"
 - button "Think I will inspect the current Session's dynamic Cordis Plugins before defining the snapshot Package."
 - time: 9/1 {{clock}}
 - button "Inspect plugins 0 dynamic plugins"

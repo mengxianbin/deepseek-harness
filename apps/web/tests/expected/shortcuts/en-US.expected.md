@@ -65,6 +65,9 @@
       - listitem:
         - button "Edit shortcut for Focus session list"
         - text: Focus session list Ctrl + Alt + 1
+      - listitem:
+        - button "Edit shortcut for Toggle read/unread"
+        - text: Toggle read/unread Ctrl + Shift + U
   - region "Text input":
     - heading "Text input" [level=3]
     - list:

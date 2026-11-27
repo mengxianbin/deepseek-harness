@@ -1,5 +1,7 @@
-- list "Background jobs":
-  - listitem:
-    - button "Finished 1" [expanded]
-    - button "Clear"
-  - listitem: "bash node -e \"const fs=require('node:fs'); const deadline=Date.now()+600000; (function tick(){ if (fs.existsSync('.background-job-list.release')) return; if (Date.now()>deadline) return; setTimeout(tick, 200) })()\" killed before exit; cancelled by the user {{duration}}"
+- region "Background jobs":
+  - heading "Background jobs" [level=2]
+  - list:
+    - listitem:
+      - button "Finished 1" [expanded]
+      - button "Clear"
+    - listitem: "node -e \"const fs=require('node:fs'); const deadline=Date.now()+600000; (function tick(){ if (fs.existsSync('.background-job-list.release')) return; if (Date.now()>deadline) return; setTimeout(tick, 200) })()\" bash · killed before exit; cancelled by the user {{duration}}"

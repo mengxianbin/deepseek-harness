@@ -1,6 +1,7 @@
 - banner:
   - navigation "Session hierarchy": Use the ask_user_question tool to
   - button "Chat"
+  - button "Session panel"
   - button "More actions"
   - button "Open right sidebar"
 - button "Previous stop"
@@ -19,6 +20,9 @@
   - text: →
   - time: {{clock}}
 - button "Analysis completed" [expanded]
+- button "Context injection runtime-context"
+- button "Context injection skill-catalog"
+- button "Context injection time-context"
 - button "Think The user wants me to ask them a checkpoint question first, then continue with whatever they interject. Let me do exactly that."
 - time: {{clock}}
 - button "Ask question 1/1 answered" [expanded]

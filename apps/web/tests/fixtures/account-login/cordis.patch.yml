@@ -4,6 +4,7 @@
 - id: deepseek-account
   config:
     platformOrigin: "{{origin}}"
+    harnessOrigin: "{{origin}}"
     allowLoopbackHttp: true
 # The scenario boots from a stored grant (FORK dsh-local, settings-launcher: the sidebar
 # menu entry that used to start the browser sign-in is gone), so onboarding stays done.

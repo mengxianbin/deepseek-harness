@@ -1,4 +1,6 @@
-- list "Background jobs":
-  - listitem:
-    - 'button "Show live output of node -e \"const fs=require(''node:fs''); const deadline=Date.now()+600000; (function tick(){ if (fs.existsSync(''.background-job-list.release'')) return; if (Date.now()>deadline) return; setTimeout(tick, 200) })()\""': "node -e \"const fs=require('node:fs'); const deadline=Date.now()+600000; (function tick(){ if (fs.existsSync('.background-job-list.release')) return; if (Date.now()>deadline) return; setTimeout(tick, 200) })()\" bash {{duration}}"
-    - 'button "Stop task node -e \"const fs=require(''node:fs''); const deadline=Date.now()+600000; (function tick(){ if (fs.existsSync(''.background-job-list.release'')) return; if (Date.now()>deadline) return; setTimeout(tick, 200) })()\""'
+- region "Background jobs":
+  - heading "Background jobs" [level=2]
+  - list:
+    - listitem:
+      - 'button "Show live output of node -e \"const fs=require(''node:fs''); const deadline=Date.now()+600000; (function tick(){ if (fs.existsSync(''.background-job-list.release'')) return; if (Date.now()>deadline) return; setTimeout(tick, 200) })()\""': "node -e \"const fs=require('node:fs'); const deadline=Date.now()+600000; (function tick(){ if (fs.existsSync('.background-job-list.release')) return; if (Date.now()>deadline) return; setTimeout(tick, 200) })()\" bash · running {{duration}}"
+      - 'button "Stop task node -e \"const fs=require(''node:fs''); const deadline=Date.now()+600000; (function tick(){ if (fs.existsSync(''.background-job-list.release'')) return; if (Date.now()>deadline) return; setTimeout(tick, 200) })()\""'

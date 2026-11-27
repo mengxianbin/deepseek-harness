@@ -2,7 +2,6 @@
 import type { SpawnOptions } from 'node:child_process'
 import { Context } from '@deepseek-ai/cordis'
 import { HostConnectionService } from '@deepseek-ai/dsh-client-connection'
-import type { BrowserAuth } from '@deepseek-ai/dsh-client-connection/src/browser-auth.ts'
 import type { IndexInjection } from '@deepseek-ai/dsh-host-webserver'
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { RESTART_COMMAND_ENV, readRestartReason, registerRestart, type RestartChild } from '../src/restart-host.ts'
@@ -42,7 +41,7 @@ const capabilityRow = [{ kind: 'global', name: RESTART_GLOBAL, value: { configur
 function fixture() {
   const ctx = new Context()
   onTestFinished(() => ctx.fiber.dispose())
-  const connection = new HostConnectionService(ctx, [], {} as BrowserAuth)
+  const connection = new HostConnectionService(ctx, [])
   const handler = connection.createSharedFetchHandler('/api')
   // `target` accepts a query string; `init` carries body/headers for reason rides.
   const post = (target: string = RESTART_PATH, init: RequestInit = {}) =>

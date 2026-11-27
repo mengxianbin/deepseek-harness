@@ -115,7 +115,10 @@ function fixture(top: number, mounted = true): { navigation: ChatNavigation } {
     firstSeq: null,
     hasMore: true,
     loadingOlder: false,
+    historyLoadStatus: 'idle',
+    isOpen: true,
     loadOlder: vi.fn(),
+    consumeOlder: vi.fn(() => false),
     loadThrough: vi.fn(() => new Promise<void>(() => {})),
   }
   const navigation = new ChatNavigation(viewport, reading, input, vi.fn())

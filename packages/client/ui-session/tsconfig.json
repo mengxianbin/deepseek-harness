@@ -12,13 +12,10 @@
       "path": "../../../vendor/cordis"
     },
     {
-      "path": "../../api/job-controller/tsconfig.client.json"
+      "path": "../../api/remote-access/tsconfig.client.json"
     },
     {
       "path": "../../api/remotes/tsconfig.client.json"
-    },
-    {
-      "path": "../../api/remote-access/tsconfig.client.json"
     },
     {
       "path": "../../api/session-controller/tsconfig.client.json"
@@ -27,13 +24,7 @@
       "path": "../../core/session"
     },
     {
-      "path": "../../goal/goal"
-    },
-    {
       "path": "../../util/values"
-    },
-    {
-      "path": "../connection/tsconfig.client.json"
     },
     {
       "path": "../store"
@@ -43,6 +34,15 @@
     },
     {
       "path": "../ui-slots"
+    },
+    {
+      "path": "../../api/job-controller/tsconfig.client.json"
+    },
+    {
+      "path": "../../goal/goal"
+    },
+    {
+      "path": "../connection/tsconfig.client.json"
     }
   ]
 }
