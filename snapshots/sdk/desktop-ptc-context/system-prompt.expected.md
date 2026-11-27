@@ -68,7 +68,7 @@ interface ToolArgsMap {
     /** Required with sandbox_permissions: one sentence for the user explaining why this exact file operation needs the wider access. Use the language of the user’s current request. */
     justification?: string;
   } & Record<string, JsonValue>;
-  /** Ask the user a concise question when you need confirmation, a choice, or missing information before proceeding. An answer item with empty selected and no custom means the user skipped that question: continue without it, do not ask it again, and do not treat the skip as permission. Keep every question field brief — the card renders question, detail, and option text inline; put long reports in a file and reference its path instead. The question field itself must fit on one line — at most 36 CJK characters (or 72 half-width units). Put background or long context into a regular conversation message sent before calling this tool, not into the card. The answer may also carry a top-level note: a card-level remark the user typed that belongs to no single question. */
+  /** Ask the user a concise question when you need confirmation, a choice, or missing information before proceeding. An answer item with empty selected and no custom means the user skipped that question: continue without it, do not ask it again, and do not treat the skip as permission. */
   ask_user_question: {
     /** Questions to ask the user before continuing. */
     questions: ({
