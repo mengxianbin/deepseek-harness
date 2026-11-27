@@ -21,7 +21,8 @@
  *   `UNKNOWN` (fail-visible since seal-light-host-state-1109 ④, superseding
  *   the old fail-dark clear): 「查失败」 must not paint the same dark as
  *   「未收口」, so the lamp renders the amber dashed unreadable ring instead of
- *   silence, while the relay gate keeps failing closed (`UNKNOWN !== DONE`).
+ *   silence, while an exact-`DONE` consumer gate keeps failing closed
+ *   (`UNKNOWN !== DONE`).
  *   The failure still starts an exponential cooldown, and `seal.ts` warns once
  *   per failed attempt, so the cooldown is what keeps a page lifetime from
  *   turning into a warning flood while 单1's endpoint is still absent
@@ -230,7 +231,7 @@ export function createSealLightStore(request: SealCheckRequest = requestSealChec
       // clearing the map. 熄灯伪装成未收口 is the exact failure this单 cures —
       // the lamp paints the amber dashed "unreadable" ring (unknown ≠
       // not-ready), rows outside this check keep what they last proved, and
-      // the relay gate still fails closed because UNKNOWN !== DONE.
+      // an exact-`DONE` consumer gate still fails closed because UNKNOWN !== DONE.
       const next = new Map(seals)
       for (const id of ids) next.set(id, UNREADABLE_SEAL)
       if (!sameSealMaps(seals, next)) {
