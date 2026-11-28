@@ -138,6 +138,21 @@
   font-weight: 500;
 }
 
+/* One-line hint of the native answer surface (ask-panel-retire-1127 甲-a):
+   the question stems live in the conversation message above; the composer
+   keeps at most this single ellipsized line as orientation. Sits inside the
+   .questionTitle wrapper, which owns the horizontal margin. */
+.hint {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 400;
+}
+
 /* Long copy keeps one line fewer than its budget once it overflows: a
    question shows in full up to three lines, an option description up to two;
    longer copy drops its last line, fades at the end of the line before, and
@@ -333,9 +348,9 @@
 /* Picked row (ask-highlight-contrast-1127, 2026-11-27): this used to be only
    interactive-bg-hover (6% tint) — invisible in practice, the user could not
    see what was already selected and mis-picked an option ("看不见已选中了").
-   Picks now take the brand tint, same package as the answered record card in
-   AskQuestionCard. Hover keeps the 6% tint but must not override the picked
-   background, hence :not(.optionSelected). */
+   Picks now take the brand tint. Hover keeps the 6% tint but must not override
+   the picked background, hence :not(.optionSelected). The answered record card
+   this batch tinted alongside is retired (ask-panel-retire-1127). */
 .optionSelected {
   background: var(--dsw-alias-state-business-tertiary);
   border-color: var(--dsw-alias-border-l2);
@@ -523,16 +538,6 @@
   .copyToggle {
     display: none;
   }
-}
-
-/* Read-only note standing in for a question the user skipped: it takes the
-   option rows' horizontal padding so it lines up with the choices above it. */
-.reviewNote {
-  margin: 0;
-  padding: 8px 12px;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 14px;
-  line-height: 24px;
 }
 
 /* Custom answer row (figma 973:36427): an option-shaped row whose copy is an

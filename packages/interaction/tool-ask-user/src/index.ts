@@ -30,13 +30,21 @@ export const inject = ['tools', 'userQuestions']
 
 const description = 'Ask the user a concise question when you need confirmation, a choice, or missing information before proceeding. '
   + skippedAnswerGuidance
-  + ' Keep every question field brief — the card renders question, detail, and option text inline; '
+  // FORK dsh-local (ask-panel-retire-1127 刀②): the option-card presentation is
+  // retired for intent-less questions — the answer surface shows a one-line
+  // hint, so brevity matters even more; kept identical to the timed description.
+  + ' Keep every question field brief — the answer surface shows a one-line hint; '
   + 'put long reports in a file and reference its path instead. '
   // FORK dsh-local (ask-long-stem, 2026-11-17 裁定 D): the stem must fit one
   // line of the card, and background belongs to the conversation before the
   // call — kept identical in the timed description below.
   + 'The question field itself must fit on one line — at most 36 CJK characters (or 72 half-width units). '
-  + 'Put background or long context into a regular conversation message sent before calling this tool, not into the card.'
+  + 'Put background or long context into a regular conversation message sent before calling this tool, not into the question. '
+  // FORK dsh-local (ask-panel-retire-1127 刀②): pending state is structural —
+  // a decision that only lives in conversation prose never reads as pending;
+  // kept identical in the timed description below.
+  + 'Any pending decision the user must rule on (a decision brief, a confirmation) must be asked through this tool: '
+  + 'the pending state is read structurally from this registration, never from conversation prose.'
   // FORK dsh-local (ask-focus-restore-1125, 2026-11-25 裁定 D): kept
   // identical to the timed description below — the card-level remark rides
   // the result as a top-level `note`.

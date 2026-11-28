@@ -229,10 +229,12 @@ describe('ask_user_question tool', () => {
     expect(schemas[0]).toMatchObject({
       description: 'Ask the user a concise question when you need confirmation, a choice, or missing information before proceeding. '
         + 'An answer item with empty selected and no custom means the user skipped that question: continue without it, do not ask it again, and do not treat the skip as permission.'
-        + ' Keep every question field brief — the card renders question, detail, and option text inline; '
+        + ' Keep every question field brief — the answer surface shows a one-line hint; '
         + 'put long reports in a file and reference its path instead. '
         + 'The question field itself must fit on one line — at most 36 CJK characters (or 72 half-width units). '
-        + 'Put background or long context into a regular conversation message sent before calling this tool, not into the card.'
+        + 'Put background or long context into a regular conversation message sent before calling this tool, not into the question. '
+        + 'Any pending decision the user must rule on (a decision brief, a confirmation) must be asked through this tool: '
+        + 'the pending state is read structurally from this registration, never from conversation prose.'
         + ' The answer may also carry a top-level note: a card-level remark the user typed that belongs to no single question.',
       parameters: { properties: { questions: { description: 'Questions to ask the user before continuing.' } } },
     })
@@ -329,6 +331,11 @@ describe('ask_user_question tool', () => {
     const noteSentence = 'The answer may also carry a top-level note: a card-level remark the user typed that belongs to no single question.'
     expect(descriptions[0] ?? '').toContain(noteSentence)
     expect(descriptions[1] ?? '').toContain(noteSentence)
+    // ask-panel-retire-1127 刀②: both faces carry the structural pending-state
+    // guidance — a ruling that never calls this tool never reads as pending.
+    const pendingSentence = 'the pending state is read structurally from this registration, never from conversation prose.'
+    expect(descriptions[0] ?? '').toContain(pendingSentence)
+    expect(descriptions[1] ?? '').toContain(pendingSentence)
   })
 
   it('asks the registered user-questions provider and projects structured answers to text', async () => {

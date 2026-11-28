@@ -32,12 +32,19 @@ const description = 'Ask brief, direct, self-contained questions about missing i
   + 'Use user-facing terms; assume no knowledge of background work or internal names. '
   + `Use distinct stable question IDs. ${skippedAnswerGuidance} `
   + 'A pending result instead means no answer batch arrived before the timeout and the user can still answer. '
-  + 'Keep every question field brief — the card renders question, detail, and option text inline; '
+  // FORK dsh-local (ask-panel-retire-1127 刀②): the option-card presentation is
+  // retired for intent-less questions — kept identical to the legacy
+  // description in index.ts.
+  + 'Keep every question field brief — the answer surface shows a one-line hint; '
   + 'put long reports in a file and reference its path instead. '
   // FORK dsh-local (ask-long-stem, 2026-11-17 裁定 D): kept identical to the
   // legacy description in index.ts — same numbers, same before-call channel.
   + 'The question field itself must fit on one line — at most 36 CJK characters (or 72 half-width units). '
-  + 'Put background or long context into a regular conversation message sent before calling this tool, not into the card.'
+  + 'Put background or long context into a regular conversation message sent before calling this tool, not into the question. '
+  // FORK dsh-local (ask-panel-retire-1127 刀②): pending state is structural —
+  // kept identical to the legacy description in index.ts.
+  + 'Any pending decision the user must rule on (a decision brief, a confirmation) must be asked through this tool: '
+  + 'the pending state is read structurally from this registration, never from conversation prose.'
   // FORK dsh-local (ask-focus-restore-1125, 2026-11-25 裁定 D): kept
   // identical to the legacy description in index.ts — the card-level remark
   // rides the result as a top-level `note`.

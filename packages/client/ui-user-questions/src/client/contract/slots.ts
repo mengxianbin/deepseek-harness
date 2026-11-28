@@ -6,7 +6,7 @@ import type { AnswerSurfaceInsert } from '@deepseek-ai/dsh-client-ui-input-trigg
 import type { ToolCallId } from '@deepseek-ai/dsh-llm/types'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {
-  AskUserQuestionAnswer, AskUserQuestionAnswerItem, AskUserQuestionItem, UserQuestionState,
+  AskUserQuestionAnswer, AskUserQuestionItem, UserQuestionState,
 } from '@deepseek-ai/dsh-user-questions/types'
 import type { createQuestionDraftStore } from '../draft-store.ts'
 
@@ -237,13 +237,6 @@ export class PendingQuestion {
   /** Tool call identity; absent for a blocking request that carried no `wait`. */
   readonly callId: ToolCallId | undefined
   /**
-   * Recorded answers of a call that already settled. Present only on a
-   * read-only review card, which the tool call row builds from its own
-   * transcript so a finished question can be read back in the panel that
-   * asked it. Such a card has no answer channel and no countdown.
-   */
-  readonly review: readonly AskUserQuestionAnswerItem[] | undefined
-  /**
    * What closing the panel does. A card keyed by tool call stays reachable
    * from its tool call row, so closing only withdraws the panel (`hide`) and
    * persists nothing. A card the Host never named has no way back, so closing
@@ -272,20 +265,17 @@ export class PendingQuestion {
    * @param questions - complete question batch.
    * @param callId - tool call identity when the Host named one.
    * @param siblings - keys of every card currently registered for the Session, for draft pruning.
-   * @param review - recorded answers of a settled call, making this a read-only card.
    */
   constructor(
     sessionId: SessionId,
     questions: readonly AskUserQuestionItem[],
     callId?: ToolCallId,
     siblings?: () => readonly string[],
-    review?: readonly AskUserQuestionAnswerItem[],
   ) {
     this.sessionId = sessionId
     this.questions = questions
     this.kind = planReviewOf(questions) === undefined ? 'question' : 'plan-review'
     this.callId = callId
-    this.review = review
     this.dismissal = callId === undefined ? 'cancel' : 'hide'
     this.#siblings = siblings
     if (callId === undefined) nextQuestionKey += 1

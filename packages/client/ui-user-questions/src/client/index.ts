@@ -6,12 +6,13 @@
  * carrier (domain encoding in contract/slots.ts PendingQuestion); copy rides
  * the standard locale seat. Export discipline: packages/client/AGENTS.md.
  *
- * One entry, two presentations: the composer renders a request with a
- * `plan-review` intent as the plan decision card and every other request as
- * the generic question flow. Both use the same carrier and composer seat.
+ * One entry, three presentations (ask-panel-retire-1127): the composer
+ * renders a `plan-review` intent as the plan decision card, an `approval`
+ * intent as its option decision card, and every other request as the native
+ * answer input. All use the same carrier and composer seat.
  *
- * The generic flow's free-text answer field joins the shared '/' trigger
- * pipeline on the `answer` surface: this plugin binds each Session's
+ * The answer field (native input and option card alike) joins the shared '/'
+ * trigger pipeline on the `answer` surface: this plugin binds each Session's
  * controller into the injected `answerTriggers` face (track / keyboard
  * arbitration / insert target) and declares the `conversation.composer.overlay`
  * slot whose entries render the candidate menu (registered by
@@ -31,10 +32,9 @@ import type { AskUserQuestionItem, PendingUserQuestion, UserQuestionProjectionVi
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 // Type-only: the slash-pipeline service face resolved as `inputTriggers`.
 import type { InputTriggerServiceContract } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
-import type { UserQuestionPanels, UserQuestionRecord } from '@deepseek-ai/dsh-client-ui-tool/client'
+import type { UserQuestionPanels } from '@deepseek-ai/dsh-client-ui-tool/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type { ToolCallId } from '@deepseek-ai/dsh-llm'
-import { brandString } from '@deepseek-ai/dsh-brand'
 import { composerEnterDisplay, composerEnterGestures, type ShortcutCommandId } from '@deepseek-ai/dsh-client-shortcuts/client'
 import { fileAddressFor } from '@deepseek-ai/dsh-util-workspace-path'
 import {
@@ -168,9 +168,7 @@ class QuestionCards {
       },
       hasRequest: () => requests.size > 0,
     }
-    // A review card has no request left to park: closing it drops the card, and
-    // the tool call row builds another one from the same transcript record.
-    pending.attachSeat({ hide: pending.review === undefined ? card.hide : card.remove })
+    pending.attachSeat({ hide: card.hide })
     this.#cards.set(pending.key, card)
     return card
   }
@@ -185,28 +183,6 @@ class QuestionCards {
   reveal(sessionId: SessionId, callId: string): boolean {
     const card = this.byCallId(sessionId, callId)
     if (card === undefined) return false
-    card.reveal()
-    return true
-  }
-
-  /**
-   * Show one settled tool call's recorded answers as a read-only card. A call
-   * that somehow still holds a card is shown as it stands, so a live request is
-   * never replaced by a stale copy of itself.
-   * @param sessionId - Session the tool call belongs to.
-   * @param callId - `ask_user_question` call whose record to show, as its
-   * transcript row spells it.
-   * @param record - the call's questions and recorded answers.
-   * @returns true; a record always produces a card.
-   */
-  review(sessionId: SessionId, callId: string, record: UserQuestionRecord): boolean {
-    const card = this.byCallId(sessionId, callId) ?? this.#create(new PendingQuestion(
-      sessionId,
-      record.questions,
-      brandString<ToolCallId>(callId),
-      () => this.keysFor(sessionId),
-      record.answers,
-    ))
     card.reveal()
     return true
   }
@@ -359,9 +335,7 @@ function publishContinuedQuestions(ctx: ClientContext, cards: QuestionCards): ()
       cards.byCallId(sessionId, row.callId)?.pending.setState('open')
     }
     for (const card of cards.values()) {
-      // A review card's call already settled, so the projection no longer lists it as answerable.
       if (card.pending.callId === undefined
-        || card.pending.review !== undefined
         || rows.has(card.pending.key)
         || card.hasRequest()
         || card.pending.hasWaterfall()) continue
@@ -410,10 +384,6 @@ export function apply(ctx: ClientContext): void {
       keys: ['Enter', 'Space'],
       bindings: [...composerEnterGestures.newline, { code: 'Space', modifiers: [] }], group: 'input',
     }), 'ui-user-questions: fixed question select')
-    scope.effect(() => scope.shortcuts.registerFixed({
-      id: 'fixed.question-pager' as ShortcutCommandId, label: () => t('shortcut.pager'),
-      keys: ['PageUp', 'PageDown'], bindings: [{ code: 'PageUp', modifiers: [] }, { code: 'PageDown', modifiers: [] }], group: 'input',
-    }), 'ui-user-questions: fixed question pager')
     // FORK dsh-local (ask-ctrl-arrow-nav-1123): the option walk moved onto
     // Ctrl+↑/↓ (the card's parallel-ring gesture, QuestionComposer frame
     // keydown) — the reference row advertises the modified pair the same
@@ -463,7 +433,6 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => () => { cards.dispose() }, 'ui-user-questions: cards')
   const disposePanels = ctx.reflect.provide('userQuestionPanels', {
     reveal: (sessionId, callId) => cards.reveal(sessionId, callId),
-    review: (sessionId, callId, record) => cards.review(sessionId, callId, record),
   } satisfies UserQuestionPanels)
   ctx.effect(() => disposePanels, 'ui-user-questions: answer panels')
   ctx.effect(() => publishContinuedQuestions(ctx, cards), 'ui-user-questions: continued questions')

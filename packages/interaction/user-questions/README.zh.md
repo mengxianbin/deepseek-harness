@@ -30,7 +30,7 @@ kind: "package-reference"
 
 问题可以携带呈现意图 `intent`。`plan-review` 指定批准选项，并将 `detail` 作为待审阅计划。`approval` 将一个阻塞式问题显示为拒绝、允许和可选的始终允许操作，可附带对象信息和本地化文案。操作标签必须互不相同，并完整对应已提供的选项，不支持多选或计时等待。`ask()` 以 `BAD_INTENT` 拒绝无效意图。两种呈现都返回原始选项标签，旧界面仍可显示通用选项列表。授权与持久化仍由调用方负责。
 
-校验之后、派发之前，`ask()` 会把超长问题文本折叠出卡片：任何字段超过 `Config.maxInlineChars`（默认 1500 字符——question、detail、header 或选项的 label/description）时，全文原样写入 `Config.reportDir` 下的报告文件（默认 `<dsh home>/ask-reports/<session>/`），回答方收到的则是以 `Config.summaryChars`（默认 600）封顶的摘要加上指向该文件的 `attachment`，长报告因此不会把卡片变成阅读器。携带呈现意图的问题豁免折叠——`plan-review` 有自己的可滚动面板；报告文件写不出来时保持原文不动：折叠是呈现层默认，不是内容闸门。
+校验之后、派发之前，`ask()` 会把超长问题文本折叠出呈现面：任何字段超过 `Config.maxInlineChars`（默认 1500 字符——question、detail、header 或选项的 label/description）时，全文原样写入 `Config.reportDir` 下的报告文件（默认 `<dsh home>/ask-reports/<session>/`），回答方收到的则是以 `Config.summaryChars`（默认 600）封顶的摘要加上指向该文件的 `attachment`，长报告因此不会把作答面变成阅读器。携带呈现意图的问题豁免折叠——`plan-review` 有自己的可滚动面板；报告文件写不出来时保持原文不动：折叠是呈现层默认，不是内容闸门。
 
 请求包含 agent 时，`ask()` 会通过当前 `AgentRegistry` 验证该 agent 与注册表中的存活实例是同一对象，并拒绝 `origin` 为 `subagent` 的 Session。带有 `parentSession` 的历史普通 fork 仍可调用。不含 agent 的程序化请求仍会交给本地未限定 scope 的 waterfall listener，若无人接受则以 `NO_PROVIDER` 失败。
 

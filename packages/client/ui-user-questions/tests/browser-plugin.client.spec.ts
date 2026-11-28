@@ -27,8 +27,6 @@ const PLAN_QUESTIONS: PendingQuestion['questions'] = [{
   options: [{ label: 'Approve' }, { label: 'Keep planning' }],
   intent: { kind: 'plan-review', approve: 'Approve' },
 }]
-/** One settled call as its tool call row reads it back. */
-const RECORD = { questions: [...QUESTIONS], answers: [...ANSWER.answers] }
 const CONTINUED: PendingUserQuestion = { callId: CALL, questions: [...QUESTIONS], state: 'continued' }
 /** The projection value this consumer reads; it acts on the answerable half alone. */
 const view = (active: readonly PendingUserQuestion[]): UserQuestionProjectionView => ({ active, settled: [] })
@@ -557,49 +555,6 @@ describe('apply', () => {
     expect(b.pending.getSnapshot()).toEqual([])
   })
 
-  it('builds a read-only card from a settled call record and drops it when closed', async () => {
-    const b = await bench()
-
-    expect(b.panels()?.review(SESSION_ID, CALL, RECORD)).toBe(true)
-    const card = b.pending.getSnapshot()[0]!
-    expect(card.key).toBe(`question:${SESSION_ID}:${CALL}`)
-    expect(card.review).toEqual(RECORD.answers)
-    expect(card.liveKeys()).toEqual([card.key])
-    // No channel and no countdown: the call settled, so nothing is answerable.
-    expect(card.snapshot()).toEqual({
-      state: 'open', waitState: 'counting', countdown: undefined,
-      channel: 'none', closed: false,
-    })
-    await expect(card.answer(ANSWER)).rejects.toThrow(/no channel accepts an answer yet/)
-
-    // The projection never lists a settled call; the sweep must leave it alone.
-    b.projection.set(view([]))
-    expect(b.pending.getSnapshot()).toEqual([card])
-
-    await card.dismiss()
-    expect(b.pending.getSnapshot()).toEqual([])
-    expect(card.snapshot().closed).toBe(true)
-
-    // The row builds another card from the same record.
-    expect(b.panels()?.review(SESSION_ID, CALL, RECORD)).toBe(true)
-    expect(b.pending.getSnapshot()[0]).not.toBe(card)
-  })
-
-  it('a review of a call that still holds a live card shows the live one', async () => {
-    const b = await bench()
-    const result = b.invoke(b.agent, timed(), async () => ANSWER)
-    await Promise.resolve()
-    const card = b.pending.getSnapshot()[0]!
-
-    expect(b.panels()?.review(SESSION_ID, CALL, RECORD)).toBe(true)
-
-    expect(b.pending.getSnapshot()).toEqual([card])
-    expect(card.review).toBeUndefined()
-    expect(card.snapshot().channel).toBe('waterfall')
-    await card.answer(ANSWER)
-    await expect(result).resolves.toBe(ANSWER)
-  })
-
   it('withdraws the panel provider with the plugin lifetime', async () => {
     const b = await bench()
     expect(b.panels()).toBeDefined()
@@ -791,7 +746,7 @@ describe('apply', () => {
     expect(b.pending.getSnapshot()).toEqual([])
   })
 
-  it("publishes the card's selection, paging, and option-walk keys as fixed reference rows", async () => {
+  it("publishes the card's selection and option-walk keys as fixed reference rows", async () => {
     const registerFixed = vi.fn((_command: unknown) => () => {})
     // FORK ask-ctrl-arrow-nav-1123: the option-nav row presents its keys
     // through the binding authority (Ctrl+↑/↓), so the stub echoes the
@@ -807,7 +762,7 @@ describe('apply', () => {
       registerFixed,
     })
     try {
-      expect(registerFixed).toHaveBeenCalledTimes(4)
+      expect(registerFixed).toHaveBeenCalledTimes(3)
       const rows = registerFixed.mock.calls.map(([command]) => command as {
         id: string
         label: () => string
@@ -815,15 +770,15 @@ describe('apply', () => {
         bindings: readonly { code: string; modifiers: readonly string[] }[]
         group: string
       })
+      // ask-panel-retire-1127: the pager row retired with the option pages;
+      // selection and option-walk rows stay with the retained decision card.
       expect(rows.map(row => row.id)).toEqual([
-        'fixed.question-advance', 'fixed.question-select', 'fixed.question-pager',
-        'fixed.question-option-nav',
+        'fixed.question-advance', 'fixed.question-select', 'fixed.question-option-nav',
       ])
       // A key the dictionaries do not carry would surface as the bare key.
       const labels = rows.map(row => row.label())
       expect(labels).not.toContain('shortcut.advance')
       expect(labels).not.toContain('shortcut.select')
-      expect(labels).not.toContain('shortcut.pager')
       expect(labels).not.toContain('shortcut.optionNav')
       expect(labels.every(label => label.length > 0)).toBe(true)
       expect(rows[0]).toMatchObject({ group: 'input' })
@@ -832,10 +787,6 @@ describe('apply', () => {
         bindings: [{ code: 'Enter', modifiers: [] }, { code: 'Space', modifiers: [] }],
       })
       expect(rows[2]).toMatchObject({
-        group: 'input', keys: ['PageUp', 'PageDown'],
-        bindings: [{ code: 'PageUp', modifiers: [] }, { code: 'PageDown', modifiers: [] }],
-      })
-      expect(rows[3]).toMatchObject({
         group: 'input', keys: ['Ctrl', '+', '↑', 'Ctrl', '+', '↓'],
         bindings: [{ code: 'ArrowUp', modifiers: ['control'] }, { code: 'ArrowDown', modifiers: ['control'] }],
       })

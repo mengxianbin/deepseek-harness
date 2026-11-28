@@ -300,6 +300,58 @@ describe('userQuestions projection fold', () => {
     expect(questionsOf('{"questions":[{"id":"x","question":"Q?"}]}')).toEqual([{ id: 'x', question: 'Q?' }])
   })
 
+  it('parses answer attachments and keeps every record written without them (ask-panel-retire-1127 刀②)', () => {
+    const withAttachments = [{
+      id: 'scope', selected: [], custom: '看图作答',
+      attachments: [{ path: 'C:\\shots\\answer.png', name: 'answer.png', mimeType: 'image/png' }],
+    }]
+    const view = { active: [], settled: [{ callId: 'call_ask_1', answers: withAttachments }] }
+    // The strict state and wire schemas accept the new slot…
+    expect(userQuestionProjectionDefinition.stateSchema.parse({ inheritedEventCount: 0, timed: true, questions: view }))
+      .toMatchObject({ questions: view })
+    expect(userQuestionProjectionDefinition.wire.viewSchema.parse(view)).toMatchObject(view)
+    // …while a record written before it still parses unchanged (回归：旧记录不破).
+    const legacy = {
+      active: [],
+      settled: [{ callId: 'call_ask_1', answers: [{ id: 'scope', selected: ['Tool only'], custom: 'also docs' }] }],
+    }
+    expect(userQuestionProjectionDefinition.wire.viewSchema.parse(legacy)).toMatchObject(legacy)
+    expect(userQuestionProjectionDefinition.wire.viewSchema.parse({ active: [], settled: [{ callId: 'call_ask_1', answers: [] }] }))
+      .toBeTruthy()
+    // A malformed attachment slot is rejected loudly, never silently dropped.
+    expect(() => userQuestionProjectionDefinition.wire.viewSchema.parse({
+      active: [],
+      settled: [{ callId: 'call_ask_1', answers: [{ id: 'scope', selected: [], attachments: [{ name: 'answer.png' }] }] }],
+    })).toThrow()
+    // In-time results and late replies carry the slot through the batch schema.
+    const batch = '{"answers":[{"id":"scope","selected":[],"attachments":[{"path":"/tmp/a.png"}]}]}'
+    expect(foldUserQuestions([timedHeader, asked, resulted(batch)])).toEqual({
+      active: [],
+      settled: [{ callId, answers: [{ id: 'scope', selected: [], attachments: [{ path: '/tmp/a.png' }] }] }],
+    })
+    const continued = [timedHeader, asked, resulted('{"pending":true,"callId":"call_ask_1"}')]
+    expect(foldUserQuestions([...continued, event(3, 'user/message', reply(batch))])).toEqual({
+      active: [],
+      settled: [{ callId, answers: [{ id: 'scope', selected: [], attachments: [{ path: '/tmp/a.png' }] }] }],
+    })
+  })
+
+  it('reads a pending ruling brief structurally through active.length, never through prose (刀② 读法契约)', () => {
+    // 裁决简报类待裁必须过 ① 层登记（简报正文 + ask 调用一体）：只有这样
+    // `active.length > 0` 才读得出「待裁」——revive 闸 / 琥珀点同读这一处。
+    const briefArgs = JSON.stringify({
+      questions: [{ id: 'q-brief', question: '采用 A 案还是 B 案？', detail: '# 裁决简报\n\n五块结构长背景……' }],
+    })
+    const brief = event(1, 'tool/call', {
+      turn: 1, step: 1, callId: brandString<ToolCallId>('call_brief'), name: 'ask_user_question', arguments: briefArgs,
+    })
+    const view = foldUserQuestions([timedHeader, brief])
+    expect(view.active.length).toBeGreaterThan(0)
+    expect(view.active[0]?.callId).toBe(brandString<ToolCallId>('call_brief'))
+    // A decision that only lives in conversation prose registers nothing.
+    expect(foldUserQuestions([timedHeader]).active).toEqual([])
+  })
+
   it('does not inherit a parent Session question into a fork and exposes the whole view on the wire', () => {
     const inherited = userQuestionProjectionDefinition.init({} as never, SessionLogOffset(2))
     expect(userQuestionProjectionDefinition.apply(inherited, timedHeader)).toBe(inherited)

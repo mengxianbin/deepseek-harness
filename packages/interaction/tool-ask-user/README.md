@@ -41,7 +41,7 @@ This is a plugin row, not a top-level `--patch` entry. In the Web profile, chang
 
 ### When to call the tool
 
-Send one or more questions with ids unique within the call; the answer echoes those ids. Put a recommended option first and append `(Recommended)` to its label. The optional per-call `timeout` is in seconds; use `-1` when work cannot safely continue without an answer. A timeout is never approval. In the Web card, editing or choosing Take time also holds that Client's wait until submission or cancellation.
+Send one or more questions with ids unique within the call; the answer echoes those ids. Put a recommended option first and append `(Recommended)` to its label. The optional per-call `timeout` is in seconds; use `-1` when work cannot safely continue without an answer. A timeout is never approval. In the Web answer surface, editing or choosing Take time also holds that Client's wait until submission or cancellation.
 
 ```json
 {
@@ -92,7 +92,7 @@ The observable behavior is covered in [Use this package](#use-this-package); thi
 
 ### Consumer role
 
-The plugin registers one tool definition. Legacy mode calls `ask()`; timed mode calls `askTimed()` for positive timeouts and `ask()` for `-1`. Both forward the calling agent and turn signal to `ctx.userQuestions`. Timed requests include the tool call id in `wait`, so a Client can reopen their card. The projection identifies timed native calls from the `timeout` field in the recorded tool schema, even when a call omits that argument.
+The plugin registers one tool definition. Legacy mode calls `ask()`; timed mode calls `askTimed()` for positive timeouts and `ask()` for `-1`. Both forward the calling agent and turn signal to `ctx.userQuestions`. Timed requests include the tool call id in `wait`, so a Client can reopen their answer surface. The projection identifies timed native calls from the `timeout` field in the recorded tool schema, even when a call omits that argument.
 
 ### Result rendering
 
