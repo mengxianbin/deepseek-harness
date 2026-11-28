@@ -33,8 +33,8 @@ import type {
 } from './types.ts'
 
 export type {
-  AskUserQuestionAnswer, AskUserQuestionAnswerItem, AskUserQuestionAttachment, AskUserQuestionIntent,
-  AskUserQuestionItem, AskUserQuestionOption, PendingUserQuestion, SettledUserQuestion,
+  AskUserQuestionAnswer, AskUserQuestionAnswerAttachment, AskUserQuestionAnswerItem, AskUserQuestionAttachment,
+  AskUserQuestionIntent, AskUserQuestionItem, AskUserQuestionOption, PendingUserQuestion, SettledUserQuestion,
   UserQuestionProjectionView, UserQuestionState,
 } from './types.ts'
 export { isTimedAskUserQuestionSchema, TIMED_WAIT_PARAMETER } from './projection.ts'

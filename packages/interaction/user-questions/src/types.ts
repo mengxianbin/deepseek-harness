@@ -83,6 +83,20 @@ export interface AskUserQuestionItem {
   intent?: AskUserQuestionIntent
 }
 
+/**
+ * One file an answer carries (贴图作答, ask-panel-retire-1127 刀②): the
+ * answer references it by path, the same folded-content convention the
+ * question side uses, so the envelope stays plain JSON on the wire.
+ */
+export interface AskUserQuestionAnswerAttachment {
+  /** Absolute path of the attached file the answer carries. */
+  path: string
+  /** Optional file name kept for display. */
+  name?: string
+  /** Optional MIME type (e.g. `image/png`); readers may infer it from the path. */
+  mimeType?: string
+}
+
 /** Answer to one question. */
 export interface AskUserQuestionAnswerItem {
   /** The answered question id. */
@@ -91,9 +105,30 @@ export interface AskUserQuestionAnswerItem {
   selected: string[]
   /** Optional free-text "Other" answer. */
   custom?: string
+  /**
+   * Optional files the answer attaches (image paste/attach). Absent on older
+   * records — every reader must keep parsing batches written without it.
+   */
+  attachments?: AskUserQuestionAnswerAttachment[]
 }
 
-/** The human's answer. */
+/**
+ * The human's answer.
+ *
+ * **Contract — `BAD_ANSWER` assembly for a plain-text answer
+ * (ask-panel-retire-1127 刀②):** `answer()` rejects any batch that does not
+ * name each question of the call exactly once (equal length, no duplicate
+ * ids, full coverage — `UserQuestionService.answer`). A free-text answer
+ * surface therefore assembles one of exactly two shapes:
+ *
+ * - **single question** — the typed text fills that question's `custom`
+ *   (`answers[0] = { id, selected: [], custom }`);
+ * - **multiple questions** — the typed text lifts to the batch-level `note`,
+ *   and every question gets one empty entry (`{ id, selected: [] }`), so the
+ *   batch still names each question exactly once.
+ *
+ * A skipped batch is the empty-entry shape with no `note`.
+ */
 export interface AskUserQuestionAnswer {
   /** Structured answers keyed by question id. */
   answers: AskUserQuestionAnswerItem[]
@@ -101,7 +136,8 @@ export interface AskUserQuestionAnswer {
    * Optional card-level remark (ask-focus-restore-1125, 2026-11-25 裁定 D):
    * free text that belongs to no single question — the "off-topic" opinion a
    * multi-page card had nowhere to put. Typed once, kept across pages,
-   * returned alongside `answers`. Absent on older records.
+   * returned alongside `answers`. Absent on older records. Also the carrier
+   * of a plain-text answer to a multi-question batch (contract above).
    */
   note?: string
 }
@@ -136,6 +172,16 @@ export interface SettledUserQuestion {
  * Both halves of one Session's timed `ask_user_question` state, as every
  * Client reads them. A call made while the blocking legacy tool was in
  * effect appears in neither half.
+ *
+ * **Pending-ruling read contract (刀②, ask-panel-retire-1127):** whether a
+ * Session still waits on an ask — a ruling brief, a confirmation, any pending
+ * decision — is the *structural* predicate `view.active.length > 0`, never a
+ * semantic reading of message text. Anything that must be machine-visible as
+ * "pending" has to be registered here through an `ask_user_question` call
+ * (the revive gate, the A+ gate, and the session-tree amber dot all read this
+ * same projection); prose that never called the tool is invisible to them and
+ * falls back to a completion display. The presentation form of the answer
+ * surface is irrelevant to this read — retired panels change nothing here.
  */
 export interface UserQuestionProjectionView {
   /** Calls that can still take an answer, in ask order. */
