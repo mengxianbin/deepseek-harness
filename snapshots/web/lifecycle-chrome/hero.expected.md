@@ -8,10 +8,14 @@
 - textbox "Search session names"
 - button "View options"
 - button "Add workspace"
+- 'button "Health: reconciliation broken — click for the differences"'
 - tree "Sessions":
-  - treeitem "workspace" [expanded]
+  - treeitem "workspace 1 session" [expanded]:
+    - text: workspace
+    - img "1 session": "1"
   - treeitem "New Session" [selected]
 - button "Settings"
+- text: Server started at {{date}} {{clock}}
 - button "More"
 - banner:
   - button "Open right sidebar"

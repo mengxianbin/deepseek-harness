@@ -1044,7 +1044,9 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
                       className={clsx(
                         css.optionRow,
                         !locked && css.optionRowInteractive,
-                        selected && question.multiSelect !== true && css.optionSelected,
+                        // ask-highlight-contrast-1127: multi-select picks were
+                        // excluded here, leaving them aria-only and invisible.
+                        selected && css.optionSelected,
                       )}
                       data-option-row
                       data-expanded={descriptionExpanded || undefined}

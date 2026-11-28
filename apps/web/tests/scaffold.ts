@@ -1697,6 +1697,15 @@ function normalizeAria(snapshot: string, workspaceCwd: string, age: boolean): st
     .replace(/\d{1,2}月\d{1,2}日 \d{2}:\d{2}/g, '{{clock}}')
     .replace(/(?<!\d)\d{1,2}:\d{2}:\d{2}(?:\.\d+)?(?:\s*[AP]M)?(?!\d)/gi, '{{clock}}')
     .replace(/(?<!\d)\d{2}:\d{2}(?!\d)/g, '{{clock}}')
+    // The clock rules above eat only the TIME half, so a wall-clock DATE that
+    // rides beside one survives them and re-dates the golden every midnight —
+    // the settings row's server-start stamp is exactly that shape ("Server
+    // started at 2026-11-27 {{clock}}"). Collapse the date when it sits
+    // mid-sentence behind a collapsed clock; leave a label whose whole value is
+    // a date+time alone (navigation-panes' fixture-pinned `2026-01-01
+    // {{clock}}` date-picker button starts at its opening quote, so the
+    // preceding non-space+space lookbehind does not match there).
+    .replace(/(?<=\S )\d{4}-\d{2}-\d{2}(?= \{\{clock\}\})/g, '{{date}}')
 }
 
 /**

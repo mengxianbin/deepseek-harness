@@ -1532,7 +1532,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'shadows-shipped-ui',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'conversation.hero.workspace.directoryFlow\', () => ctx.slots.register(\n      { name: \'conversation.hero.workspace.directoryFlow\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:192',
+    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:201',
   },
   {
     key: 'conversation.input.activity',
@@ -6495,7 +6495,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'sidebar.session.row.hover\', () => ctx.slots.register(\n      { name: \'sidebar.session.row.hover\', id: \'my-entry\', order: 100, label: \'My entry\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:226',
+    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:235',
   },
   {
     key: 'sidebar.session.row.leading',
@@ -6553,7 +6553,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'sidebar.session.row.leading\', () => ctx.slots.register(\n      { name: \'sidebar.session.row.leading\', id: \'my-entry\', order: 100, label: \'My entry\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:212',
+    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:221',
   },
   {
     key: 'sidebar.session.row.trailing',
@@ -6610,7 +6610,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'sidebar.session.row.trailing\', () => ctx.slots.register(\n      { name: \'sidebar.session.row.trailing\', id: \'my-entry\', order: 100, label: \'My entry\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:221',
+    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:230',
   },
   {
     key: 'sidebar.settings',
@@ -6753,7 +6753,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'shadows-shipped-ui',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'sidebar.workspaces.directoryFlow\', () => ctx.slots.register(\n      { name: \'sidebar.workspaces.directoryFlow\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:194',
+    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:203',
   },
   {
     key: 'sidebar.workspaces.session.menu.item',
@@ -6782,10 +6782,10 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       },
     ],
     ownerProps: [
-      '/** Owner share of one Session row action occurrence: the row the action belongs to. */\nexport interface SessionRowOwnerProps {\n  /** Session the row shows. */\n  sessionId: SessionId\n  /** Row display title: persisted title, or empty when the Session has none. */\n  displayTitle: string\n  /**\n   * FORK dsh-local (blank-row-archive-1026): the row is the provisional blank\n   * New Session placeholder (no prompt yet). The row\'s "..." menu stays closed\n   * for such a row, but the hover strip still renders so the archive verb can\n   * dismiss an abandoned placeholder; an entry whose action cannot apply\n   * (pin) returns nothing when this is true.\n   */\n  blank: boolean\n}',
+      '/**\n * Owner share of the legacy `menu.item` list: the row\'s identity without the\n * blank flag the hover strip requires. The "..." menu never opens on a blank\n * row (blank-row-archive-1026), and the context-menu bridge (`SessionMenu`)\n * captures a target that carries no blank, so `blank` stays optional here and\n * required only on `session.row.action`.\n */\nexport type SessionMenuOwnerProps = Omit<SessionRowOwnerProps, \'blank\'> & { blank?: boolean }',
     ],
     ownerPropsReferences: [
-      'SessionId',
+      'SessionRowOwnerProps',
     ],
     standardProps: [
       'useRemoteAccess: (action: RemoteEndpoint) => boolean',
@@ -6808,14 +6808,14 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     occupants: [],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    const copyLabel = \'Copy session title\' // Localize in the contributing package.\n    ctx.slots.inject(\'sidebar.workspaces.session.menu.item\', () => ctx.slots.register(\n      { name: \'sidebar.workspaces.session.menu.item\', id: \'copy-session-title\', order: 500 },\n      ({ displayTitle, useMenuOpenState }) => {\n        const [, setMenuOpen] = useMenuOpenState()\n        return React.createElement(\n          \'button\',\n          {\n            type: \'button\', role: \'menuitem\',\n            onClick: () => { setMenuOpen(false); void navigator.clipboard.writeText(displayTitle) },\n          },\n          copyLabel,\n        )\n      },\n    ))\n  },\n}',
-    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:256',
+    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:265',
   },
   {
     key: 'sidebar.workspaces.session.row.action',
     kind: 'list',
     scope: 'root',
     summary: 'The hover buttons at the end of one Session row, in ascending `order`, after the "..." menu trigger.',
-    doc: 'The hover buttons at the end of one Session row, in ascending `order`,\nafter the "..." menu trigger. ui-workspace registers `relay` (50),\n`archive` (100) and `pin` (200) here. An entry renders one icon button (or nothing, when its\naction does not apply to the row) and owns the action it performs. Clicks\ninside the strip stay in the strip, so the button needs no propagation\nhandling to keep the row from opening. Hoverless devices hide this slot;\ncontribute the action to the menu list as well for touch access. FORK\ndsh-local (blank-row-archive-1026): a provisional blank row (owner\n`blank`) shows this strip without its "..." menu, so an entry here\ndecides blank applicability from the owner share.',
+    doc: 'The hover buttons at the end of one Session row, in ascending `order`,\nafter the "..." menu trigger. ui-workspace registers `archive` (100)\nand `pin` (200) here. An entry renders one icon button (or nothing, when its\naction does not apply to the row) and owns the action it performs. Clicks\ninside the strip stay in the strip, so the button needs no propagation\nhandling to keep the row from opening. Hoverless devices hide this slot;\ncontribute the action to the menu list as well for touch access. FORK\ndsh-local (blank-row-archive-1026): a provisional blank row (owner\n`blank`) shows this strip without its "..." menu, so an entry here\ndecides blank applicability from the owner share.',
     registerOptions: [
       {
         name: 'id',
@@ -6861,13 +6861,12 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     slotInject: '',
     declaredBy: 'an entry in \'sidebar.workspaces\' (client-ui-workspace), so it exists while that entry is mounted',
     occupants: [
-      'client-ui-workspace RelaySessionRowButton id \'relay\'',
       'client-ui-workspace ArchiveSessionRowButton id \'archive\'',
       'client-ui-workspace PinSessionRowButton id \'pin\'',
     ],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'sidebar.workspaces.session.row.action\', () => ctx.slots.register(\n      { name: \'sidebar.workspaces.session.row.action\', id: \'my-entry\', order: 100, label: \'My entry\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:278',
+    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:287',
   },
   {
     key: 'tool.call.images',
@@ -7126,7 +7125,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'shadows-shipped-ui',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'workspace.picker.directoryFlow\', () => ctx.slots.register(\n      { name: \'workspace.picker.directoryFlow\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:202',
+    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:211',
   },
   {
     key: 'workspace.toast',
@@ -7162,7 +7161,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       'useSessionHealth?: UseSessionHealth',
       'useWorkspaceAccess: (workspaceId: WorkspaceId, action: RemoteEndpoint) => boolean',
     ],
-    keyDomain: 'fixed by the owner\'s key table { [K in ToastKind]: ToastNotice<K> }, already taken: archivedNotOpenable, createFailed, defaultWorkspaceFailed, forkRequiresOpen, pinFailed, readingFailed, relayArchiveFailed, relayFailed, sealEndorseRetry, sealStale, sessionIdCopied, sessionIdCopyFailed, shortcutForkFailed, unpinFailed',
+    keyDomain: 'fixed by the owner\'s key table { [K in ToastKind]: ToastNotice<K> }, already taken: archivedNotOpenable, createFailed, defaultWorkspaceFailed, forkRequiresOpen, pinFailed, readingFailed, sealEndorseRetry, sealStale, sessionIdCopied, sessionIdCopyFailed, shortcutForkFailed, unpinFailed',
     hookContext: '',
     slotInject: '',
     declaredBy: 'an entry in \'shell.overlay\' (client-ui-workspace), so it exists while that entry is mounted',
@@ -7180,8 +7179,6 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       'client-ui-workspace ArchiveToastEntry',
       'client-ui-workspace ToastEntry<PropsRuntime<\'workspace.toast\', \'sealStale\'>> key \'sealStale\'',
       'client-ui-workspace ToastEntry<PropsRuntime<\'workspace.toast\', \'sealEndorseRe… key \'sealEndorseRetry\'',
-      'client-ui-workspace ToastEntry<PropsRuntime<\'workspace.toast\', \'relayFailed\'>> key \'relayFailed\'',
-      'client-ui-workspace ToastEntry<PropsRuntime<\'workspace.toast\', \'relayArchiveF… key \'relayArchiveFailed\'',
     ],
     replaceRisk: 'shadows-shipped-ui',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'workspace.toast\', () => ctx.slots.register(\n      { name: \'workspace.toast\', key: \'<one key the owner dispatches>\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',

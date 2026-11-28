@@ -124,6 +124,11 @@ describe('web e2e: lifecycle & chrome (workspace flow / reload / dark mode)', ()
     try {
       await zhPage.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
       await zhPage.waitForSelector('[class*="frame"]', { timeout: 30_000 })
+      // browser.newPage() opens a fresh context with no stored selection, so the
+      // boot has nothing to auto-select and lands in the Workspace-trigger view
+      // with the composer (and this launcher) inert — support.ts's contract is
+      // that every scenario which types into the composer connects one first.
+      await connectFreshWorkspaceZh(zhPage, scaffold.workspaceCwd)
       const launcher = zhPage.getByRole('button', { name: '添加文件或调用指令' })
       await launcher.click()
       const menu = zhPage.getByRole('listbox', { name: '触发候选建议' })
@@ -150,6 +155,14 @@ describe('web e2e: lifecycle & chrome (workspace flow / reload / dark mode)', ()
     try {
       await inputPage.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
       await inputPage.waitForSelector('[class*="frame"]', { timeout: 30_000 })
+      // Same contract as the zh localization case above: a fresh context carries
+      // no stored selection, so nothing is auto-selected and the composer never
+      // unlocks until a workspace is connected.
+      if (locale === ZH_BROWSER_LOCALE) {
+        await connectFreshWorkspaceZh(inputPage, scaffold.workspaceCwd)
+      } else {
+        await connectFreshWorkspace(inputPage, scaffold.workspaceCwd)
+      }
       const input = inputPage.locator('[data-composer-input]').first()
       await writeComposerDraft(inputPage, input, '/')
       await inputPage.getByRole('listbox').getByRole('option', { name: row, exact: true }).click()

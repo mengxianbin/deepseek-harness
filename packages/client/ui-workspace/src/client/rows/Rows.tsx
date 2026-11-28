@@ -28,6 +28,8 @@ import type {
   SealLightSnapshot, SealRowObserver, SessionDragType, WorkspaceBrowserProps,
 } from '../contract/slots.ts'
 import type { GroupNode, SearchResultNode, SessionNode } from '../tree.ts'
+import { useFrozenSession, usePreview, wakeFrozen } from '../session-actions/fsm-freeze.ts'
+import type { FrozenSessionView } from '../session-actions/fsm-freeze.ts'
 import { SealLight } from './SealLight.tsx'
 import css from './Rows.module.css'
 
@@ -612,23 +614,51 @@ function RowStateDot({ state, busyCount }: { state: StateDotState; busyCount?: n
   )
 }
 
-/** Primary status dot (or glyph) plus every status's screen-reader label, shared by the search and session rows. */
-function SessionStatusDots({ statuses }: { statuses: readonly [SessionStatus, ...SessionStatus[]] }) {
+/**
+ * Primary status dot (or glyph) plus every status's screen-reader label, shared by the search and session rows.
+ * While the row's Session wears the FSM badge (freeze-reclaim §2.1), the
+ * ❄️/🔒副状态 rides the dot's bottom-right corner and is itself the button
+ * for the human unfreeze path (§6.2 解冻永可用).
+ */
+export function SessionStatusDots({ statuses, frozen, t }: {
+  statuses: readonly [SessionStatus, ...SessionStatus[]]
+  /** The row's FSM view when frozen/locked; absent = no badge. */
+  frozen?: FrozenSessionView | undefined
+  t: RowTranslate
+}) {
   const primary = statuses[0]
   const dot = primary.glyph === undefined
     ? <RowStateDot state={primary.state} busyCount={primary.busyCount} />
     : <StatusGlyphMark glyph={primary.glyph} />
+  const ringed = primary.staleRing === undefined
+    ? dot
+    : (
+      <span
+        className={css.staleRing}
+        data-stale-kind={primary.staleRing.kind}
+        title={primary.staleLabel}
+      >{dot}</span>
+    )
+  const marked = frozen === undefined
+    ? ringed
+    : (
+      <span className={css.freezeWrap}>
+        {ringed}
+        {/* A button, not a div: it stops the row's own click and keeps its
+            label out of the dot's aria-hidden shell. The wake it fires is
+            human-only — nothing in the auto paths may call this. */}
+        <button
+          type="button"
+          className={css.freezeBadge}
+          aria-label={t('row.frozenBadge', { reason: frozen.reason })}
+          title={t('row.frozenBadge', { reason: frozen.reason })}
+          onClick={(e) => { e.stopPropagation(); void wakeFrozen(frozen) }}
+        >{frozen.mode === 'locked' ? '🔒' : '❄️'}</button>
+      </span>
+    )
   return (
     <>
-      {primary.staleRing === undefined
-        ? dot
-        : (
-          <span
-            className={css.staleRing}
-            data-stale-kind={primary.staleRing.kind}
-            title={primary.staleLabel}
-          >{dot}</span>
-        )}
+      {marked}
       {statuses.map(status => (
         <span className={css.visuallyHidden} key={status.label}>{status.label}</span>
       ))}
@@ -757,6 +787,7 @@ export function SearchResultItem({
   }, [result.id, watchSessionJobs])
   const statuses = sessionStatuses(result, t)
   const primaryStatus = statuses[0]
+  const frozen = useFrozenSession(result.id)
   return (
     <div
       className={clsx(css.searchResultRow, selected && css.selected, result.archived && css.archived)}
@@ -771,7 +802,7 @@ export function SearchResultItem({
             archived look. */}
         <span className={css.slot}>
           {!result.archived && ownsLeadingCell(primaryStatus) && (
-            <SessionStatusDots statuses={statuses} />
+            <SessionStatusDots statuses={statuses} frozen={frozen} t={t} />
           )}
         </span>
         <span className={css.searchResultTitle}>{result.title || t('session.untitled')}</span>
@@ -798,6 +829,19 @@ export function SearchResultItem({
       </span>
     </div>
   )
+}
+
+/**
+ * §5.1 预告横幅（freeze-reclaim 分期5）: the row's second line while a
+ * preview announcement is pending — `role=status` so assistive tech
+ * announces it, one line with ellipsis, caller-owned localized reason
+ * (same contract as the composer block's placeholder). No preview, no
+ * render: the compact one-line row contract is untouched.
+ * @param props.reason - the localized announcement text (setPreview's reason).
+ * @returns the banner strip, or null-less span for the row to place.
+ */
+export function FreezePreviewBanner({ reason }: { reason: string }) {
+  return <span className={css.freezePreviewBanner} role="status">{reason}</span>
 }
 
 /**
@@ -876,6 +920,10 @@ export function SessionNodeItem({
   const statuses = sessionStatuses(node, t)
   const primaryStatus = statuses[0]
   const showStatus = ownsLeadingCell(primaryStatus)
+  const frozen = useFrozenSession(node.id)
+  // §5.1 预告横幅（freeze-reclaim 分期5）: a preview-announced row unfolds a
+  // second line with the announcement; no preview, no layout change.
+  const previewReason = usePreview(node.id)
   // Archived rows hold their in-place grayed slot, so manual reorder cannot
   // move them. Pinned rows drag within the pinned block: the browser gates
   // their drop targets to fellow pinned rows.
@@ -941,6 +989,7 @@ export function SessionNodeItem({
         css.sessionRow, selected && css.selected, menuOpen && css.menuOpen,
         row.archived && css.archived,
         drag?.marker === 'before' && css.dropBefore, drag?.marker === 'after' && css.dropAfter,
+        previewReason !== undefined && css.previewing,
       )}
       role="treeitem"
       aria-selected={selected}
@@ -1008,7 +1057,7 @@ export function SessionNodeItem({
           live status stays on the hover card only. */}
       <span className={css.slot}>
         {!row.archived && !row.blank && (showStatus
-          ? <SessionStatusDots statuses={statuses} />
+          ? <SessionStatusDots statuses={statuses} frozen={frozen} t={t} />
           : renderSlot('sidebar.session.row.leading', { sessionId: node.id }))}
       </span>
       <MarqueeText
@@ -1087,6 +1136,7 @@ export function SessionNodeItem({
           t={t}
         />
       )}
+      {previewReason !== undefined && <FreezePreviewBanner reason={previewReason} />}
     </div>
   )
   return (

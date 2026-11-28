@@ -17,14 +17,13 @@ import { apply, inject } from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type { WorkspaceBrowserInjected, WorkspacePickerInjected } from '@deepseek-ai/dsh-client-ui-workspace/client'
 import {
   type ArchiveSessionInjected, menuOpenStateFactory, type PinSessionInjected,
-  type RelaySessionInjected, type RowToastInjected,
+  type RowToastInjected,
   type SessionArchiveConfirmInjected, type SessionRenameDialogInjected,
   type WorkspaceViewStoreHandle,
 } from '../src/client/contract/slots.ts'
 import { WorkspaceBrowser } from '../src/client/rows/WorkspaceBrowser.tsx'
 import { ArchiveSessionRowButton, SessionArchiveConfirmDialog } from '../src/client/session-actions/ArchiveSession.tsx'
 import { PinSessionRowButton } from '../src/client/session-actions/PinSession.tsx'
-import { RelaySessionRowButton } from '../src/client/session-actions/RelaySession.tsx'
 import { SessionRenameDialog } from '../src/client/session-actions/RenameSession.tsx'
 import { RowActionToast } from '../src/client/session-actions/RowActionToast.tsx'
 import type { ArchiveToastInjected, ToastDisplayInjected } from '../src/client/contract/toast.ts'
@@ -125,8 +124,8 @@ async function bench(access: 'fake' | 'static' = 'fake') {
   const fork = vi.fn<ISessions['fork']>(async () => sid('forked'))
   const pinSession = vi.fn(async () => undefined)
   const unpinSession = vi.fn(async () => undefined)
-  // FORK session-relay-1106: the relay seats its successor locally, the same
-  // cross-transport seat createNamed performs.
+  // Cross-transport seat: an HTTP-created session lands in the workspace
+  // membership before the follow stream pushes it.
   const seatSession = vi.fn()
   // The Host snapshots the injected hooks derive from and a pin's order write
   // reads at completion; a test replaces them whole, so an unchanged snapshot
@@ -249,20 +248,15 @@ type SealCheckRow = { id: string; verdict: string; detail?: string; followUpCoun
 /** One canned answer of the fake seal-gate routes. */
 type SealFetchResponse = { ok: boolean; status: number; json: () => Promise<unknown> }
 
-/** FORK session-relay-1106: one canned answer of the fake dispatch route. */
-type DispatchFetchResponse = { status?: number; body?: unknown; reject?: Error }
-
 /**
- * Fake the plugin's two seal-gate routes over the global fetch, plus the
- * relay's dispatch route when the test's chain reaches it.
+ * Fake the plugin's two seal-gate routes over the global fetch.
  * @param answers - `check` is the seal-check payload (an Error rejects; default
  * `{ results: [] }` = every id reads as absent), `overrideStatus` is the
- * write-back's HTTP status (default 200), `dispatch` answers the relay POST
- * (default: success creating the Session `fresh`).
+ * write-back's HTTP status (default 200).
  * @returns the fetch mock (its calls cover the routes).
  */
 function stubSealGate(
-  answers: { check?: unknown; checks?: readonly unknown[]; overrideStatus?: number; dispatch?: DispatchFetchResponse } = {},
+  answers: { check?: unknown; checks?: readonly unknown[]; overrideStatus?: number } = {},
 ) {
   // `checks` (archive-seal-falsered-1116 段3): per-call seal-check answers in
   // order — the last entry repeats once the queue runs out; `check` stays the
@@ -285,13 +279,6 @@ function stubSealGate(
     if (input === '/api/dsh-session-archive/archive-override') {
       const status = answers.overrideStatus ?? 200
       return { ok: status >= 200 && status < 300, status, json: async () => ({}) }
-    }
-    if (input === '/api/session-dispatch') {
-      const dispatch = answers.dispatch ?? {}
-      if (dispatch.reject !== undefined) throw dispatch.reject
-      const status = dispatch.status ?? 200
-      const body: unknown = dispatch.body ?? { ok: true, sessionId: 'fresh' }
-      return { ok: status >= 200 && status < 300, status, json: async () => body }
     }
     throw new Error(`seal-gate test fetch saw an unexpected route: ${String(input)} (init: ${JSON.stringify(init ?? null)})`)
   })
@@ -386,8 +373,10 @@ describe('ui-workspace apply', () => {
     await Promise.resolve()
     expect(after.slots.entries('conversation.hero.workspace')[0]!.component).toBe(WorkspacePicker)
     // The row actions follow the browser's own declaration, whenever it lands.
+    // FORK menu model = contextMenu 单属主 (Path B, merge对账): no menu.item
+    // slots; row actions = archive + pin (relay 摘除 with the freeze batch).
     expect(after.slots.entries(MENU_ITEM)).toHaveLength(0)
-    expect(after.slots.entries(ROW_ACTION)).toHaveLength(3)
+    expect(after.slots.entries(ROW_ACTION)).toHaveLength(2)
     expect(after.slots.entries('shell.overlay')).toHaveLength(3)
   })
 
@@ -408,8 +397,6 @@ describe('ui-workspace apply', () => {
       .map(registration => [registration.options.id, registration.options.order, registration.component, registration.locale])
     expect(rows(MENU_ITEM)).toEqual([])
     expect(rows(ROW_ACTION)).toEqual([
-      // FORK session-relay-1106: relay leads the strip, before archive.
-      ['relay', 50, RelaySessionRowButton, 'workspace'],
       ['archive', 100, ArchiveSessionRowButton, 'workspace'],
       ['pin', 200, PinSessionRowButton, 'workspace'],
     ])
@@ -432,8 +419,6 @@ describe('ui-workspace apply', () => {
       'sealStale',
       // archive-seal-falsered-1116 段3 灯门对账: the lamp-green × recheck-red retry prompt.
       'sealEndorseRetry',
-      // FORK session-relay-1106: the dispatch failure and the archive-half failure.
-      'relayFailed', 'relayArchiveFailed',
     ])
     for (const registration of b.slots.entries('workspace.toast')) {
       expect(registration.locale).toBe('workspace')
@@ -443,12 +428,10 @@ describe('ui-workspace apply', () => {
       if (registration === rowToastEntry) continue
       expect(registration.store).toBeUndefined()
     }
-    // Each share raises its own notices inside its callbacks. Relay is a
-    // hover-only entry: it has no menu row, so the menu side stays two.
+    // Each share raises its own notices inside its callbacks.
     for (const id of ['pin', 'archive']) {
       expect(faceOf(entry(b.slots, ROW_ACTION, id))).not.toHaveProperty('notify')
     }
-    expect(faceOf(entry(b.slots, ROW_ACTION, 'relay'))).not.toHaveProperty('notify')
   })
 
   it('marks cold Sessions silently and reports only failed writes', async () => {
@@ -1433,7 +1416,7 @@ describe('ui-workspace apply', () => {
     const fiber = b.ctx.plugin({ inject: [...inject], apply }, syncedConfig({ recentViewLimit: 10 }))
     await fiber.await()
     expect(b.slots.entries(MENU_ITEM)).toHaveLength(0)
-    expect(b.slots.entries(ROW_ACTION)).toHaveLength(3)
+    expect(b.slots.entries(ROW_ACTION)).toHaveLength(2)
     expect(b.slots.entries('shell.overlay')).toHaveLength(3)
     await fiber.dispose()
     expect(b.slots.entries('sidebar.workspaces')).toHaveLength(0)
@@ -1447,105 +1430,6 @@ describe('ui-workspace apply', () => {
     expect(b.slots.entries('workspace.toast')).toHaveLength(0)
     expect(b.slots.snapshot('factory:workspace.toast.content')).toEqual([])
     expect(b.slots.snapshot('factory:workspace.picker')).toEqual([])
-  })
-
-  // FORK session-relay-1106: the chain the row button drives — one dispatch
-  // POST creates and seeds the successor, the apply seats and opens it, and
-  // only then does the seal-gated archive of the source run. Create-new
-  // first, archive-last, forward-only: every failure names itself in a
-  // notice and nothing that was created is ever rolled back.
-  describe('session relay chain (FORK session-relay-1106)', () => {
-    /** The assembled surfaces one relay test drives, with the source owned by a Workspace. */
-    async function relayBench() {
-      const b = await bench()
-      b.setWorkspaces(workspaceState([workspace('alpha', ['one'])]))
-      b.setSessions(sessionState([summary('one', 1)]))
-      declare(b.slots, 'sidebar.workspaces', 'shell.overlay')
-      await b.ctx.plugin({ inject: [...inject], apply }, syncedConfig({ recentViewLimit: 10 })).await()
-      const archiveSession = vi.spyOn(b.ctx.uiWorkspace, 'archiveSession').mockResolvedValue(undefined)
-      const openSession = vi.spyOn(b.ctx.uiWorkspace, 'openSession').mockImplementation(() => {})
-      return {
-        b,
-        archiveSession,
-        openSession,
-        relay: faceOf(entry(b.slots, ROW_ACTION, 'relay')) as RelaySessionInjected,
-        toast: faceOf(entry(b.slots, 'shell.overlay', 'workspace.row-toast')) as RowToastInjected,
-      }
-    }
-
-    it('dispatches the successor, seats and opens it, then archives the source', async () => {
-      const { b, archiveSession, openSession, relay, toast } = await relayBench()
-      const fetchMock = stubSealGate({ check: { results: [{ id: 'one', verdict: 'DONE' }] } })
-
-      await expect(relay.relaySession(sid('one'))).resolves.toBe(true)
-
-      // One POST carries the owning Workspace, the localized seed, the
-      // inherited title, and the permission pin the dispatch ruling demands.
-      const dispatch = fetchMock.mock.calls.find(call => call[0] === '/api/session-dispatch')
-      expect(dispatch).toBeDefined()
-      expect(JSON.parse((dispatch![1] as RequestInit).body as string)).toEqual({
-        workspaceId: 'alpha',
-        prompt: b.locale.bind('workspace')('relay.seed', { id: 'one' }),
-        title: 'one',
-        permission: 'danger-full-access',
-      })
-      expect(b.seatSession).toHaveBeenCalledWith('alpha', 'fresh')
-      expect(openSession).toHaveBeenCalledWith(sid('fresh'))
-      // Create-new first, archive-last: the successor opens before the
-      // source's Host archive runs, and the archived notice still lands.
-      await vi.waitFor(() => { expect(archiveSession).toHaveBeenCalledExactlyOnceWith('one') })
-      expect(openSession.mock.invocationCallOrder[0]!).toBeLessThan(archiveSession.mock.invocationCallOrder[0]!)
-      await vi.waitFor(() => {
-        expect(toast.hooks.toast.getSnapshot()).toMatchObject({ kind: 'archived', sessionId: 'one' })
-      })
-    })
-
-    it('a failed dispatch archives nothing, names the failure, and leaves the row relayable', async () => {
-      const { b, archiveSession, openSession, relay, toast } = await relayBench()
-      const fetchMock = stubSealGate({ dispatch: { status: 500, body: { ok: false, error: 'workspace/path-conflict' } } })
-
-      await expect(relay.relaySession(sid('one'))).resolves.toBe(false)
-      expect(toast.hooks.toast.getSnapshot()).toMatchObject({ kind: 'relayFailed', message: 'workspace/path-conflict' })
-      expect(fetchMock.mock.calls.map(call => call[0])).toEqual(['/api/session-dispatch'])
-      expect(b.seatSession).not.toHaveBeenCalled()
-      expect(openSession).not.toHaveBeenCalled()
-      expect(archiveSession).not.toHaveBeenCalled()
-
-      // A transport failure rides its own message through the same notice.
-      stubSealGate({ dispatch: { reject: new Error('connection refused') } })
-      await expect(relay.relaySession(sid('one'))).resolves.toBe(false)
-      expect(toast.hooks.toast.getSnapshot()).toMatchObject({ kind: 'relayFailed', message: 'connection refused' })
-      expect(archiveSession).not.toHaveBeenCalled()
-    })
-
-    it('an ungrouped source has no Workspace to pin and never dispatches', async () => {
-      const { b, relay, toast } = await relayBench()
-      b.setWorkspaces(workspaceState([workspace('alpha', ['other'])]))
-      const fetchMock = stubSealGate()
-
-      await expect(relay.relaySession(sid('one'))).resolves.toBe(false)
-      expect(toast.hooks.toast.getSnapshot()).toMatchObject({ kind: 'relayFailed', message: 'workspace:missing' })
-      expect(fetchMock).not.toHaveBeenCalled()
-    })
-
-    it('a failed archive after the dispatch names itself and never rolls the successor back', async () => {
-      const { b, archiveSession, openSession, relay, toast } = await relayBench()
-      stubSealGate({ check: { results: [{ id: 'one', verdict: 'DONE' }] } })
-      archiveSession.mockRejectedValueOnce(new Error('archive exploded'))
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-      try {
-        await expect(relay.relaySession(sid('one'))).resolves.toBe(true)
-        // The successor stands: seated and opened before the archive ran.
-        expect(b.seatSession).toHaveBeenCalledWith('alpha', 'fresh')
-        expect(openSession).toHaveBeenCalledWith(sid('fresh'))
-        await vi.waitFor(() => {
-          expect(toast.hooks.toast.getSnapshot()).toMatchObject({ kind: 'relayArchiveFailed' })
-        })
-        expect(warn).toHaveBeenCalledWith('session archive rejected:', expect.any(Error))
-      } finally {
-        warn.mockRestore()
-      }
-    })
   })
 })
 
