@@ -18,12 +18,10 @@ import {
 import {
   codeToolbarLabels, diffBlockLabels, readBlockLabels, searchBlockLabels, webBlockLabels,
 } from '../models/primitive-labels.ts'
-import type { AskQuestionCardModel } from '../models/ask-question-card-model.ts'
 import {
   formatToolBody, type ToolRowState, type ToolRowVariant,
 } from '../models/tool-call-model.ts'
 import type { WebCardModelProps } from '../models/web-card-model.ts'
-import { AskQuestionCard } from './AskQuestionCard.tsx'
 import { ToolDetails, type ToolDetailsModel } from './ToolDetails.tsx'
 import { ExitCodeBadge } from './ExitCodeBadge.tsx'
 import css from './ToolRow.module.css'
@@ -49,8 +47,6 @@ export interface ToolRowProps {
   bodyRaw?: string | null | undefined
   /** Flattened result text for the expanded Output section; null/absent = no output section. */
   output?: string | null | undefined
-  /** Ask-user transcript card; card fields are mutually exclusive and replace text sections. */
-  askQuestion?: AskQuestionCardModel | null | undefined
   /**
    * First error line for rows without an exit status capsule; null/absent keeps
    * the ordinary summary. Rows with an exit capsule retain the command description.
@@ -131,7 +127,6 @@ export const ToolRow = memo(function ToolRow({
   summarySuffix,
   bodyRaw,
   output,
-  askQuestion,
   errorSummary,
   terminal,
   diff,
@@ -166,11 +161,10 @@ export const ToolRow = memo(function ToolRow({
     : null
   const searchBody = search ?? null
   const webBody = web ?? null
-  const askQuestionBody = askQuestion ?? null
   const detailsBody = details ?? null
   const inputRaw = bodyRaw ?? null
   const outputText = output ?? null
-  const card = askQuestionBody ?? terminalBody ?? diffBody ?? readBody ?? imageBody ?? searchBody ?? webBody ?? detailsBody
+  const card = terminalBody ?? diffBody ?? readBody ?? imageBody ?? searchBody ?? webBody ?? detailsBody
   const expandable = state !== 'preparing' && (inputRaw !== null || outputText !== null || card !== null)
   const open = expanded && expandable
   const bodyText = useMemo(
@@ -257,103 +251,101 @@ export const ToolRow = memo(function ToolRow({
   ), [summaryLinkKeyDown, linkHref, openFile, state, suffix, totals, summaryText, exitLabel])
   const expandedContent = useMemo(() => open ? (
     <div className={clsx(css.bodyWrap, detailsBody !== null && css.detailsBodyWrap)}>
-      {askQuestionBody !== null
-        ? <AskQuestionCard card={askQuestionBody} />
-        : terminalBody !== null
-          ? (
-            <TerminalBlock
-              {...terminalBody.card}
-              maxLines={Infinity}
-              labels={terminalLabels}
-              className={css.terminalBody}
-            />
-          )
-          : diffBody !== null
-            ? <DiffBlock {...diffBody.card} labels={diffLabels} maxLines={CHAT_DIFF_MAX_LINES} className={css.diffBody} />
-            : readBody !== null
-              ? <ReadBlock {...readBody} labels={readLabels} maxLines={CHAT_READ_MAX_LINES} className={css.readBody} />
-              : imageBody !== null
-                ? (
-                  /* Gallery, then the full path and each attached image's size.
+      {terminalBody !== null
+        ? (
+          <TerminalBlock
+            {...terminalBody.card}
+            maxLines={Infinity}
+            labels={terminalLabels}
+            className={css.terminalBody}
+          />
+        )
+        : diffBody !== null
+          ? <DiffBlock {...diffBody.card} labels={diffLabels} maxLines={CHAT_DIFF_MAX_LINES} className={css.diffBody} />
+          : readBody !== null
+            ? <ReadBlock {...readBody} labels={readLabels} maxLines={CHAT_READ_MAX_LINES} className={css.readBody} />
+            : imageBody !== null
+              ? (
+            /* Gallery, then the full path and each attached image's size.
                      These come from the image card model, never from the row's
                      flattened output, which JSON.stringifies the image block. They
                      stay visible when the attachment slot renders nothing. */
-                  <div className={css.imageBody}>
-                    {renderSlot !== undefined && loadImage !== undefined && renderSlot('tool.call.images', {
-                      images: imageBody.images,
-                      loadImage,
-                      align: 'start',
-                    })}
-                    <div className={css.imageMeta}>
-                      <div>{imageBody.path}</div>
-                      {imageBody.images.map(({ attachment }, index) => (
-                        <div key={index}>
-                          {attachment.originalDimensions === undefined
-                            ? t('row.imageSize', { width: attachment.width, height: attachment.height, bytes: attachment.bytes })
-                            : t('row.imageSizeDownscaled', {
-                              width: attachment.width,
-                              height: attachment.height,
-                              originalWidth: attachment.originalDimensions.width,
-                              originalHeight: attachment.originalDimensions.height,
-                              bytes: attachment.bytes,
-                            })}
-                        </div>
-                      ))}
-                    </div>
-                    {imageBody.extraText !== null && <div className={css.imageExtra}>{imageBody.extraText}</div>}
+                <div className={css.imageBody}>
+                  {renderSlot !== undefined && loadImage !== undefined && renderSlot('tool.call.images', {
+                    images: imageBody.images,
+                    loadImage,
+                    align: 'start',
+                  })}
+                  <div className={css.imageMeta}>
+                    <div>{imageBody.path}</div>
+                    {imageBody.images.map(({ attachment }, index) => (
+                      <div key={index}>
+                        {attachment.originalDimensions === undefined
+                          ? t('row.imageSize', { width: attachment.width, height: attachment.height, bytes: attachment.bytes })
+                          : t('row.imageSizeDownscaled', {
+                            width: attachment.width,
+                            height: attachment.height,
+                            originalWidth: attachment.originalDimensions.width,
+                            originalHeight: attachment.originalDimensions.height,
+                            bytes: attachment.bytes,
+                          })}
+                      </div>
+                    ))}
                   </div>
-                )
-                : searchBody !== null
-                  ? (
-                    <>
-                      <SearchBlock
-                        {...searchBody.card}
-                        labels={searchLabels}
-                        maxLines={CHAT_SEARCH_MAX_LINES}
-                        className={css.searchBody}
-                      />
-                      {/* A capped search's recovery locator lives only in the result
+                  {imageBody.extraText !== null && <div className={css.imageExtra}>{imageBody.extraText}</div>}
+                </div>
+              )
+              : searchBody !== null
+                ? (
+                  <>
+                    <SearchBlock
+                      {...searchBody.card}
+                      labels={searchLabels}
+                      maxLines={CHAT_SEARCH_MAX_LINES}
+                      className={css.searchBody}
+                    />
+                    {/* A capped search's recovery locator lives only in the result
                       text; show it below the card so the dropped rows survive. */}
-                      {searchBody.recovery !== undefined && (
-                        <div className={css.searchRecovery}>{searchBody.recovery}</div>
-                      )}
-                    </>
-                  )
-                  : webBody !== null
-                    ? <WebBlock {...webBody} labels={webLabels} className={css.webBody} />
-                    : detailsBody !== null
-                      ? <ToolDetails model={detailsBody} hasInspect={inspect !== undefined} t={t} onOpenFile={onOpenFile} />
-                      : (
-                        <>
-                          {variant === 'code' && bodyText !== null && (
-                            <div className={css.bodyScroll}>
-                              <CodeBlock code={bodyText} lang="typescript" copyLabel={t('copy')} copiedLabel={t('copied')}
-                                toolbarLabels={codeToolbarLabels(t)} className={css.codeBody} />
-                            </div>
-                          )}
-                          {(cardBody !== null || outputText !== null) && (
-                            <div className={css.ioCard}>
-                              {cardBody !== null && (
-                                <div className={css.ioSection}>
-                                  <span className={css.ioLabel}>{t('row.input')}</span>
-                                  <span className={css.ioText}>{cardBody}</span>
-                                </div>
-                              )}
-                              {cardBody !== null && outputText !== null && (
-                                <span className={css.ioDivider} aria-hidden />
-                              )}
-                              {outputText !== null && (
-                                <div className={css.ioSection}>
-                                  <span className={css.ioLabel}>{t('row.output')}</span>
-                                  <span className={css.ioText} data-error={state === 'error' || undefined}>
-                                    {outputText}
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </>
-                      )}
+                    {searchBody.recovery !== undefined && (
+                      <div className={css.searchRecovery}>{searchBody.recovery}</div>
+                    )}
+                  </>
+                )
+                : webBody !== null
+                  ? <WebBlock {...webBody} labels={webLabels} className={css.webBody} />
+                  : detailsBody !== null
+                    ? <ToolDetails model={detailsBody} hasInspect={inspect !== undefined} t={t} onOpenFile={onOpenFile} />
+                    : (
+                      <>
+                        {variant === 'code' && bodyText !== null && (
+                          <div className={css.bodyScroll}>
+                            <CodeBlock code={bodyText} lang="typescript" copyLabel={t('copy')} copiedLabel={t('copied')}
+                              toolbarLabels={codeToolbarLabels(t)} className={css.codeBody} />
+                          </div>
+                        )}
+                        {(cardBody !== null || outputText !== null) && (
+                          <div className={css.ioCard}>
+                            {cardBody !== null && (
+                              <div className={css.ioSection}>
+                                <span className={css.ioLabel}>{t('row.input')}</span>
+                                <span className={css.ioText}>{cardBody}</span>
+                              </div>
+                            )}
+                            {cardBody !== null && outputText !== null && (
+                              <span className={css.ioDivider} aria-hidden />
+                            )}
+                            {outputText !== null && (
+                              <div className={css.ioSection}>
+                                <span className={css.ioLabel}>{t('row.output')}</span>
+                                <span className={css.ioText} data-error={state === 'error' || undefined}>
+                                  {outputText}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )}
       {inspect !== undefined && (
         <button
           type="button"
@@ -366,7 +358,7 @@ export const ToolRow = memo(function ToolRow({
       )}
     </div>
   ) : undefined, [
-    open, detailsBody, askQuestionBody, terminalBody, terminalLabels, diffBody, diffLabels, readBody, readLabels,
+    open, detailsBody, terminalBody, terminalLabels, diffBody, diffLabels, readBody, readLabels,
     imageBody, renderSlot, loadImage, searchBody, searchLabels, webBody, webLabels, inspect, t, onOpenFile,
     variant, bodyText, cardBody, outputText, state,
   ])
