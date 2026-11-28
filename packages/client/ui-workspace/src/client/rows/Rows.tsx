@@ -27,6 +27,7 @@ import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/clie
 import type {
   SealLightSnapshot, SealRowObserver, SessionDragType, WorkspaceBrowserProps,
 } from '../contract/slots.ts'
+import { formatAgeSec } from '../format-age.ts'
 import type { GroupNode, SearchResultNode, SessionNode } from '../tree.ts'
 import { useFrozenSession, usePreview, wakeFrozen } from '../session-actions/fsm-freeze.ts'
 import type { FrozenSessionView } from '../session-actions/fsm-freeze.ts'
@@ -552,7 +553,7 @@ function sessionStatuses(
     ? t('status.staleLastKnown', { state: primary.label })
     : node.heartbeatStaleSeconds === undefined
       ? t('status.heartbeatStaleLastKnown', { state: primary.label })
-      : t('status.heartbeatStaleSince', { s: node.heartbeatStaleSeconds, state: primary.label })
+      : t('status.heartbeatStaleSince', { s: formatAgeSec(node.heartbeatStaleSeconds), state: primary.label })
   return [
     { ...primary, staleRing: { kind }, staleLabel },
     ...base.slice(1),
