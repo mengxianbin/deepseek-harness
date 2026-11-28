@@ -6,7 +6,6 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { allowAllAccess } from '@deepseek-ai/dsh-client-test-runtime'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { AskUserQuestionAnswerItem } from '@deepseek-ai/dsh-user-questions/types'
 import { createWaterfallRequest, PendingQuestion, type QuestionCardSnapshot, type QuestionComposerProps } from '../src/client/contract/slots.ts'
 import type { ArbitrateKey, ArbitrateOutcome } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { AnswerSurfaceInsert } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
@@ -184,10 +183,19 @@ beforeEach(() => {
   kit = { ...kitBase, useStore, actions: instance.actions }
 })
 
+/**
+ * Approval intent: routes the batch to the retained option decision card
+ * (ask-panel-retire-1127 D3 — an approval intent keeps QuestionFlow, an
+ * intent-less batch takes the native QuestionInput). ask() validation never
+ * runs in this spec, so the labels only have to exist for the type.
+ */
+const approval = (approve: string, reject: string) => ({ kind: 'approval' as const, approve, reject })
+
 const QUESTIONS: PendingQuestion['questions'] = [
   {
     id: 'profile', header: '偏好', question: '选择候选人类型',
     detail: '按当前空缺岗位的优先级选择。',
+    intent: approval('工程落地型 (Recommended)', '研究潜力型'),
     options: [
       { label: '工程落地型 (Recommended)', description: '优先工程交付。' },
       { label: '研究潜力型', description: '优先研究能力。' },
@@ -253,6 +261,7 @@ describe('QuestionComposer', () => {
   it('starts every recommended choice of a multi-select question selected', () => {
     const { carrier, answer } = wait([{
       id: 'checks', question: 'Which checks?', multiSelect: true,
+      intent: approval('Unit (Recommended)', 'Lint'),
       options: [{ label: 'Unit (Recommended)' }, { label: 'Lint' }, { label: 'Types（推荐）' }],
     }])
     render(<QuestionComposer matched={carrier} {...kit} />)
@@ -281,6 +290,7 @@ describe('QuestionComposer', () => {
     const { carrier } = wait([
       {
         id: 'checks', question: 'Which checks?', multiSelect: true,
+        intent: approval('Unit (Recommended)', 'Lint'),
         options: [{ label: 'Unit (Recommended)' }, { label: 'Lint' }, { label: 'Types (Recommended)' }],
       },
       { id: 'note', question: 'Anything else?' },
@@ -301,7 +311,7 @@ describe('QuestionComposer', () => {
 
   it('starts only a recommended first choice of a single-select question selected', () => {
     const { carrier } = wait([
-      { id: 'first', question: 'First?', options: [{ label: 'A (Recommended)' }, { label: 'B (Recommended)' }] },
+      { id: 'first', question: 'First?', intent: approval('A (Recommended)', 'B (Recommended)'), options: [{ label: 'A (Recommended)' }, { label: 'B (Recommended)' }] },
       { id: 'later', question: 'Later?', options: [{ label: 'C' }, { label: 'D (Recommended)' }] },
     ])
     render(<QuestionComposer matched={carrier} {...kit} />)
@@ -315,7 +325,7 @@ describe('QuestionComposer', () => {
 
   it('clears a single-select pick when its own option is clicked again, without stepping the page', () => {
     const { carrier } = wait([
-      { id: 'first', question: 'First?', options: [{ label: 'A (Recommended)' }, { label: 'B' }] },
+      { id: 'first', question: 'First?', intent: approval('A (Recommended)', 'B'), options: [{ label: 'A (Recommended)' }, { label: 'B' }] },
       { id: 'later', question: 'Later?', options: [{ label: 'C' }, { label: 'D' }] },
     ])
     render(<QuestionComposer matched={carrier} {...kit} />)
@@ -345,7 +355,7 @@ describe('QuestionComposer', () => {
 
   it('classifies Enter on an option: bare selects through native activation, Shift/Ctrl+Enter runs the flow', () => {
     const { carrier, answer } = wait([
-      { id: 'mode', question: 'Which mode?', options: [{ label: 'Alpha' }, { label: 'Beta' }] },
+      { id: 'mode', question: 'Which mode?', intent: approval('Alpha', 'Beta'), options: [{ label: 'Alpha' }, { label: 'Beta' }] },
       { id: 'next', question: 'Then what?', options: [{ label: 'Gamma' }] },
     ])
     render(<QuestionComposer matched={carrier} {...kit} />)
@@ -378,7 +388,8 @@ describe('QuestionComposer', () => {
 
   it('keeps an IME-composed Enter on an option with the IME', () => {
     const { carrier, answer } = wait([{
-      id: 'mode', question: 'Which mode?', options: [{ label: 'Alpha' }, { label: 'Beta' }],
+      id: 'mode', question: 'Which mode?', intent: approval('Alpha', 'Beta'),
+      options: [{ label: 'Alpha' }, { label: 'Beta' }],
     }])
     render(<QuestionComposer matched={carrier} {...kit} />)
     const alpha = screen.getByRole('radio', { name: 'Alpha' })
@@ -444,7 +455,7 @@ describe('QuestionComposer', () => {
 
   it('keeps a single-select selection and a typed custom answer together', () => {
     const { carrier, answer } = wait([{
-      id: 'one', question: 'Pick one', options: [{ label: 'Alpha' }, { label: 'Beta' }],
+      id: 'one', question: 'Pick one', intent: approval('Alpha', 'Beta'), options: [{ label: 'Alpha' }, { label: 'Beta' }],
     }])
     render(<QuestionComposer matched={carrier} {...kit} />)
 
@@ -502,6 +513,7 @@ describe('QuestionComposer', () => {
     const description = 'Remove the experimental client from every shipped template and require an explicit profile install.'
     const { carrier } = wait([{
       id: 'release', question: 'How should the release graph change?',
+      intent: approval('Explicit install', 'Optional bundle'),
       options: [
         { label: 'Explicit install', description },
         { label: 'Optional bundle' },
@@ -550,6 +562,7 @@ describe('QuestionComposer', () => {
     const { carrier } = wait([
       {
         id: 'first', question: 'First question?',
+        intent: approval('Continue', 'Stop'),
         options: [{ label: 'Continue', description: firstDescription }],
       },
       {
@@ -617,7 +630,7 @@ describe('QuestionComposer', () => {
 
   it('keeps expansions with their question when the shared position moves elsewhere', () => {
     const { carrier } = wait([
-      { id: 'first', question: 'First question?', options: [{ label: 'Continue', description: 'First detail.' }] },
+      { id: 'first', question: 'First question?', intent: approval('Continue', 'Stop'), options: [{ label: 'Continue', description: 'First detail.' }] },
       { id: 'second', question: 'Second question?', options: [{ label: 'Continue', description: 'Second detail.' }] },
     ])
     render(<QuestionComposer matched={carrier} {...kit} />)
@@ -638,6 +651,7 @@ describe('QuestionComposer', () => {
       id: 'plan',
       question: '批准这个计划吗？',
       detail: '# 实施计划\n\n- **先验证**现状\n- 修改 `QuestionComposer`',
+      intent: approval('批准', '拒绝'),
       options: [{ label: '批准' }],
     }])
     const view = render(<QuestionComposer matched={carrier} {...kit} />)
@@ -1052,7 +1066,7 @@ describe('attention fold', () => {
   })
 
   it('a busy submission keeps its card up even when the transcript is pressed', async () => {
-    const { carrier, answer } = wait([{ id: 'scope', question: '选择范围', options: [{ label: '仅工具' }, { label: '全部' }] }])
+    const { carrier, answer } = wait([{ id: 'scope', question: '选择范围', intent: approval('仅工具', '全部'), options: [{ label: '仅工具' }, { label: '全部' }] }])
     answer.mockReturnValueOnce(new Promise(() => {}))
     renderInSeatView(carrier)
 
@@ -1109,7 +1123,7 @@ describe('PageUp / PageDown question paging', () => {
 
   it('a busy submission does not turn the page', () => {
     const { carrier, answer } = wait([
-      { id: 'one', question: 'First?', options: [{ label: 'A' }, { label: 'B' }] },
+      { id: 'one', question: 'First?', intent: approval('A', 'B'), options: [{ label: 'A' }, { label: 'B' }] },
       { id: 'two', question: 'Second?', options: [{ label: 'C' }] },
     ])
     answer.mockReturnValueOnce(new Promise(() => {}))
@@ -1148,7 +1162,7 @@ describe('PageUp / PageDown question paging', () => {
 describe('focus follow after a page change', () => {
   it('hands focus to the new question when the auto-advance unmounts the focused option', () => {
     const { carrier } = wait([
-      { id: 'one', question: 'First?', options: [{ label: 'One' }, { label: 'Two' }] },
+      { id: 'one', question: 'First?', intent: approval('One', 'Two'), options: [{ label: 'One' }, { label: 'Two' }] },
       { id: 'two', question: 'Second?', options: [{ label: 'Three' }, { label: 'Four' }] },
     ])
     render(<QuestionComposer matched={carrier} {...kit} />)
@@ -1171,7 +1185,7 @@ describe('focus follow after a page change', () => {
     // Both questions carry options, so neither page mounts the optionless
     // answer field that would legitimately autofocus on first presentation.
     const { carrier } = wait([
-      { id: 'one', question: 'First?', options: [{ label: 'One' }] },
+      { id: 'one', question: 'First?', intent: approval('One', 'Two'), options: [{ label: 'One' }] },
       { id: 'two', question: 'Second?', options: [{ label: 'Two' }] },
     ])
     render(<QuestionComposer matched={carrier} {...kit} />)
@@ -1191,7 +1205,7 @@ describe('focus follow after a page change', () => {
     // keyboard to the choice that was already made — not the first row,
     // which read as "my previous choice was forgotten".
     const { carrier } = wait([
-      { id: 'one', question: 'First?', options: [{ label: 'One' }, { label: 'Two' }] },
+      { id: 'one', question: 'First?', intent: approval('One', 'Two'), options: [{ label: 'One' }, { label: 'Two' }] },
       { id: 'two', question: 'Second?', options: [{ label: 'Three' }, { label: 'Four' }] },
     ])
     render(<QuestionComposer matched={carrier} {...kit} />)
@@ -1221,7 +1235,7 @@ describe('focus follow after a page change', () => {
 
   it('does not grab focus the card never held', () => {
     const { carrier } = wait([
-      { id: 'one', question: 'First?', options: [{ label: 'One' }] },
+      { id: 'one', question: 'First?', intent: approval('One', 'Two'), options: [{ label: 'One' }] },
       { id: 'two', question: 'Second?', options: [{ label: 'Two' }] },
     ])
     render(<QuestionComposer matched={carrier} {...kit} />)
@@ -1303,6 +1317,7 @@ describe('arrow keys switch the options', () => {
   it('moves a multi-select focus with Ctrl+↓ without toggling the choice', () => {
     const { carrier, answer } = wait([{
       id: 'checks', question: 'Which checks?', multiSelect: true,
+      intent: approval('Unit', 'Lint'),
       options: [{ label: 'Unit' }, { label: 'Lint' }, { label: 'Types' }],
     }])
     render(<QuestionComposer matched={carrier} {...kit} />)
@@ -1320,6 +1335,7 @@ describe('arrow keys switch the options', () => {
   it('leaves modified, composing, and locked keys to the browser', () => {
     const { carrier, answer } = wait([{
       id: 'one', question: 'First?',
+      intent: approval('A', 'B'),
       options: [{ label: 'A', description: 'A detail' }, { label: 'B' }],
     }])
     answer.mockReturnValueOnce(new Promise(() => {}))
@@ -1362,7 +1378,7 @@ describe('arrow keys switch the options', () => {
 describe('Tab leaves the option list in one press', () => {
   it('skips the remaining options forward to the answer field', () => {
     const { carrier } = wait([{
-      id: 'one', question: 'First?', options: [{ label: 'A' }, { label: 'B' }, { label: 'C' }],
+      id: 'one', question: 'First?', intent: approval('A', 'C'), options: [{ label: 'A' }, { label: 'B' }, { label: 'C' }],
     }])
     render(<QuestionComposer matched={carrier} {...kit} />)
     const a = screen.getByRole('radio', { name: 'A' })
@@ -1377,6 +1393,7 @@ describe('Tab leaves the option list in one press', () => {
   it('keeps the description toggles in the Tab path and walks back out of the list', () => {
     const { carrier } = wait([{
       id: 'one', question: 'First?',
+      intent: approval('A', 'B'),
       options: [{ label: 'A', description: 'A detail' }, { label: 'B', description: 'B detail' }],
     }])
     render(<QuestionComposer matched={carrier} {...kit} />)
@@ -1471,15 +1488,15 @@ describe('timed card', () => {
       let settled = false
       void request.result.then(() => { settled = true }, () => { settled = true })
       render(<QuestionComposer matched={carrier} {...kit} />)
-      const option = screen.getByRole('radio', { name: '仅工具' })
+      const field = screen.getByPlaceholderText(zh['custom.placeholder'])
 
-      fireEvent.focus(option)
+      fireEvent.focus(field)
       expect(carrier.snapshot()).toMatchObject({ waitState: 'focused', countdown: { running: false } })
       expect(screen.getByText(/已暂停/)).toBeTruthy()
       await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
       expect(settled).toBe(false)
 
-      fireEvent.blur(option, { relatedTarget: document.body })
+      fireEvent.blur(field, { relatedTarget: document.body })
       expect(carrier.snapshot()).toMatchObject({ waitState: 'counting' })
       await act(async () => { await vi.advanceTimersByTimeAsync(2_100) })
       expect(settled).toBe(true)
@@ -1496,7 +1513,7 @@ describe('timed card', () => {
       void first.request.result.then(() => { firstSettled = true }, () => { firstSettled = true })
       const view = render(<QuestionComposer matched={first.carrier} {...kit} />)
 
-      fireEvent.click(screen.getByRole('radio', { name: '仅工具' }))
+      fireEvent.change(screen.getByPlaceholderText(zh['custom.placeholder']), { target: { value: '仅工具' } })
       expect(first.carrier.snapshot()).toMatchObject({ waitState: 'editing', countdown: { running: false } })
       expect(draftInstance.getSnapshot().progressByRequest[first.carrier.key]?.wait).toBe('editing')
       await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
@@ -1541,11 +1558,11 @@ describe('timed card', () => {
         carrier.setState('continued')
       })
       expect(screen.getByText('已继续工作，仍可回答')).toBeTruthy()
-      fireEvent.click(screen.getByRole('radio', { name: '仅工具' }))
+      fireEvent.change(screen.getByPlaceholderText(zh['custom.placeholder']), { target: { value: '仅工具' } })
       expect(screen.getByRole<HTMLButtonElement>('button', { name: '提交' }).disabled).toBe(false)
       fireEvent.click(screen.getByRole('button', { name: '提交' }))
       await act(async () => { await Promise.resolve() })
-      expect(answer).toHaveBeenCalledWith({ answers: [{ id: 'scope', selected: ['仅工具'] }] })
+      expect(answer).toHaveBeenCalledWith({ answers: [{ id: 'scope', selected: [], custom: '仅工具' }] })
     } finally {
       vi.useRealTimers()
     }
@@ -1574,21 +1591,21 @@ describe('timed card', () => {
   it('re-arms the controls with a resubmit hint when a sent answer is dropped', async () => {
     const { carrier, request } = timedCard(Date.now() + 60_000)
     render(<QuestionComposer matched={carrier} {...kit} />)
-    fireEvent.click(screen.getByRole('radio', { name: '仅工具' }))
+    fireEvent.change(screen.getByPlaceholderText(zh['custom.placeholder']), { target: { value: '仅工具' } })
     fireEvent.click(screen.getByRole('button', { name: '提交' }))
 
-    await expect(request.result).resolves.toEqual({ answers: [{ id: 'scope', selected: ['仅工具'] }] })
+    await expect(request.result).resolves.toEqual({ answers: [{ id: 'scope', selected: [], custom: '仅工具' }] })
     expect(screen.getByRole<HTMLButtonElement>('button', { name: '正在提交…' }).disabled).toBe(true)
     expect(draftInstance.getSnapshot().progressByRequest[carrier.key]).toBeDefined()
 
     act(() => { carrier.setState('continued') })
 
     expect(screen.getByText('回答未送达，工作已继续，请再提交一次。')).toBeTruthy()
-    expect(screen.getByRole('radio', { name: '仅工具' }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByPlaceholderText<HTMLTextAreaElement>(zh['custom.placeholder']).value).toBe('仅工具')
     const answer = vi.fn(async () => true)
     act(() => { carrier.attachRpc({ answer }) })
     fireEvent.click(screen.getByRole('button', { name: '提交' }))
-    await vi.waitFor(() => { expect(answer).toHaveBeenCalledWith({ answers: [{ id: 'scope', selected: ['仅工具'] }] }) })
+    await vi.waitFor(() => { expect(answer).toHaveBeenCalledWith({ answers: [{ id: 'scope', selected: [], custom: '仅工具' }] }) })
   })
 
   it('steers an RPC reply, hides the panel, and rejects a duplicate before discard', async () => {
@@ -1601,7 +1618,7 @@ describe('timed card', () => {
     carrier.setState('continued')
     render(<QuestionComposer matched={carrier} {...kit} />)
 
-    fireEvent.click(screen.getByRole('radio', { name: '仅工具' }))
+    fireEvent.change(screen.getByPlaceholderText(zh['custom.placeholder']), { target: { value: '仅工具' } })
     fireEvent.click(screen.getByRole('button', { name: '提交' }))
     await vi.waitFor(() => { expect(hide).toHaveBeenCalledOnce() })
     expect(screen.getByRole<HTMLButtonElement>('button', { name: '提交' }).disabled).toBe(false)
@@ -1628,7 +1645,7 @@ describe('timed card', () => {
       selector === undefined ? rendered : selector(rendered)) as QuestionComposerProps['useQuestionCard']
     render(<Composer matched={carrier} {...kit} useQuestionCard={useQuestionCard} />)
 
-    fireEvent.click(screen.getByRole('radio', { name: '仅工具' }))
+    fireEvent.change(screen.getByPlaceholderText(zh['custom.placeholder']), { target: { value: '仅工具' } })
     fireEvent.click(screen.getByRole('button', { name: '提交' }))
 
     await vi.waitFor(() => { expect(hide).toHaveBeenCalledOnce() })
@@ -1684,143 +1701,12 @@ describe('timed card', () => {
     render(<QuestionComposer matched={carrier} {...kit} />)
 
     expect(draftInstance.getSnapshot().progressByRequest['question:stale']).toBeUndefined()
-    fireEvent.click(screen.getByRole('radio', { name: '全部' }))
-    expect(draftInstance.getSnapshot().progressByRequest[carrier.key]?.drafts[0]?.selected).toEqual(['全部'])
+    fireEvent.change(screen.getByPlaceholderText(zh['custom.placeholder']), { target: { value: '全部' } })
+    expect(draftInstance.getSnapshot().progressByRequest[carrier.key]?.drafts[0]?.custom).toBe('全部')
 
     act(() => { carrier.close() })
 
     expect(draftInstance.getSnapshot().progressByRequest[carrier.key]).toBeUndefined()
-  })
-})
-
-const REVIEWED_CALL = 'ask-answered'
-/** One settled call's answers in record order, which is not the question order. */
-const RECORDED: readonly AskUserQuestionAnswerItem[] = [
-  { id: 'signals', selected: [] },
-  { id: 'profile', selected: ['工程落地型 (Recommended)'] },
-  { id: 'detail', selected: [], custom: '要能独立排查线上问题' },
-]
-/** A record whose multi-select answer used the custom row beside a checked option. */
-const RECORDED_CUSTOM: readonly AskUserQuestionAnswerItem[] = [
-  { id: 'profile', selected: ['研究潜力型'] },
-  { id: 'detail', selected: [], custom: '要能独立排查线上问题' },
-  { id: 'signals', selected: ['系统设计'], custom: '沟通能力' },
-]
-
-/** A read-only card as the panel provider builds it from a settled call's transcript record. */
-function reviewCard(review: readonly AskUserQuestionAnswerItem[] = RECORDED) {
-  const carrier = new PendingQuestion(SID, QUESTIONS, ToolCallId(REVIEWED_CALL), undefined, review)
-  const hide = vi.fn()
-  carrier.attachSeat({ hide })
-  return { carrier, hide }
-}
-
-describe('review card', () => {
-  it('walks a settled call record with every answer surface frozen', () => {
-    const { carrier } = reviewCard()
-    render(<QuestionComposer matched={carrier} {...kit} />)
-
-    expect(screen.getByText(zh['review.status'])).toBeTruthy()
-    // The recorded selection is paired by question id, not by record order.
-    const chosen = screen.getByRole<HTMLButtonElement>('radio', { name: '工程落地型' })
-    expect(chosen.getAttribute('aria-checked')).toBe('true')
-    expect(chosen.disabled).toBe(true)
-    // Long copy stays readable on a frozen card.
-    expect(screen.getAllByRole<HTMLButtonElement>('button', { name: '展开' }).map(toggle => toggle.disabled)).toEqual([false, false, false])
-    // Nothing is left to send, and the unused free-text field would read as
-    // somewhere to type.
-    expect(screen.queryByRole('button', { name: '跳过' })).toBeNull()
-    expect(screen.queryByRole('button', { name: '提交' })).toBeNull()
-    expect(screen.queryByPlaceholderText('输入你的答案')).toBeNull()
-
-    fireEvent.click(screen.getByLabelText('下一题'))
-
-    expect(screen.getByText('2 / 3')).toBeTruthy()
-    const optionless = screen.getByPlaceholderText<HTMLTextAreaElement>('输入你的答案')
-    expect(optionless.value).toBe('要能独立排查线上问题')
-    expect(optionless.disabled).toBe(true)
-    expect(document.activeElement).not.toBe(optionless)
-
-    fireEvent.click(screen.getByLabelText('下一题'))
-
-    expect(screen.getByText('3 / 3')).toBeTruthy()
-    expect(screen.getByText(zh['review.skipped'])).toBeTruthy()
-    expect(screen.getByRole('checkbox', { name: '系统设计' }).getAttribute('aria-checked')).toBe('false')
-    expect(screen.queryByPlaceholderText('输入你的答案')).toBeNull()
-  })
-
-  it('shows recorded multi-select answers without restoring recommended defaults', () => {
-    const questions: PendingQuestion['questions'] = [
-      {
-        id: 'checks', question: 'Which checks?', multiSelect: true,
-        options: [{ label: 'Unit (Recommended)' }, { label: 'Lint' }, { label: 'Types (Recommended)' }],
-      },
-      {
-        id: 'unrecorded', question: 'Which targets?', multiSelect: true,
-        options: [{ label: 'Web (Recommended)' }, { label: 'Desktop' }],
-      },
-    ]
-    const carrier = new PendingQuestion(SID, questions, ToolCallId(REVIEWED_CALL), undefined, [{ id: 'checks', selected: ['Lint'] }])
-    carrier.attachSeat({ hide: vi.fn() })
-    render(<QuestionComposer matched={carrier} {...kit} />)
-
-    expect(screen.getByRole('checkbox', { name: 'Unit' }).getAttribute('aria-checked')).toBe('false')
-    expect(screen.getByRole('checkbox', { name: 'Lint' }).getAttribute('aria-checked')).toBe('true')
-    expect(screen.getByRole('checkbox', { name: 'Types' }).getAttribute('aria-checked')).toBe('false')
-    fireEvent.click(screen.getByLabelText('下一题'))
-    expect(screen.getByRole('checkbox', { name: 'Web' }).getAttribute('aria-checked')).toBe('false')
-  })
-
-  it('reads the record back instead of a draft the live card left under the same key', () => {
-    kit.actions.replace(PendingQuestion.keyOf(SID, REVIEWED_CALL), {
-      index: 2,
-      drafts: [
-        { selected: [], custom: '没提交的草稿', skipped: false },
-        { selected: [], custom: '', skipped: false },
-        { selected: ['代码质量'], custom: '', skipped: false },
-      ],
-    })
-    const { carrier } = reviewCard(RECORDED_CUSTOM)
-    render(<QuestionComposer matched={carrier} {...kit} />)
-
-    // The page the live card was on is restored; its half-typed answers are not.
-    expect(screen.getByText('3 / 3')).toBeTruthy()
-    expect(screen.getByRole('checkbox', { name: '系统设计' }).getAttribute('aria-checked')).toBe('true')
-    expect(screen.getByRole('checkbox', { name: '代码质量' }).getAttribute('aria-checked')).toBe('false')
-    const custom = screen.getByPlaceholderText<HTMLTextAreaElement>('输入你的答案')
-    expect(custom.value).toBe('沟通能力')
-    expect(custom.disabled).toBe(true)
-
-    fireEvent.click(screen.getByLabelText('上一题'))
-    fireEvent.click(screen.getByLabelText('上一题'))
-
-    expect(screen.getByRole('radio', { name: '研究潜力型' }).getAttribute('aria-checked')).toBe('true')
-    expect(screen.queryByDisplayValue('没提交的草稿')).toBeNull()
-  })
-
-  it('closing a read-only panel withdraws it and sends nothing', () => {
-    const { carrier, hide } = reviewCard()
-    render(<QuestionComposer matched={carrier} {...kit} />)
-
-    // The card is keyed by its tool call, so closing names the reopen path.
-    expect(screen.queryByLabelText(zh['nav.cancel'])).toBeNull()
-    fireEvent.click(screen.getByLabelText(zh['nav.close']))
-
-    expect(hide).toHaveBeenCalledOnce()
-    expect(carrier.snapshot()).toEqual({
-      state: 'open', waitState: 'counting', countdown: undefined,
-      channel: 'none', closed: false,
-    })
-  })
-
-  it('renders the read-only copy through the English dictionary', () => {
-    const { carrier } = reviewCard()
-    render(<QuestionComposer matched={carrier} {...kit} t={seatOver(en, commonEn)} />)
-
-    expect(screen.getByText(en['review.status'])).toBeTruthy()
-    fireEvent.click(screen.getByLabelText(en['nav.next']))
-    fireEvent.click(screen.getByLabelText(en['nav.next']))
-    expect(screen.getByText(en['review.skipped'])).toBeTruthy()
   })
 })
 
@@ -1947,7 +1833,7 @@ describe('QuestionComposer answer-surface wiring', () => {
 
   it('tracks a locked field frozen so a submission in flight cannot leave a menu open', () => {
     const { carrier, answer } = wait([{
-      id: 'only', question: '最后一题', options: [{ label: 'Alpha' }],
+      id: 'only', question: '最后一题', intent: approval('Alpha', 'Reject'), options: [{ label: 'Alpha' }],
     }])
     const harness = triggerFace()
     render(<QuestionComposer matched={carrier} {...kit} answerTriggers={harness.face} />)
@@ -1956,6 +1842,326 @@ describe('QuestionComposer answer-surface wiring', () => {
 
     expect(answer).toHaveBeenCalledOnce()
     expect(harness.track).toHaveBeenLastCalledWith(expect.any(String), expect.any(Number), 'frozen', expect.any(Number))
+  })
+})
+
+/**
+ * The native answer surface (ask-panel-retire-1127 甲-a): an intent-less batch
+ * takes QuestionInput — a one-line hint, one auto-growing textarea, and the
+ * submit/skip row. The timed-card mechanics (countdown / 慢慢回答 / engage
+ * freeze / ASK_TIMED_OUT) live in the `timed card` describe above, converted to
+ * this form; this section covers the input itself, its batch assembly, its two
+ * close states, its draft persistence, its trigger-pipeline wiring, and the
+ * three-way intent fork at the router.
+ */
+describe('QuestionInput native answer surface', () => {
+  it('renders an intent-less batch as the native input: one-line hint, no option row, no pager', () => {
+    const { carrier } = wait([
+      { id: 'one', question: '第一问', options: [{ label: '甲' }, { label: '乙' }] },
+      { id: 'two', question: '第二问' },
+    ])
+    const view = render(<QuestionComposer matched={carrier} {...kit} />)
+
+    // The frame marks the native takeover; the hint joins every stem on one line.
+    expect(view.container.querySelector('[data-question-native]')).toBeTruthy()
+    const hint = screen.getByRole('heading', { name: '第一问 · 第二问' })
+    expect(hint.className).toContain('hint')
+
+    // No option card furniture survives: no radio rows, no pager, no page
+    // text, no remark box, no expand toggles — even with options in the data.
+    expect(screen.queryByRole('radiogroup')).toBeNull()
+    expect(screen.queryByRole('radio')).toBeNull()
+    expect(screen.queryByRole('checkbox')).toBeNull()
+    expect(screen.queryByLabelText('下一题')).toBeNull()
+    expect(screen.queryByLabelText('上一题')).toBeNull()
+    expect(screen.queryByText('1 / 2')).toBeNull()
+    expect(screen.queryByRole('button', { name: '题外话' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '展开' })).toBeNull()
+
+    // The native field and its submit row.
+    expect(screen.getAllByRole('textbox')).toHaveLength(1)
+    expect(answerField()).toBeTruthy()
+    expect(screen.getByRole('button', { name: '跳过' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '提交' })).toBeTruthy()
+  })
+
+  it('submits a single question text as its custom answer on Shift+Enter', () => {
+    const { carrier, answer } = wait([{ id: 'only', question: '只有一题' }])
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    const field = answerField()
+    fireEvent.change(field, { target: { value: '答复内容' } })
+
+    fireEvent.keyDown(field, { key: 'Enter', shiftKey: true })
+
+    expect(answer).toHaveBeenCalledWith({ answers: [{ id: 'only', selected: [], custom: '答复内容' }] })
+  })
+
+  it('submits the same single-question shape from the 提交 button', () => {
+    const { carrier, answer } = wait([{ id: 'only', question: '只有一题' }])
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    fireEvent.change(answerField(), { target: { value: '点按钮的答复' } })
+
+    fireEvent.click(screen.getByRole('button', { name: '提交' }))
+
+    expect(answer).toHaveBeenCalledWith({ answers: [{ id: 'only', selected: [], custom: '点按钮的答复' }] })
+  })
+
+  it('lifts a multi-question batch text into the note with one empty entry per question', () => {
+    const { carrier, answer } = wait([
+      { id: 'a', question: '甲问题' },
+      { id: 'b', question: '乙问题' },
+    ])
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    fireEvent.change(answerField(), { target: { value: '这是给整组的答复' } })
+
+    fireEvent.click(screen.getByRole('button', { name: '提交' }))
+
+    expect(answer).toHaveBeenCalledWith({
+      answers: [{ id: 'a', selected: [] }, { id: 'b', selected: [] }],
+      note: '这是给整组的答复',
+    })
+  })
+
+  it('skipping answers every question with an empty entry and carries no note', () => {
+    const { carrier, answer } = wait([
+      { id: 'a', question: '甲问题' },
+      { id: 'b', question: '乙问题' },
+    ])
+    render(<QuestionComposer matched={carrier} {...kit} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '跳过' }))
+
+    expect(answer).toHaveBeenCalledWith({ answers: [{ id: 'a', selected: [] }, { id: 'b', selected: [] }] })
+    expect(Object.keys(answer.mock.calls[0]?.[0] ?? {})).toEqual(['answers'])
+  })
+
+  it('an empty submission reports incomplete instead of sending an empty batch', () => {
+    const { carrier, answer } = wait([{ id: 'only', question: '只有一题' }])
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    const submit = screen.getByRole<HTMLButtonElement>('button', { name: '提交' })
+    expect(submit.disabled).toBe(true)
+
+    // The button is inert while the field is empty; the submit gesture still
+    // runs validation, and nothing reaches the carrier.
+    expect(fireEvent.keyDown(answerField(), { key: 'Enter', shiftKey: true })).toBe(false)
+
+    expect(screen.getByRole('status').textContent).toBe(zh['error.incomplete'])
+    expect(answer).not.toHaveBeenCalled()
+  })
+
+  it('closing a tool-call-keyed panel only withdraws it from the seat', () => {
+    const carrier = new PendingQuestion(SID, [{ id: 'only', question: '只有一题' }], ToolCallId('ask-native-hide'))
+    const hide = vi.fn()
+    carrier.attachSeat({ hide })
+    const answer = vi.spyOn(carrier, 'answer')
+    render(<QuestionComposer matched={carrier} {...kit} />)
+
+    // The keyed close names the reopen path, not a cancellation of the request.
+    expect(screen.queryByLabelText('放弃整组问题')).toBeNull()
+    fireEvent.click(screen.getByLabelText('收起问题面板，可从工具调用重新打开'))
+
+    expect(hide).toHaveBeenCalledOnce()
+    expect(answer).not.toHaveBeenCalled()
+    expect(screen.queryByText('当前无法提交，请稍候再试。')).toBeNull()
+  })
+
+  it('closing an unnamed panel cancels its waterfall with ASK_CANCELLED', async () => {
+    const carrier = new PendingQuestion(SID, [{ id: 'only', question: '只有一题' }])
+    const request = createWaterfallRequest(undefined, undefined, (channel) => { carrier.detachWaterfall(channel) })
+    carrier.attachWaterfall(request.channel)
+    const answer = vi.spyOn(carrier, 'answer')
+    const cancellation = expect(request.result).rejects.toMatchObject({ name: 'UserQuestionError', code: 'ASK_CANCELLED' })
+    render(<QuestionComposer matched={carrier} {...kit} />)
+
+    expect(screen.queryByLabelText('收起问题面板，可从工具调用重新打开')).toBeNull()
+    fireEvent.click(screen.getByLabelText('放弃整组问题'))
+
+    await cancellation
+    expect(answer).not.toHaveBeenCalled()
+    expect(carrier.snapshot().channel).toBe('none')
+    expect(screen.queryByText('当前无法提交，请稍候再试。')).toBeNull()
+  })
+
+  it('keeps the typed text in drafts[0] across a remount with index pinned at 0', () => {
+    const { carrier } = wait([
+      { id: 'one', question: '甲问题' },
+      { id: 'two', question: '乙问题' },
+    ])
+    const view = render(<QuestionComposer matched={carrier} {...kit} />)
+    fireEvent.change(answerField(), { target: { value: '保留这段草稿' } })
+
+    const progress = draftInstance.getSnapshot().progressByRequest[carrier.key]
+    expect(progress?.index).toBe(0)
+    expect(progress?.drafts[0]?.custom).toBe('保留这段草稿')
+    expect(progress?.drafts).toHaveLength(2)
+
+    view.unmount()
+    render(<QuestionComposer matched={carrier} {...kit} />)
+
+    expect(answerField().value).toBe('保留这段草稿')
+  })
+})
+
+describe('QuestionInput answer-surface wiring', () => {
+  const PLAIN: PendingQuestion['questions'] = [{ id: 'only', question: '只有一题' }]
+
+  it('attaches while the field is mounted and detaches on unmount', () => {
+    const { carrier } = wait(PLAIN)
+    const harness = triggerFace()
+    const view = render(<QuestionComposer matched={carrier} {...kit} answerTriggers={harness.face} />)
+
+    expect(harness.attach).toHaveBeenCalledTimes(1)
+    expect(harness.target()).not.toBeNull()
+    expect(view.container.querySelector('[class*="triggerAnchor"]')).toBeTruthy()
+
+    // QuestionInput has no fold state: the lease releases with the unmount.
+    view.unmount()
+    expect(harness.detach).toHaveBeenCalledTimes(1)
+    expect(harness.target()).toBeNull()
+  })
+
+  it('feeds edits to the pipeline with a content revision, and focus re-tracks without bumping it', () => {
+    const { carrier } = wait(PLAIN)
+    const harness = triggerFace()
+    render(<QuestionComposer matched={carrier} {...kit} answerTriggers={harness.face} />)
+    expect(harness.track.mock.calls.at(-1)).toEqual(['', expect.any(Number), 'plain', 1])
+
+    const field = answerField()
+    fireEvent.change(field, { target: { value: '/g' } })
+    expect(harness.track.mock.calls.at(-1)).toEqual(['/g', expect.any(Number), 'plain', 2])
+
+    fireEvent.focus(field)
+    const afterFocus = harness.track.mock.calls.at(-1)!
+    expect(afterFocus[0]).toBe('/g')
+    expect(afterFocus[2]).toBe('plain')
+    expect(afterFocus[3]).toBe(2)
+  })
+
+  it('arbitrates menu keys first: claimed keys are prevented, passed keys keep the field behavior', () => {
+    const { carrier, answer } = wait(PLAIN)
+    const harness = triggerFace()
+    harness.arbitrate.mockReturnValue('consumed')
+    render(<QuestionComposer matched={carrier} {...kit} answerTriggers={harness.face} />)
+    const field = answerField()
+
+    expect(fireEvent.keyDown(field, { key: 'ArrowDown' })).toBe(false)
+    expect(harness.arbitrate).toHaveBeenLastCalledWith('down', false)
+    fireEvent.keyDown(field, { key: 'Tab', shiftKey: true })
+    expect(harness.arbitrate).toHaveBeenLastCalledWith('tabBack', false)
+
+    // A highlighted Enter settles the pick through the menu and never submits.
+    harness.arbitrate.mockReturnValue('pick-highlighted')
+    fireEvent.change(field, { target: { value: '/g' } })
+    expect(fireEvent.keyDown(field, { key: 'Enter' })).toBe(false)
+    expect(harness.arbitrate).toHaveBeenLastCalledWith('enter', false)
+    expect(answer).not.toHaveBeenCalled()
+
+    // A passing Escape reaches the field untouched (no menu open).
+    harness.arbitrate.mockReturnValue('pass')
+    expect(fireEvent.keyDown(field, { key: 'Escape' })).toBe(true)
+    expect(harness.arbitrate).toHaveBeenLastCalledWith('escape', false)
+  })
+
+  it('applies a picked text over the pick-time span, restores the caret, and refuses a stale revision', () => {
+    const { carrier } = wait(PLAIN)
+    const harness = triggerFace()
+    render(<QuestionComposer matched={carrier} {...kit} answerTriggers={harness.face} />)
+    const field = answerField()
+    fireEvent.change(field, { target: { value: '/g' } })
+    const rev = harness.rev()
+    const insert = harness.target()
+    expect(insert).not.toBeNull()
+
+    let applied = false
+    act(() => {
+      applied = insert!('/go-run ', { start: 0, end: 2, draftRev: rev }, false)
+    })
+    expect(applied).toBe(true)
+    expect(answerField().value).toBe('/go-run ')
+    expect(answerField().selectionStart).toBe('/go-run '.length)
+
+    // Content moved on: the pick-time revision is stale and must be refused.
+    act(() => {
+      applied = insert!('/stale ', { start: 0, end: 3, draftRev: rev }, false)
+    })
+    expect(applied).toBe(false)
+    expect(answerField().value).toBe('/go-run ')
+  })
+
+  it('keeps a bare Enter a newline and runs the submit gesture on Shift/Ctrl+Enter', () => {
+    const { carrier, answer } = wait(PLAIN)
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    const field = answerField()
+    fireEvent.change(field, { target: { value: '第一行' } })
+
+    expect(fireEvent.keyDown(field, { key: 'Enter' })).toBe(true)
+    expect(answer).not.toHaveBeenCalled()
+
+    expect(fireEvent.keyDown(field, { key: 'Enter', ctrlKey: true })).toBe(false)
+    expect(answer).toHaveBeenCalledWith({ answers: [{ id: 'only', selected: [], custom: '第一行' }] })
+  })
+
+  it('tracks a locked field frozen while a submission is in flight', () => {
+    const { carrier, answer } = wait(PLAIN)
+    const harness = triggerFace()
+    render(<QuestionComposer matched={carrier} {...kit} answerTriggers={harness.face} />)
+    fireEvent.change(answerField(), { target: { value: '答复' } })
+
+    fireEvent.click(screen.getByRole('button', { name: '提交' }))
+
+    expect(answer).toHaveBeenCalledOnce()
+    expect(harness.track).toHaveBeenLastCalledWith(expect.any(String), expect.any(Number), 'frozen', expect.any(Number))
+  })
+})
+
+describe('intent routing at the composer fork', () => {
+  it('a plan-review intent renders the plan decision card', () => {
+    const carrier = new PendingQuestion(SID, [{
+      id: 'plan',
+      question: '批准这个计划吗？',
+      detail: '# 计划\n\n先做 A，再做 B。',
+      intent: { kind: 'plan-review', approve: '批准' },
+      options: [{ label: '批准' }, { label: '拒绝' }],
+    }])
+    render(<QuestionComposer matched={carrier} {...kit} />)
+
+    expect(document.querySelector('[data-plan-review-key]')).toBeTruthy()
+    expect(document.querySelector('[data-question-native]')).toBeNull()
+    expect(screen.queryByRole('radiogroup')).toBeNull()
+  })
+
+  it('an approval intent keeps the option decision card', () => {
+    const carrier = new PendingQuestion(SID, [{
+      id: 'grant',
+      question: '允许这个操作吗？',
+      intent: approval('允许', '拒绝'),
+      options: [{ label: '允许' }, { label: '拒绝' }],
+    }])
+    render(<QuestionComposer matched={carrier} {...kit} />)
+
+    expect(screen.getByRole('radiogroup')).toBeTruthy()
+    expect(document.querySelector('[data-question-native]')).toBeNull()
+    expect(document.querySelector('[data-plan-review-key]')).toBeNull()
+  })
+
+  it('one approval intent in a mixed batch routes the whole batch to the option card', () => {
+    const { carrier } = wait([
+      { id: 'first', question: 'First?', intent: approval('One', 'Two'), options: [{ label: 'One' }] },
+      { id: 'second', question: 'Second?' },
+    ])
+    render(<QuestionComposer matched={carrier} {...kit} />)
+
+    expect(screen.getByRole('radiogroup')).toBeTruthy()
+    expect(document.querySelector('[data-question-native]')).toBeNull()
+  })
+
+  it('an intent-less request takes the native input', () => {
+    const carrier = new PendingQuestion(SID, [{ id: 'plain', question: '一个普通问题' }])
+    render(<QuestionComposer matched={carrier} {...kit} />)
+
+    expect(document.querySelector('[data-question-native]')).toBeTruthy()
+    expect(screen.queryByRole('radiogroup')).toBeNull()
+    expect(document.querySelector('[data-plan-review-key]')).toBeNull()
   })
 })
 
@@ -1996,7 +2202,7 @@ describe('folded long-content attachment row', () => {
 
 it('retains custom-answer focus across Shift+Enter navigation between option questions', () => {
   const { carrier } = wait([
-    { id: 'one', question: 'First?', options: [{ label: 'One', description: 'First description' }] },
+    { id: 'one', question: 'First?', intent: approval('One', 'Two'), options: [{ label: 'One', description: 'First description' }] },
     { id: 'two', question: 'Second?', options: [{ label: 'Two' }] },
   ])
   render(<QuestionComposer matched={carrier} {...kit} />)
