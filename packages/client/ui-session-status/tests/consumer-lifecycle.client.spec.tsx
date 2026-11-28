@@ -22,21 +22,24 @@ it('unloads hook consumers with the status table and renders them again after it
   if (status === undefined) throw new Error(`${STATUS} is not in the roster`)
 
   expect(consumers()).toEqual([true, true])
-  expect(slotText('sidebar.workspaces')).toContain('Workspaces')
+  // FORK workspace-slim-1126 (7af89ab63c「workspace/browser 瘦身」): the section
+  // header label ('Workspaces' when grouped) is fork-removed, so the empty-state
+  // text probes the sidebar.workspaces slot instead — same lifecycle contract.
+  expect(slotText('sidebar.workspaces')).toContain('No sessions yet')
   expect(slotText('main.conversation')).toContain('Choose a workspace to start')
 
   await act(async () => { await status.update({ disabled: true }) })
   await client.flush()
 
   expect(consumers()).toEqual([false, false])
-  expect(slotText('sidebar.workspaces')).not.toContain('Workspaces')
+  expect(slotText('sidebar.workspaces')).not.toContain('No sessions yet')
   expect(slotText('main.conversation')).not.toContain('Choose a workspace to start')
 
   await act(async () => { await status.update({ disabled: false }) })
   await client.flush()
 
   expect(consumers()).toEqual([true, true])
-  expect(slotText('sidebar.workspaces')).toContain('Workspaces')
+  expect(slotText('sidebar.workspaces')).toContain('No sessions yet')
   expect(slotText('main.conversation')).toContain('Choose a workspace to start')
   expect(errors).not.toHaveBeenCalled()
 }, 60_000)

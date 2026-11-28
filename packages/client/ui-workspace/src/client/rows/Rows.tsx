@@ -816,9 +816,9 @@ export function SearchResultItem({
  * @param props.onOpen - open a session by id.
  * @param props.onRenameRequest - open the rename dialog from a title double-click (id + current title);
  * called only after a single press on the title since the window last lost focus.
- * @param props.renderSlot - child-seat renderer for the row's action lists
- * (`sidebar.workspaces.session.menu.item` / `sidebar.workspaces.session.row.action`),
- * its leading and trailing decorations, and its hover-card section.
+ * @param props.renderSlot - child-seat renderer for the row's action list
+ * (`sidebar.workspaces.session.row.action`), its leading and trailing decorations,
+ * and its hover-card section; the session menu itself rides the context-menu seat.
  * @param props.onReveal - scroll this row into view after search navigation, then acknowledge it.
  * @param props.drag - optional row-drag target wiring; blank rows, and rows whose access excludes
  * `workspace/insertSessionBefore`, cannot start a drag.
@@ -864,7 +864,6 @@ export function SessionNodeItem({
   sealRows?: SealRowObserver | undefined
   t: RowTranslate
 } & Pick<WorkspaceBrowserProps, 'useSessionAccess'> & PropsRenderSlots<
-  | 'sidebar.workspaces.session.menu.item'
   | 'sidebar.workspaces.session.row.action'
   | 'sidebar.session.row.trailing'
   | 'sidebar.session.row.leading'

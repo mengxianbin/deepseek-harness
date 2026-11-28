@@ -9,9 +9,10 @@
  * is the header button's one action, so it raises the directory flow with no
  * menu in between; the flow and its error dialog live in WorkspacePicker
  * (same package — direct composition, no slot between them). A Session row's
- * "..." menu and hover buttons are the `sidebar.workspaces.session.menu.item`
- * and `sidebar.workspaces.session.row.action` lists rendered through this
- * entry's `renderSlot`; the actions in them, this package's own included,
+ * "..." trigger rides the context-menu seat (`contextMenu.button` factory) and
+ * its hover buttons are the `sidebar.workspaces.session.row.action` list
+ * rendered through this entry's `renderSlot`; the actions in them, this
+ * package's own included,
  * are slot entries with their own behavior, so this component threads no
  * action callbacks and hosts no action surface.
  */
@@ -297,7 +298,6 @@ type SessionTreeProps = Pick<
    */
   sealRows: SealRowObserver
 } & PropsRenderSlots<
-  | 'sidebar.workspaces.session.menu.item'
   | 'sidebar.workspaces.session.row.action'
   | 'sidebar.session.row.trailing'
   | 'sidebar.session.row.leading'

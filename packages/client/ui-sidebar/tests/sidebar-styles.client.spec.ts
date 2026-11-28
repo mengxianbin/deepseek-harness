@@ -26,21 +26,6 @@ function declarations(selector: string): Map<string, string> | undefined {
   return undefined
 }
 
-/**
- * Every declared selector, including those inside at-rule blocks.
- * @returns the selector text of each comma-separated part.
- */
-function declaredSelectors(): string[] {
-  const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, ' ')
-  return [...withoutComments.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
-    .flatMap(([, selectorList = '']) => selectorList.split(',').map(value => value.trim()))
-}
-
-/** Declarations of the reduced-motion block, which disables every rail animation. */
-function reducedMotion(): string {
-  return css.match(/@media \(prefers-reduced-motion: reduce\) \{([\s\S]*)\n\}/u)?.[1] ?? ''
-}
-
 /** The renderer's `display: contents` anchor for the sidebar session action HOC slot. */
 const SLOT_ANCHOR = ":global([data-slot='sidebar.session.action'])"
 /** The shell's New-session button and the occupant's controls: the anchor's children, each matched once. */
@@ -129,9 +114,12 @@ describe('SidebarRoot.module.css', () => {
 
   it('moves the upper controls while the settings seat only fades', () => {
     const animation = 'rail-in 150ms var(--ds-ease-in-out) backwards'
+    // FORK sidebar-layout round 2: the wide non-darwin New Session capsule is
+    // folded into the footer ⋯ menu, so the shell renders no `.newSessionRow`
+    // host for upstream's session-action anchor — the row's animation rule is
+    // not part of this list.
     for (const selector of [
       '.railIn .iconButton',
-      ROW_CONTENT,
       '.railIn .regionArea',
     ]) {
       expect(declarations(selector)?.get('animation')).toBe(animation)
@@ -143,24 +131,6 @@ describe('SidebarRoot.module.css', () => {
       /@keyframes rail-in\s*\{\s*from\s*\{\s*opacity: 0;\s*transform: translateX\(49px\);\s*}\s*}/,
     )
     expect(css).toMatch(/@keyframes rail-fade-in\s*\{\s*from\s*\{\s*opacity: 0;\s*}\s*}/)
-  })
-
-  it('fades the New Session row through its slot anchor without reaching into either button', () => {
-    // The row renders its content through the HOC slot, so the renderer's
-    // display:contents anchor is the row's only child; the shell's New-session
-    // button and the occupant's own controls are the anchor's children.
-    expect(declarations(ROW_CONTENT)?.get('animation')).toBe('rail-in 150ms var(--ds-ease-in-out) backwards')
-    expect(reducedMotion()).toContain(ROW_CONTENT)
-    for (const selector of declaredSelectors()) {
-      if (!selector.includes('.newSessionRow')) continue
-      // A bare star under the row matches the boxless anchor, so nothing animates.
-      expect(selector).not.toMatch(/\.newSessionRow\s*>\s*\*/u)
-      // A second bare star step also matches .newSessionLabelMask and
-      // .newSessionShortcut inside the button, which would run rail-in twice on it.
-      expect(selector).not.toMatch(/>\s*\*\s*>\s*\*/u)
-      expect(selector).not.toContain('.newSessionLabelMask')
-      expect(selector).not.toContain('.newSessionShortcut')
-    }
   })
 
   it('matches exactly the two buttons the slot anchor holds', () => {

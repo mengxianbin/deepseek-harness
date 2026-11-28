@@ -151,13 +151,18 @@ describe('SidebarRoot shell', () => {
   it('puts navigation and workspaces in one viewport without scrolling primary controls or the footer', () => {
     mountShell({ panels: [{ id: 'notes' as SidebarPanelMetadata['id'], order: 1, label: 'Notes' }] })
     const viewport = document.querySelector('[data-sidebar-scrollport]')!
-    expect(viewport.contains(screen.getByRole('navigation'))).toBe(true)
+    // FORK rail-more-sync-1030: neither state renders a navigation landmark —
+    // the panel entries live in the ⋯ menu the foot/rail anchor hosts, so the
+    // browsing region alone fills the viewport.
+    expect(screen.queryByRole('navigation')).toBeNull()
     expect(viewport.contains(screen.getByTestId('region'))).toBe(true)
-    for (const button of screen.getAllByRole('button', { name: 'New session' })) {
+    for (const button of screen.queryAllByRole('button', { name: 'New session' })) {
       expect(viewport.contains(button)).toBe(false)
     }
     expect(viewport.contains(screen.getByTestId('settings-seat'))).toBe(false)
-    expect(viewport.contains(screen.getByTestId('footer-action-seat'))).toBe(false)
+    // FORK footer-into-more-1031: the footer-action seat renders inside the
+    // ⋯ menu (a portal), so it is not mounted here at all — never in the viewport.
+    expect(screen.queryByTestId('footer-action-seat')).toBeNull()
   })
 
   it('hands the section a stable scroller hook bound to this sidebar viewport', () => {

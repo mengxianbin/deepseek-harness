@@ -383,50 +383,9 @@ describe('sidebar global panels', () => {
 const PINS_KEY = 'dsh.slot.manual-order.sidebar.panellist.v1'
 describe('sidebar entry actions in the footer menu', () => {
   it('renders probe rows after the data rows and routes open, pin, and dismiss', async () => {
-    const { runtime, locale, view } = await bench()
+    const { runtime, locale, layout, view } = await bench()
     await mountPanels(runtime, locale)
-    const navigation = await view.findByRole('navigation', { name: 'Global panels' })
-    expect(within(navigation).getAllByRole('button').map(row => row.textContent)).toEqual(['Beta panel', 'Alpha panel'])
-    await mountPanel(runtime, { id: PLUGINS, heading: 'Plugins content', label: 'Plugins', order: 0 })
-    await waitFor(() => {
-      expect(within(navigation).getAllByRole('button').map(row => row.textContent)).toEqual(['Plugins', 'Beta panel', 'Alpha panel'])
-    })
-    expect(runtime.slots.entries('main').map(entry => entry.options.key)).toEqual(['conversation', ALPHA, BETA, PLUGINS])
-  })
-
-  it('shows every panel when the stored list is not a string array', async () => {
-    localStorage.setItem(PINS_KEY, JSON.stringify({ unpinned: [ALPHA, 1] }))
-    const { runtime, locale, view } = await bench()
-    await mountPanels(runtime, locale)
-    const navigation = await view.findByRole('navigation', { name: 'Global panels' })
-    expect(within(navigation).getAllByRole('button').map(row => row.textContent)).toEqual(['Beta panel', 'Alpha panel'])
-  })
-
-  it('shows More and hides unpinned rows only while the actions list has registrations', async () => {
-    const { runtime, locale, view } = await bench()
-    const probe = await mountProbeActions(runtime)
-    expect(view.queryByRole('navigation')).toBeNull()
-    await mountPanels(runtime, locale)
-    const navigation = await view.findByRole('navigation', { name: 'Global panels' })
-    expect(within(navigation).getAllByRole('button').map(row => row.getAttribute('aria-label')))
-      .toEqual(['Beta panel', 'Unpin Beta panel from sidebar', 'Alpha panel', 'Unpin Alpha panel from sidebar', 'More'])
-    fireEvent.click(within(navigation).getByRole('button', { name: 'Unpin Alpha panel from sidebar' }))
-    expect(within(navigation).queryByRole('button', { name: 'Alpha panel' })).toBeNull()
-    expect(document.activeElement).toBe(within(navigation).getByRole('button', { name: 'More' }))
-    await probe.dispose()
-    await waitFor(() => { expect(within(navigation).queryByRole('button', { name: 'More' })).toBeNull() })
-    expect(within(navigation).getAllByRole('button').map(row => row.getAttribute('aria-label'))).toEqual(['Beta panel', 'Alpha panel'])
     await mountProbeActions(runtime)
-    await waitFor(() => { expect(within(navigation).queryByRole('button', { name: 'Alpha panel' })).toBeNull() })
-    expect(within(navigation).getByRole('button', { name: 'More' })).toBeTruthy()
-  })
-
-  it.each([false, true])('opens, pins, and dismisses through the More menu with collapsed=%s', async (collapsed) => {
-    const { runtime, locale, layout, view } = await bench(collapsed)
-    await mountPanels(runtime, locale)
-    await mountPanel(runtime, { id: PLUGINS, heading: 'Plugins content', label: 'Plugins', order: 0 })
-    await mountProbeActions(runtime)
-    const navigation = await view.findByRole('navigation', { name: 'Global panels' })
     const { menu } = await openPanelsMenu(view)
     const rows = within(menu)
     expect(rows.getAllByRole('menuitem').map(row => row.textContent))
@@ -444,25 +403,92 @@ describe('sidebar entry actions in the footer menu', () => {
     fireEvent.click(rows.getByRole('menuitem', { name: 'Open Alpha panel' }))
     expect(layout.selectPanel).toHaveBeenLastCalledWith(ALPHA)
     expect(view.getByRole('heading', { name: 'Alpha content' })).toBeTruthy()
-    await waitFor(() => { expect(within(navigation).queryByRole('button', { name: 'Alpha panel' })).toBeNull() })
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Pin Alpha panel' }))
-    const alphaRow = await within(navigation).findByRole('button', { name: 'Alpha panel' })
-    expect(alphaRow.getAttribute('aria-current')).toBe('page')
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Unpin Beta panel' }))
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Pin Beta panel' }))
-    expect(within(navigation).getAllByRole('button').map(row => row.getAttribute('aria-label'))
-      .filter(label => !label?.startsWith('Unpin ')))
-      .toEqual(['Plugins', 'Beta panel', 'Alpha panel', 'More'])
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Unpin Alpha panel' }))
-    await waitFor(() => { expect(within(navigation).queryByRole('button', { name: 'Alpha panel' })).toBeNull() })
+    await waitFor(() => { expect(view.queryByRole('menu')).toBeNull() })
+
+    // A late panel registration joins the main entries and leads the data rows
+    // in menu order (order zero beats Beta's ten and Alpha's twenty).
+    await mountPanel(runtime, { id: PLUGINS, heading: 'Plugins content', label: 'Plugins', order: 0 })
+    expect(runtime.slots.entries('main').map(entry => entry.options.key)).toEqual(['conversation', ALPHA, BETA, PLUGINS])
+    const again = await openPanelsMenu(view)
+    expect(within(again.menu).getAllByRole('menuitem').map(row => row.textContent)).toEqual(
+      ['Sign in to MiMo', 'New Session', 'Plugins', 'Beta panel', 'Alpha panel',
+        'Open Beta panel', 'Unpin Beta panel', 'Open Alpha panel', 'Unpin Alpha panel', 'Dismiss'])
+  })
+
+  it('shows every panel when the stored list is not a string array', async () => {
+    localStorage.setItem(PINS_KEY, JSON.stringify({ unpinned: [ALPHA, 1] }))
+    const { runtime, locale, view } = await bench()
+    await mountPanels(runtime, locale)
+    // The garbage list hides nothing: the ⋯ menu still lists every panel
+    // (upstream's nav-row assertion re-pointed at fork's menu model).
+    const { menu } = await openPanelsMenu(view)
+    expect(within(menu).getAllByRole('menuitem').map(row => row.textContent)).toEqual(
+      ['Sign in to MiMo', 'New Session', 'Beta panel', 'Alpha panel'])
+  })
+
+  it('keeps the ⋯ trigger standing and gates only the probe rows on the actions list (FORK rail-more-sync-1030)', async () => {
+    const { runtime, locale, view } = await bench()
+    expect(view.queryByRole('navigation')).toBeNull()
+    // The anchor is standing chrome: it never waits on the action seat.
+    expect(await view.findByRole('button', { name: 'More' })).toBeTruthy()
+    await mountPanels(runtime, locale)
+    const probe = await mountProbeActions(runtime)
+    const { menu } = await openPanelsMenu(view)
+    expect(within(menu).getAllByRole('menuitem').map(row => row.textContent)).toEqual(
+      ['Sign in to MiMo', 'New Session', 'Beta panel', 'Alpha panel',
+        'Open Beta panel', 'Unpin Beta panel', 'Open Alpha panel', 'Unpin Alpha panel', 'Dismiss'])
+    await probe.dispose()
+    await waitFor(() => { expect(view.queryByRole('menuitem', { name: 'Dismiss' })).toBeNull() })
+    // Only the probe rows leave: every panel stays listed — pins never hide a
+    // row from the menu (fork's full-reachability ruling).
+    expect(within(view.getByRole('menu')).getAllByRole('menuitem').map(row => row.textContent)).toEqual(
+      ['Sign in to MiMo', 'New Session', 'Beta panel', 'Alpha panel'])
+    expect(view.getByRole('button', { name: 'More' })).toBeTruthy()
+  })
+
+  it.each([false, true])('opens, pins, and dismisses through the More menu with collapsed=%s', async (collapsed) => {
+    const { runtime, locale, layout, view } = await bench(collapsed)
+    await mountPanels(runtime, locale)
+    await mountPanel(runtime, { id: PLUGINS, heading: 'Plugins content', label: 'Plugins', order: 0 })
+    await mountProbeActions(runtime)
+    let { menu } = await openPanelsMenu(view)
+    let rows = within(menu)
+    expect(rows.getAllByRole('menuitem').map(row => row.textContent))
+      .toEqual(['Sign in to MiMo', 'New Session', 'Plugins', 'Beta panel', 'Alpha panel',
+        'Open Beta panel', 'Unpin Beta panel', 'Open Alpha panel', 'Unpin Alpha panel', 'Dismiss'])
+
+    fireEvent.click(rows.getByRole('menuitem', { name: 'Unpin Alpha panel' }))
+    expect(rows.getByRole('menuitem', { name: 'Pin Alpha panel' })).toBeTruthy()
+    // FORK ruling: the ⋯ menu keeps full reachability — pins filter the rail launchers only.
+    expect(rows.getAllByRole('menuitem').map(row => row.textContent)).toEqual(['Sign in to MiMo', 'New Session', 'Plugins', 'Beta panel', 'Alpha panel',
+      'Open Beta panel', 'Unpin Beta panel', 'Open Alpha panel', 'Pin Alpha panel', 'Dismiss'])
+    fireEvent.click(rows.getByRole('menuitem', { name: 'Pin Alpha panel' }))
+    expect(rows.getByRole('menuitem', { name: 'Unpin Alpha panel' })).toBeTruthy()
+
+    fireEvent.click(rows.getByRole('menuitem', { name: 'Open Alpha panel' }))
+    expect(layout.selectPanel).toHaveBeenLastCalledWith(ALPHA)
     expect(view.getByRole('heading', { name: 'Alpha content' })).toBeTruthy()
-    expect(within(menu).getByRole('menuitem', { name: 'Open Alpha panel' }).getAttribute('aria-current')).toBe('page')
+    // FORK: the probe's Open action dismisses the menu (the data rows do too).
+    await waitFor(() => { expect(view.queryByRole('menu')).toBeNull() })
+    // Open peeks without touching the pin — the reopened menu still offers Unpin,
+    // and the active panel's Open row carries the current marker.
+    ;({ menu } = await openPanelsMenu(view))
+    rows = within(menu)
+    expect(rows.getByRole('menuitem', { name: 'Unpin Alpha panel' })).toBeTruthy()
+    expect(rows.getByRole('menuitem', { name: 'Open Alpha panel' }).getAttribute('aria-current')).toBe('page')
+
+    fireEvent.click(rows.getByRole('menuitem', { name: 'Unpin Alpha panel' }))
+    // Full reachability: the unpinned panel stays listed, and its content stays.
+    expect(rows.getByRole('menuitem', { name: 'Alpha panel' })).toBeTruthy()
+    expect(view.getByRole('heading', { name: 'Alpha content' })).toBeTruthy()
+    fireEvent.click(rows.getByRole('menuitem', { name: 'Pin Alpha panel' }))
+    expect(rows.getByRole('menuitem', { name: 'Unpin Alpha panel' })).toBeTruthy()
+
     act(() => { layout.selectPanel(BETA) })
     await waitFor(() => {
-      expect(within(menu).getByRole('menuitem', { name: 'Open Alpha panel' }).hasAttribute('aria-current')).toBe(false)
-      expect(within(menu).getByRole('menuitem', { name: 'Open Beta panel' }).getAttribute('aria-current')).toBe('page')
+      expect(within(view.getByRole('menu')).getByRole('menuitem', { name: 'Open Alpha panel' }).hasAttribute('aria-current')).toBe(false)
+      expect(within(view.getByRole('menu')).getByRole('menuitem', { name: 'Open Beta panel' }).getAttribute('aria-current')).toBe('page')
     })
-    await waitFor(() => { expect(within(navigation).queryByRole('button', { name: 'Alpha panel' })).toBeNull() })
   })
 
   it('drops the probe rows when its registration goes away', async () => {
@@ -575,67 +601,9 @@ describe('sidebar entry click analytics', () => {
   })
 })
 
-/** Trailing content that names the row state it receives; its visible count is decorative and its text describes the row. */
-function Count({ wide, active }: PropsRuntime<'sidebar.panellist.trailing'>) {
-  return (
-    <span data-testid="count" data-wide={wide} data-active={active}>
-      <span aria-hidden="true">{wide ? '6' : '•'}</span>
-      <span>6 waiting</span>
-    </span>
-  )
-}
-
-async function mountCount(runtime: SlotTestRuntime, id: MainPanelId) {
-  return runtime.mount({
-    inject: ['slots'],
-    apply(ctx: Context) {
-      ctx.slots.inject('sidebar.panellist.trailing', () => ctx.slots.register({ name: 'sidebar.panellist.trailing', id }, Count))
-    },
-  })
-}
-
-describe('sidebar panel trailing content', () => {
-  it('shows a panel registration in its own row only, describing the row button, and follows the selection', async () => {
-    const { runtime, locale, view } = await bench()
-    await mountPanels(runtime, locale)
-    await mountCount(runtime, ALPHA)
-
-    const alpha = await view.findByRole('button', { name: 'Alpha panel' })
-    const beta = view.getByRole('button', { name: 'Beta panel' })
-    expect(alpha.getAttribute('aria-describedby')).not.toBeNull()
-    const described = document.getElementById(alpha.getAttribute('aria-describedby') ?? '')
-    expect(described?.textContent).toBe('66 waiting')
-    expect(within(described as HTMLElement).getByTestId('count').dataset).toMatchObject({ wide: 'true', active: 'false' })
-    expect(document.getElementById(beta.getAttribute('aria-describedby') ?? '')?.textContent).toBe('')
-    expect(view.getAllByTestId('count')).toHaveLength(1)
-    // The content sits inside the row button after its title; the slot wrappers are inline spans, so nesting stays valid.
-    expect(alpha.contains(described)).toBe(true)
-    expect(described?.previousElementSibling?.textContent).toBe('Alpha panel')
-    const wrappers = [...(described?.querySelectorAll('[data-slot]') ?? [])]
-    expect(wrappers.length).toBeGreaterThan(0)
-    expect(wrappers.every(wrapper => wrapper.tagName === 'SPAN')).toBe(true)
-    expect(described?.querySelector('div')).toBeNull()
-
-    fireEvent.click(alpha)
-    await waitFor(() => { expect(view.getByTestId('count').dataset.active).toBe('true') })
-  })
-
-  it('tells the collapsed rail it is not wide', async () => {
-    const { runtime, locale, view } = await bench(true)
-    await mountPanels(runtime, locale)
-    await mountCount(runtime, BETA)
-
-    await waitFor(() => { expect(view.getByTestId('count').dataset.wide).toBe('false') })
-  })
-
-  it('removes the content when its registering fiber is disposed', async () => {
-    const { runtime, locale, view } = await bench()
-    await mountPanels(runtime, locale)
-    const count = await mountCount(runtime, ALPHA)
-    await view.findByTestId('count')
-
-    await act(async () => { await count.dispose() })
-    expect(view.queryByTestId('count')).toBeNull()
-    expect(view.getByRole('button', { name: 'Alpha panel' })).toBeTruthy()
-  })
-})
+// FORK sidebar-layout round 2: upstream's `sidebar.panel trailing content`
+// describe (row-button descriptions, wide/active datasets, dispose lifecycle)
+// retired with the nav rows — the ⋯ menu rows carry icon + label only, so no
+// row hosts trailing content here. The `sidebar.panellist.trailing` seat and
+// its `sidebar.panel.trailing` factory stay declared for registrations; wiring
+// a menu-row trailing cell is a separate piece of work.

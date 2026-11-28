@@ -33,36 +33,27 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
         />
       </button>
     </div>
-    <div
-      class="newSessionRow"
+    <button
+      aria-label="New session"
+      class="newSession"
+      type="button"
     >
-      <div
-        data-slot="sidebar.session.action"
-        style="display: contents;"
+      <span
+        class="newSessionLabelMask"
       >
-        <button
-          aria-label="New session"
-          class="newSession"
-          type="button"
+        <span
+          class="newSessionContent"
         >
-          <span
-            class="newSessionLabelMask"
-          >
-            <span
-              class="newSessionContent"
-            >
-              <svg
-                aria-hidden="true"
-                data-content="6e5e38f3"
-                data-icon="dsw-icon-new-chat-outline-regular"
-                height="16"
-                width="16"
-              />
-            </span>
-          </span>
-        </button>
-      </div>
-    </div>
+          <svg
+            aria-hidden="true"
+            data-content="6e5e38f3"
+            data-icon="dsw-icon-new-chat-outline-regular"
+            height="16"
+            width="16"
+          />
+        </span>
+      </span>
+    </button>
     <div
       class="scrollRegion"
     >
@@ -96,6 +87,7 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
       </div>
       <span
         class="root panelMoreSlot panelMoreRail"
+        style="anchor-name: --dsh-menu-trigger-rp;"
       >
         <button
           aria-expanded="false"
@@ -222,41 +214,6 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
       </button>
     </div>
     <div
-      class="newSessionRow"
-    >
-      <div
-        data-slot="sidebar.session.action"
-        style="display: contents;"
-      >
-        <button
-          aria-label="New session"
-          class="newSession"
-          type="button"
-        >
-          <span
-            class="newSessionLabelMask"
-          >
-            <span
-              class="newSessionContent"
-            >
-              <svg
-                aria-hidden="true"
-                data-content="532cf99a"
-                data-icon="dsw-icon-new-chat-outline-medium"
-                height="14"
-                width="14"
-              />
-              <span
-                class="newSessionLabel wide"
-              >
-                New Session
-              </span>
-            </span>
-          </span>
-        </button>
-      </div>
-    </div>
-    <div
       class="scrollRegion"
     >
       <div
@@ -293,6 +250,7 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
         </div>
         <span
           class="root panelMoreSlot"
+          style="anchor-name: --dsh-menu-trigger-rl;"
         >
           <button
             aria-expanded="false"
@@ -349,36 +307,27 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
         />
       </button>
     </div>
-    <div
-      class="newSessionRow"
+    <button
+      aria-label="New session"
+      class="newSession"
+      type="button"
     >
-      <div
-        data-slot="sidebar.session.action"
-        style="display: contents;"
+      <span
+        class="newSessionLabelMask"
       >
-        <button
-          aria-label="New session"
-          class="newSession"
-          type="button"
+        <span
+          class="newSessionContent"
         >
-          <span
-            class="newSessionLabelMask"
-          >
-            <span
-              class="newSessionContent"
-            >
-              <svg
-                aria-hidden="true"
-                data-content="6e5e38f3"
-                data-icon="dsw-icon-new-chat-outline-regular"
-                height="18"
-                width="18"
-              />
-            </span>
-          </span>
-        </button>
-      </div>
-    </div>
+          <svg
+            aria-hidden="true"
+            data-content="6e5e38f3"
+            data-icon="dsw-icon-new-chat-outline-regular"
+            height="18"
+            width="18"
+          />
+        </span>
+      </span>
+    </button>
     <div
       class="scrollRegion"
     >
@@ -412,6 +361,7 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
       </div>
       <span
         class="root panelMoreSlot panelMoreRail"
+        style="anchor-name: --dsh-menu-trigger-rd;"
       >
         <button
           aria-expanded="false"
@@ -538,41 +488,6 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
       </button>
     </div>
     <div
-      class="newSessionRow"
-    >
-      <div
-        data-slot="sidebar.session.action"
-        style="display: contents;"
-      >
-        <button
-          aria-label="New session"
-          class="newSession"
-          type="button"
-        >
-          <span
-            class="newSessionLabelMask"
-          >
-            <span
-              class="newSessionContent"
-            >
-              <svg
-                aria-hidden="true"
-                data-content="532cf99a"
-                data-icon="dsw-icon-new-chat-outline-medium"
-                height="14"
-                width="14"
-              />
-              <span
-                class="newSessionLabel wide"
-              >
-                New Session
-              </span>
-            </span>
-          </span>
-        </button>
-      </div>
-    </div>
-    <div
       class="scrollRegion"
     >
       <div
@@ -609,6 +524,7 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
         </div>
         <span
           class="root panelMoreSlot"
+          style="anchor-name: --dsh-menu-trigger-r5;"
         >
           <button
             aria-expanded="false"
@@ -736,41 +652,6 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
       </button>
     </div>
     <div
-      class="newSessionRow"
-    >
-      <div
-        data-slot="sidebar.session.action"
-        style="display: contents;"
-      >
-        <button
-          aria-label="新建会话"
-          class="newSession"
-          type="button"
-        >
-          <span
-            class="newSessionLabelMask"
-          >
-            <span
-              class="newSessionContent"
-            >
-              <svg
-                aria-hidden="true"
-                data-content="532cf99a"
-                data-icon="dsw-icon-new-chat-outline-medium"
-                height="14"
-                width="14"
-              />
-              <span
-                class="newSessionLabel wide"
-              >
-                新会话
-              </span>
-            </span>
-          </span>
-        </button>
-      </div>
-    </div>
-    <div
       class="scrollRegion"
     >
       <div
@@ -807,6 +688,7 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
         </div>
         <span
           class="root panelMoreSlot"
+          style="anchor-name: --dsh-menu-trigger-r1;"
         >
           <button
             aria-expanded="false"
