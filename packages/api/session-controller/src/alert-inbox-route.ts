@@ -19,6 +19,16 @@ import { ALERT_INBOX_PATH } from './types.ts'
 /** Bounded body read — the panel posts two fields; anything bigger is a mistake. */
 const MAX_BODY_BYTES = 16 * 1024
 
+/**
+ * Charset guidance: which hop refused and what the sender must change. Wording
+ * matches the shared `E_CHARSET_INVALID` text in dsh-web's shared/host/http.ts,
+ * so one grep finds the code across both repos.
+ */
+const CHARSET_GUIDANCE =
+  'E_CHARSET_INVALID: request body is not valid UTF-8 (expected UTF-8, RFC 8259). ' +
+  'This host never transcodes; the bad bytes were noticed at the receiving hop. ' +
+  'Fix the sender: encode the JSON body as UTF-8 (Buffer.from(JSON.stringify(v), "utf8")) and send charset=utf-8.'
+
 function send(response: ServerResponse, status: number, payload: unknown): void {
   const body = JSON.stringify(payload)
   response.writeHead(status, {
@@ -28,7 +38,16 @@ function send(response: ServerResponse, status: number, payload: unknown): void 
   response.end(body)
 }
 
-async function readBody(request: IncomingMessage): Promise<string | undefined> {
+/**
+ * Collect the request body as strict UTF-8 text.
+ *
+ * `undefined` means past the size ceiling (stream drained) and `null` means the
+ * bytes were not valid UTF-8: the charset guard refuses a legacy-coded body
+ * instead of substituting U+FFFD into the `id` it would then look up.
+ * @param request - the admitted inbound request.
+ * @returns the decoded body, or the refusal reason as above.
+ */
+async function readBody(request: IncomingMessage): Promise<string | undefined | null> {
   const chunks: Buffer[] = []
   let size = 0
   for await (const chunk of request) {
@@ -37,7 +56,11 @@ async function readBody(request: IncomingMessage): Promise<string | undefined> {
     if (size > MAX_BODY_BYTES) return undefined
     chunks.push(buffer)
   }
-  return Buffer.concat(chunks).toString('utf8')
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks))
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -68,6 +91,10 @@ export async function alertInboxRequest(
   const raw = await readBody(request)
   if (raw === undefined) {
     send(response, 413, { ok: false, error: 'body-too-large' })
+    return
+  }
+  if (raw === null) {
+    send(response, 400, { ok: false, code: 'E_CHARSET_INVALID', error: CHARSET_GUIDANCE })
     return
   }
   let id: unknown
