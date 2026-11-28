@@ -7,7 +7,7 @@ import type {} from '@deepseek-ai/dsh-agent/types'
 import type {} from '@deepseek-ai/dsh-tool-executor-ptc/types'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, ToolSchema } from '@deepseek-ai/dsh-llm'
-import type { AskUserQuestionAnswerItem, AskUserQuestionItem, AskUserQuestionOption, PendingUserQuestion, SettledUserQuestion, UserQuestionProjectionView } from './types.ts'
+import type { AskUserQuestionAnswerAttachment, AskUserQuestionAnswerItem, AskUserQuestionItem, AskUserQuestionOption, PendingUserQuestion, SettledUserQuestion, UserQuestionProjectionView } from './types.ts'
 
 /**
  * The pure fold state: whether the request header in effect declares the
@@ -86,14 +86,29 @@ const pendingQuestionsSchema: z.ZodType<readonly PendingUserQuestion[]> = z.arra
   }
 })
 
+// ask-panel-retire-1127 刀②: optional on purpose — every record written
+// before the attachment slot existed must keep parsing (strict means the
+// field must be DECLARED when present, not that it is required).
+const answerAttachmentSchema = z.object({
+  path: z.string().min(1),
+  name: z.string().optional(),
+  mimeType: z.string().optional(),
+}).strict().transform((attachment): AskUserQuestionAnswerAttachment => ({
+  path: attachment.path,
+  ...(attachment.name === undefined ? {} : { name: attachment.name }),
+  ...(attachment.mimeType === undefined ? {} : { mimeType: attachment.mimeType }),
+}))
+
 const answerSchema = z.object({
   id: z.string(),
   selected: z.array(z.string()),
   custom: z.string().optional(),
+  attachments: z.array(answerAttachmentSchema).optional(),
 }).strict().transform((answer): AskUserQuestionAnswerItem => ({
   id: answer.id,
   selected: answer.selected,
   ...(answer.custom === undefined ? {} : { custom: answer.custom }),
+  ...(answer.attachments === undefined ? {} : { attachments: answer.attachments }),
 }))
 
 const settledQuestionsSchema: z.ZodType<readonly SettledUserQuestion[]> = z.array(z.object({

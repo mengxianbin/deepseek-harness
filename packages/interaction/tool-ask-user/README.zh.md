@@ -41,7 +41,7 @@ kind: "package-reference"
 
 ### 何时调用该工具
 
-发送一个或多个问题，每个问题的 `id` 在本次调用内必须唯一；回答会带回这些 id。推荐选项放在首位，并在标签末尾追加 `(Recommended)`。可选的单次调用 `timeout` 以秒为单位；如果没有回答就无法安全继续，请使用 `-1`。超时绝不表示批准。在 Web 卡片中，开始编辑或选择“慢慢回答”也会让该 Client 的等待持续到提交或取消。
+发送一个或多个问题，每个问题的 `id` 在本次调用内必须唯一；回答会带回这些 id。推荐选项放在首位，并在标签末尾追加 `(Recommended)`。可选的单次调用 `timeout` 以秒为单位；如果没有回答就无法安全继续，请使用 `-1`。超时绝不表示批准。在 Web 作答面中，开始编辑或选择“慢慢回答”也会让该 Client 的等待持续到提交或取消。
 
 ```json
 {
@@ -92,7 +92,7 @@ Legacy 调用和 `timeout: -1` 调用会等待回答或取消；没有 answerer 
 
 ### 消费方角色
 
-插件只注册一个工具定义。Legacy 模式调用 `ask()`；timed 模式对正数期限调用 `askTimed()`，对 `-1` 调用 `ask()`。两者都向 `ctx.userQuestions` 传递调用方 agent 和轮次信号。Timed 请求在 `wait` 中包含工具调用 id，Client 因此可以重新打开对应卡片。投影从记录的工具 schema 的 `timeout` 字段识别 timed 原生调用，即使某次调用省略该参数也一样。
+插件只注册一个工具定义。Legacy 模式调用 `ask()`；timed 模式对正数期限调用 `askTimed()`，对 `-1` 调用 `ask()`。两者都向 `ctx.userQuestions` 传递调用方 agent 和轮次信号。Timed 请求在 `wait` 中包含工具调用 id，Client 因此可以重新打开对应作答面。投影从记录的工具 schema 的 `timeout` 字段识别 timed 原生调用，即使某次调用省略该参数也一样。
 
 ### 结果渲染
 

@@ -8,7 +8,7 @@ import type {
   ToolResultNode, UseDisclosure,
 } from '@deepseek-ai/dsh-client-ui-chat/client'
 import type { MessageImageLoader, MessageImageSource } from '@deepseek-ai/dsh-client-ui-conversation/client'
-import type { AskUserQuestionAnswerItem, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions/types'
+import type {} from '@deepseek-ai/dsh-user-questions/types'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -90,23 +90,15 @@ export type ToolCallViewProps = PropsRuntime<'tool.call.toolview'>
 export type StartedToolCallViewProps = Exclude<ToolCallViewProps, { readonly phase: 'preparing' }>
 
 /**
- * One settled `ask_user_question` call as its transcript row read it. The row
- * reads the questions from the recorded call JSON, and the answers from
- * whichever recorded them: its own result when the answer arrived in time, or
- * the `userQuestions` projection when a late reply settled the call.
- */
-export interface UserQuestionRecord {
-  /** The call's questions, with the option lists the panel renders. */
-  readonly questions: readonly AskUserQuestionItem[]
-  /** The recorded answer batch; an item with no selection and no custom text was skipped. */
-  readonly answers: readonly AskUserQuestionAnswerItem[]
-}
-
-/**
  * Optional answer-panel provider consumed by the ask-question row. A timed
  * `ask_user_question` call stays answerable after its result is recorded, and
  * its panel can be closed, so the transcript row is the way back to it. A
  * composition without a question UI has no panel to show.
+ *
+ * ask-panel-retire-1127: the read-only record panel is retired with the ask
+ * card — a settled call reads back through the row's own input/output
+ * sections and the `question-reply` conversation bubble, so `reveal` is the
+ * only verb left.
  */
 export interface UserQuestionPanels {
   /**
@@ -117,16 +109,6 @@ export interface UserQuestionPanels {
    * @returns whether a panel for that call was there to show.
    */
   reveal(sessionId: SessionIdOf, callId: string): boolean
-  /**
-   * Show one settled call's recorded answers as a read-only panel, ahead of
-   * any other pending question. Closing that panel drops it for good; the row
-   * builds it again from the same record.
-   * @param sessionId - Session the call belongs to.
-   * @param callId - `ask_user_question` call whose record to show.
-   * @param record - the call's questions and recorded answers.
-   * @returns whether the panel was shown.
-   */
-  review(sessionId: SessionIdOf, callId: string, record: UserQuestionRecord): boolean
 }
 
 declare module '@deepseek-ai/cordis' {

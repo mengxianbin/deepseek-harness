@@ -2,26 +2,28 @@
 import { DisclosureRow, IconInspectOutlineRegular, IconQuestionOutlineRegular, TextShimmer } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ToolRowProps } from './ToolRow.tsx'
 import { formatToolBody } from '../models/tool-call-model.ts'
-import { AskQuestionCard } from './AskQuestionCard.tsx'
 import css from './ToolRow.module.css'
 import questionCss from './QuestionToolRow.module.css'
 
 type QuestionToolRowProps = Pick<ToolRowProps,
-  'useDisclosure' | 't' | 'summary' | 'bodyRaw' | 'output' | 'askQuestion' | 'state' | 'inspect'> & {
+  'useDisclosure' | 't' | 'summary' | 'bodyRaw' | 'output' | 'state' | 'inspect'> & {
     readonly openPanel: () => boolean
     readonly panelLabel: string
   }
 
 /**
  * Render a question with its answer-panel entry point.
+ * ask-panel-retire-1127: the ask record card is retired — the expanded body
+ * is always the raw input/output sections (the readable answer echo lives in
+ * the `question-reply` conversation bubble).
  * @param props - Question transcript, panel action, and disclosure state.
  * @returns The question's summary and optional expanded record.
  */
 export function QuestionToolRow({
-  useDisclosure, t, summary, bodyRaw, output, askQuestion, state, inspect, openPanel, panelLabel,
+  useDisclosure, t, summary, bodyRaw, output, state, inspect, openPanel, panelLabel,
 }: QuestionToolRowProps) {
   const { expanded, toggle } = useDisclosure()
-  const expandable = bodyRaw != null || output != null || askQuestion != null
+  const expandable = bodyRaw != null || output != null
   const open = expanded && expandable
   return (
     <div className={css.root} data-variant="others" data-tool="ask_user_question" data-state={state}>
@@ -39,9 +41,9 @@ export function QuestionToolRow({
           <button type="button" className={questionCss.panelButton}
             onClick={(event) => {
               event.stopPropagation()
-              // A provider with no panel falls back to the record — but only
-              // when it is not already on screen, so the pill never collapses
-              // the auto-opened transcript it is supposed to reveal.
+              // A provider with no panel falls back to the expanded raw
+              // sections — but only when they are not already on screen, so
+              // the pill never collapses what it is supposed to reveal.
               if (!openPanel() && !open) toggle()
             }}
             onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') event.stopPropagation() }}>
@@ -50,7 +52,7 @@ export function QuestionToolRow({
         </>}
       >
         {open && <div className={css.bodyWrap}>
-          {askQuestion != null ? <AskQuestionCard card={askQuestion} /> : <div className={css.ioCard}>
+          <div className={css.ioCard}>
             {bodyRaw != null && <div className={css.ioSection}>
               <span className={css.ioLabel}>{t('row.input')}</span>
               <span className={css.ioText}>{formatToolBody('others', bodyRaw)}</span>
@@ -59,7 +61,7 @@ export function QuestionToolRow({
             {output != null && <div className={css.ioSection}>
               <span className={css.ioLabel}>{t('row.output')}</span><span className={css.ioText}>{output}</span>
             </div>}
-          </div>}
+          </div>
           {inspect !== undefined && <button type="button" className={css.inspectButton} onClick={inspect}>
             <IconInspectOutlineRegular />{t('row.inspect')}
           </button>}

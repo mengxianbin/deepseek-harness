@@ -1,38 +1,16 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback } from 'react'
 import { IconQuestionOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent/types'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 // Also merges the userQuestions key into SessionProjectionMap for useProjection.
-import type {
-  AskUserQuestionAnswerItem, AskUserQuestionItem, AskUserQuestionOption,
-} from '@deepseek-ai/dsh-user-questions/types'
-import type { ToolCallViewProps, UserQuestionRecord } from '../../contract/slots.ts'
-import type {
-  AskQuestionCardModel, QuestionCardOption, UnansweredQuestionCardItem,
-} from '../models/ask-question-card-model.ts'
+import type { AskUserQuestionAnswerItem } from '@deepseek-ai/dsh-user-questions/types'
+import type { ToolCallViewProps } from '../../contract/slots.ts'
 import { singleResultText } from '../models/raw-tool-call.ts'
 import { toolRowModel } from '../models/tool-call-model.ts'
 import { ToolRow } from '../components/ToolRow.tsx'
 import { QuestionToolRow } from '../components/QuestionToolRow.tsx'
 import { CONVERSATION_NS as NS } from '../../locale.ts'
-
-/** One paired question, its visible answer lines, and every offered option. */
-interface AnsweredQuestion {
-  id: string
-  question: string
-  answers: string[]
-  options: QuestionCardOption[]
-}
-
-/** Everything a recorded answer batch puts on its row. */
-interface AnswerPresentation {
-  summary: string
-  /** The paired transcript card; absent when pairing the batch would be ambiguous. */
-  transcript: AskQuestionCardModel | null
-  /** Material for the read-only panel; absent whenever the transcript card is, since both render the same pairing. */
-  record: UserQuestionRecord | undefined
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -47,11 +25,13 @@ function parseJson(text: string): unknown {
 }
 
 /**
- * Answer records plus the optional card-level note from result JSON; null
- * when the result is malformed (ask-focus-restore-1125 裁定 D: the note is
- * read beside the batch it rides with, in-time or from a late reply).
+ * Answer records from result JSON; null when the result is malformed.
+ * ask-panel-retire-1127: the record card is retired with the ask panel — the
+ * batch still feeds the row's answered-count summary, while the readable
+ * record lives in the row's input/output sections and the `question-reply`
+ * conversation bubble.
  */
-function answerBatchOf(text: string): { answers: AskUserQuestionAnswerItem[]; note?: string } | null {
+function answerBatchOf(text: string): { answers: AskUserQuestionAnswerItem[] } | null {
   const parsed = parseJson(text)
   if (!isRecord(parsed)) return null
   const answers = parsed.answers
@@ -68,12 +48,11 @@ function answerBatchOf(text: string): { answers: AskUserQuestionAnswerItem[]; no
       ...(answer.custom === undefined ? {} : { custom: answer.custom }),
     })
   }
-  const note = typeof parsed.note === 'string' && parsed.note !== '' ? parsed.note : undefined
-  return { answers: entries, ...(note === undefined ? {} : { note }) }
+  return { answers: entries }
 }
 
-/** Answers plus note from a submitted steer that still awaits admission to a step. */
-function queuedAnswerBatch(message: unknown, callId: string): { answers: AskUserQuestionAnswerItem[]; note?: string } | null {
+/** Answers from a submitted steer that still awaits admission to a step. */
+function queuedAnswerBatch(message: unknown, callId: string): { answers: AskUserQuestionAnswerItem[] } | null {
   if (!isRecord(message) || !Array.isArray(message.content)) return null
   const content: unknown = message.content[0]
   if (!isRecord(content) || content.type !== 'text' || typeof content.text !== 'string') return null
@@ -82,142 +61,13 @@ function queuedAnswerBatch(message: unknown, callId: string): { answers: AskUser
   return answerBatchOf(content.text)
 }
 
-/** One question's choices from call JSON; absent when any entry is malformed. */
-function optionEntries(value: unknown): AskUserQuestionOption[] | undefined {
-  if (!Array.isArray(value)) return undefined
-  const options: AskUserQuestionOption[] = []
-  for (const option of value) {
-    if (!isRecord(option) || typeof option.label !== 'string') return undefined
-    options.push({
-      label: option.label,
-      ...(typeof option.description === 'string' ? { description: option.description } : {}),
-    })
-  }
-  return options
-}
-
-/**
- * One question's options as card data, each marked with whether the recorded
- * answer chose it, so unchosen choices stay readable after the interaction.
- * @param question - the validated call question.
- * @param selected - option labels the answer batch recorded for it.
- * @returns the offered options in asker order.
- */
-function cardOptions(question: AskUserQuestionItem, selected: readonly string[] = []): QuestionCardOption[] {
-  return (question.options ?? []).map(option => ({
-    label: option.label,
-    ...(option.description === undefined ? {} : { description: option.description }),
-    selected: selected.includes(option.label),
-  }))
-}
-
-/**
- * Card items for questions no answer reached yet, carrying their options.
- * @param questions - the validated call questions.
- * @returns the unanswered transcript items.
- */
-function unansweredItems(questions: readonly AskUserQuestionItem[]): UnansweredQuestionCardItem[] {
-  return questions.map(question => ({
-    id: question.id,
-    question: question.question,
-    options: cardOptions(question),
-  }))
-}
-
-/**
- * Questions from call JSON; null when pairing with answers would be ambiguous.
- * The optional presentation fields are carried for the read-only answer panel,
- * which renders the same option lists the user chose from; a malformed one is
- * dropped rather than failing the whole call, because the transcript card needs
- * only the id and the question text.
- */
-function questionEntries(argsRaw: string): AskUserQuestionItem[] | null {
-  const parsed = parseJson(argsRaw)
-  if (!isRecord(parsed) || !Array.isArray(parsed.questions) || parsed.questions.length === 0) return null
-  const questions: AskUserQuestionItem[] = []
-  const ids = new Set<string>()
-  for (const question of parsed.questions) {
-    if (!isRecord(question)
-      || typeof question.id !== 'string'
-      || typeof question.question !== 'string'
-      || ids.has(question.id)) return null
-    ids.add(question.id)
-    const options = optionEntries(question.options)
-    questions.push({
-      id: question.id,
-      question: question.question,
-      ...(typeof question.header === 'string' ? { header: question.header } : {}),
-      ...(typeof question.detail === 'string' ? { detail: question.detail } : {}),
-      ...(options === undefined ? {} : { options }),
-      // The tool schema spells the multi-select flag in snake case.
-      ...(typeof question.multi_select === 'boolean' ? { multiSelect: question.multi_select } : {}),
-    })
-  }
-  return questions
-}
-
-/** Pair questions with result entries by their echoed stable ids. */
-function pairAnswers(
-  questions: readonly AskUserQuestionItem[],
-  answers: readonly AskUserQuestionAnswerItem[],
-): AnsweredQuestion[] | null {
-  if (questions.length !== answers.length) return null
-  const byId = new Map<string, AskUserQuestionAnswerItem>()
-  for (const answer of answers) {
-    if (byId.has(answer.id)) return null
-    byId.set(answer.id, answer)
-  }
-  const paired: AnsweredQuestion[] = []
-  for (const question of questions) {
-    const answer = byId.get(question.id)
-    if (answer === undefined) return null
-    paired.push({
-      id: question.id,
-      question: question.question,
-      answers: [
-        ...answer.selected,
-        ...(answer.custom === undefined || answer.custom === '' ? [] : [answer.custom]),
-      ],
-      options: cardOptions(question, answer.selected),
-    })
-  }
-  return paired
-}
-
-/**
- * Answer summary, transcript content, and panel material from one recorded
- * answer batch, whether the result carried it in time or a late reply did.
- * @param questions - The call's questions, or null when they failed validation.
- * @param answers - The recorded answer batch.
- * @param t - Row translator.
- * @param note - The batch's card-level remark, when it carried one.
- * @returns What the answered row shows.
- */
-function answeredPresentation(
-  questions: readonly AskUserQuestionItem[] | null,
-  answers: readonly AskUserQuestionAnswerItem[],
-  t: AskQuestionRowProps['t'],
-  note?: string,
-): AnswerPresentation {
+/** Answered-count summary of one recorded batch. */
+function answeredCountSummary(answers: readonly AskUserQuestionAnswerItem[], t: AskQuestionRowProps['t']): string {
   const answered = answers.filter(answer => answer.selected.length > 0 || (answer.custom ?? '') !== '').length
-  const paired = questions === null ? null : pairAnswers(questions, answers)
-  return {
-    summary: t('ask.answered', { answered, total: answers.length }),
-    transcript: paired === null ? null : {
-      kind: 'answered',
-      questions: paired,
-      skippedLabel: t('ask.skipped'),
-      ...(note === undefined || note === '' ? {} : { note: { label: t('ask.noteLabel'), text: note } }),
-    },
-    // The read-only panel renders the option lists the user chose from and
-    // looks each answer up by question id, so a batch this row cannot pair
-    // unambiguously gets no panel either: blank or dropped answers would read
-    // as choices the user made.
-    record: paired === null || questions === null ? undefined : { questions, answers },
-  }
+  return t('ask.answered', { answered, total: answers.length })
 }
 
-/** Best-effort answered-count summary when strict transcript pairing fails. */
+/** Best-effort answered-count summary when strict batch parsing fails. */
 function answeredSummary(text: string, t: AskQuestionRowProps['t']): string | null {
   const parsed = parseJson(text)
   if (!isRecord(parsed)) return null
@@ -235,7 +85,7 @@ function isPendingResult(text: string): boolean {
   return isRecord(parsed) && parsed.pending === true && typeof parsed.callId === 'string'
 }
 
-/** Injected panel verbs for the row's own Session, filled by the optional panel provider. */
+/** Injected panel verb for the row's own Session, filled by the optional panel provider. */
 interface AskQuestionPanelInjected {
   /**
    * Show one call's answer panel in the composer.
@@ -243,20 +93,18 @@ interface AskQuestionPanelInjected {
    * @returns whether a panel for that call was there to show.
    */
   revealPanel: (callId: string) => boolean
-  /**
-   * Show one settled call's recorded answers as a read-only panel.
-   * @param callId - the row's own `ask_user_question` call.
-   * @param record - the call's questions and recorded answers, read from this row.
-   * @returns whether a panel provider was there to show it.
-   */
-  reviewPanel: (callId: string, record: UserQuestionRecord) => boolean
 }
 
 type AskQuestionRowProps = ToolCallViewProps & PropsLocale<'conversation'> & InjectFace<AskQuestionPanelInjected>
 
-/** Summarizes a pending, answered, cancelled, or interrupted question set. */
+/**
+ * Summarizes a pending, answered, cancelled, or interrupted question set.
+ * ask-panel-retire-1127: the transcript card and the read-only record panel
+ * are retired — the row keeps its summary/state, falls back to the raw
+ * input/output sections, and only an answerable call keeps the reopen action.
+ */
 export function AskQuestionRow({
-  callId, toolName, block, inspect, useDisclosure, useProjection, revealPanel, reviewPanel, t,
+  callId, toolName, block, inspect, useDisclosure, useProjection, revealPanel, t,
 }: AskQuestionRowProps) {
   const model = toolRowModel(toolName, block)
   // The `userQuestions` projection lists exactly the timed calls that can still
@@ -270,12 +118,12 @@ export function AskQuestionRow({
   // The same projection settles every answered timed call with its batch: the
   // one its own result carried, or the one a late reply carried after the
   // result recorded the timeout. A legacy call is never settled there, so its
-  // answers come from its result text alone, without a panel to read back.
+  // answers come from its result text alone.
   const settled = useProjection('userQuestions', view =>
     view?.settled.find(row => row.callId === callId))
   // A continued call stays answerable until its steered reply is admitted.
-  // Select the durable Inbox entry so its submitted answers can be reviewed
-  // read-only during that interval, including after a browser reconnect.
+  // Select the durable Inbox entry so the queued answers can keep the row's
+  // summary accurate during that interval, including after a browser reconnect.
   const queuedReply = useProjection('inbox', (view) => {
     const matches = (message: unknown): boolean => {
       const source = isRecord(message) ? message.source : undefined
@@ -291,154 +139,75 @@ export function AskQuestionRow({
   // failed shape, and the abort keeps the shared stopped (amber) semantics of
   // any other interrupted tool call.
   const code = 'kind' in block ? block.error?.code : undefined
-  const argsRaw = model.bodyRaw ?? ''
   let summary = model.summary
   let state = model.state
-  let transcript: AskQuestionCardModel | null = null
-  // An answerable call reopens its panel, a queued reply reveals the row's
-  // read-only transcript, and a settled call opens a read-only panel.
+  // An answerable call reopens its panel; everything else reads as a plain row.
   let rowAction: (() => boolean) | undefined
-  let rowActionLabel = t('ask.reopen')
+  const rowActionLabel = t('ask.reopen')
   if (code === 'ASK_CANCELLED') {
     summary = t('ask.cancelled')
     state = 'ok'
-    const questions = questionEntries(argsRaw)
-    if (questions !== null) {
-      transcript = { kind: 'unanswered', questions: unansweredItems(questions), verdict: t('ask.cancelledDetail') }
-    }
   } else if (code === 'ASK_ABORTED') {
     summary = t('ask.interrupted')
     state = 'stopped'
-    const questions = questionEntries(argsRaw)
-    if (questions !== null) {
-      transcript = { kind: 'unanswered', questions: unansweredItems(questions), verdict: t('ask.interruptedDetail') }
-    }
   } else if (model.state === 'running') {
     summary = t('ask.waiting')
-    // The waiting row reads the questions too: the composer card can be
-    // closed or hidden, and the timeline must still say what is being asked.
-    const questions = questionEntries(argsRaw)
-    if (questions !== null) {
-      transcript = { kind: 'unanswered', questions: unansweredItems(questions), verdict: t('ask.waitingDetail') }
-    }
     if (answerable) rowAction = reopen
   } else if (code === 'TOOL_OUTCOME_UNKNOWN' && (answerable || settled !== undefined)) {
     // Crash repair has no pending result text; the durable question projection
     // still knows whether the interrupted call can take a late answer.
     state = 'ok'
-    const questions = questionEntries(argsRaw)
     if (answerable) {
       summary = t('ask.pending')
-      if (questions !== null) {
-        transcript = { kind: 'unanswered', questions: unansweredItems(questions), verdict: t('ask.pendingDetail') }
-      }
       rowAction = reopen
     } else if (settled?.answers.length === 0) {
       summary = t('ask.closed')
-      if (questions !== null) {
-        transcript = { kind: 'unanswered', questions: unansweredItems(questions), verdict: t('ask.closedDetail') }
-      }
     } else if (settled !== undefined) {
-      const presentation = answeredPresentation(questions, settled.answers, t, settled.note)
-      summary = presentation.summary
-      transcript = presentation.transcript
-      const record = presentation.record
-      if (record !== undefined) {
-        rowAction = () => reviewPanel(callId, record)
-        rowActionLabel = t('ask.review')
-      }
+      summary = answeredCountSummary(settled.answers, t)
     }
   } else if ('kind' in block && model.state === 'ok') {
     const text = singleResultText(block)
     if (text !== undefined) {
-      const questions = questionEntries(argsRaw)
-      // A timed question's recorded result may be the timeout; whether it is
-      // still answerable, and what the user finally answered, is the
-      // projection's to say.
       const pending = isPendingResult(text)
       if (pending && answerable) {
         summary = t('ask.pending')
-        if (questions !== null) {
-          transcript = { kind: 'unanswered', questions: unansweredItems(questions), verdict: t('ask.pendingDetail') }
-        }
         rowAction = reopen
       } else if (pending && (settled === undefined || settled.answers.length === 0)) {
         summary = t('ask.closed')
-        if (questions !== null) {
-          transcript = { kind: 'unanswered', questions: unansweredItems(questions), verdict: t('ask.closedDetail') }
-        }
       } else {
         // Answered either way: whether the answer beat the timeout is the
         // agent's pacing, not something a reader of the row has to reason
         // about, so a late-answered call reads exactly like an in-time one.
-        // The projection's settled record wins over the result text — it also
-        // carries the card-level note for a reply that settled late.
-        const batch = settled !== undefined
-          ? { answers: settled.answers, ...(settled.note === undefined ? {} : { note: settled.note }) }
-          : answerBatchOf(text)
-        const answers = batch?.answers ?? null
-        const presentation = answers === null ? null : answeredPresentation(questions, answers, t, batch?.note)
-        // Full transcripts require stable ids and valid visible fields; retain the
-        // legacy best-effort count when only strict pairing is unsafe.
-        summary = presentation?.summary ?? answeredSummary(text, t) ?? model.summary
-        transcript = presentation?.transcript ?? null
-        // Only a timed call has a panel to read its answers back in.
-        const record = settled === undefined ? undefined : presentation?.record
-        if (record !== undefined) {
-          rowAction = () => reviewPanel(callId, record)
-          rowActionLabel = t('ask.review')
-        }
+        // The projection's settled record wins over the result text.
+        const answers = (settled !== undefined ? { answers: settled.answers } : answerBatchOf(text))?.answers ?? null
+        summary = (answers === null ? null : answeredCountSummary(answers, t)) ?? answeredSummary(text, t) ?? model.summary
       }
     }
   }
   if (answerable && queuedReply !== undefined && rowAction === reopen) {
+    // A queued reply already owns this call's answer: keep the summary accurate
+    // but drop the reopen action — a second submission would reject with
+    // REPLY_QUEUED, and the admitted reply lands as its own conversation bubble.
     const batch = queuedAnswerBatch(queuedReply, callId)
-    const presentation = batch === null
-      ? null
-      : answeredPresentation(questionEntries(argsRaw), batch.answers, t, batch.note)
-    if (presentation?.record !== undefined) {
-      summary = presentation.summary
-      transcript = presentation.transcript
-      // The queued reply is reviewed in this row while its editable card is absent.
-      rowAction = () => false
-      rowActionLabel = t('ask.review')
-    }
+    if (batch !== null) summary = answeredCountSummary(batch.answers, t)
+    rowAction = undefined
   }
-  // The transcript is the persistent record of the interaction, so the row
-  // opens it by default: the question, its options, and the answer must stay
-  // readable in the timeline without a click. A reader who collapses it keeps
-  // that choice, and the disclosure state stays shared with the row below.
-  const disclosure = useDisclosure()
-  const [autoOpen, setAutoOpen] = useState(true)
-  useEffect(() => {
-    if (autoOpen && transcript !== null && !disclosure.expanded) disclosure.setExpanded(true)
-  }, [autoOpen, transcript, disclosure.expanded, disclosure.setExpanded])
-  const sharedDisclosure = useCallback(() => ({
-    expanded: disclosure.expanded,
-    setExpanded: disclosure.setExpanded,
-    toggle: () => {
-      if (disclosure.expanded) setAutoOpen(false)
-      disclosure.toggle()
-    },
-  }), [disclosure.expanded, disclosure.setExpanded, disclosure.toggle])
   if (rowAction !== undefined) return (
-    <QuestionToolRow useDisclosure={sharedDisclosure} t={t} summary={summary}
-      bodyRaw={transcript === null ? model.bodyRaw : null} output={transcript === null ? model.output : null}
-      askQuestion={transcript} state={state} inspect={inspect}
+    <QuestionToolRow useDisclosure={useDisclosure} t={t} summary={summary}
+      bodyRaw={model.bodyRaw} output={model.output} state={state} inspect={inspect}
       openPanel={rowAction} panelLabel={rowActionLabel} />
   )
   return (
     <ToolRow
-      useDisclosure={sharedDisclosure}
+      useDisclosure={useDisclosure}
       t={t}
       variant={model.variant}
       toolName={toolName}
       icon={<IconQuestionOutlineRegular />}
       title={t(model.titleKey)}
       summary={summary}
-      bodyRaw={transcript === null ? model.bodyRaw : null}
-      output={transcript === null ? model.output : null}
-      askQuestion={transcript}
+      bodyRaw={model.bodyRaw}
+      output={model.output}
       state={state}
       inspect={inspect}
     />
@@ -453,11 +222,9 @@ export const askQuestionToolview = {
     ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({
       name: 'tool.call.toolview', key: 'ask_user_question', locale: NS,
       // Read per click, not per render: a composition with no question UI
-      // provides no panels, and the row then falls back to its own record.
+      // provides no panel, and the row then falls back to its own record.
       inject: (sessionId): AskQuestionPanelInjected => ({
         revealPanel: callId => ctx.get('userQuestionPanels')?.reveal(sessionId, callId) ?? false,
-        reviewPanel: (callId, record) =>
-          ctx.get('userQuestionPanels')?.review(sessionId, callId, record) ?? false,
       }),
     }, AskQuestionRow))
   },

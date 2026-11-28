@@ -53,9 +53,9 @@ owner 载荷为 `ToolCallOwnerProps`：`callId`、`toolName`、`phase` 判别字
 
 本包拥有 generic fallback，以及 shell/pwsh、read、read_image、write/edit、运行中的 `str_replace_editor` `create`／`str_replace`、grep/glob、web、todo、question 与 PTC dispatch 的内置展示。结构化卡片直接从第一方原始 event 字段派生；Host `presentCall` 与 `presentResult` 值不会进入 Client。运行中的原子工具行以同一道高光从左到右扫过标题、分隔符、摘要与后缀；已完成行保持静态。运行中与已完成的前台标准 `bash`/`pwsh` 和 `terminal_send` 调用，无论位于根还是 PTC dispatch 子调用中，都在通过相同的参数、结果和错误检查后使用 terminal 卡片。持久 `bash`/`pwsh` 调用仅在运行中使用 terminal 卡片。以已识别的 spill 策略提示结尾的 shell 输出，在 shell 行中使用可展开的 generic 输出，在 Details 中使用 generic 输出；位置被改变或被省略的退出标记无法证明成功。已完成的持久 shell 结果保持 generic 展示，因为 reset 与部分输出诊断不一定描述单个进程的退出状态；根调用的持久 shell 结果可展开。合法的主动后台 `bash`／`pwsh` 调用使用 terminal Start 展示；成功启动回执后，静态仅命令卡片保留 command 和 cwd，不显示输出或执行状态。启动失败保留通用参数与错误展示，后台 `terminal_send` 仍为 generic。Inspect 保留原始参数及回执，后续 job 输出不接回此卡片（[决定](../../../.agents/notes/implemented/bug-fix/2026-10-10-background-shell-command-display.zh.md)）。展开的终端命令与后台输入按可用宽度自动折行，保留原有换行和可选文本；终端输出保持按列对齐的排版。仅横向溢出时添加具名的键盘聚焦目标。提供 Inspect 时也可使用。回执不表示后台任务的退出状态。带有 `AUTO_REVIEW_DENIED` 的原生或 PTC dispatch 失败会在折叠行显示 Auto review 裁决，展开时显示一行归一化后的“未执行”原因；原因缺失或只有空白时使用本地化 fallback 文案。`ui-skill` 展示了业务包自行拥有的 `skill` 注册项。
 
-问题行按 id 配对问题与答案；答案来自工具结果，迟到回答则来自 `userQuestions` 投影。可回答的调用提供按钮以重新打开面板。迟到回复进入 agent Inbox 后，问题行显示已提交的答案；等待准入期间，「查看回答」展开只读的行内记录。带有答案的已结算调用则以只读方式打开面板。没有答案的已关闭调用和无效记录不提供按钮。已取消和已中断的行显示裁决，不虚构答案。若面板提供方不接受按钮操作，点击会展开该行。不受支持或含糊的输入回退为压平的工具文本。
+问题行按 id 配对问题与答案；答案来自工具结果，迟到回答则来自 `userQuestions` 投影。可回答的调用提供重新打开按钮，把作答面再次显示在编辑器位置；若面板提供方不接受该操作，点击会展开该行。迟到回复进入 agent Inbox 后，问题行在等待准入期间保留已回答计数摘要、摘掉重新打开按钮。已结算的调用在行内保留已回答计数摘要，绝不打开只读卡片。没有答案的已关闭调用和无效记录不提供按钮。已取消和已中断的行显示裁决，不虚构答案。不受支持或含糊的输入回退为压平的工具文本。
 
-回答面板按钮归问题 renderer 所有。它使用 `DisclosureRow` 组合自己的操作与 transcript；通用 `ToolRow` 不选择或派发问题操作。
+回答面板按钮归问题 renderer 所有。可回答的调用用 `DisclosureRow` 组合自己的重新打开操作；其余问题行都是通用 `ToolRow`，不选择也不派发问题操作。展开的记录恒为原始输入/输出两段——可读的答案活在 `question-reply` 会话气泡里。
 
 -----
 
@@ -97,7 +97,7 @@ terminal model 使用浏览器安全入口 `@deepseek-ai/dsh-spill-policy/notice
 
 ### 声明的可选能力
 
-本包声明可选的 `UserQuestionPanels` 能力；`ui-user-questions` 提供它。`reveal(sessionId, callId)` 打开可回答的面板，`review(sessionId, callId, record)` 以只读方式打开已记录的答案。行通过 `ctx.get('userQuestionPanels')` 读取此能力；未组合问题 UI 时仍保留文本记录。
+本包声明可选的 `UserQuestionPanels` 能力；`ui-user-questions` 提供它。`reveal(sessionId, callId)` 打开可回答的面板——该能力不携带其他操作，因为已结算的调用把答案留在行内摘要里，而不是只读卡片。行通过 `ctx.get('userQuestionPanels')` 读取此能力；未组合问题 UI 时回退为通用行。
 
 </details>
 

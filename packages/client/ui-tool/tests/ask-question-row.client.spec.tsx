@@ -2,11 +2,14 @@
 /**
  * ask_user_question toolview acceptance: `waiting` summary while running,
  * answered-count from the result JSON once settled (skipped answers
- * excluded), the same reading for a call a late reply answered, readable
- * question lists for ASK_CANCELLED and ASK_ABORTED, the still-answerable
- * row's reopen action and its closed counterpart, shared ToolRow state
- * semantics for interrupted/failed calls, and generic fallbacks on malformed
- * results.
+ * excluded), the same reading for a call a late reply answered, the
+ * cancelled/interrupted verdicts, the still-answerable row's reopen action
+ * and its closed counterpart, shared ToolRow state semantics for
+ * interrupted/failed calls, and generic fallbacks on malformed results.
+ *
+ * ask-panel-retire-1127: the transcript/record card is retired — the row
+ * keeps its summary/state, expands to the raw input/output sections, and
+ * only an answerable call keeps the reopen (panel) action.
  */
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { useDisclosure } from '@deepseek-ai/dsh-client-ui-chat/src/client/chat/use-disclosure.ts'
@@ -51,23 +54,18 @@ const t = makeTranslate(zh, commonZh)
 interface RowEnvironment {
   /** Call ids the `userQuestions` projection still lists as answerable; absent = none. */
   answerable?: readonly string[]
-  /** Answer batches the projection settled a late reply with, by call id; absent = none.
-   *  A settled entry may also carry the card-level note (ask-focus-restore-1125). */
-  settled?: Readonly<Record<string, readonly unknown[] | { answers: readonly unknown[]; note?: string }>>
+  /** Answer batches the projection settled a late reply with, by call id; absent = none. */
+  settled?: Readonly<Record<string, readonly unknown[]>>
   /** Pending steers mirrored by the durable Inbox projection. */
   inbox?: { readonly 'next-turn': readonly unknown[]; readonly 'next-step': readonly unknown[] }
   /** The injected reopen verb; absent = a panel is always there to show. */
   revealPanel?: (callId: string) => boolean
-  /** The injected read-only verb; absent = a provider is always there. */
-  reviewPanel?: (callId: string, record: unknown) => boolean
 }
 
 function rowProps(block: ToolCallBlock, env: RowEnvironment = {}): Parameters<typeof AskQuestionRow>[0] {
   const view = {
     active: (env.answerable ?? []).map(callId => ({ callId })),
-    settled: Object.entries(env.settled ?? {}).map(([callId, entry]) => 'answers' in entry
-      ? { callId, answers: entry.answers, ...(entry.note === undefined ? {} : { note: entry.note }) }
-      : { callId, answers: entry }),
+    settled: Object.entries(env.settled ?? {}).map(([callId, answers]) => ({ callId, answers })),
   }
   const useProjection = (key: string, select: (value: unknown) => unknown) =>
     select(key === 'inbox' ? env.inbox : view)
@@ -81,7 +79,6 @@ function rowProps(block: ToolCallBlock, env: RowEnvironment = {}): Parameters<ty
     useSessions: () => undefined,
     useProjection,
     revealPanel: env.revealPanel ?? (() => true),
-    reviewPanel: env.reviewPanel ?? (() => true),
   } as Parameters<typeof AskQuestionRow>[0]
   return props
 }
@@ -96,12 +93,14 @@ const queuedReply = (callId: string, entries: unknown[]): unknown => ({
 })
 
 /** Every pill the row can offer, by its visible copy. */
-const PILL = { reopen: '回答', review: '查看回答' } as const
+const PILL = { reopen: '回答' } as const
+
+/** The disclosure toggle of either row shape, by its accessible name. */
+const TOGGLE = '提问'
 
 /** The panel verbs the registered toolview hands each row of one Session. */
 interface PanelFace {
   revealPanel: (callId: string) => boolean
-  reviewPanel: (callId: string, record: unknown) => boolean
 }
 
 /** The keyed toolview declaration, as far as this spec reads it. */
@@ -141,6 +140,8 @@ describe('AskQuestionRow', () => {
     expect(screen.getByText('提问')).toBeTruthy()
     expect(screen.getByText('等待回答')).toBeTruthy()
     expect(view.container.querySelector('[data-state="running"]')).not.toBeNull()
+    expect(view.container.querySelector('[data-tool="ask_user_question"]')).not.toBeNull()
+    expect(view.container.querySelector('[class*="panelButton"]')).toBeNull()
   })
 
   it('a running call the projection still lists offers its panel from the row body', () => {
@@ -158,20 +159,23 @@ describe('AskQuestionRow', () => {
       { answerable: ['c1'], revealPanel },
     )} />)
 
+    // The panel row owns no row-wide disclosure target: only its leading
+    // glyph toggles the body, so the pill can never double as a toggle.
     expect(view.container.querySelector('[data-disclosure-row]')?.getAttribute('role')).toBeNull()
-
-    // The record opens by default: the questions stay readable without a click.
-    expect(screen.getByRole('button', { expanded: true })).toBeTruthy()
+    expect(screen.getByRole('button', { expanded: false })).toBeTruthy()
     expect(revealPanel).not.toHaveBeenCalled()
 
+    fireEvent.click(screen.getByRole('button', { name: TOGGLE }))
+    expect(screen.getByRole('button', { expanded: true })).toBeTruthy()
+    expect(view.container.querySelector('[class*="ioCard"]')).not.toBeNull()
+
+    // Reopening is not a disclosure: the body the user opened stays open.
     fireEvent.click(screen.getByRole('button', { name: PILL.reopen }))
     expect(revealPanel).toHaveBeenCalledWith('c1')
-    // Reopening is not a disclosure: the body the user already opened stays open.
     expect(screen.getByRole('button', { expanded: true })).toBeTruthy()
   })
 
-  it('shows a queued steer as a read-only submitted answer before it is admitted', () => {
-    const reviewPanel = vi.fn(() => true)
+  it('shows a queued steer as the answered count with no second answer action', () => {
     const revealPanel = vi.fn(() => true)
     const batch = [
       { id: 'goal', selected: ['Develop a feature'] },
@@ -183,16 +187,15 @@ describe('AskQuestionRow', () => {
       {
         answerable: ['c1'],
         inbox: { 'next-step': [queuedReply('other', batch), queuedReply('c1', batch)], 'next-turn': [] },
-        revealPanel, reviewPanel,
+        revealPanel,
       },
     )} />)
 
+    // A queued reply already owns this call's answer: a second submission
+    // would reject with REPLY_QUEUED, so the reopen action is dropped while
+    // the summary keeps the batch's answered count accurate.
     expect(screen.getByText('2/3 已回答')).toBeTruthy()
     expect(screen.queryByRole('button', { name: PILL.reopen })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: PILL.review }))
-    expect(screen.getByRole('button', { expanded: true })).toBeTruthy()
-    expect(screen.getByText('the web app')).toBeTruthy()
-    expect(reviewPanel).not.toHaveBeenCalled()
     expect(revealPanel).not.toHaveBeenCalled()
   })
 
@@ -206,48 +209,63 @@ describe('AskQuestionRow', () => {
     const view = render(<AskQuestionRow {...rowProps(block, {
       answerable: ['c1'], inbox: { 'next-step': [], 'next-turn': [queuedReply('c1', batch)] },
     })} />)
-    expect(screen.getByRole('button', { name: PILL.review })).toBeTruthy()
+    expect(screen.getByText('1/3 已回答')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: PILL.reopen })).toBeNull()
 
     view.rerender(<AskQuestionRow {...rowProps(block, {
       answerable: ['c1'], inbox: { 'next-step': [], 'next-turn': [] },
     })} />)
+    expect(screen.getByText('已继续工作，仍可回答')).toBeTruthy()
     expect(screen.getByRole('button', { name: PILL.reopen })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: PILL.review })).toBeNull()
   })
 
-  it('does not lock a question for an unrelated or malformed queued message', () => {
+  it('an unrelated queued reply leaves this row answerable', () => {
+    render(<AskQuestionRow {...rowProps(resultNode(READABLE_ARGS, PENDING_RESULT), {
+      answerable: ['c1'],
+      inbox: { 'next-step': [queuedReply('other', [])], 'next-turn': [] },
+    })} />)
+    expect(screen.getByRole('button', { name: PILL.reopen })).toBeTruthy()
+    expect(screen.getByText('已继续工作，仍可回答')).toBeTruthy()
+  })
+
+  it('a queued reply for this call drops the answer action even when its payload is unreadable', () => {
+    // The durable Inbox entry is keyed by its source, not its body: it says a
+    // reply is already queued for this call, so reopening would hit
+    // REPLY_QUEUED. An unreadable payload only costs the count refresh.
+    const revealPanel = vi.fn(() => true)
     const bad = { source: { kind: 'user-question-reply', callId: 'c1' }, content: [
       { type: 'text', text: JSON.stringify({ kind: 'wrong', callId: 'c1', answers: [] }) },
     ] }
     render(<AskQuestionRow {...rowProps(resultNode(READABLE_ARGS, PENDING_RESULT), {
-      answerable: ['c1'], inbox: { 'next-step': [queuedReply('other', [])], 'next-turn': [bad] },
+      answerable: ['c1'], inbox: { 'next-step': [], 'next-turn': [bad] }, revealPanel,
     })} />)
-    expect(screen.getByRole('button', { name: PILL.reopen })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: PILL.review })).toBeNull()
-  })
-
-  it('keyboard activation of the pill leaves the row disclosure alone', () => {
-    // The pill is a button inside the row's own button: without the keydown
-    // guard, one Enter would both reopen the panel and toggle the record.
-    const revealPanel = vi.fn(() => true)
-    render(<AskQuestionRow {...rowProps(
-      resultNode(READABLE_ARGS, PENDING_RESULT),
-      { answerable: ['c1'], revealPanel },
-    )} />)
-    // Collapse the auto-opened record first, so a leaking toggle is visible.
-    fireEvent.click(screen.getByRole('button', { expanded: true }))
-    expect(screen.getByRole('button', { expanded: false })).toBeTruthy()
-
-    fireEvent.keyDown(screen.getByRole('button', { name: PILL.reopen }), { key: 'Enter' })
-    expect(screen.getByRole('button', { expanded: false })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: PILL.reopen })).toBeNull()
+    expect(screen.getByText('已继续工作，仍可回答')).toBeTruthy()
     expect(revealPanel).not.toHaveBeenCalled()
   })
 
-  it('a reopen that finds no panel left expands the record instead of doing nothing', () => {
+  it('keyboard activation of the pill leaves the row disclosure alone', () => {
+    // The pill is a button inside the row's own header: without the keydown
+    // guard, one Enter would both reopen the panel and toggle the body.
+    const revealPanel = vi.fn(() => true)
+    const view = render(<AskQuestionRow {...rowProps(
+      resultNode(READABLE_ARGS, PENDING_RESULT),
+      { answerable: ['c1'], revealPanel },
+    )} />)
+    fireEvent.click(screen.getByRole('button', { name: TOGGLE }))
+    expect(screen.getByRole('button', { expanded: true })).toBeTruthy()
+
+    fireEvent.keyDown(screen.getByRole('button', { name: PILL.reopen }), { key: 'Enter' })
+    expect(screen.getByRole('button', { expanded: true })).toBeTruthy()
+    expect(revealPanel).not.toHaveBeenCalled()
+    expect(view.container.querySelector('[class*="ioCard"]')).not.toBeNull()
+  })
+
+  it('a reopen that finds no panel left expands the raw body instead of doing nothing', () => {
     // The projection lists the call but no card answers for it — a resumed
     // Session before its repair pass, or a composition with no question UI.
     const revealPanel = vi.fn(() => false)
-    render(<AskQuestionRow {...rowProps(
+    const view = render(<AskQuestionRow {...rowProps(
       resultNode(READABLE_ARGS, PENDING_RESULT),
       { answerable: ['c1'], revealPanel },
     )} />)
@@ -255,20 +273,30 @@ describe('AskQuestionRow', () => {
     fireEvent.click(screen.getByRole('button', { name: PILL.reopen }))
     expect(revealPanel).toHaveBeenCalledWith('c1')
     expect(screen.getByRole('button', { expanded: true })).toBeTruthy()
-    expect(screen.getByText('What do you want to accomplish?')).toBeTruthy()
+    const io = view.container.querySelector('[class*="ioCard"]')
+    expect(io).not.toBeNull()
+    expect(io?.textContent).toContain('What do you want to accomplish?')
+    expect(io?.textContent).toContain('"pending":true')
   })
 
   it('a pending result the projection dropped reads as closed, with no action on its row', () => {
     // The recorded result stays `pending` after the reply, the skip, or the
     // timeout lands; the projection is what says the question is over.
-    render(<AskQuestionRow {...rowProps(resultNode(READABLE_ARGS, PENDING_RESULT))} />)
+    const view = render(<AskQuestionRow {...rowProps(resultNode(READABLE_ARGS, PENDING_RESULT))} />)
 
     expect(screen.getByText('已结束')).toBeTruthy()
     expect(screen.queryByRole('button', { name: PILL.reopen })).toBeNull()
-    expect(screen.queryByRole('button', { name: PILL.review })).toBeNull()
-    expect(screen.getByText('该问题已结束，结果见下方对话')).toBeTruthy()
-    expect(screen.getByText('What do you want to accomplish?')).toBeTruthy()
+    expect(view.container.querySelector('[class*="panelButton"]')).toBeNull()
+    expect(view.container.querySelector('[data-state="ok"]')).not.toBeNull()
+    // Collapsed: the raw sections wait behind the disclosure.
+    expect(view.container.querySelector('[class*="ioCard"]')).toBeNull()
     expect(screen.queryByText(/"pending"/)).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { expanded: false }))
+    const io = view.container.querySelector('[class*="ioCard"]')
+    expect(io).not.toBeNull()
+    expect(io?.textContent).toContain('What do you want to accomplish?')
+    expect(io?.textContent).toContain('"pending":true')
   })
 
   it('reopens a crash-repaired question while the projection still lists it', () => {
@@ -283,8 +311,7 @@ describe('AskQuestionRow', () => {
     expect(revealPanel).toHaveBeenCalledWith('c1')
   })
 
-  it('shows a late answer after crash repair through the read-only panel', () => {
-    const reviewPanel = vi.fn(() => true)
+  it('a late answer after crash repair reads as the answered count with no panel action', () => {
     const batch = [
       { id: 'goal', selected: ['Develop a feature'] },
       { id: 'scope', selected: [], custom: 'the web app' },
@@ -293,65 +320,53 @@ describe('AskQuestionRow', () => {
     const repaired = resultNode(READABLE_ARGS, 'The tool call was interrupted after it was recorded.', {
       isError: true, error: { name: 'SessionFormatError', code: 'TOOL_OUTCOME_UNKNOWN' },
     })
-    render(<AskQuestionRow {...rowProps(repaired, { settled: { c1: batch }, reviewPanel })} />)
+    render(<AskQuestionRow {...rowProps(repaired, { settled: { c1: batch } })} />)
 
     expect(screen.getByText('2/3 已回答')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: PILL.review }))
-    expect(reviewPanel).toHaveBeenCalledWith('c1', expect.objectContaining({ answers: batch }))
+    expect(screen.queryByRole('button', { name: PILL.reopen })).toBeNull()
+    expect(screen.getByText('提问')).toBeTruthy()
   })
 
   it('shows an unreadable late reply after crash repair as closed', () => {
-    const reviewPanel = vi.fn(() => true)
     const repaired = resultNode(READABLE_ARGS, 'The tool call was interrupted after it was recorded.', {
       isError: true, error: { name: 'SessionFormatError', code: 'TOOL_OUTCOME_UNKNOWN' },
     })
-    render(<AskQuestionRow {...rowProps(repaired, { settled: { c1: [] }, reviewPanel })} />)
+    render(<AskQuestionRow {...rowProps(repaired, { settled: { c1: [] } })} />)
 
     expect(screen.getByText('已结束')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: PILL.review })).toBeNull()
-    expect(reviewPanel).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: PILL.reopen })).toBeNull()
   })
 
   it('a late reply makes its row read exactly like one answered in time', () => {
     // The timed call's own result is the timeout, so the answers come from the
     // projection; which one beat the clock is the agent's pacing, not the
     // reader's problem.
-    const reviewPanel = vi.fn(() => true)
     const answered = [
       { id: 'goal', selected: ['Develop a feature'] },
       { id: 'scope', selected: [], custom: 'the web app' },
       { id: 'notes', selected: [] },
     ]
-    render(<AskQuestionRow {...rowProps(
+    const view = render(<AskQuestionRow {...rowProps(
       resultNode(READABLE_ARGS, PENDING_RESULT),
-      { settled: { c1: answered }, reviewPanel },
+      { settled: { c1: answered } },
     )} />)
 
     expect(screen.getByText('2/3 已回答')).toBeTruthy()
     expect(screen.queryByText('已结束')).toBeNull()
     expect(screen.queryByRole('button', { name: PILL.reopen })).toBeNull()
-
-    // The record is on screen by default: no disclosure click to reach it.
-    expect(screen.getByText('What do you want to accomplish?')).toBeTruthy()
-    expect(screen.getByText('the web app')).toBeTruthy()
-    expect(screen.getByText('未回答')).toBeTruthy()
     expect(screen.queryByText(/"pending"/)).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: PILL.review }))
-    expect(reviewPanel).toHaveBeenCalledWith('c1', {
-      questions: [
-        { id: 'goal', question: 'What do you want to accomplish?' },
-        { id: 'scope', question: 'Which project should this apply to?' },
-        { id: 'notes', question: 'Anything else?' },
-      ],
-      answers: answered,
-    })
+    // The readable record is the row's own input/output sections now.
+    fireEvent.click(screen.getByRole('button', { expanded: false }))
+    const io = view.container.querySelector('[class*="ioCard"]')
+    expect(io).not.toBeNull()
+    expect(io?.textContent).toContain('What do you want to accomplish?')
+    expect(io?.textContent).toContain('"pending":true')
   })
 
   it('a reply that settled the call without answers leaves the row closed', () => {
     render(<AskQuestionRow {...rowProps(resultNode(READABLE_ARGS, PENDING_RESULT), { settled: { c1: [] } })} />)
     expect(screen.getByText('已结束')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: PILL.review })).toBeNull()
     expect(screen.queryByRole('button', { name: PILL.reopen })).toBeNull()
   })
 
@@ -361,7 +376,6 @@ describe('AskQuestionRow', () => {
       { answerable: ['c1'], settled: { other: [{ id: 'goal', selected: ['x'] }] } },
     )} />)
     expect(screen.getByRole('button', { name: PILL.reopen })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: PILL.review })).toBeNull()
   })
 
   it('another session question being answered leaves this row alone', () => {
@@ -378,165 +392,93 @@ describe('AskQuestionRow', () => {
     expect(screen.getByText('3/3 已回答')).toBeTruthy()
   })
 
-  it('shows a pending result as readable still-answerable questions', () => {
+  it('an answerable row expands to the raw input/output sections, not a record card', () => {
     const view = render(<AskQuestionRow {...rowProps(
       resultNode(READABLE_ARGS, PENDING_RESULT),
       { answerable: ['c1'] },
     )} />)
 
     expect(screen.getByText('已继续工作，仍可回答')).toBeTruthy()
-    expect(screen.getByText('等待中的问题仍可在输入框中回答')).toBeTruthy()
-    expect(screen.getByText('What do you want to accomplish?')).toBeTruthy()
+    expect(screen.getByRole('button', { name: PILL.reopen })).toBeTruthy()
     expect(view.container.querySelector('[class*="ioCard"]')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: TOGGLE }))
+    const io = view.container.querySelector('[class*="ioCard"]')
+    expect(io).not.toBeNull()
+    // IN carries the formatted argument JSON verbatim, OUT the result text.
+    expect(io?.textContent).toContain('"question": "What do you want to accomplish?"')
+    expect(io?.textContent).toContain('"question": "Which project should this apply to?"')
+    expect(io?.textContent).toContain(PENDING_RESULT)
+    // No record card: the transcript's paired question list is gone.
+    expect(view.container.querySelector('[class*="transcript"]')).toBeNull()
+    expect(screen.queryByText('未回答')).toBeNull()
+  })
+
+  it('only an answerable row offers the panel button', () => {
+    const pending = resultNode(READABLE_ARGS, PENDING_RESULT)
+    render(<AskQuestionRow {...rowProps(pending, { answerable: ['c1'] })} />)
+    expect(screen.getByRole('button', { name: PILL.reopen })).toBeTruthy()
+    cleanup()
+
+    render(<AskQuestionRow {...rowProps(pending)} />)
+    expect(screen.queryByRole('button', { name: PILL.reopen })).toBeNull()
     expect(screen.queryByText(/"pending"/)).toBeNull()
   })
 
-  it('renders paired questions, offered options, and readable answer lines by default', () => {
-    render(<AskQuestionRow {...rowProps(resultNode(READABLE_ARGS, answers([
-      { id: 'scope', selected: ['deepseek-harness'] },
-      { id: 'goal', selected: ['Develop a feature'], custom: 'Keep the API small' },
-      { id: 'notes', selected: [] },
-    ])))} />)
+  it('both row shapes render the ask tool identity and the collapsed summary', () => {
+    const pending = resultNode(READABLE_ARGS, PENDING_RESULT)
+    const panel = render(<AskQuestionRow {...rowProps(pending, { answerable: ['c1'] })} />)
+    expect(panel.container.querySelector('[data-tool="ask_user_question"]')).not.toBeNull()
+    expect(panel.container.querySelector('[data-variant="others"]')).not.toBeNull()
+    expect(panel.container.querySelector('[data-state="ok"]')).not.toBeNull()
+    cleanup()
 
-    expect(screen.getByText('What do you want to accomplish?')).toBeTruthy()
-    expect(screen.getByText('Develop a feature')).toBeTruthy()
-    expect(screen.getByText('Keep the API small')).toBeTruthy()
-    expect(screen.getByText('Which project should this apply to?')).toBeTruthy()
-    expect(screen.getByText('deepseek-harness')).toBeTruthy()
-    expect(screen.getByText('Anything else?')).toBeTruthy()
-    expect(screen.getByText('未回答')).toBeTruthy()
-    expect(screen.queryByText(/"questions"/)).toBeNull()
-    expect(screen.queryByText(/"answers"/)).toBeNull()
+    const plain = render(<AskQuestionRow {...rowProps(pending)} />)
+    expect(plain.container.querySelector('[data-tool="ask_user_question"]')).not.toBeNull()
+    expect(plain.container.querySelector('[data-variant="others"]')).not.toBeNull()
+    expect(plain.container.querySelector('[data-state="ok"]')).not.toBeNull()
+    expect(plain.container.querySelector('[class*="panelButton"]')).toBeNull()
   })
-
-  it('renders the card-level remark the answer carried (ask-focus-restore-1125)', () => {
-    // In-time result: the note rides the batch and reads as one more
-    // question-shaped item on the transcript. Strict pairing needs one
-    // answer per asked question.
-    const noted = JSON.stringify({
-      answers: [
-        { id: 'goal', selected: ['Ship it'] },
-        { id: 'scope', selected: ['deepseek-harness'] },
-        { id: 'notes', selected: [] },
-      ],
-      note: '顺带看看部署日志',
-    })
-    render(<AskQuestionRow {...rowProps(resultNode(READABLE_ARGS, noted))} />)
-
-    expect(screen.getByText('题外话')).toBeTruthy()
-    expect(screen.getByText('顺带看看部署日志')).toBeTruthy()
-    expect(screen.queryByText(/"note"/)).toBeNull()
-  })
-
-  it('shows a remark a late reply settled with, read from the settled record', () => {
-    render(<AskQuestionRow {...rowProps(
-      resultNode(READABLE_ARGS, PENDING_RESULT),
-      { settled: { c1: {
-        answers: [
-          { id: 'goal', selected: ['Ship it'] },
-          { id: 'scope', selected: ['deepseek-harness'] },
-          { id: 'notes', selected: [] },
-        ],
-        note: '顺带看看部署日志',
-      } } },
-    )} />)
-
-    expect(screen.getByText('题外话')).toBeTruthy()
-    expect(screen.getByText('顺带看看部署日志')).toBeTruthy()
-    expect(screen.getByText('2/3 已回答')).toBeTruthy()
-  })
-
-  it('keeps every offered option on screen, marking the chosen one', () => {
-    // The options are the reader's record of what was on offer: an unchosen
-    // choice must survive the settlement just like the chosen one.
-    const args = JSON.stringify({ questions: [{
-      id: 'goal',
-      question: 'What do you want to accomplish?',
-      options: [{ label: 'Develop a feature', description: 'New behavior' }, { label: 'Fix a bug' }],
-    }] })
-    const view = render(<AskQuestionRow {...rowProps(resultNode(args, answers([
-      { id: 'goal', selected: ['Fix a bug'] },
-    ])))} />)
-
-    const options = [...view.container.querySelectorAll('li')]
-    expect(options).toHaveLength(2)
-    expect(options.map(option => option.textContent)).toEqual([
-      '·Develop a featureNew behavior',
-      '✓Fix a bug',
-    ])
-    expect(options[0]?.hasAttribute('data-selected')).toBe(false)
-    expect(options[1]?.hasAttribute('data-selected')).toBe(true)
-    // The record is open without a click, and the raw JSON stays out of it.
-    expect(screen.getByRole('button', { expanded: true })).toBeTruthy()
-    expect(screen.queryByText(/"questions"/)).toBeNull()
-  })
-
-  it('a running row renders the questions and their options while the composer waits', () => {
-    // The composer card can be closed from the timeline: the waiting row still
-    // has to say what is being asked.
+  it('a running row expands to its raw arguments while the composer waits', () => {
     const args = JSON.stringify({ questions: [{
       id: 'color',
       question: 'Which color do you prefer?',
       options: [{ label: 'Blue' }, { label: 'Green' }],
     }] })
-    render(<AskQuestionRow {...rowProps(runningCall(args))} />)
+    const view = render(<AskQuestionRow {...rowProps(runningCall(args))} />)
 
     expect(screen.getByText('等待回答')).toBeTruthy()
-    expect(screen.getByText('问题已提交，等待你的回答')).toBeTruthy()
-    expect(screen.getByText('Which color do you prefer?')).toBeTruthy()
-    expect(screen.getByText('Blue')).toBeTruthy()
-    expect(screen.getByText('Green')).toBeTruthy()
-    expect(screen.getByRole('button', { expanded: true })).toBeTruthy()
+    expect(view.container.querySelector('[class*="ioCard"]')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { expanded: false }))
+    const io = view.container.querySelector('[class*="ioCard"]')
+    expect(io).not.toBeNull()
+    expect(io?.textContent).toContain('"question": "Which color do you prefer?"')
+    expect(io?.textContent).toContain('Blue')
+    expect(io?.textContent).toContain('Green')
   })
 
-  it('a reader who collapses the record keeps it collapsed', () => {
-    // The default-open record must never fight a reader who folded it away.
+  it('a reader who collapses the raw body keeps it collapsed', () => {
     const view = render(<AskQuestionRow {...rowProps(resultNode(READABLE_ARGS, answers([
       { id: 'goal', selected: ['Develop a feature'] },
       { id: 'scope', selected: [] },
       { id: 'notes', selected: [] },
     ])))} />)
-    expect(screen.getByRole('button', { expanded: true })).toBeTruthy()
+    expect(screen.getByText('1/3 已回答')).toBeTruthy()
+    expect(view.container.querySelector('[class*="ioCard"]')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { expanded: false }))
+    expect(view.container.querySelector('[class*="ioCard"]')).not.toBeNull()
 
     fireEvent.click(screen.getByRole('button', { expanded: true }))
-    expect(screen.getByRole('button', { expanded: false })).toBeTruthy()
-    expect(screen.queryByText('What do you want to accomplish?')).toBeNull()
     expect(view.container.querySelector('[class*="ioCard"]')).toBeNull()
+    expect(screen.queryByText('What do you want to accomplish?')).toBeNull()
   })
 
-  it('a timed call the projection settled in time offers its record as a read-only panel, options included', () => {
-    const args = JSON.stringify({ questions: [{
-      id: 'goal',
-      question: 'What do you want to accomplish?',
-      header: 'Goal',
-      detail: 'Pick the closest match.',
-      multi_select: false,
-      options: [{ label: 'Develop a feature', description: 'New behavior' }, { label: 'Fix a bug' }],
-    }] })
-    const reviewPanel = vi.fn(() => true)
-    const batch = [{ id: 'goal', selected: ['Fix a bug'] }]
-    render(<AskQuestionRow {...rowProps(
-      resultNode(args, answers(batch)),
-      { settled: { c1: batch }, reviewPanel },
-    )} />)
-
-    fireEvent.click(screen.getByRole('button', { name: PILL.review }))
-    expect(reviewPanel).toHaveBeenCalledWith('c1', {
-      questions: [{
-        id: 'goal',
-        question: 'What do you want to accomplish?',
-        header: 'Goal',
-        detail: 'Pick the closest match.',
-        multiSelect: false,
-        options: [{ label: 'Develop a feature', description: 'New behavior' }, { label: 'Fix a bug' }],
-      }],
-      answers: batch,
-    })
-  })
-
-  it('an answered legacy call reads exactly as before timed questions existed: transcript, no pill', () => {
+  it('an answered legacy call reads as its answered count with raw sections, no pill', () => {
     // The projection never lists a call the blocking legacy tool made, so the
-    // row has nothing to reopen and no panel to read the answers back in.
+    // row has nothing to reopen; the answers read back through the row's own
+    // input/output sections.
     const view = render(<AskQuestionRow {...rowProps(resultNode(READABLE_ARGS, answers([
       { id: 'goal', selected: ['Develop a feature'] },
       { id: 'scope', selected: [], custom: 'the web app' },
@@ -544,48 +486,37 @@ describe('AskQuestionRow', () => {
     ])))} />)
 
     expect(screen.getByText('2/3 已回答')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: PILL.review })).toBeNull()
     expect(screen.queryByRole('button', { name: PILL.reopen })).toBeNull()
-    expect(view.container.querySelector('[class*="rowAction"]')).toBeNull()
-    expect(screen.getByText('the web app')).toBeTruthy()
-    expect(screen.getByText('未回答')).toBeTruthy()
+    expect(view.container.querySelector('[class*="panelButton"]')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { expanded: false }))
+    const io = view.container.querySelector('[class*="ioCard"]')
+    expect(io).not.toBeNull()
+    expect(io?.textContent).toContain('What do you want to accomplish?')
+    expect(io?.textContent).toContain('"answers"')
+    expect(screen.queryByText('未回答')).toBeNull()
   })
 
-  it('a settled call whose questions failed validation keeps only its transcript', () => {
+  it('a settled call keeps its answered count when its arguments were unparseable', () => {
     const batch = [{ id: 'a', selected: ['x'] }]
-    render(<AskQuestionRow {...rowProps(resultNode('oops', answers(batch)), { settled: { c1: batch } })} />)
+    const view = render(<AskQuestionRow {...rowProps(resultNode('oops', answers(batch)), { settled: { c1: batch } })} />)
     expect(screen.getByText('1/1 已回答')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: PILL.review })).toBeNull()
-  })
-
-  it.each([
-    { label: 'fewer answers than questions', batch: [{ id: 'goal', selected: ['x'] }] },
-    { label: 'an answer to a question never asked', batch: [
-      { id: 'goal', selected: ['x'] }, { id: 'scope', selected: [] }, { id: 'other', selected: ['y'] },
-    ] },
-    { label: 'the same question answered twice', batch: [
-      { id: 'goal', selected: ['x'] }, { id: 'goal', selected: ['y'] }, { id: 'notes', selected: [] },
-    ] },
-  ])('a settled batch with $label offers no panel, like the transcript it cannot pair', ({ batch }) => {
-    const reviewPanel = vi.fn(() => true)
-    const view = render(<AskQuestionRow {...rowProps(
-      resultNode(READABLE_ARGS, answers(batch)),
-      { settled: { c1: batch }, reviewPanel },
-    )} />)
-    expect(screen.queryByRole('button', { name: PILL.review })).toBeNull()
     fireEvent.click(screen.getByRole('button', { expanded: false }))
     expect(view.container.querySelector('[class*="ioCard"]')).not.toBeNull()
-    expect(reviewPanel).not.toHaveBeenCalled()
   })
 
   it.each([
-    { label: 'a cancelled set', code: 'ASK_CANCELLED' },
-    { label: 'an aborted turn', code: 'ASK_ABORTED' },
-  ])('$label has no answers to review', ({ code }) => {
-    render(<AskQuestionRow {...rowProps(resultNode(READABLE_ARGS, null,
-      { isError: true, error: { name: 'UserQuestionError', code } }))} />)
-    expect(screen.queryByRole('button', { name: PILL.review })).toBeNull()
-    expect(screen.queryByRole('button', { name: PILL.reopen })).toBeNull()
+    { label: 'missing id', value: { selected: ['x'] }, count: '1/1 已回答' },
+    { label: 'non-array selection', value: { id: 'a', selected: 'x' }, count: '0/1 已回答' },
+    { label: 'non-string selection', value: { id: 'a', selected: [1] }, count: '1/1 已回答' },
+    { label: 'non-string custom text', value: { id: 'a', selected: [], custom: 1 }, count: '0/1 已回答' },
+  ])('a result with $label still gets its best-effort count ($count)', ({ value, count }) => {
+    // Strict batch parsing rejects the entry; the lenient recount still says
+    // how many questions carry an answer, so the summary never goes blank.
+    const view = render(<AskQuestionRow {...rowProps(resultNode(READABLE_ARGS, answers([value])))} />)
+    expect(screen.getByText(count)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { expanded: false }))
+    expect(view.container.querySelector('[class*="ioCard"]')).not.toBeNull()
   })
 
   it('keeps generic diagnostics when a valid answer result includes a non-text block', () => {
@@ -631,70 +562,49 @@ describe('AskQuestionRow', () => {
   })
 
   it.each([
-    { label: 'missing id', value: { selected: ['x'] } },
-    { label: 'non-array selection', value: { id: 'a', selected: 'x' } },
-    { label: 'non-string selection', value: { id: 'a', selected: [1] } },
-    { label: 'non-string custom text', value: { id: 'a', selected: [], custom: 1 } },
-  ])('falls back to generic JSON for a result with $label', ({ value }) => {
-    const view = render(<AskQuestionRow {...rowProps(resultNode(READABLE_ARGS, answers([value])))} />)
-    fireEvent.click(screen.getByRole('button', { expanded: false }))
-    expect(view.container.querySelector('[class*="ioCard"]')).not.toBeNull()
+    { label: 'a cancelled set', code: 'ASK_CANCELLED', summary: '已取消', state: 'ok' },
+    { label: 'an aborted turn', code: 'ASK_ABORTED', summary: '已中断', state: 'stopped' },
+  ])('$label reads its verdict with no answer action', ({ code, summary, state }) => {
+    const view = render(<AskQuestionRow {...rowProps(resultNode(READABLE_ARGS, null,
+      { isError: true, error: { name: 'UserQuestionError', code } }))} />)
+    expect(screen.getByText(summary)).toBeTruthy()
+    expect(view.container.querySelector(`[data-state="${state}"]`)).not.toBeNull()
+    expect(screen.queryByRole('button', { name: PILL.reopen })).toBeNull()
+    expect(view.container.querySelector('[class*="panelButton"]')).toBeNull()
   })
 
-  it.each([
-    { label: 'non-JSON args', args: 'oops' },
-    { label: 'non-object args', args: '[]' },
-    { label: 'missing question array', args: '{}' },
-    { label: 'non-object question', args: '{"questions":[null]}' },
-    { label: 'non-string question id', args: '{"questions":[{"id":1,"question":"Q"}]}' },
-    { label: 'non-string question text', args: '{"questions":[{"id":"a","question":1}]}' },
-    { label: 'duplicate question ids', args: '{"questions":[{"id":"a","question":"Q1"},{"id":"a","question":"Q2"}]}' },
-    { label: 'different question count', args: '{"questions":[]}' },
-  ])('keeps raw details when answer pairing sees $label', ({ args }) => {
-    const view = render(<AskQuestionRow {...rowProps(resultNode(args, answers([
-      { id: 'a', selected: ['x'] },
-    ])))} />)
-    expect(screen.getByText('1/1 已回答')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { expanded: false }))
-    expect(view.container.querySelector('[class*="ioCard"]')).not.toBeNull()
-  })
-
-  it.each([
-    { label: 'duplicate answer ids', values: [{ id: 'a', selected: ['x'] }, { id: 'a', selected: ['y'] }] },
-    { label: 'unknown answer id', values: [{ id: 'other', selected: ['x'] }] },
-  ])('keeps raw details for $label', ({ values }) => {
-    const args = JSON.stringify({ questions: values.map((_, index) => ({
-      id: String.fromCharCode(97 + index), question: `Question ${String(index + 1)}`,
-    })) })
-    const view = render(<AskQuestionRow {...rowProps(resultNode(args, answers(values)))} />)
-    fireEvent.click(screen.getByRole('button', { expanded: false }))
-    expect(view.container.querySelector('[class*="ioCard"]')).not.toBeNull()
-  })
-
-  it('user cancellation shows the original questions without raw JSON or an error body', () => {
+  it('user cancellation reads as cancelled with its raw diagnostics behind the disclosure', () => {
     // ASK_CANCELLED: the ask_user_question handler's cancel error.
     const view = render(<AskQuestionRow {...rowProps(resultNode(READABLE_ARGS, null,
       { isError: true, error: { name: 'UserQuestionError', code: 'ASK_CANCELLED' } }))} />)
     expect(screen.getByText('已取消')).toBeTruthy()
     expect(view.container.querySelector('[data-state="ok"]')).not.toBeNull()
-    expect(screen.getByText('本轮已取消，未提交回答')).toBeTruthy()
-    expect(screen.getByText('What do you want to accomplish?')).toBeTruthy()
-    expect(screen.getByText('Which project should this apply to?')).toBeTruthy()
-    expect(screen.getByText('Anything else?')).toBeTruthy()
+    expect(view.container.querySelector('[class*="panelButton"]')).toBeNull()
+    // Collapsed: no raw JSON or error body on screen yet.
     expect(view.container.querySelector('[class*="ioCard"]')).toBeNull()
     expect(screen.queryByText(/"questions"/)).toBeNull()
     expect(screen.queryByText(/the user cancelled ask_user_question/)).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { expanded: false }))
+    const io = view.container.querySelector('[class*="ioCard"]')
+    expect(io).not.toBeNull()
+    expect(io?.textContent).toContain('What do you want to accomplish?')
+    expect(io?.textContent).toContain('UserQuestionError: ASK_CANCELLED')
   })
 
-  it('a turn abort shows the original questions with stopped semantics', () => {
+  it('a turn abort reads as stopped with its raw arguments behind the disclosure', () => {
     // ASK_ABORTED: the ask handler's turn-abort settlement.
     const view = render(<AskQuestionRow {...rowProps(resultNode(READABLE_ARGS, null,
       { isError: true, error: { name: 'UserQuestionError', code: 'ASK_ABORTED' } }))} />)
     expect(screen.getByText('已中断')).toBeTruthy()
     expect(view.container.querySelector('[data-state="stopped"]')).not.toBeNull()
-    expect(screen.getByText('本轮已中断，未提交回答')).toBeTruthy()
-    expect(screen.getByText('What do you want to accomplish?')).toBeTruthy()
+    expect(view.container.querySelector('[class*="panelButton"]')).toBeNull()
     expect(view.container.querySelector('[class*="ioCard"]')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { expanded: false }))
+    const io = view.container.querySelector('[class*="ioCard"]')
+    expect(io).not.toBeNull()
+    expect(io?.textContent).toContain('What do you want to accomplish?')
   })
 
   it.each([
@@ -756,27 +666,17 @@ describe('AskQuestionRow', () => {
     const reveal = vi.fn<UserQuestionPanels['reveal']>(() => true)
     const get = vi.fn((_name: string): PanelProvider => ({
       reveal: (_sessionId, callId) => reveal(_sessionId, callId),
-      review: () => false,
     }))
     expect(injectedFace(get).revealPanel('c1')).toBe(true)
     expect(get).toHaveBeenCalledWith('userQuestionPanels')
     expect(reveal).toHaveBeenCalledWith('s1', 'c1')
   })
 
-  it('the injected review verb hands the row own record to the panel provider', () => {
-    const review = vi.fn<UserQuestionPanels['review']>(() => true)
-    const get = vi.fn((_name: string): PanelProvider => ({
-      reveal: () => false,
-      review: (_sessionId, callId, value) => review(_sessionId, callId, value),
-    }))
-    const record = { questions: [], answers: [] }
-    expect(injectedFace(get).reviewPanel('c1', record)).toBe(true)
-    expect(get).toHaveBeenCalledWith('userQuestionPanels')
-    expect(review).toHaveBeenCalledWith('s1', 'c1', record)
-  })
-
-  it('a composition with no question UI reports no panel to reveal or review', () => {
-    expect(injectedFace(() => undefined).revealPanel('c1')).toBe(false)
-    expect(injectedFace(() => undefined).reviewPanel('c1', { questions: [], answers: [] })).toBe(false)
+  it('a composition with no question UI exposes only revealPanel, and it reports no panel', () => {
+    const face = injectedFace(() => undefined)
+    // ask-panel-retire-1127: the read-only review verb is retired with the
+    // record card — the injected face is revealPanel alone.
+    expect(Object.keys(face)).toEqual(['revealPanel'])
+    expect(face.revealPanel('c1')).toBe(false)
   })
 })

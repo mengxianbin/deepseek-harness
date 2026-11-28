@@ -1,6 +1,6 @@
 import {
   useEffect, useId, useLayoutEffect, useMemo, useRef, useState,
-  type ChangeEvent, type FocusEvent, type KeyboardEvent, type MouseEvent, type RefObject,
+  type ChangeEvent, type FocusEvent, type KeyboardEvent, type MouseEvent,
 } from 'react'
 import clsx from 'clsx'
 import {
@@ -14,7 +14,9 @@ import { classifyComposerEnter } from '@deepseek-ai/dsh-client-shortcuts/client'
 import { planReviewOf, type QuestionAnswer, type QuestionCardSnapshot, type QuestionComposerProps } from './contract/slots.ts'
 import type { PendingQuestion } from './contract/slots.ts'
 import type { QuestionDraftAnswer, QuestionDraftProgress } from './draft-store.ts'
+import { AnswerField, isComposing } from './AnswerField.tsx'
 import { PlanReviewPanel } from './PlanReviewPanel.tsx'
+import { QuestionInput } from './QuestionInput.tsx'
 import css from './QuestionComposer.module.css'
 
 /**
@@ -81,12 +83,6 @@ function isQuestionDraftProgress(value: unknown, questionCount: number): value i
   })
 }
 
-/** Return whether a key event belongs to an active IME composition. */
-function isComposing(event: KeyboardEvent<HTMLElement>): boolean {
-  // keyCode 229 is the legacy IME-composition signal engines emit without isComposing.
-  return event.nativeEvent.isComposing || Reflect.get(event.nativeEvent, 'keyCode') === 229
-}
-
 /**
  * Text-field keys the open trigger menu may claim, keyed by KeyboardEvent.key
  * and resolved to the pipeline's arbitration vocabulary. Tab resolves to
@@ -101,86 +97,35 @@ const ARBITRATE_KEYS: Record<string, ArbitrateKey> = {
   Tab: 'tab',
 }
 
-/** The free-text answer field shared by both question variants. */
-interface AnswerFieldProps {
-  /** Visual variant: the custom row's inline column or the optionless question's framed block. */
-  variant: 'inline' | 'block'
-  /** Current draft text. */
-  value: string
-  /** Empty-field prompt. */
-  placeholder: string
-  /** Whether a submission in flight has frozen the field. */
-  disabled: boolean
-  /** Whether this field takes focus on mount. */
-  autoFocus?: boolean
-  /** Host hook for trigger-pipeline caret tracking and post-insert caret restore. */
-  textRef?: RefObject<HTMLTextAreaElement>
-  /** Called when the field takes focus. */
-  onFocus?: () => void
-  /** Called whenever the selection moves (caret motion re-tracks the trigger pipeline). */
-  onSelect?: () => void
-  /** Called with each edit of the draft. */
-  onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void
-  /** Called with each key press, before the browser's own handling. */
-  onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void
-}
-
 /**
- * Auto-growing free-text answer: a textarea, so a long answer soft-wraps and
- * Enter breaks a line, over a hidden mirror that owns the height.
+ * Composer takeover router. One takeover, three presentations decided at this
+ * single intent fork (ask-panel-retire-1127 D3 — the separation rides the
+ * request's type, never an in-session judgement):
  *
- * The mirror renders the draft plus a trailing newline in normal flow and so
- * sizes the grid row (counting rows by '\n' cannot see soft wraps); the
- * textarea shares that one cell and stretches to it, and `rows={1}` keeps the
- * control's own intrinsic height out of the row sizing so the mirror alone
- * decides. Past the mirror's cap the textarea scrolls itself — it is the only
- * scrollport in the stack, there being no second glyph layer to keep aligned.
- * Mirror and textarea MUST share font, line-height, padding and wrapping rules
- * or the two heights diverge.
+ * 1. a `plan-review` intent renders the plan decision card (one decision over
+ *    one plan, not a question set);
+ * 2. an `approval` intent keeps its option decision card — its caller reads
+ *    the chosen label verbatim, so the options ARE the protocol surface;
+ * 3. every other (intent-less) request takes the native input straight
+ *    through: no option tabs, no record card, the question text living in the
+ *    AI's conversation message (甲-a).
  *
- * @param props - visual variant, draft text, and the field's event handlers.
- * @returns The mirrored auto-growing field.
- */
-function AnswerField(props: AnswerFieldProps) {
-  return (
-    <div className={clsx(css.field, props.variant === 'inline' ? css.customInline : css.customBlock)}>
-      <div aria-hidden className={css.fieldMirror}>{`${props.value}\n`}</div>
-      <textarea
-        ref={props.textRef}
-        autoFocus={props.autoFocus}
-        className={css.fieldInput}
-        value={props.value}
-        disabled={props.disabled}
-        rows={1}
-        placeholder={props.placeholder}
-        onFocus={props.onFocus}
-        onSelect={props.onSelect}
-        onChange={props.onChange}
-        onKeyDown={props.onKeyDown}
-      />
-    </div>
-  )
-}
-
-/**
- * Composer takeover router. Generic-question drafts live in this entry's
- * Session-scoped Slot store, keyed by the pending carrier, so a strict Session
- * entry remount restores the same request without exposing it to another one.
- *
- * One takeover, two presentations: a request that declares a presentation intent this
- * package renders uses that presentation (a plan review is one decision over one
- * plan, not a question set), and every other request takes the generic flow.
  * The routing lives here, at the one entry that owns the composer seat, so
- * neither presentation can claim a request the other is already rendering.
+ * neither presentation can claim a request another one is already rendering.
  *
  * @param props - the selector-matched pending question carrier plus the framework standard kit.
- * @returns The question flow, or the intent's own surface, for this request.
+ * @returns the intent's own surface for this request.
  */
 export function QuestionComposer(props: QuestionComposerProps) {
   const question = props.matched
-  const review = useMemo(() => planReviewOf(question.questions), [question])
-  return review === undefined
-    ? (
+  const review = planReviewOf(question.questions)
+  if (review !== undefined) {
+    return (
+      <PlanReviewPanel key={question.key} pending={question} review={review} t={props.t} renderSlot={props.renderSlot} />
+    )
+  }
+  if (question.questions.some(item => item.intent?.kind === 'approval')) {
+    return (
       <QuestionFlow
         key={question.key}
         pending={question}
@@ -193,7 +138,20 @@ export function QuestionComposer(props: QuestionComposerProps) {
         {...(props.openAttachment === undefined ? {} : { openAttachment: props.openAttachment })}
       />
     )
-    : <PlanReviewPanel key={question.key} pending={question} review={review} t={props.t} renderSlot={props.renderSlot} />
+  }
+  return (
+    <QuestionInput
+      key={question.key}
+      pending={question}
+      t={props.t}
+      useStore={props.useStore}
+      useQuestionCard={props.useQuestionCard}
+      actions={props.actions}
+      renderSlot={props.renderSlot}
+      answerTriggers={props.answerTriggers}
+      {...(props.openAttachment === undefined ? {} : { openAttachment: props.openAttachment })}
+    />
+  )
 }
 
 type QuestionFlowProps =
@@ -201,35 +159,27 @@ type QuestionFlowProps =
   & Pick<QuestionComposerProps,
     't' | 'useStore' | 'useQuestionCard' | 'actions' | 'renderSlot' | 'answerTriggers' | 'openAttachment'>
 
+/**
+ * The option decision card, kept for intent-bearing requests only
+ * (ask-panel-retire-1127 D3): an `approval` intent's caller reads the chosen
+ * label verbatim, so its options are the protocol surface. Intent-less
+ * questions no longer reach this flow — QuestionComposer routes them to the
+ * native QuestionInput.
+ */
 function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSlot, answerTriggers, openAttachment }: QuestionFlowProps) {
   const descriptionIdPrefix = useId()
   const questions = pending.questions
-  // A read-only card built from a settled call's transcript: the same panel
-  // over the recorded answers, with nothing left to submit.
-  const review = pending.review
   const markdownLabels = useMemo(() => ({
     code: { copyLabel: t('copy'), copiedLabel: t('copied'), toolbarLabels: { codeLabel: t('codeBlock.title'), wrapLabel: t('codeBlock.wrap'), unwrapLabel: t('codeBlock.unwrap') } },
     footnotes: t('markdown.footnotes'),
   }), [t])
-  const initialDrafts = useMemo<QuestionDraftAnswer[]>(() => {
-    // Recorded answers echo the question ids rather than their order.
-    const recorded = new Map((review ?? []).map(answer => [answer.id, answer]))
-    return questions.map((item) => {
-      const answer = recorded.get(item.id)
-      const custom = answer?.custom ?? ''
-      return {
-        selected: answer !== undefined ? [...answer.selected] : review === undefined ? recommendedOptions(item) : [],
-        custom,
-        // A recorded answer with no selection and no custom text was skipped.
-        skipped: answer !== undefined && answer.selected.length === 0 && custom === '',
-      }
-    })
-  }, [questions, review])
+  const initialDrafts = useMemo<QuestionDraftAnswer[]>(
+    () => questions.map(item => ({ selected: recommendedOptions(item), custom: '', skipped: false })),
+    [questions],
+  )
   const stored = useStore(state => state.progressByRequest[pending.key])
   const validStored = isQuestionDraftProgress(stored, questions.length) ? stored : undefined
-  // A review card renders the record itself, so a draft its live card left
-  // behind can never surface as an answer; only the page position is restored.
-  const storedProgress = review === undefined ? validStored : undefined
+  const storedProgress = validStored
   const index = validStored?.index ?? 0
   const drafts = storedProgress?.drafts ?? initialDrafts
   // The card-level remark (题外话) rides the same progress record, so page
@@ -245,9 +195,8 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
   const [error, setError] = useState<Feedback | null>(null)
   const card = useQuestionCard(pending.key, snapshot => snapshot ?? REMOVED_CARD)
   const canSubmit = card.channel !== 'none'
-  // The answer surface freezes while a submission is in flight, and for good on
-  // a review card: its call has already settled.
-  const locked = busy !== null || review !== undefined
+  // The answer surface freezes while a submission is in flight.
+  const locked = busy !== null
   // A waterfall submission is only "sent": the gateway drops an outcome that
   // arrives after another Client settled the event, without telling anyone.
   // The draft therefore survives until the projection closes the card, and a
@@ -830,7 +779,7 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
   // selections survive the page turn, so returning to a question restores the
   // keyboard to the choice that was already made instead of the first row
   // (which read as "my previous choice was forgotten"). No selection, or a
-  // locked card (busy/review) whose options are disabled, falls back to the
+  // locked card (busy) whose options are disabled, falls back to the
   // first enabled option exactly as before; a multi-select lands on its
   // first checked option in document order.
   useLayoutEffect(() => {
@@ -973,7 +922,6 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
             {countdown !== undefined && (card.waitState === 'waiting' || card.waitState === 'editing') && (
               <span className={css.waitStatus}>{t('wait.held')}</span>
             )}
-            {review !== undefined && <span className={css.waitStatus}>{t('review.status')}</span>}
             <button
               type="button" className={css.iconButton}
               aria-label={t(pending.dismissal === 'hide' ? 'nav.close' : 'nav.cancel')}
@@ -1118,73 +1066,67 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
                   )
                 })}
 
-                {review !== undefined && draft.skipped && (
-                  <p className={css.reviewNote}>{t('review.skipped')}</p>
-                )}
-
-                {/* A review card keeps the free-text field only when the
-                    recorded answer used it; an empty disabled box with a
-                    placeholder would read as somewhere to type. */}
-                {(review === undefined || draft.custom !== '') && (hasOptions
-                  ? (
-                    <div
-                      className={clsx(
-                        css.customRow,
-                        draft.custom !== '' && css.customRowActive,
-                        question.multiSelect !== true && draft.selected.length > 0 && css.customRowYielded,
-                      )}
-                    >
-                      {question.multiSelect === true
-                        ? (
-                          <span
-                            className={clsx(css.checkbox, draft.custom !== '' && css.checkboxChecked)}
-                            aria-hidden="true"
-                          >
-                            {draft.custom !== '' && <IconCheckOutlineRegular size={12} />}
-                          </span>
-                        )
-                        : (
-                          <span className={css.number} aria-hidden="true">
-                            <IconEditOutlineRegular size={12} />
-                          </span>
+                {(
+                  hasOptions
+                    ? (
+                      <div
+                        className={clsx(
+                          css.customRow,
+                          draft.custom !== '' && css.customRowActive,
+                          question.multiSelect !== true && draft.selected.length > 0 && css.customRowYielded,
                         )}
+                      >
+                        {question.multiSelect === true
+                          ? (
+                            <span
+                              className={clsx(css.checkbox, draft.custom !== '' && css.checkboxChecked)}
+                              aria-hidden="true"
+                            >
+                              {draft.custom !== '' && <IconCheckOutlineRegular size={12} />}
+                            </span>
+                          )
+                          : (
+                            <span className={css.number} aria-hidden="true">
+                              <IconEditOutlineRegular size={12} />
+                            </span>
+                          )}
+                        <AnswerField
+                          variant="inline"
+                          value={draft.custom}
+                          disabled={locked}
+                          placeholder={t('custom.placeholder')}
+                          textRef={textRef}
+                          onFocus={trackCaret}
+                          onSelect={trackCaret}
+                          onChange={draftCustom}
+                          onKeyDown={answerKeyDown}
+                        />
+                      </div>
+                    )
+                    : (
                       <AnswerField
-                        variant="inline"
+                      // A missing countdown does not imply an indefinite request:
+                      // a timed request can still be awaiting its claim's first frame.
+                        autoFocus={canSubmit && countdown === undefined && !locked && !focusedQuestions.current.has(index)}
+                        variant="block"
                         value={draft.custom}
                         disabled={locked}
                         placeholder={t('custom.placeholder')}
                         textRef={textRef}
-                        onFocus={trackCaret}
+                        onFocus={() => { focusedQuestions.current.add(index); trackCaret() }}
                         onSelect={trackCaret}
                         onChange={draftCustom}
                         onKeyDown={answerKeyDown}
                       />
-                    </div>
-                  )
-                  : (
-                    <AnswerField
-                      // A missing countdown does not imply an indefinite request:
-                      // a timed request can still be awaiting its claim's first frame.
-                      autoFocus={canSubmit && countdown === undefined && !locked && !focusedQuestions.current.has(index)}
-                      variant="block"
-                      value={draft.custom}
-                      disabled={locked}
-                      placeholder={t('custom.placeholder')}
-                      textRef={textRef}
-                      onFocus={() => { focusedQuestions.current.add(index); trackCaret() }}
-                      onSelect={trackCaret}
-                      onChange={draftCustom}
-                      onKeyDown={answerKeyDown}
-                    />
-                  ))}
+                    ))}
               </div>
 
               {/* FORK dsh-local (ask-focus-restore-1125, 2026-11-25 裁定 D):
                   the card-level remark box (题外话): free text that belongs to
                   no single question, opened from the footer toggle and kept
                   across pages in the progress record. Closed it takes no
-                  space; a review card has nothing to add. */}
-              {review === undefined && noteOpen && (
+                  space. */}
+              {noteOpen && (
                 <div className={css.noteRow} data-question-note="">
                   <AnswerField
                     variant="inline"
@@ -1222,8 +1164,7 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
               <div className={css.feedback} role="status">
                 {error === null ? null : 'key' in error ? t(error.key) : error.text}
               </div>
-              {/* A review card has nothing to send: the pager alone walks the record. */}
-              {review === undefined && (
+              {(
                 <div className={css.footerActions}>
                   {/* FORK dsh-local (ask-focus-restore-1125, 裁定 D): the
                       题外话 open/close toggle — the box itself takes no space

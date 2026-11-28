@@ -958,6 +958,11 @@ describe('folding over-long question text out of the card', () => {
   async function foldContext(): Promise<{ ctx: Context; reportDir: string; p: ReturnType<typeof provider> }> {
     const reportDir = await mkdtemp(join(tmpdir(), 'ask-fold-spec-'))
     const ctx = new Context()
+    // AgentRegistry declares `static inject = ['sessionProjections']`, so the
+    // registry only lands once the projection service exists — every factory
+    // in this file registers it first (baseline-red fix, stash A/B proved the
+    // failure predates ask-panel-retire-1127).
+    await ctx.plugin(SessionProjectionRegistry)
     await ctx.plugin(AgentRegistry)
     // Full Config literal, as the service's typed constructor expects; zod's
     // defaults fill these in production, tests state them explicitly.
