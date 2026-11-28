@@ -24,6 +24,7 @@
  */
 import type { SessionHealthState } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { WorkspaceBrowserProps } from '../contract/slots.ts'
+import { formatAgeSec } from '../format-age.ts'
 import type { WorkspaceKey } from '../locales.ts'
 import css from './HealthDetail.module.css'
 
@@ -86,7 +87,7 @@ export function HealthDetail({ report, t }: { report: HealthReport; t: DetailTra
               </div>
               {!duty.fresh && (
                 <div className={css.dutyUntrusted} data-duty-untrusted="">
-                  {t('health.duty.untrusted', { s: duty.ageSec ?? 0 })}
+                  {t('health.duty.untrusted', { s: formatAgeSec(duty.ageSec ?? 0) })}
                 </div>
               )}
               {/* 睡眠豁免（duty-sleep-gap-1126）：原始年龄超线但睡眠窗已扣减、
@@ -95,8 +96,8 @@ export function HealthDetail({ report, t }: { report: HealthReport; t: DetailTra
               {duty.sleepExempt === true && (
                 <div className={css.dutySleepExempt} data-duty-sleep-exempt="">
                   {t('health.duty.sleepExempt', {
-                    s: duty.ageSec ?? 0,
-                    sleep: duty.sleepOverlapSec ?? 0,
+                    s: formatAgeSec(duty.ageSec ?? 0),
+                    sleep: formatAgeSec(duty.sleepOverlapSec ?? 0),
                   })}
                 </div>
               )}
@@ -139,7 +140,7 @@ export function HealthDetail({ report, t }: { report: HealthReport; t: DetailTra
             : (
               <div className={css.dutyFailed} data-auto-route="failing">
                 <span className={css.dutyItemName}>
-                  {t('health.autoRoute.failing', { s: autoRoute.failingForSec ?? 0 })}
+                  {t('health.autoRoute.failing', { s: formatAgeSec(autoRoute.failingForSec ?? 0) })}
                 </span>
                 {autoRoute.sustained && (
                   <span className={css.dutyItemTag}>{t('health.autoRoute.sustainedTag')}</span>
