@@ -36,12 +36,15 @@ export function QuestionReplyBubble({ data, t }: { data: QuestionReplyData; t: P
             : <dl className={css.details}>
               {data.questions.map((question) => {
                 const values = replyAnswerValues(data, question.id)
+                // No per-question value: nothing is labelled "skipped"
+                // (ask-native-input-1128 — skip is abolished, so an empty
+                // entry is the batch text's own, carried by the remark below).
                 return <div key={question.id}>
                   <dt className={css.question}>
                     {question.header && question.header !== question.question && <span className={css.header}>{question.header}</span>}
                     <span>{question.question}</span>
                   </dt>
-                  <dd className={css.answer}>{values.length === 0 ? t('reply.skipped') : values.join(', ')}</dd>
+                  {values.length === 0 ? null : <dd className={css.answer}>{values.join(', ')}</dd>}
                 </div>
               })}
               {/* The card-level remark (题外话, ask-focus-restore-1125 裁定 D):

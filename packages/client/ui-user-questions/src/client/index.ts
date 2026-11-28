@@ -6,24 +6,27 @@
  * carrier (domain encoding in contract/slots.ts PendingQuestion); copy rides
  * the standard locale seat. Export discipline: packages/client/AGENTS.md.
  *
- * One entry, three presentations (ask-panel-retire-1127): the composer
- * renders a `plan-review` intent as the plan decision card, an `approval`
- * intent as its option decision card, and every other request as the native
- * answer input. All use the same carrier and composer seat.
+ * One entry, three presentations (ask-panel-retire-1127 + ask-native-input-1128):
+ * the composer chain's selector routes a `plan-review` intent to the plan
+ * decision card and an `approval` intent to its option decision card, and
+ * DECLINES every other (intent-less) request — the resident composer, the
+ * ordinary chat input, then keeps the seat, so typing a message and sending it
+ * IS the answer (① 表现层完全用普通 input，底层做适配). The plain send is
+ * diverted back through the `questionAnswerSink` face this plugin provides:
+ * the provider assembles the BAD_ANSWER batch and calls `pending.answer()`.
  *
- * The answer field (native input and option card alike) joins the shared '/'
- * trigger pipeline on the `answer` surface: this plugin binds each Session's
- * controller into the injected `answerTriggers` face (track / keyboard
- * arbitration / insert target) and declares the `conversation.composer.overlay`
- * slot whose entries render the candidate menu (registered by
- * ui-input-trigger) above the card.
+ * The answer field (option card alike) joins the shared '/' trigger pipeline
+ * on the `answer` surface: this plugin binds each Session's controller into
+ * the injected `answerTriggers` face (track / keyboard arbitration / insert
+ * target) and declares the `conversation.composer.overlay` slot whose entries
+ * render the candidate menu (registered by ui-input-trigger) above the card.
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { InboxWireState } from '@deepseek-ai/dsh-agent/types'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
-import type { ComposerChainProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { ComposerChainProps, QuestionAnswerSink, SubmitOutcome } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { PendingInteractionPublisher } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { TypertClientEventListener } from '@deepseek-ai/dsh-typert-protocol'
@@ -39,10 +42,10 @@ import { composerEnterDisplay, composerEnterGestures, type ShortcutCommandId } f
 import { fileAddressFor } from '@deepseek-ai/dsh-util-workspace-path'
 import {
   createWaterfallRequest, PendingQuestion,
-  type AnswerTriggerSurface, type QuestionRpcChannel,
+  type AnswerTriggerSurface, type QuestionAnswer, type QuestionRpcChannel,
 } from './contract/slots.ts'
 import { createQuestionDraftStore } from './draft-store.ts'
-import { QuestionComposer } from './QuestionComposer.tsx'
+import { QuestionComposer, intentSurfaceOf } from './QuestionComposer.tsx'
 import { answeredQuestionDefinition, questionReplyDefinition } from './question-reply.ts'
 import { QuestionReplyView } from './QuestionReplyView.tsx'
 import { en, ja, es, fr, de, ru, pt, zh, type QuestionKey } from './locales.ts'
@@ -78,7 +81,7 @@ export const inject = [
 /** One card and the composer seat it moves in and out of. */
 interface QuestionCard {
   readonly pending: PendingQuestion
-  /** Withdraw the panel from the composer seat; the request and its countdown stand. */
+  /** Withdraw the panel from the composer seat; the request stands and stays answerable. */
   readonly hide: () => void
   /** Publish the panel last, so it wins the seat against any other pending question. */
   readonly reveal: () => void
@@ -435,12 +438,60 @@ export function apply(ctx: ClientContext): void {
     reveal: (sessionId, callId) => cards.reveal(sessionId, callId),
   } satisfies UserQuestionPanels)
   ctx.effect(() => disposePanels, 'ui-user-questions: answer panels')
+  /**
+   * The plain-send divert (ask-native-input-1128): the conversation hub reads
+   * this before the ordinary message path, so a typed-and-sent draft while an
+   * intent-less question owns the Session IS that question's answer. Assembly
+   * stays here, on the presentation side — the BAD_ANSWER contract itself
+   * (one entry per question, batch text as `note`) is untouched.
+   */
+  const disposeAnswerSink = ctx.reflect.provide('questionAnswerSink', {
+    answer: async (sessionId: SessionId, text: string): Promise<SubmitOutcome | null> => {
+      const pending = ctx.uiSession.sessionStatus.getSnapshot().get(sessionId)?.pendingInteraction
+      if (!(pending instanceof PendingQuestion)) return null
+      // The card presentations keep their own answer surface; only the
+      // resident composer's plain send is diverted.
+      if (intentSurfaceOf(pending.questions).kind !== 'native') return null
+      const questions = pending.questions
+      const [first] = questions
+      // BAD_ANSWER: every question exactly once. A single question carries the
+      // text as its `custom`; a batch lifts it to the batch-level `note` and
+      // leaves one empty entry per question.
+      const answers = questions.length === 1 && first !== undefined
+        ? [{ id: first.id, selected: [], custom: text }]
+        : questions.map(item => ({ id: item.id, selected: [] }))
+      const answer: QuestionAnswer = {
+        answers,
+        ...(questions.length === 1 ? {} : { note: text }),
+      }
+      // The external-store render can lag the carrier as a continued call
+      // re-arms: read the channel answer() uses in this same event turn.
+      const channel = pending.snapshot().channel
+      try {
+        await pending.answer(answer)
+        if (channel === 'rpc') await pending.dismiss().catch(() => undefined)
+        return { kind: 'success' }
+      } catch (cause: unknown) {
+        return { kind: 'error', text: cause instanceof Error ? cause.message : String(cause) }
+      }
+    },
+  } satisfies QuestionAnswerSink)
+  ctx.effect(() => disposeAnswerSink, 'ui-user-questions: answer sink')
   ctx.effect(() => publishContinuedQuestions(ctx, cards), 'ui-user-questions: continued questions')
   ctx.slots.inject('conversation.composer', () => ctx.slots.register(
     {
       name: 'conversation.composer',
-      select: ({ pendingInteraction }: ComposerChainProps): PendingQuestion | null =>
-        pendingInteraction instanceof PendingQuestion ? pendingInteraction : null,
+      /**
+       * The one intent fork at the seat (ask-panel-retire-1127 D3 +
+       * ask-native-input-1128): plan-review and approval elect their own card;
+       * every other (intent-less) pending question DECLINES here, so the
+       * owner's fallback — the resident composer, the ordinary chat input —
+       * keeps the seat and a plain send is diverted back as the answer.
+       */
+      select: ({ pendingInteraction }: ComposerChainProps): PendingQuestion | null => {
+        if (!(pendingInteraction instanceof PendingQuestion)) return null
+        return intentSurfaceOf(pendingInteraction.questions).kind === 'native' ? null : pendingInteraction
+      },
       locale: NS,
       store: questionDraftStore,
       inject: (sessionId: SessionId | undefined) => ({

@@ -104,7 +104,18 @@ async function bench(
     pending.set(value, delegate)
     return () => { pending.delete(value) }
   })
-  ctx.provide('uiSession', { registerPendingInteraction } as never)
+  ctx.provide('uiSession', {
+    registerPendingInteraction,
+    // The answer divert reads the same published carriers the seat does.
+    sessionStatus: {
+      getSnapshot: () => {
+        const snapshot = new Map<SessionId, { pendingInteraction: PendingQuestion | undefined }>()
+        for (const [carrier] of pending) snapshot.set(carrier.sessionId, { pendingInteraction: carrier })
+        return snapshot
+      },
+      subscribe: () => () => {},
+    },
+  } as never)
   const registerNode = vi.fn((_definition: { kind: string }) => () => {})
   ctx.provide('uiConversation', { events: { register: registerNode } } as never)
   // Slash-pipeline stub: only reached through the entry inject's sessionId
@@ -208,7 +219,7 @@ describe('apply', () => {
       expect(next).toHaveBeenCalledOnce()
       expect(dispose).toHaveBeenCalledOnce()
       expect(b.remoteQuestions.attachWait.mock.calls[0]![2].aborted).toBe(true)
-      expect(b.pending.getSnapshot()[0]?.snapshot()).toMatchObject({ channel: 'none', countdown: undefined })
+      expect(b.pending.getSnapshot()[0]?.snapshot()).toMatchObject({ channel: 'none' })
       b.projection.set(view([]))
       expect(b.pending.getSnapshot()).toEqual([])
     } finally {
@@ -281,7 +292,7 @@ describe('apply', () => {
     }
   })
 
-  it('keeps a claim until the Host accepts an answer submitted after Take time', async () => {
+  it('keeps a claim until the Host accepts an answer submitted after the deadline', async () => {
     const b = await bench()
     vi.useFakeTimers()
     const wait = new TimedQuestionWait(Date.now() + 5_000, undefined, new Error('unclaimed timeout'))
@@ -306,7 +317,6 @@ describe('apply', () => {
       const result = b.invoke(b.agent, timed(), async () => ANSWER)
       await claimed.promise
       const pending = b.pending.getSnapshot()[0]!
-      pending.takeTime()
       await vi.advanceTimersByTimeAsync(6_000)
       await pending.answer(ANSWER)
       await expect(result).resolves.toEqual(ANSWER)
@@ -401,13 +411,16 @@ describe('apply', () => {
       owner: { pendingInteraction: PendingQuestion | undefined },
     ) => PendingQuestion | null
     expect(select({ pendingInteraction: undefined })).toBeNull()
-    expect(select({ pendingInteraction: pending })).toBe(pending)
+    // An intent-less request declines the takeover: the resident composer — the
+    // ordinary chat input — takes the seat instead (ask-native-input-1128).
+    expect(select({ pendingInteraction: pending })).toBeNull()
     expect(select({ pendingInteraction: new PendingQuestion(SESSION_ID, PLAN_QUESTIONS) })?.kind).toBe('plan-review')
-    expect(select({ pendingInteraction: new PendingQuestion(SESSION_ID, [{ id: 'cua-app-access', question: 'Allow?',
-      intent: { kind: 'approval', approve: 'Allow', reject: 'Deny' } }]) })?.questions[0]?.intent?.kind).toBe('approval')
+    const approval = new PendingQuestion(SESSION_ID, [{ id: 'cua-app-access', question: 'Allow?',
+      intent: { kind: 'approval', approve: 'Allow', reject: 'Deny' } }])
+    expect(select({ pendingInteraction: approval })).toBe(approval)
     expect(pending).toMatchObject({ kind: 'question', sessionId: SESSION_ID, questions: QUESTIONS, callId: undefined })
     expect(pending.snapshot()).toEqual({
-      state: 'open', waitState: 'counting', countdown: undefined,
+      state: 'open',
       channel: 'waterfall', closed: false,
     })
 
@@ -475,45 +488,51 @@ describe('apply', () => {
     expect(b.pending.getSnapshot()).toEqual([])
   })
 
-  it('keys a timed request by Session and call and settles it with ASK_TIMED_OUT at the local deadline', async () => {
+  it('keys a timed request by Session and call and never settles it on the Client', async () => {
     const b = await bench()
-    const result = b.invoke(b.agent, timed(), async () => ANSWER)
-    await Promise.resolve()
-    const pending = b.pending.getSnapshot()[0]!
-    expect(pending.key).toBe(`question:${SESSION_ID}:${CALL}`)
-    expect(pending.dismissal).toBe('hide')
-    expect(pending.snapshot()).toMatchObject({
-      state: 'open', waitState: 'counting', channel: 'waterfall', closed: false,
-    })
-    // The card owns the countdown, so it reads the deadline down from now.
-    expect(pending.snapshot().countdown).toEqual({ remainingMs: expect.any(Number) as number, running: true })
-    expect(pending.snapshot().countdown!.remainingMs).toBeGreaterThan(55_000)
-    const rejection = expect(result).rejects.toMatchObject({ name: 'UserQuestionError', code: 'ASK_TIMED_OUT' })
+    vi.useFakeTimers()
+    try {
+      const result = b.invoke(b.agent, timed(), async () => ANSWER)
+      await Promise.resolve()
+      const pending = b.pending.getSnapshot()[0]!
+      expect(pending.key).toBe(`question:${SESSION_ID}:${CALL}`)
+      expect(pending.dismissal).toBe('hide')
+      expect(pending.snapshot()).toEqual({
+        state: 'open', channel: 'waterfall', closed: false,
+      })
+      // The Client adopts no deadline of its own: no local clock, no local
+      // settlement, so the call stays answerable however long the user takes.
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(vi.getTimerCount()).toBe(0)
+      expect(b.pending.getSnapshot()).toEqual([pending])
+      expect(pending.snapshot().channel).toBe('waterfall')
 
-    pending.timeout()
-
-    await rejection
-    expect(b.pending.getSnapshot()).toEqual([pending])
-    expect(pending.snapshot()).toEqual({
-      state: 'open', waitState: 'counting', countdown: undefined,
-      channel: 'none', closed: false,
-    })
-    await expect(pending.answer(ANSWER)).rejects.toThrow(/no channel/)
+      await pending.answer(ANSWER)
+      await expect(result).resolves.toBe(ANSWER)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
-  it('anchors a Host-measured remaining wait to the Client clock', async () => {
+  it('ignores a Host-measured remaining wait instead of anchoring it to the Client clock', async () => {
     const b = await bench(true, [], 2_000)
-    const request = timed()
-    const result = b.invoke(b.agent, request, async () => ANSWER)
-    await Promise.resolve()
-    const pending = b.pending.getSnapshot()[0]!
-    expect(pending.snapshot().countdown!.remainingMs).toBeLessThanOrEqual(2_000)
-    expect(pending.snapshot().countdown!.remainingMs).toBeGreaterThan(1_000)
-    pending.timeout()
-    await expect(result).rejects.toMatchObject({ code: 'ASK_TIMED_OUT' })
+    vi.useFakeTimers()
+    try {
+      const result = b.invoke(b.agent, timed(), async () => ANSWER)
+      await Promise.resolve()
+      const pending = b.pending.getSnapshot()[0]!
+      await vi.advanceTimersByTimeAsync(3_000)
+      expect(vi.getTimerCount()).toBe(0)
+      expect(pending.snapshot().channel).toBe('waterfall')
+
+      await pending.answer(ANSWER)
+      await expect(result).resolves.toBe(ANSWER)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
-  it('a card-keyed request without a deadline waits with no countdown', async () => {
+  it('a card-keyed request without a deadline waits with no local clock', async () => {
     const b = await bench()
     // Nothing settles an indefinite wait, so the request stays pending past this test.
     void b.invoke(b.agent, { questions: QUESTIONS, wait: { callId: CALL } }, async () => ANSWER)
@@ -523,8 +542,7 @@ describe('apply', () => {
     expect(pending.key).toBe(`question:${SESSION_ID}:${CALL}`)
     expect(pending.dismissal).toBe('hide')
     expect(pending.snapshot()).toEqual({
-      state: 'open', waitState: 'counting', countdown: undefined,
-      channel: 'waterfall', closed: false,
+      state: 'open', channel: 'waterfall', closed: false,
     })
   })
 
@@ -621,8 +639,8 @@ describe('apply', () => {
     expect(b.remoteQuestions.answer).toHaveBeenCalledWith(SESSION_ID, CALL, ANSWER)
     expect(currentCard.snapshot().channel).toBe('waterfall')
 
-    currentCard.timeout()
-    await expect(current).rejects.toMatchObject({ code: 'ASK_TIMED_OUT' })
+    await currentCard.answer(ANSWER)
+    await expect(current).resolves.toEqual(ANSWER)
   })
 
   it('does not reopen a queued older answer after a browser reconnect', async () => {
@@ -644,8 +662,8 @@ describe('apply', () => {
       b.inbox.set(emptyInbox())
       expect(b.pending.getSnapshot().find(card => card.callId === CALL)?.snapshot())
         .toMatchObject({ state: 'continued', channel: 'rpc' })
-      b.pending.getSnapshot().find(card => card.callId === currentCall)?.timeout()
-      await expect(current).rejects.toMatchObject({ code: 'ASK_TIMED_OUT' })
+      await b.pending.getSnapshot().find(card => card.callId === currentCall)!.answer(ANSWER)
+      await expect(current).resolves.toEqual(ANSWER)
     } finally {
       await b.fiber.dispose()
     }
@@ -793,6 +811,81 @@ describe('apply', () => {
       // The ring pair is reserved through the binding authority at registration.
       expect(describeBinding).toHaveBeenCalledWith({ code: 'ArrowUp', modifiers: ['control'] })
       expect(describeBinding).toHaveBeenCalledWith({ code: 'ArrowDown', modifiers: ['control'] })
+    } finally {
+      await b.fiber.dispose()
+    }
+  })
+})
+
+describe('questionAnswerSink', () => {
+  it('turns a plain send into the single question’s own custom answer', async () => {
+    const b = await bench()
+    try {
+      const result = b.invoke(b.agent, { questions: QUESTIONS }, async () => ANSWER)
+      await Promise.resolve()
+      const sink = b.ctx.get('questionAnswerSink')
+      expect(sink).toBeDefined()
+
+      await expect(sink!.answer(SESSION_ID, 'Fast')).resolves.toEqual({ kind: 'success' })
+      // BAD_ANSWER, unchanged: one entry per question, the text as `custom`.
+      await expect(result).resolves.toEqual({ answers: [{ id: 'mode', selected: [], custom: 'Fast' }] })
+      expect(b.pending.getSnapshot()).toEqual([])
+    } finally {
+      await b.fiber.dispose()
+    }
+  })
+
+  it('lifts a plain send to the batch note for a multi-question request', async () => {
+    const b = await bench()
+    try {
+      const questions = [
+        { id: 'first', question: 'First?' },
+        { id: 'second', question: 'Second?' },
+      ]
+      const result = b.invoke(b.agent, { questions }, async () => ANSWER)
+      await Promise.resolve()
+      const sink = b.ctx.get('questionAnswerSink')!
+
+      await expect(sink.answer(SESSION_ID, 'the answer')).resolves.toEqual({ kind: 'success' })
+      await expect(result).resolves.toEqual({
+        answers: [{ id: 'first', selected: [] }, { id: 'second', selected: [] }],
+        note: 'the answer',
+      })
+    } finally {
+      await b.fiber.dispose()
+    }
+  })
+
+  it('declines a send no pending question owns and one a card presentation owns', async () => {
+    const b = await bench()
+    try {
+      const sink = b.ctx.get('questionAnswerSink')!
+      await expect(sink.answer(SESSION_ID, 'nothing pending')).resolves.toBeNull()
+
+      // A card presentation keeps its own answer surface: the divert is for
+      // the resident composer alone (ask-native-input-1128).
+      const result = b.invoke(b.agent, { questions: PLAN_QUESTIONS }, async () => ANSWER)
+      await Promise.resolve()
+      await expect(sink.answer(SESSION_ID, 'not an option')).resolves.toBeNull()
+      expect(b.pending.getSnapshot()).toHaveLength(1)
+
+      await b.releasePending()
+      await expect(result).resolves.toBe(ANSWER)
+    } finally {
+      await b.fiber.dispose()
+    }
+  })
+
+  it('reports a failed settlement as an ordinary submission error', async () => {
+    const b = await bench()
+    try {
+      const sink = b.ctx.get('questionAnswerSink')!
+      // A card published before any channel attached: answer() has nothing to
+      // settle through, so the send surfaces as an error and the composer
+      // keeps the draft instead of swallowing it.
+      const carrier = new PendingQuestion(SESSION_ID, QUESTIONS, CALL)
+      b.registerPendingInteraction(() => 0)(carrier, async () => {})
+      await expect(sink.answer(SESSION_ID, 'Fast')).resolves.toMatchObject({ kind: 'error' })
     } finally {
       await b.fiber.dispose()
     }

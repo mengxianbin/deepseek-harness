@@ -206,14 +206,6 @@ export function createWaterfallRequest(
 export interface QuestionCardSnapshot {
   /** Mirrors the projection row; `open` until the projection says otherwise. */
   readonly state: UserQuestionState
-  /** User-visible foreground wait presentation. */
-  readonly waitState: 'counting' | 'focused' | 'editing' | 'waiting' | 'continued'
-  /**
-   * Foreground countdown presentation, absent for a request that carried no
-   * deadline. The card owns the ticking, so a hidden panel keeps counting and
-   * still times out; `running` is false while a hold or an edit froze it.
-   */
-  readonly countdown: { readonly remainingMs: number; readonly running: boolean } | undefined
   /** Channel a submission would use right now. */
   readonly channel: 'waterfall' | 'rpc' | 'none'
   /** Set once the card left the registry; the mounted composer clears its draft on this. */
@@ -248,13 +240,6 @@ export class PendingQuestion {
   #waterfall: QuestionWaterfallChannel | undefined
   #rpc: QuestionRpcChannel | undefined
   #seat: QuestionSeat | undefined
-  #timedWait = false
-  #timer: ReturnType<typeof setInterval> | undefined
-  #deadline: number | undefined
-  #remainingMs: number | undefined
-  #focused = false
-  #engaged = false
-  #held = false
   #closed = false
   readonly #siblings: (() => readonly string[]) | undefined
   readonly #listeners = new Set<() => void>()
@@ -321,22 +306,8 @@ export class PendingQuestion {
     const channel = this.#waterfall !== undefined
       ? 'waterfall'
       : this.#state === 'continued' && this.#rpc !== undefined ? 'rpc' : 'none'
-    const waitState = this.#state === 'continued'
-      ? 'continued'
-      : this.#held ? 'waiting'
-        : this.#engaged ? 'editing'
-          : this.#focused ? 'focused' : 'counting'
     return {
       state: this.#state,
-      waitState,
-      countdown: this.#timedWait
-        ? {
-          remainingMs: this.#deadline === undefined
-            ? this.#remainingMs ?? 0
-            : Math.max(0, this.#deadline - Date.now()),
-          running: this.#deadline !== undefined,
-        }
-        : undefined,
       channel,
       closed: this.#closed,
     }
@@ -344,51 +315,20 @@ export class PendingQuestion {
 
   private publish(): void {
     this.#snapshot = this.createSnapshot()
-    this.#reschedule()
     for (const listener of this.#listeners) listener()
   }
 
   /**
-   * Own the countdown here rather than in a mounted component: the panel can be
-   * hidden and remounted while the request stands, and a timer that died with
-   * the component would leave the tool call waiting past its deadline.
-   */
-  #reschedule(): void {
-    const wanted = this.#deadline !== undefined && !this.#closed
-    if (wanted === (this.#timer !== undefined)) return
-    if (!wanted) {
-      clearInterval(this.#timer)
-      this.#timer = undefined
-      return
-    }
-    this.#timer = setInterval(() => { this.#tick() }, 1000)
-  }
-
-  #tick(): void {
-    const deadline = this.#deadline
-    /* v8 ignore next -- #reschedule clears the interval in the same publish that drops the deadline. */
-    if (deadline === undefined) return
-    if (Date.now() >= deadline) {
-      this.timeout()
-      return
-    }
-    this.publish()
-  }
-
-  /**
    * Attach the live waterfall of a forwarded request.
+   *
+   * The request's own deadline is deliberately NOT adopted as a Client clock
+   * (ask-native-input-1128: a pending question is unlimited — the Host timer
+   * only runs while no Client holds the claim, and its expiry returns the call
+   * to `view.active` still answerable, so a late answer is always accepted).
    * @param channel - request channel created by {@link createWaterfallRequest}.
    */
   attachWaterfall(channel: QuestionWaterfallChannel): void {
     this.#waterfall = channel
-    this.#timedWait = channel.deadline !== undefined
-    if (!this.#held && !this.#engaged) {
-      this.#deadline = channel.deadline
-      if (this.#focused && channel.deadline !== undefined) {
-        this.#remainingMs = Math.max(0, channel.deadline - Date.now())
-        this.#deadline = undefined
-      }
-    }
     this.publish()
   }
 
@@ -399,8 +339,6 @@ export class PendingQuestion {
   detachWaterfall(channel: QuestionWaterfallChannel): void {
     if (this.#waterfall !== channel) return
     this.#waterfall = undefined
-    this.#timedWait = false
-    this.#deadline = undefined
     this.publish()
   }
 
@@ -439,67 +377,6 @@ export class PendingQuestion {
     this.publish()
   }
 
-  /** Stop this Client's countdown indefinitely; the waterfall then waits like a blocking question. */
-  takeTime(): void {
-    if (this.#held) return
-    this.#held = true
-    this.#focused = false
-    this.#remainingMs = undefined
-    this.#deadline = undefined
-    this.publish()
-  }
-
-  /**
-   * Record focus even before the request arrives, freezing a pristine countdown once attached.
-   * @param now - current Client epoch time.
-   */
-  holdFocus(now = Date.now()): void {
-    if (this.#held || this.#engaged || this.#focused) return
-    this.#remainingMs = this.#deadline === undefined ? undefined : Math.max(0, this.#deadline - now)
-    this.#deadline = undefined
-    this.#focused = true
-    this.publish()
-  }
-
-  /**
-   * Resume a pristine countdown after the answer surface loses focus.
-   * @param now - current Client epoch time.
-   */
-  releaseFocus(now = Date.now()): void {
-    if (!this.#focused) return
-    this.#focused = false
-    this.#deadline = this.#timedWait && this.#remainingMs !== undefined ? now + this.#remainingMs : undefined
-    this.#remainingMs = undefined
-    this.publish()
-  }
-
-  /**
-   * Keep the first edited draft answerable without a foreground deadline.
-   * @param now - current Client epoch time used to preserve the remaining duration.
-   */
-  engage(now = Date.now()): void {
-    if (this.#held || this.#engaged) return
-    if (this.#remainingMs === undefined && this.#deadline !== undefined) {
-      this.#remainingMs = Math.max(0, this.#deadline - now)
-    }
-    this.#engaged = true
-    this.#focused = false
-    this.#deadline = undefined
-    this.publish()
-  }
-
-  /** Local countdown reached zero: settle the waterfall with `ASK_TIMED_OUT`, keep the card. */
-  timeout(): void {
-    if (this.#held || this.#engaged || this.#focused) return
-    const channel = this.#waterfall
-    if (channel === undefined) return
-    this.#waterfall = undefined
-    this.#timedWait = false
-    this.#deadline = undefined
-    channel.reject('ASK_TIMED_OUT')
-    this.publish()
-  }
-
   /** Hand a live waterfall to the next listener when this presentation domain unloads. */
   delegate(): void {
     this.#waterfall?.delegate()
@@ -533,7 +410,7 @@ export class PendingQuestion {
 
   /**
    * Close the panel. A tool-call-keyed card only leaves the composer seat: the
-   * request stands, the countdown keeps running here, and the tool call row
+   * request stands, the request stays answerable here, and the tool call row
    * reopens it. A card the Host never named ends its request instead, because
    * nothing could bring it back.
    */

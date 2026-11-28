@@ -1,11 +1,11 @@
 import {
   useEffect, useId, useLayoutEffect, useMemo, useRef, useState,
-  type ChangeEvent, type FocusEvent, type KeyboardEvent, type MouseEvent,
+  type ChangeEvent, type KeyboardEvent, type MouseEvent,
 } from 'react'
 import clsx from 'clsx'
 import {
   Button, IconCheckOutlineRegular, IconChevronDownOutlineRegular, IconChevronLeftOutlineRegular,
-  IconChevronRightOutlineRegular, IconChevronUpOutlineRegular, IconCloseOutlineRegular,
+  IconChevronRightOutlineRegular, IconChevronUpOutlineRegular,
   IconEditOutlineRegular, MarkdownText, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ArbitrateKey } from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -16,7 +16,6 @@ import type { PendingQuestion } from './contract/slots.ts'
 import type { QuestionDraftAnswer, QuestionDraftProgress } from './draft-store.ts'
 import { AnswerField, isComposing } from './AnswerField.tsx'
 import { PlanReviewPanel } from './PlanReviewPanel.tsx'
-import { QuestionInput } from './QuestionInput.tsx'
 import css from './QuestionComposer.module.css'
 
 /**
@@ -29,7 +28,7 @@ type Feedback = { key: 'error.incomplete' | 'error.unanswered' | 'error.unavaila
 
 /** A removed card can remain mounted until the composer seat updates. */
 const REMOVED_CARD: QuestionCardSnapshot = {
-  state: 'open', waitState: 'counting', countdown: undefined, channel: 'none', closed: true,
+  state: 'open', channel: 'none', closed: true,
 }
 
 /** Long copy the user expanded on one question: the question itself or an option description by index. */
@@ -98,49 +97,61 @@ const ARBITRATE_KEYS: Record<string, ArbitrateKey> = {
 }
 
 /**
- * Composer takeover router. One takeover, three presentations decided at this
- * single intent fork (ask-panel-retire-1127 D3 — the separation rides the
+ * The intent fork's routing decision, in one place: which presentation owns
+ * this request. `plan-review` and `approval` draw their own card; every other
+ * (intent-less) request belongs to the resident composer — the ordinary chat
+ * input — which the chain selector elects by declining the takeover
+ * (ask-native-input-1128).
+ */
+export type IntentSurface =
+  | { readonly kind: 'plan-review'; readonly review: NonNullable<ReturnType<typeof planReviewOf>> }
+  | { readonly kind: 'approval' }
+  | { readonly kind: 'native' }
+
+/**
+ * Route one request's question batch to its presentation.
+ * @param questions - the request's whole question batch.
+ * @returns the owning presentation, carrying the narrowed review when it is one.
+ */
+export function intentSurfaceOf(questions: PendingQuestion['questions']): IntentSurface {
+  const review = planReviewOf(questions)
+  if (review !== undefined) return { kind: 'plan-review', review }
+  if (questions.some(item => item.intent?.kind === 'approval')) return { kind: 'approval' }
+  return { kind: 'native' }
+}
+
+/**
+ * Composer takeover router. Two of the three presentations of the intent fork
+ * own a self-drawn card (ask-panel-retire-1127 D3 — the separation rides the
  * request's type, never an in-session judgement):
  *
  * 1. a `plan-review` intent renders the plan decision card (one decision over
  *    one plan, not a question set);
  * 2. an `approval` intent keeps its option decision card — its caller reads
  *    the chosen label verbatim, so the options ARE the protocol surface;
- * 3. every other (intent-less) request takes the native input straight
- *    through: no option tabs, no record card, the question text living in the
- *    AI's conversation message (甲-a).
+ * 3. every other (intent-less) request never reaches this component: the chain
+ *    selector declines it so the resident composer — the ordinary chat input —
+ *    keeps the seat (ask-native-input-1128). There is nothing left to draw:
+ *    the question text lives in the AI's conversation message (甲-a), and
+ *    typing a message and sending it IS the answer.
  *
- * The routing lives here, at the one entry that owns the composer seat, so
- * neither presentation can claim a request another one is already rendering.
+ * The routing lives at the one entry that owns the composer seat —
+ * {@link intentSurfaceOf}, read by the chain selector and by this component —
+ * so neither presentation can claim a request another one is already rendering.
  *
  * @param props - the selector-matched pending question carrier plus the framework standard kit.
  * @returns the intent's own surface for this request.
  */
 export function QuestionComposer(props: QuestionComposerProps) {
   const question = props.matched
-  const review = planReviewOf(question.questions)
-  if (review !== undefined) {
+  const surface = intentSurfaceOf(question.questions)
+  if (surface.kind === 'plan-review') {
     return (
-      <PlanReviewPanel key={question.key} pending={question} review={review} t={props.t} renderSlot={props.renderSlot} />
-    )
-  }
-  if (question.questions.some(item => item.intent?.kind === 'approval')) {
-    return (
-      <QuestionFlow
-        key={question.key}
-        pending={question}
-        t={props.t}
-        useStore={props.useStore}
-        useQuestionCard={props.useQuestionCard}
-        actions={props.actions}
-        renderSlot={props.renderSlot}
-        answerTriggers={props.answerTriggers}
-        {...(props.openAttachment === undefined ? {} : { openAttachment: props.openAttachment })}
-      />
+      <PlanReviewPanel key={question.key} pending={question} review={surface.review} t={props.t} renderSlot={props.renderSlot} />
     )
   }
   return (
-    <QuestionInput
+    <QuestionFlow
       key={question.key}
       pending={question}
       t={props.t}
@@ -163,8 +174,9 @@ type QuestionFlowProps =
  * The option decision card, kept for intent-bearing requests only
  * (ask-panel-retire-1127 D3): an `approval` intent's caller reads the chosen
  * label verbatim, so its options are the protocol surface. Intent-less
- * questions no longer reach this flow — QuestionComposer routes them to the
- * native QuestionInput.
+ * questions never reach this flow — the chain selector declines them so the
+ * resident composer (the ordinary chat input) takes the seat
+ * (ask-native-input-1128).
  */
 function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSlot, answerTriggers, openAttachment }: QuestionFlowProps) {
   const descriptionIdPrefix = useId()
@@ -185,13 +197,7 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
   // The card-level remark (题外话) rides the same progress record, so page
   // turns and picks below carry it without a second store.
   const note = storedProgress?.note ?? ''
-  const restoredWait = storedProgress?.wait
-    ?? (storedProgress?.drafts.some((item, itemIndex) =>
-      item.selected.length !== initialDrafts[itemIndex]?.selected.length
-      || item.selected.some((label, labelIndex) => label !== initialDrafts[itemIndex]?.selected[labelIndex])
-      || item.custom !== '' || item.skipped) === true
-      ? 'editing' : undefined)
-  const [busy, setBusy] = useState<'answer' | 'cancel' | null>(null)
+  const [busy, setBusy] = useState<'answer' | null>(null)
   const [error, setError] = useState<Feedback | null>(null)
   const card = useQuestionCard(pending.key, snapshot => snapshot ?? REMOVED_CARD)
   const canSubmit = card.channel !== 'none'
@@ -215,15 +221,6 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
   useEffect(() => {
     actions.prune(pending.liveKeys())
   }, [actions, pending])
-  const waitDisposition = useRef<'editing' | 'waiting' | undefined>(restoredWait)
-  useEffect(() => {
-    if (waitDisposition.current === 'waiting') pending.takeTime()
-    if (waitDisposition.current === 'editing') pending.engage()
-  }, [pending])
-  // The countdown belongs to the carrier, not to this component: the user can
-  // close the panel and reopen it from the tool call row, and a timer that died
-  // with the mount would leave the tool call waiting past its deadline.
-  const countdown = card.countdown
   // Collapsed to the header strip so the conversation above stays readable
   // while the user decides; answer drafts live in the Session store above.
   // FORK dsh-local (ask-keys-focus, 2026-11-17 裁定): one fold reason only —
@@ -311,52 +308,10 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
     actions.replace(pending.key, {
       index: nextIndex,
       drafts: nextDrafts,
-      ...(waitDisposition.current === undefined ? {} : { wait: waitDisposition.current }),
       // The remark rides every navigation write so no page turn drops it.
       ...(note === '' ? {} : { note }),
     })
   }
-
-  const takeTime = (): void => {
-    waitDisposition.current = 'waiting'
-    pending.takeTime()
-    replaceProgress(index, drafts)
-  }
-
-  const engage = (): void => {
-    if (waitDisposition.current !== undefined) return
-    waitDisposition.current = 'editing'
-    pending.engage()
-  }
-
-  const focusAnswerSurface = (event: FocusEvent<HTMLDivElement>): void => {
-    if (!event.currentTarget.contains(event.relatedTarget)) pending.holdFocus()
-  }
-
-  const blurAnswerSurface = (event: FocusEvent<HTMLDivElement>): void => {
-    if (!event.currentTarget.contains(event.relatedTarget)) pending.releaseFocus()
-  }
-
-  useEffect(() => {
-    const release = (): void => { pending.releaseFocus() }
-    const refocus = (): void => {
-      if (waitDisposition.current === 'editing') {
-        pending.engage()
-        return
-      }
-      if (answerSurface.current?.contains(document.activeElement) === true) pending.holdFocus()
-    }
-    const visibilityChanged = (): void => { if (document.hidden) release(); else refocus() }
-    window.addEventListener('blur', release)
-    window.addEventListener('focus', refocus)
-    document.addEventListener('visibilitychange', visibilityChanged)
-    return () => {
-      release()
-      window.removeEventListener('blur', release)
-      window.removeEventListener('focus', refocus)
-      document.removeEventListener('visibilitychange', visibilityChanged)
-    }
-  }, [pending])
 
   // FORK dsh-local (ask-keys-focus, 2026-11-17 裁定 A2, supersedes
   // occlusion-fold): attention leaving the card — a pointerdown or focusin
@@ -393,33 +348,10 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
     setAutoFolded(false)
   }
 
-  const dismissFlow = (): void => {
-    // A tool-call-keyed panel only leaves the seat; nothing is sent and nothing
-    // is persisted, and the tool call row brings it back.
-    if (pending.dismissal === 'hide') {
-      void pending.dismiss()
-      return
-    }
-    if (!canSubmit) {
-      setError({ key: 'error.unavailable' })
-      return
-    }
-    setBusy('cancel')
-    setError(null)
-    sentVia.current = 'waterfall'
-    void pending.dismiss()
-      .catch((cause: unknown) => {
-        sentVia.current = null
-        setBusy(null)
-        setError({ text: cause instanceof Error ? cause.message : String(cause) })
-      })
-  }
-
   const updateDraft = (
     update: (current: QuestionDraftAnswer) => QuestionDraftAnswer,
     nextIndex = index,
   ): void => {
-    engage()
     const nextDrafts = drafts.map((item, itemIndex) => itemIndex === index ? update(item) : item)
     replaceProgress(nextIndex, nextDrafts)
     setError(null)
@@ -616,12 +548,10 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
   // belongs to the answer surface, never to this box. The write goes through
   // its own store call because the note value differs from the render's.
   const updateNote = (value: string): void => {
-    engage()
     captureBodyPin()
     actions.replace(pending.key, {
       index,
       drafts,
-      ...(waitDisposition.current === undefined ? {} : { wait: waitDisposition.current }),
       ...(value === '' ? {} : { note: value }),
     })
     setError(null)
@@ -646,19 +576,6 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
       }
     }
     continueFromCustom(event)
-  }
-
-  const skipQuestion = (): void => {
-    engage()
-    const nextDrafts = drafts.map((item, itemIndex) => itemIndex === index
-      ? { selected: [], custom: '', skipped: true }
-      : item)
-    replaceProgress(index < questions.length - 1 ? index + 1 : index, nextDrafts)
-    setError(null)
-    if (index < questions.length - 1) {
-      return
-    }
-    submitDrafts(nextDrafts)
   }
 
   // FORK dsh-local (ask-keys-focus, 2026-11-17 裁定 A4): PageUp/PageDown walk
@@ -904,32 +821,7 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
             </div>
           )}
           <div className={css.headerActions}>
-            {countdown !== undefined && card.waitState !== 'waiting' && card.waitState !== 'editing' && card.waitState !== 'continued' && (
-              <span className={css.waitStatus}>
-                {t(countdown.running ? 'wait.countdown' : 'wait.paused', {
-                  seconds: Math.ceil(countdown.remainingMs / 1000),
-                })}
-              </span>
-            )}
-            {countdown !== undefined && card.waitState !== 'waiting' && card.waitState !== 'editing' && card.waitState !== 'continued' && (
-              <Button variant="outline" className={css.waitButton} onClick={takeTime}>
-                {t('wait.takeTime')}
-              </Button>
-            )}
             {card.state === 'continued' && <span className={css.waitStatus}>{t('wait.continued')}</span>}
-            {/* A held or frozen countdown says so; a request that never carried
-                one waits silently, as the blocking question always has. */}
-            {countdown !== undefined && (card.waitState === 'waiting' || card.waitState === 'editing') && (
-              <span className={css.waitStatus}>{t('wait.held')}</span>
-            )}
-            <button
-              type="button" className={css.iconButton}
-              aria-label={t(pending.dismissal === 'hide' ? 'nav.close' : 'nav.cancel')}
-              title={t(pending.dismissal === 'hide' ? 'nav.close' : 'nav.cancel')}
-              disabled={busy !== null} onClick={dismissFlow}
-            >
-              <IconCloseOutlineRegular size={15} />
-            </button>
           </div>
         </header>
 
@@ -939,8 +831,6 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
               ref={answerSurface}
               className={css.body}
               data-question-scroll
-              onFocusCapture={focusAnswerSurface}
-              onBlurCapture={blurAnswerSurface}
             >
               <div className={css.questionTitle} data-expanded={expanded.has('question') || undefined}>
                 <h2
@@ -1105,9 +995,7 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
                     )
                     : (
                       <AnswerField
-                      // A missing countdown does not imply an indefinite request:
-                      // a timed request can still be awaiting its claim's first frame.
-                        autoFocus={canSubmit && countdown === undefined && !locked && !focusedQuestions.current.has(index)}
+                        autoFocus={canSubmit && !locked && !focusedQuestions.current.has(index)}
                         variant="block"
                         value={draft.custom}
                         disabled={locked}
@@ -1176,9 +1064,6 @@ function QuestionFlow({ pending, t, useStore, useQuestionCard, actions, renderSl
                     onClick={toggleNote}
                   >
                     {t('note.toggle')}
-                  </Button>
-                  <Button variant="outline" disabled={busy !== null} onClick={skipQuestion}>
-                    {t('action.skip')}
                   </Button>
                   <Button
                     variant="primary"

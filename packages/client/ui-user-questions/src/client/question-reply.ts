@@ -100,7 +100,7 @@ export function replyPairsOf(text: string): Pick<QuestionReplyData, 'questions' 
  * followed by a non-blank custom answer.
  * @param data - Projected reply holding the recorded answers.
  * @param id - Question id to read.
- * @returns The values, empty when the user skipped that question.
+ * @returns The values, empty when the batch carried no value for that question.
  */
 export function replyAnswerValues(data: QuestionReplyData, id: string): string[] {
   const answer = data.answers.find(item => item.id === id)
@@ -110,7 +110,9 @@ export function replyAnswerValues(data: QuestionReplyData, id: string): string[]
 
 /**
  * Clipboard text of one answer batch: every question with the answer the user
- * gave, without question details or unselected options.
+ * gave, without question details or unselected options. A question the batch
+ * carried no value for keeps its heading and no answer line — skip is
+ * abolished (ask-native-input-1128), so there is nothing to label.
  * @param data - Projected reply to copy.
  * @param t - Bound `question` namespace translator owning the answer labels.
  * @returns One block per question, or the model-facing text when the payload was unreadable.
@@ -122,10 +124,9 @@ export function replyClipboardText(data: QuestionReplyData, t: PropsLocale<'ques
     const heading = question.header && question.header !== question.question
       ? `${question.header} — ${question.question}`
       : question.question
-    const answer = values.length === 0
-      ? t('reply.skipped')
-      : `${t('reply.answerLabel')}${values.join(', ')}`
-    return `${heading}\n${answer}`
+    return values.length === 0
+      ? heading
+      : `${heading}\n${t('reply.answerLabel')}${values.join(', ')}`
   }).join('\n\n')
 }
 

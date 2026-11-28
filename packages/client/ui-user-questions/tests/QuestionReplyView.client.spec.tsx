@@ -94,7 +94,7 @@ describe('QuestionReplyView', () => {
     expect(screen.getByRole('group', { name: '问题与回答' }).getAttribute('data-question-reply')).toBe('call-reply')
   })
 
-  it('shows a distinct header, marks an unanswered question skipped, and falls back to the raw text', () => {
+  it('shows a distinct header, leaves a valueless question unlabelled, and falls back to the raw text', () => {
     render(<QuestionReplyBubble
       data={{
         ...data,
@@ -108,7 +108,9 @@ describe('QuestionReplyView', () => {
     />)
     expect(screen.getByText('Goal')).toBeTruthy()
     expect(screen.queryByText('None')).toBeNull()
-    expect(screen.getAllByText('已跳过')).toHaveLength(2)
+    // Skip is abolished (ask-native-input-1128): an empty entry carries no
+    // label at all, so the batch's own text is the only thing the echo shows.
+    expect(screen.queryByText('已跳过')).toBeNull()
     cleanup()
 
     render(<QuestionReplyBubble data={{ ...data, questions: [], answers: [], text: 'raw reply text' }} t={t} />)
