@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { runGate } from './run-gates.ts'
 import { PassThrough } from 'node:stream'
-import { afterEach, describe, expect, it, type MockInstance, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from 'vitest'
 import { ForksPoolWorker } from 'vitest/node'
 import type { PoolOptions, PoolWorker, TestProject, WorkerRequest, WorkerResponse } from 'vitest/node'
 import { coverageForkPool } from './coverage-fork-diagnostics.ts'
@@ -11,11 +11,19 @@ import { coverageForkPool } from './coverage-fork-diagnostics.ts'
 const roots: string[] = []
 const cleanups: Array<() => Promise<void>> = []
 
+// Death-audit isolation (heavyio-silentdeath-1128): a killed fixture gate
+// appends a die-log line, and the kill-audit cross-reference must never
+// inherit a real reaper row from this machine.
+beforeEach(() => {
+  vi.stubEnv('DSH_HEAVY_IO_DIELOG', join(tmpdir(), 'coverage-fork-spec-die.log'))
+  vi.stubEnv('DSH_KILL_AUDIT_LOG', join(tmpdir(), 'coverage-fork-spec-kill-audit.log'))
+})
 afterEach(async () => {
   const cleanup = cleanups.splice(0)
   const directories = roots.splice(0)
   const results = await Promise.allSettled(cleanup.map(dispose => dispose()))
   vi.restoreAllMocks()
+  vi.unstubAllEnvs()
   for (const directory of directories) await rm(directory, { recursive: true, force: true })
   const errors: unknown[] = []
   for (const result of results) {

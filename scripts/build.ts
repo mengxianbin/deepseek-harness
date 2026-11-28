@@ -21,6 +21,7 @@ import {
   writeClientBuildRecord,
 } from './client-build-environment.ts'
 import { aggregateBuildArgs, aggregateCheckArgs, contractSteps, libraryBuildSteps } from './compile-referenced-projects.ts'
+import { memorySnapshot, recordDie } from './die-log.ts'
 import { enterHeavyIoGate } from './heavy-io-gate.ts'
 import type { LibraryStep } from './compile-referenced-projects.ts'
 import { beginBuild, endBuild, STAMP_ACTIVE_ENV } from './restart-signal/build-stamp.ts'
@@ -178,10 +179,27 @@ async function main(): Promise<number> {
   // 纯排队 sink（2026-11-12 定稿）：build 全 scope 在真实入口进机器级锁——包
   // package.json 拦不住裸 `tsx scripts/build.ts --scope typecheck`（18:47 打穿
   // 的洞），sink 才是入口级封堵。CI / DSH_HEAVY_IO=0 / 嵌套持锁照旧透传。
-  const lease = await enterHeavyIoGate(`scripts/build.ts${process.argv.slice(2).map(arg => ` ${arg}`).join('')}`, process.env)
+  const command = `scripts/build.ts${process.argv.slice(2).map(arg => ` ${arg}`).join('')}`
+  const lease = await enterHeavyIoGate(command, process.env)
+  // Death record for the aggregate holder itself (heavyio-silentdeath-1128 ·
+  // 腿①): a signal reaching this process means the build/typecheck aggregate is
+  // going down mid-run — write the exit line first (the process may never come
+  // back), then release the lock with reason=被杀 so the queue sees a named
+  // release instead of a stale owner.
+  const onSignal = (signal: NodeJS.Signals): void => {
+    const { freeMb, floorMb } = memorySnapshot(process.env)
+    recordDie(process.env, 'exit', command, { path: 'killed', signal, freeMb, floorMb })
+    void (lease?.release('被杀') ?? Promise.resolve()).finally(() => {
+      process.exit(signal === 'SIGINT' ? 130 : 143)
+    })
+  }
+  process.once('SIGINT', onSignal)
+  process.once('SIGTERM', onSignal)
   try {
     return await executeBuild(scope, profile, serial, root)
   } finally {
+    process.off('SIGINT', onSignal)
+    process.off('SIGTERM', onSignal)
     await lease?.release()
   }
 }
@@ -237,4 +255,22 @@ async function executeBuild(scope: BuildScope, profile: string | undefined, seri
   return 0
 }
 
-if (import.meta.main) process.exitCode = await main()
+if (import.meta.main) {
+  try {
+    process.exitCode = await main()
+  } catch (error) {
+    // Crash path (heavyio-silentdeath-1128): a config/parse error before any
+    // aggregate line exists would exit with a stack and no machine-checkable
+    // death line. Record cause + memory snapshot, then rethrow so the visible
+    // stack and non-zero exit behave exactly as before.
+    const { freeMb, floorMb } = memorySnapshot(process.env)
+    recordDie(process.env, 'exit', `scripts/build.ts${process.argv.slice(2).map(arg => ` ${arg}`).join('')}`, {
+      path: 'normal',
+      exitCode: 1,
+      error: (error as Error).message,
+      freeMb,
+      floorMb,
+    })
+    throw error
+  }
+}

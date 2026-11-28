@@ -6,7 +6,7 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { officialClientBuildEnvironment, writeClientBuildRecord } from '../client-build-environment.ts'
 import { runGate, type Gate } from '../run-gates.ts'
 import { removeFixtureSafely } from '../test-fixture-cleanup.ts'
@@ -109,8 +109,16 @@ function readyHookPids(root: string): number[] {
   return [ready.hook, ready.child]
 }
 
+// Death-audit isolation (heavyio-silentdeath-1128): an aborted pack gate
+// appends a die-log line, and the kill-audit cross-reference must never
+// inherit a real reaper row from this machine.
+beforeEach(() => {
+  vi.stubEnv('DSH_HEAVY_IO_DIELOG', join(tmpdir(), 'release-pack-spec-die.log'))
+  vi.stubEnv('DSH_KILL_AUDIT_LOG', join(tmpdir(), 'release-pack-spec-kill-audit.log'))
+})
 afterEach(() => {
   for (const root of roots.splice(0)) removeFixtureSafely(root)
+  vi.unstubAllEnvs()
 })
 
 describe('release pack CLI', () => {

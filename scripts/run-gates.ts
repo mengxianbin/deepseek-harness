@@ -12,6 +12,7 @@ import { performance } from 'node:perf_hooks'
 import { CLIENT_BUILD_PROFILE_SELECTOR } from './client-build-environment.ts'
 import { COVERAGE_EXEMPT_ENV, coverageExemptHeavySuites } from './coverage-exempt.ts'
 import { COVERAGE_PARTITIONS_ENV, parseCoveragePartitionCount } from './coverage-partitions.ts'
+import { killAuditRef, memorySnapshot, recordDie } from './die-log.ts'
 import { LOCAL_TEST_PARALLELISM_CAP, defaultParallelism, describeDefaultParallelism } from './parallelism.ts'
 import { pnpmInvocation } from './pnpm-invocation.ts'
 
@@ -101,7 +102,23 @@ export const BUILD_BACKED_NODE_COMPAT_VERSION = '24.9'
 
 const root = resolve(import.meta.dirname, '..')
 if (import.meta.main) {
-  process.exitCode = await main(process.argv.slice(2))
+  try {
+    process.exitCode = await main(process.argv.slice(2))
+  } catch (error) {
+    // Crash path (heavyio-silentdeath-1128): an exception outside the
+    // aggregate's own accounting would exit with a stack and no machine-
+    // checkable death line. Record cause + memory snapshot, then rethrow so
+    // the visible stack and non-zero exit behave exactly as before.
+    const { freeMb, floorMb } = memorySnapshot(process.env)
+    recordDie(process.env, 'exit', `run-gates ${process.argv.slice(2).join(' ')}`, {
+      path: 'normal',
+      exitCode: 1,
+      error: (error as Error).message,
+      freeMb,
+      floorMb,
+    })
+    throw error
+  }
 }
 
 async function main(args: string[]): Promise<number> {
@@ -135,9 +152,26 @@ export async function runAggregate(name: string, gates: Gate[], concurrencyDefau
 
   const results = await runGates(gates, maxConcurrency, runGate, printResult, cliGateOptions(failFast))
   printSummary(results, performance.now() - startedAt)
-  return results.some(result => result.gate.allowFailure !== true && (result.status === 'failed' || result.status === 'skipped'))
+  const code = results.some(result => result.gate.allowFailure !== true && (result.status === 'failed' || result.status === 'skipped'))
     ? 1
     : 0
+  // Aggregate-leg completion line (heavyio-silentdeath-1128): the r1/r2 silent
+  // deaths were aggregates that left no closing record at all, so every
+  // aggregate — pass or fail — appends one machine-checkable exit line with the
+  // exit code, gate tally and memory snapshot at the end instant. A hard kill
+  // still reaches no hook; that gap stays with the stale-break writeback.
+  const { freeMb, floorMb } = memorySnapshot(process.env)
+  recordDie(process.env, 'exit', `run-gates ${name}`, {
+    path: 'normal',
+    exitCode: code,
+    gates: results.length,
+    passed: results.filter(result => result.status === 'passed').length,
+    failed: results.filter(result => result.status === 'failed').length,
+    durationMs: Math.round(performance.now() - startedAt),
+    freeMb,
+    floorMb,
+  })
+  return code
 }
 
 /**
@@ -1179,9 +1213,15 @@ function gateFailed(state: GateState | undefined): boolean {
  */
 export async function runGate(gate: Gate, signal?: AbortSignal): Promise<GateResult> {
   const started = performance.now()
+  const startedAtMs = Date.now()
   const output: GateOutputChunk[] = []
   let spawnError: string | undefined
-  let aborted = false
+  // Object property, not a bare `let`: `terminate()` mutates it from inside the
+  // spawn closure, so a plain flag stays narrowed to its initializer in this
+  // flow and the death-line ternary trips oxlint no-unnecessary-condition
+  // (probe E); probe B (property read) passes.
+  const abortState = { aborted: false }
+  let childPid: number | undefined
 
   const outcome = await new Promise<{
     exitCode: number | null
@@ -1193,6 +1233,7 @@ export async function runGate(gate: Gate, signal?: AbortSignal): Promise<GateRes
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: signal !== undefined && process.platform !== 'win32',
     })
+    childPid = child.pid
     child.stdout.setEncoding('utf8')
     child.stderr.setEncoding('utf8')
     child.stdout.on('data', (chunk: string) => {
@@ -1248,7 +1289,7 @@ export async function runGate(gate: Gate, signal?: AbortSignal): Promise<GateRes
     let descendants: number[] = []
     let pipeDrain: ReturnType<typeof setTimeout> | undefined
     const terminate = () => {
-      aborted = true
+      abortState.aborted = true
       const pid = child.pid
       // Merge while the child is still alive: re-enumerating alone would drop
       // a descendant that an exited intermediate reparented out of the parent
@@ -1399,8 +1440,39 @@ export async function runGate(gate: Gate, signal?: AbortSignal): Promise<GateRes
     exitCode,
     signalCode,
   }
-  result.aborted = aborted
+  result.aborted = abortState.aborted
   if (spawnError !== undefined) result.error = spawnError
+  // Death cause for an abnormal child outcome (heavyio-silentdeath-1128 ·
+  // 一切活儿都杜绝静默死): a signal-killed / aborted / never-started gate would
+  // otherwise surface only as a bare FAIL with no exit path and no memory
+  // reading — exactly the r1/r2 「无 FAIL 行、无汇总」 diagnosis gap. A plain
+  // non-zero exit already carries its own FAIL line + captured output, so it is
+  // only appended when the kill-audit names an external reaper for the window
+  // (the watchdog's taskkill /F makes a child exit 1 with no signal — visually
+  // indistinguishable from a real failure, which is the whole point of the
+  // cross-reference).
+  if (status !== 'passed') {
+    const { freeMb, floorMb } = memorySnapshot(process.env)
+    const endedAtMs = Date.now()
+    const crossRef = spawnError === undefined
+      ? killAuditRef(process.env, startedAtMs, endedAtMs, childPid === undefined ? [] : [childPid])
+      : {}
+    const externallyKilled = signalCode !== null || abortState.aborted || crossRef.killedBy !== undefined
+    if (externallyKilled || spawnError !== undefined) {
+      recordDie(process.env, 'exit', gate.displayCommand, {
+        path: spawnError !== undefined ? 'spawn-error' : externallyKilled ? 'killed' : 'normal',
+        gate: gate.id,
+        ...(signalCode !== null ? { signal: signalCode } : {}),
+        ...(abortState.aborted ? { aborted: true } : {}),
+        ...(spawnError !== undefined ? { error: spawnError } : {}),
+        exitCode: exitCode ?? 'none',
+        durationMs: Math.round(result.durationMs),
+        freeMb,
+        floorMb,
+        ...crossRef,
+      })
+    }
+  }
   return result
 }
 

@@ -1,4 +1,6 @@
 import { readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi, type MockInstance } from 'vitest'
 import {
   cliGateOptions,
@@ -23,6 +25,11 @@ beforeEach(() => {
   vi.stubEnv('DSH_WEB_SNAPSHOT_WORKERS', undefined)
   vi.stubEnv('DSH_COVERAGE_MAX_WORKERS', undefined)
   vi.stubEnv('DSH_COVERAGE_PARTITIONS', undefined)
+  // Death/exit audit isolation (heavyio-silentdeath-1128): runGate/runAggregate
+  // append die-log lines for abnormal outcomes, and the kill-audit
+  // cross-reference must never inherit a real reaper row from this machine.
+  vi.stubEnv('DSH_HEAVY_IO_DIELOG', join(tmpdir(), 'run-gates-spec-die.log'))
+  vi.stubEnv('DSH_KILL_AUDIT_LOG', join(tmpdir(), 'run-gates-spec-kill-audit.log'))
 })
 afterEach(() => vi.unstubAllEnvs())
 

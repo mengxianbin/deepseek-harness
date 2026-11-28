@@ -57,6 +57,8 @@ import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { freemem, homedir, totalmem, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { killAuditRef, memorySnapshot, recordDie } from './die-log.ts'
+import type { LockReleaseReason } from './die-log.ts'
 
 const DEFAULT_POLL_INTERVAL_MS = 2_000
 // 纯排队（2026-11-12 定稿）：waiters queue without a bound. The former 45 min
@@ -487,12 +489,15 @@ async function holderCommandForAudit(env: NodeJS.ProcessEnv): Promise<string> {
  * holder marks `DSH_HEAVY_IO_HELD=1` so nested gate wrappers pass through.
  * @param command - Description recorded in owner.json and history.log.
  * @param env - Environment to read gate settings from; defaults to this process.
- * @returns an idempotent release handle, or undefined when the call passes through.
+ * @returns an idempotent release handle (every call also appends a die-log
+ *   `release` line carrying a non-empty `reason=正常收口|被杀|超时|stale-break`,
+ *   heavyio-silentdeath-1128 凡死必有死因留痕), or undefined when the call
+ *   passes through.
  */
 export async function enterHeavyIoGate(
   command: string,
   env: NodeJS.ProcessEnv = process.env,
-): Promise<{ release: () => Promise<void> } | undefined> {
+): Promise<{ release: (reason?: LockReleaseReason) => Promise<void> } | undefined> {
   // CI = 授权环境：全量检查是 CI 本职，一律透传（token 不适用）。
   if (env.CI === 'true') {
     recordHistory(historyFile(env), 'passthrough', command, {
@@ -537,11 +542,18 @@ export async function enterHeavyIoGate(
   const acquiredAt = Date.now()
   let released = false
   return {
-    release: async (): Promise<void> => {
+    release: async (reason: LockReleaseReason = '正常收口'): Promise<void> => {
       if (released) return
       released = true
       await releaseHeavyIoLock(directory)
-      recordHistory(history, 'release', command, { heldMs: Date.now() - acquiredAt })
+      const heldMs = Date.now() - acquiredAt
+      recordHistory(history, 'release', command, { heldMs })
+      // Die-log release line: history.log's release format is pinned by three
+      // consumers (harness spec regexes / m-note build-watchdog / gate-run-probe),
+      // so the release *reason* lives here instead — every lock removal stays
+      // answerable without touching the frozen history grammar.
+      const { freeMb, floorMb } = memorySnapshot(env)
+      recordDie(env, 'release', command, { heldMs, reason, freeMb, floorMb })
     },
   }
 }
@@ -592,10 +604,45 @@ async function waitForHeavyIoLock(directory: string, command: string, env: NodeJ
     const heldForLog = await readHeavyIoLock(directory)
     if (await breakStaleHeavyIoLock(directory)) {
       if (heldForLog !== undefined) {
+        const holderAgeMs = Date.now() - Date.parse(heldForLog.startedAt)
+        const holderAlive = isProcessAlive(heldForLog.pid)
         recordHistory(history, 'stale-break', command, {
           holderPid: heldForLog.pid,
-          holderAgeMs: Date.now() - Date.parse(heldForLog.startedAt),
-          holderAlive: isProcessAlive(heldForLog.pid),
+          holderAgeMs,
+          holderAlive,
+        })
+        // Dual-insurance writeback (heavyio-silentdeath-1128): a watchdog/OOM
+        // kill takes the holder's whole tree down via TerminateProcess — no
+        // in-process hook ever runs, so the dead holder wrote no exit/release
+        // line of its own. The next acquirer that breaks the stale lock answers
+        // for it here: a `die` line (path=killed + holder pid/age + memory
+        // snapshot at discovery + kill-audit cross-reference naming the killer
+        // and its tier — fact correction 2026-11-28: the dominant killer is the
+        // build-watchdog tiered reaper, not plain OOM) and the lock's `release`
+        // line with reason=stale-break, so every removal of the lock carries a
+        // non-empty reason on every path.
+        const { freeMb, floorMb } = memorySnapshot(env)
+        const holderStartMs = Date.parse(heldForLog.startedAt)
+        const discoveredAtMs = Date.now()
+        const crossRef = killAuditRef(env, holderStartMs, discoveredAtMs, [heldForLog.pid])
+        recordDie(env, 'die', heldForLog.command, {
+          path: 'killed',
+          reason: 'stale-break',
+          holderPid: heldForLog.pid,
+          holderAgeMs,
+          writerPid: process.pid,
+          snapshotAt: 'discovery',
+          freeMb,
+          floorMb,
+          ...crossRef,
+        })
+        recordDie(env, 'release', heldForLog.command, {
+          heldMs: holderAgeMs,
+          reason: 'stale-break',
+          holderPid: heldForLog.pid,
+          writerPid: process.pid,
+          freeMb,
+          floorMb,
         })
       } else {
         // An ownerless orphan directory was broken (crash inside the
@@ -628,7 +675,7 @@ async function waitForHeavyIoLock(directory: string, command: string, env: NodeJ
 async function main(): Promise<void> {
   const command = process.argv.slice(2).join(' ')
   if (command === '') throw new Error('heavy-io-gate: expected a shell command argument after --.')
-  let lease: { release: () => Promise<void> } | undefined
+  let lease: { release: (reason?: LockReleaseReason) => Promise<void> } | undefined
   try {
     lease = await enterHeavyIoGate(command, process.env)
   } catch (error) {
@@ -639,27 +686,62 @@ async function main(): Promise<void> {
   }
   if (lease === undefined) {
     // Passthrough was recorded by enterHeavyIoGate — the "was this gated?"
-    // question the history exists to answer.
-    process.exitCode = await runCommand(command, process.env)
+    // question the history exists to answer. The exit line still applies:
+    // 一切活儿都杜绝静默死 (heavyio-silentdeath-1128) — a passthrough run dies
+    // just as silently, and its exit path + memory snapshot belong on record.
+    try {
+      const code = await runCommand(command, process.env)
+      process.exitCode = code
+      const { freeMb, floorMb } = memorySnapshot(process.env)
+      recordDie(process.env, 'exit', command, { path: 'normal', exitCode: code, freeMb, floorMb })
+    } catch (error) {
+      const { freeMb, floorMb } = memorySnapshot(process.env)
+      recordDie(process.env, 'exit', command, { path: 'spawn-error', error: (error as Error).message, freeMb, floorMb })
+      throw error
+    }
     return
   }
   let child: ChildProcess | undefined
+  // Set once a signal has taken over the exit path: the post-await normal
+  // exit line must not double-report a run the signal handler already
+  // recorded as killed (the handler's line is the authoritative one).
+  // Held as an object property, not a bare `let`: the handler mutates it from
+  // a closure, so a plain flag stays narrowed to its initializer in this flow
+  // and `if (!signalled)` trips oxlint no-unnecessary-condition (probe A).
+  const signalState = { signalled: false }
   // Abnormal exit only: a signal means the gate is going down while the
   // command may still be attached — kill the tree before releasing so the
   // next queued job never overlaps surviving descendants (tsgolint respawn).
   // On normal `close` the tree is done; killing then would risk a recycled pid.
   const onSignal = (signal: NodeJS.Signals): void => {
+    signalState.signalled = true
     if (child?.pid !== undefined && child.exitCode === null && child.signalCode === null) {
       killChildTree(child.pid)
     }
-    void lease.release().finally(() => {
+    // Death record first (this process is about to exit for good), then the
+    // lock leaves with reason=被杀 — both on the die-log, because history.log's
+    // release grammar is frozen by three consumers.
+    const { freeMb, floorMb } = memorySnapshot(process.env)
+    recordDie(process.env, 'exit', command, { path: 'killed', signal, freeMb, floorMb })
+    void lease.release('被杀').finally(() => {
       process.exit(signal === 'SIGINT' ? 130 : 143)
     })
   }
   process.once('SIGINT', onSignal)
   process.once('SIGTERM', onSignal)
   try {
-    process.exitCode = await runCommand(command, process.env, (spawned) => { child = spawned })
+    const code = await runCommand(command, process.env, (spawned) => { child = spawned })
+    process.exitCode = code
+    if (!signalState.signalled) {
+      const { freeMb, floorMb } = memorySnapshot(process.env)
+      recordDie(process.env, 'exit', command, { path: 'normal', exitCode: code, freeMb, floorMb })
+    }
+  } catch (error) {
+    if (!signalState.signalled) {
+      const { freeMb, floorMb } = memorySnapshot(process.env)
+      recordDie(process.env, 'exit', command, { path: 'spawn-error', error: (error as Error).message, freeMb, floorMb })
+    }
+    throw error
   } finally {
     process.off('SIGINT', onSignal)
     process.off('SIGTERM', onSignal)

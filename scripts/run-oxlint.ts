@@ -2,12 +2,20 @@ import { spawn } from 'node:child_process'
 import { availableParallelism } from 'node:os'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { memorySnapshot, recordDie } from './die-log.ts'
 import { defaultParallelism } from './parallelism.ts'
 import { enterHeavyIoGate } from './heavy-io-gate.ts'
 
 const oxlintCli = fileURLToPath(new URL('../node_modules/oxlint/bin/oxlint', import.meta.url))
 const MAX_CAPTURED_OUTPUT_BYTES = 64 * 1024 * 1024
 const FIX_FLAGS = new Set(['--fix', '--fix-dangerously', '--fix-suggestions'])
+
+/** Audit context for death lines (heavyio-silentdeath-1128); set by main() before any child runs. */
+let auditCommand = ''
+/** True once a death line is on disk, so the finally block never double-reports. */
+let auditLineWritten = false
+/** True when the child died by signal: the lock release must answer 被杀, not 正常收口. */
+let auditKilled = false
 
 function isFixInvocation(args: readonly string[]): boolean {
   return args.some(arg => FIX_FLAGS.has(arg))
@@ -150,6 +158,13 @@ function runOxlint(
 
 function completeFrom(result: { readonly signal: NodeJS.Signals | null; readonly status: number | null }): void {
   if (result.signal !== null) {
+    // Death line before the self-re-kill (heavyio-silentdeath-1128): once
+    // process.kill re-raises the child's signal no hook runs again, so the
+    // killed path + memory snapshot must be on disk first.
+    auditKilled = true
+    auditLineWritten = true
+    const { freeMb, floorMb } = memorySnapshot(process.env)
+    recordDie(process.env, 'exit', auditCommand, { path: 'killed', signal: result.signal, freeMb, floorMb })
     process.kill(process.pid, result.signal)
     return
   }
@@ -162,7 +177,9 @@ async function main(): Promise<void> {
   // `lint:contracts-ready` 直调、裸 `run-oxlint.ts .`、外层包装三种形态一并
   // 拦截（会话裸调是 2026-11-12 五代 respawn 的根因）。pre-commit staged
   // 检查经 lefthook 的 DSH_HEAVY_IO=0 显式透传，交互提交不排队。
-  const lease = await enterHeavyIoGate(`run-oxlint.ts${process.argv.slice(2).map(arg => ` ${arg}`).join('')}`, process.env)
+  const command = `run-oxlint.ts${process.argv.slice(2).map(arg => ` ${arg}`).join('')}`
+  auditCommand = command
+  const lease = await enterHeavyIoGate(command, process.env)
   try {
     if (!isFixInvocation(invocation.args)) {
       const result = await runOxlint(invocation.args, invocation.env)
@@ -185,8 +202,25 @@ async function main(): Promise<void> {
     // Overlapping JS-plugin fixes can expose one more fixable diagnostic after the first pass.
     const second = await runOxlint(invocation.args, invocation.env)
     completeFrom(second)
+  } catch (error) {
+    // Spawn/pickup failure (heavyio-silentdeath-1128): name it before the
+    // stack leaves, so the die-log answers for a lint run that never started.
+    if (!auditLineWritten) {
+      auditLineWritten = true
+      const { freeMb, floorMb } = memorySnapshot(process.env)
+      recordDie(process.env, 'exit', command, { path: 'spawn-error', error: (error as Error).message, freeMb, floorMb })
+    }
+    throw error
   } finally {
-    await lease?.release()
+    await lease?.release(auditKilled ? '被杀' : '正常收口')
+    // Normal-completion line (heavyio-silentdeath-1128 · 一切活儿): the lint
+    // run finished of its own accord — record the exit path and the memory
+    // reading once, skipping when a death line already covers this run.
+    if (!auditLineWritten) {
+      auditLineWritten = true
+      const { freeMb, floorMb } = memorySnapshot(process.env)
+      recordDie(process.env, 'exit', command, { path: 'normal', exitCode: process.exitCode ?? 0, freeMb, floorMb })
+    }
   }
 }
 

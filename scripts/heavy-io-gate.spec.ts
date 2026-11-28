@@ -75,6 +75,12 @@ function runGate(args: readonly string[], env: Record<string, string>) {
       // Default every spawned gate to a scratch history file so tests never
       // append to the machine-wide log; history cases override it per case.
       DSH_HEAVY_IO_HISTORY: join(tmpdir(), 'heavy-io-gate-spec-history.log'),
+      // Same isolation for the death/exit audit (heavyio-silentdeath-1128):
+      // spawned gates append exit/release/die lines, and cases that assert on
+      // them override this per case. The kill-audit cross-reference points at
+      // a path that never exists so no case can inherit a real reaper row.
+      DSH_HEAVY_IO_DIELOG: join(tmpdir(), 'heavy-io-gate-spec-die.log'),
+      DSH_KILL_AUDIT_LOG: join(tmpdir(), 'heavy-io-gate-spec-kill-audit.log'),
       // Floor pinned green by default (heavy-admit-floor-1124): queue release
       // now checks the memory floor, and a red machine would otherwise park
       // every case. The dedicated red/green fixtures override per case.

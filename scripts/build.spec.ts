@@ -1,9 +1,19 @@
 import { spawnSync } from 'node:child_process'
-import { resolve } from 'node:path'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { buildGates, parseBuildArguments } from './build.ts'
 
 const root = resolve(import.meta.dirname, '..')
+
+// Death-audit isolation (heavyio-silentdeath-1128): these failure cases reach
+// build.ts's crash-path death line, and the kill-audit cross-reference must
+// never inherit a real reaper row from this machine.
+const auditEnv = {
+  ...process.env,
+  DSH_HEAVY_IO_DIELOG: join(tmpdir(), 'build-spec-die.log'),
+  DSH_KILL_AUDIT_LOG: join(tmpdir(), 'build-spec-kill-audit.log'),
+}
 
 const artifactGraph = {
   'native': [],
@@ -26,7 +36,7 @@ describe('repository build CLI', () => {
     const result = spawnSync(
       process.execPath,
       ['--no-experimental-strip-types', '--import', 'tsx/esm', resolve(root, 'scripts/build.ts'), '--spec-sentinel'],
-      { cwd: root, encoding: 'utf8' },
+      { cwd: root, encoding: 'utf8', env: auditEnv },
     )
     expect(result.status).not.toBe(0)
     expect(result.stderr).toContain('build: Node.js TypeScript type stripping is unavailable')
@@ -36,7 +46,7 @@ describe('repository build CLI', () => {
     const result = spawnSync(
       process.execPath,
       ['--import', 'tsx/esm', resolve(root, 'scripts/build.ts'), '--artifacts-only'],
-      { cwd: root, encoding: 'utf8' },
+      { cwd: root, encoding: 'utf8', env: auditEnv },
     )
     expect(result.status).not.toBe(0)
     expect(result.stderr).toContain("Unknown option '--artifacts-only'")
