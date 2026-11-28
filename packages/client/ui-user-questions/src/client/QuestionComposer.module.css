@@ -86,18 +86,14 @@
   padding-bottom: 14px;
 }
 
-/* Header button group: minimize sits next to the close action, both on the
-   same 24px icon-button grid. */
+/* Header button group: the wait status sits on the same 24px icon-button
+   grid the header controls share. */
 .headerActions {
   display: flex;
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
   margin-left: auto;
-}
-
-.waitButton {
-  white-space: nowrap;
 }
 
 .waitStatus {
@@ -138,20 +134,9 @@
   font-weight: 500;
 }
 
-/* One-line hint of the native answer surface (ask-panel-retire-1127 甲-a):
-   the question stems live in the conversation message above; the composer
-   keeps at most this single ellipsized line as orientation. Sits inside the
-   .questionTitle wrapper, which owns the horizontal margin. */
-.hint {
-  margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 13px;
-  line-height: 20px;
-  font-weight: 400;
-}
+/* The question stems live in the conversation message above (甲-a); the
+   resident composer draws no copy of its own, so ask-native-input-1128 leaves
+   no one-line hint rule behind. */
 
 /* Long copy keeps one line fewer than its budget once it overflows: a
    question shows in full up to three lines, an option description up to two;

@@ -99,7 +99,7 @@ export type {
 export type {
   BeginCommandRequest, CommandClaim, ConsumeTokenRequest, DraftAttachmentId, DraftInitializationOptions,
   DraftInitializationResult, InputActions,
-  InputState, InsertReferenceRequest, InsertTextRequest, PickOutcome, SessionInput,
+  InputState, InsertReferenceRequest, InsertTextRequest, PickOutcome, QuestionAnswerSink, SessionInput,
   SessionInputResolver, SubmitAttachment, SubmitOutcome,
 } from './contract/input.ts'
 export type { ArbitrateKey, ArbitrateOutcome, DraftInput, DraftQuote, DraftReference, DraftSnapshot, ReferenceInsert, TokenSpan } from './contract/draft-editor.ts'

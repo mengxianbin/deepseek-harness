@@ -10,7 +10,7 @@ import { createWaterfallRequest, PendingQuestion, type QuestionCardSnapshot, typ
 import type { ArbitrateKey, ArbitrateOutcome } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { AnswerSurfaceInsert } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import { createQuestionDraftStore } from '../src/client/draft-store.ts'
-import { QuestionComposer as Composer, parseRecommendedLabel } from '../src/client/QuestionComposer.tsx'
+import { QuestionComposer as Composer, intentSurfaceOf, parseRecommendedLabel } from '../src/client/QuestionComposer.tsx'
 import { en, zh } from '../src/client/locales.ts'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
@@ -185,9 +185,11 @@ beforeEach(() => {
 
 /**
  * Approval intent: routes the batch to the retained option decision card
- * (ask-panel-retire-1127 D3 — an approval intent keeps QuestionFlow, an
- * intent-less batch takes the native QuestionInput). ask() validation never
- * runs in this spec, so the labels only have to exist for the type.
+ * (ask-panel-retire-1127 D3 — an approval intent keeps QuestionFlow; an
+ * intent-less batch never reaches a card at all, the chain selector declining
+ * it so the resident composer keeps the seat, ask-native-input-1128). ask()
+ * validation never runs in this spec, so the labels only have to exist for the
+ * type.
  */
 const approval = (approve: string, reject: string) => ({ kind: 'approval' as const, approve, reject })
 
@@ -225,8 +227,9 @@ const answerBatch = (answers: object[]) => ({ answers })
 
 describe('QuestionComposer', () => {
   it('a blocking request shows no wait status before or after the first edit, exactly as before timed questions', () => {
-    // The blocking card never carried a countdown, so there is nothing for a
-    // held or frozen label to describe; the header keeps only the question and its two controls.
+    // There is no countdown left to describe (ask-native-input-1128: a pending
+    // question is unlimited), so the header keeps only the question itself —
+    // and with the close affordance gone there is nothing to dismiss either.
     const { carrier } = wait()
     const view = render(<QuestionComposer matched={carrier} {...kit} />)
     const status = () => view.container.querySelector('[class*="waitStatus"]')
@@ -234,28 +237,24 @@ describe('QuestionComposer', () => {
     expect(status()).toBeNull()
     expect(screen.queryByText('会一直等你回答')).toBeNull()
     fireEvent.click(screen.getByRole('radio', { name: /工程落地型/ }))
-    expect(carrier.snapshot()).toMatchObject({ waitState: 'editing', countdown: undefined })
+    expect(carrier.snapshot()).toMatchObject({ state: 'open', channel: 'waterfall' })
     expect(status()).toBeNull()
     expect(screen.queryByText('会一直等你回答')).toBeNull()
     expect(screen.queryByRole('button', { name: '慢慢回答' })).toBeNull()
-    expect(screen.getByRole('button', { name: '放弃整组问题' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '放弃整组问题' })).toBeNull()
   })
 
-  it('keeps a recommended default selected without pausing a timed wait', () => {
+  it('keeps a recommended default selected without disturbing a timed wait', () => {
     const { carrier } = wait(QUESTIONS, Date.now() + 30_000)
-    try {
-      const view = render(<QuestionComposer matched={carrier} {...kit} />)
-      expect(screen.getByRole('radio', { name: /工程落地型/ }).getAttribute('aria-checked')).toBe('true')
-      expect(carrier.snapshot().countdown?.running).toBe(true)
+    const view = render(<QuestionComposer matched={carrier} {...kit} />)
+    expect(screen.getByRole('radio', { name: /工程落地型/ }).getAttribute('aria-checked')).toBe('true')
+    expect(carrier.snapshot().channel).toBe('waterfall')
 
-      fireEvent.click(screen.getByLabelText('下一题'))
-      view.unmount()
-      render(<QuestionComposer matched={carrier} {...kit} />)
-      expect(carrier.snapshot().countdown?.running).toBe(true)
-      expect(screen.getByText('2 / 3')).toBeTruthy()
-    } finally {
-      carrier.timeout()
-    }
+    fireEvent.click(screen.getByLabelText('下一题'))
+    view.unmount()
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    expect(carrier.snapshot().channel).toBe('waterfall')
+    expect(screen.getByText('2 / 3')).toBeTruthy()
   })
 
   it('starts every recommended choice of a multi-select question selected', () => {
@@ -286,7 +285,7 @@ describe('QuestionComposer', () => {
     ]))
   })
 
-  it('keeps several recommended multi-select defaults without pausing a timed wait', () => {
+  it('keeps several recommended multi-select defaults without disturbing a timed wait', () => {
     const { carrier } = wait([
       {
         id: 'checks', question: 'Which checks?', multiSelect: true,
@@ -295,18 +294,14 @@ describe('QuestionComposer', () => {
       },
       { id: 'note', question: 'Anything else?' },
     ], Date.now() + 30_000)
-    try {
-      const view = render(<QuestionComposer matched={carrier} {...kit} />)
-      fireEvent.click(screen.getByLabelText('下一题'))
-      view.unmount()
-      render(<QuestionComposer matched={carrier} {...kit} />)
-      expect(carrier.snapshot().countdown?.running).toBe(true)
-      fireEvent.click(screen.getByLabelText('上一题'))
-      expect(screen.getByRole('checkbox', { name: 'Unit' }).getAttribute('aria-checked')).toBe('true')
-      expect(screen.getByRole('checkbox', { name: 'Types' }).getAttribute('aria-checked')).toBe('true')
-    } finally {
-      carrier.timeout()
-    }
+    const view = render(<QuestionComposer matched={carrier} {...kit} />)
+    fireEvent.click(screen.getByLabelText('下一题'))
+    view.unmount()
+    render(<QuestionComposer matched={carrier} {...kit} />)
+    expect(carrier.snapshot().channel).toBe('waterfall')
+    fireEvent.click(screen.getByLabelText('上一题'))
+    expect(screen.getByRole('checkbox', { name: 'Unit' }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByRole('checkbox', { name: 'Types' }).getAttribute('aria-checked')).toBe('true')
   })
 
   it('starts only a recommended first choice of a single-select question selected', () => {
@@ -488,13 +483,15 @@ describe('QuestionComposer', () => {
     expect(document.activeElement).toBe(note)
     fireEvent.change(note, { target: { value: '题外话：顺带看看部署日志' } })
 
-    // Typed on the first page: page turns must not drop it, and a question
-    // that never got an answer can still be skipped on the way. The first turn
+    // Typed on the first page: page turns must not drop it. The first turn
     // rides the pager — clicking the pre-selected recommendation would now
     // clear it (ask-deselect-1126 裁定 A) and the batch below keeps it.
+    // Skip is abolished (ask-native-input-1128), so the free-text question in
+    // the middle is answered instead of stepped over.
     fireEvent.click(screen.getByLabelText('下一题'))
     expect(screen.getByText('2 / 3')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '跳过' }))
+    fireEvent.change(screen.getByPlaceholderText(zh['custom.placeholder']), { target: { value: '只要能跑通' } })
+    fireEvent.click(screen.getByLabelText('下一题'))
     expect(screen.getByText('3 / 3')).toBeTruthy()
     fireEvent.click(screen.getByRole('checkbox', { name: '系统设计' }))
     fireEvent.click(screen.getByRole('button', { name: '提交' }))
@@ -502,7 +499,7 @@ describe('QuestionComposer', () => {
     expect(answer).toHaveBeenCalledWith({
       answers: [
         { id: 'profile', selected: ['工程落地型 (Recommended)'] },
-        { id: 'detail', selected: [] },
+        { id: 'detail', selected: [], custom: '只要能跑通' },
         { id: 'signals', selected: ['系统设计'] },
       ],
       note: '题外话：顺带看看部署日志',
@@ -662,7 +659,7 @@ describe('QuestionComposer', () => {
     expect(view.container.querySelectorAll('li')).toHaveLength(2)
   })
 
-  it('skips individual questions without discarding earlier answers', () => {
+  it('answers each question in turn without discarding earlier answers', () => {
     const { carrier, answer } = wait()
     render(<QuestionComposer matched={carrier} {...kit} />)
 
@@ -670,14 +667,18 @@ describe('QuestionComposer', () => {
     expect((screen.getByText('下一题').closest('button') as HTMLButtonElement).disabled).toBe(false)
     fireEvent.click(screen.getByRole('radio', { name: '研究潜力型' }))
     expect(screen.getByText('2 / 3')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '跳过' }))
+    // Skip is abolished (ask-native-input-1128): the free-text question is
+    // answered, and the last page submits the whole batch.
+    fireEvent.change(screen.getByPlaceholderText('输入你的答案'), { target: { value: '补充说明' } })
+    fireEvent.click(screen.getByLabelText('下一题'))
     expect(screen.getByText('3 / 3')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '跳过' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: '系统设计' }))
+    fireEvent.click(screen.getByRole('button', { name: '提交' }))
 
     expect(answer).toHaveBeenCalledWith(answerBatch([
       { id: 'profile', selected: ['研究潜力型'] },
-      { id: 'detail', selected: [] },
-      { id: 'signals', selected: [] },
+      { id: 'detail', selected: [], custom: '补充说明' },
+      { id: 'signals', selected: ['系统设计'] },
     ]))
   })
 
@@ -766,21 +767,6 @@ describe('QuestionComposer', () => {
     ]))
   })
 
-  it('surfaces cancellation failures and re-arms the controls', async () => {
-    const { carrier, dismiss } = wait()
-    dismiss
-      .mockRejectedValueOnce(new Error('第一次取消失败'))
-      .mockRejectedValueOnce(new Error('第二次取消失败'))
-    render(<QuestionComposer matched={carrier} {...kit} />)
-
-    fireEvent.click(screen.getByRole('button', { name: '放弃整组问题' }))
-    expect(await screen.findByText('第一次取消失败')).toBeTruthy()
-    expect(screen.getByRole<HTMLButtonElement>('button', { name: '跳过' }).disabled).toBe(false)
-
-    fireEvent.click(screen.getByRole('button', { name: '放弃整组问题' }))
-    expect(await screen.findByText('第二次取消失败')).toBeTruthy()
-  })
-
   it('surfaces answer rejection and resets local drafts for a different request', async () => {
     const first = wait()
     const view = render(<QuestionComposer matched={first.carrier} {...kit} />)
@@ -817,9 +803,9 @@ describe('QuestionComposer', () => {
   it('renders chrome copy through the English dictionary', () => {
     const { carrier } = wait([{ id: 'detail', question: '补充你的要求' }])
     render(<QuestionComposer matched={carrier} {...kit} t={seatOver(en, commonEn)} />)
-    expect(screen.getByLabelText('Dismiss all questions')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Skip' })).toBeTruthy()
     expect(screen.getByPlaceholderText('Type your answer')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Remark' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Submit' })).toBeTruthy()
   })
 
   it('restores the current page and drafts after the strict Session entry remounts', () => {
@@ -877,10 +863,10 @@ describe('PendingQuestion domain face', () => {
     const view = render(<QuestionComposer matched={carrier} {...kit} />)
     // Expanded: the option list is visible.
     expect(screen.getByRole('radiogroup')).toBeTruthy()
-    // The manual minimize toggle is gone (2026-11-17 裁定 A1): close is the
-    // only header control left.
+    // The manual minimize toggle is gone (2026-11-17 裁定 A1), and so is the
+    // close action (ask-native-input-1128): the header strip carries no control.
     expect(screen.queryByLabelText(zh['nav.minimize'])).toBeNull()
-    expect(screen.getByRole('button', { name: zh['nav.cancel'] })).toBeTruthy()
+    expect(view.container.querySelector('[class*="headerActions"] button')).toBeNull()
     // Fold: options leave the tree; the strip keeps the stem readable.
     fireEvent.pointerDown(view.container.ownerDocument.body, { bubbles: true })
     expect(screen.queryByRole('radiogroup')).toBeNull()
@@ -958,17 +944,16 @@ describe('PendingQuestion domain face', () => {
     }
   })
 
-  it('a folded strip does not flash open under its own close button', () => {
-    const { carrier, dismiss } = wait()
+  it('a folded strip keeps the stem readable with no control to flash it open', () => {
+    const { carrier } = wait()
     render(<QuestionComposer matched={carrier} {...kit} />)
     fireEvent.pointerDown(document.body, { bubbles: true })
     expect(screen.queryByRole('radiogroup')).toBeNull()
 
-    // Buttons on the strip are excluded from the unfold gesture: the close
-    // action must not light the card up on its way out.
-    fireEvent.click(screen.getByRole('button', { name: zh['nav.cancel'] }))
-
-    expect(dismiss).toHaveBeenCalledTimes(1)
+    // The close action left with the three pseudo-problem affordances
+    // (ask-native-input-1128), so the strip has no button that could unfold it.
+    expect(screen.getByText('选择候选人类型')).toBeTruthy()
+    expect(document.querySelector('[class*="headerActions"] button')).toBeNull()
     expect(screen.queryByRole('radiogroup')).toBeNull()
   })
 })
@@ -1452,7 +1437,7 @@ function timedCard(deadline: number, callId = ToolCallId('ask-timed')) {
 }
 
 describe('timed card', () => {
-  it.each([true, false])('does not autofocus before claiming and respects manual focus until readiness: %s', async (stillFocused) => {
+  it('does not autofocus before claiming and never adopts the named deadline as a Client clock', async () => {
     vi.useFakeTimers()
     const carrier = new PendingQuestion(SID, [{ id: 'free', question: '补充说明' }], ToolCallId('claiming'))
     const request = createWaterfallRequest(Date.now() + 2_000, undefined,
@@ -1463,15 +1448,12 @@ describe('timed card', () => {
       expect(document.activeElement).not.toBe(field)
 
       fireEvent.focus(field)
-      if (!stillFocused) fireEvent.blur(field, { relatedTarget: document.body })
       act(() => { carrier.attachWaterfall(request.channel) })
-      expect(carrier.snapshot().countdown).toEqual({ remainingMs: 2_000, running: !stillFocused })
-      if (stillFocused) {
-        await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
-        expect(carrier.snapshot().channel).toBe('waterfall')
-        fireEvent.blur(field, { relatedTarget: document.body })
-        expect(carrier.snapshot().countdown).toEqual({ remainingMs: 2_000, running: true })
-      }
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
+      // ask-native-input-1128: the wait is unlimited — no local clock, no
+      // local settlement, whatever deadline the Host named.
+      expect(carrier.snapshot()).toMatchObject({ state: 'open', channel: 'waterfall', closed: false })
+      expect(screen.queryByText(/秒后继续工作/)).toBeNull()
     } finally {
       act(() => { request.channel.resolve({ answers: [{ id: 'free', selected: [] }] }) })
       await request.result
@@ -1481,31 +1463,7 @@ describe('timed card', () => {
     }
   })
 
-  it('pauses a pristine countdown while the answer surface has focus and resumes its remainder on blur', async () => {
-    vi.useFakeTimers()
-    try {
-      const { carrier, request } = timedCard(Date.now() + 2_000)
-      let settled = false
-      void request.result.then(() => { settled = true }, () => { settled = true })
-      render(<QuestionComposer matched={carrier} {...kit} />)
-      const field = screen.getByPlaceholderText(zh['custom.placeholder'])
-
-      fireEvent.focus(field)
-      expect(carrier.snapshot()).toMatchObject({ waitState: 'focused', countdown: { running: false } })
-      expect(screen.getByText(/已暂停/)).toBeTruthy()
-      await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
-      expect(settled).toBe(false)
-
-      fireEvent.blur(field, { relatedTarget: document.body })
-      expect(carrier.snapshot()).toMatchObject({ waitState: 'counting' })
-      await act(async () => { await vi.advanceTimersByTimeAsync(2_100) })
-      expect(settled).toBe(true)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('keeps the first edited draft indefinite and restores that choice after remount', async () => {
+  it('keeps the first edited draft and restores it after remount', async () => {
     vi.useFakeTimers()
     try {
       const first = timedCard(Date.now() + 1_000)
@@ -1514,8 +1472,7 @@ describe('timed card', () => {
       const view = render(<QuestionComposer matched={first.carrier} {...kit} />)
 
       fireEvent.change(screen.getByPlaceholderText(zh['custom.placeholder']), { target: { value: '仅工具' } })
-      expect(first.carrier.snapshot()).toMatchObject({ waitState: 'editing', countdown: { running: false } })
-      expect(draftInstance.getSnapshot().progressByRequest[first.carrier.key]?.wait).toBe('editing')
+      expect(draftInstance.getSnapshot().progressByRequest[first.carrier.key]?.drafts[0]?.custom).toBe('仅工具')
       await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
       expect(firstSettled).toBe(false)
 
@@ -1525,8 +1482,7 @@ describe('timed card', () => {
       void restored.request.result.then(() => { restoredSettled = true }, () => { restoredSettled = true })
       render(<QuestionComposer matched={restored.carrier} {...kit} />)
       await act(async () => { await Promise.resolve() })
-      expect(restored.carrier.snapshot()).toMatchObject({ waitState: 'editing', countdown: { running: false } })
-      expect(screen.getByText('会一直等你回答')).toBeTruthy()
+      expect(screen.getByPlaceholderText<HTMLTextAreaElement>(zh['custom.placeholder']).value).toBe('仅工具')
       await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
       expect(restoredSettled).toBe(false)
     } finally {
@@ -1534,26 +1490,28 @@ describe('timed card', () => {
     }
   })
 
-  it('counts down locally, settles the waterfall with ASK_TIMED_OUT at zero, and waits for the projection', async () => {
+  it('never settles a timed waterfall locally and takes the RPC path once continued', async () => {
     vi.useFakeTimers()
     try {
       const { carrier, request } = timedCard(Date.now() + 1_500)
-      const rejection = expect(request.result).rejects.toMatchObject({ name: 'UserQuestionError', code: 'ASK_TIMED_OUT' })
+      let settled = false
+      void request.result.then(() => { settled = true }, () => { settled = true })
       render(<QuestionComposer matched={carrier} {...kit} />)
-      expect(screen.getByText(/秒后继续工作/)).toBeTruthy()
-      expect(screen.getByRole('button', { name: '慢慢回答' })).toBeTruthy()
+      expect(screen.queryByText(/秒后继续工作/)).toBeNull()
+      expect(screen.queryByRole('button', { name: '慢慢回答' })).toBeNull()
       await act(async () => { await vi.advanceTimersByTimeAsync(2_100) })
 
-      await rejection
+      expect(settled).toBe(false)
       expect(carrier.snapshot()).toEqual({
-        state: 'open', waitState: 'counting', countdown: undefined,
-        channel: 'none', closed: false,
+        state: 'open',
+        channel: 'waterfall', closed: false,
       })
-      expect(screen.queryByText(/秒后继续工作/)).toBeNull()
-      expect(screen.getByRole<HTMLButtonElement>('button', { name: '提交' }).disabled).toBe(true)
 
       const answer = vi.fn(async () => true)
       act(() => {
+        // The waterfall settles out first: a continued card answers over the
+        // Remote path, which is the one this assertion watches.
+        carrier.detachWaterfall(request.channel)
         carrier.attachRpc({ answer })
         carrier.setState('continued')
       })
@@ -1563,26 +1521,6 @@ describe('timed card', () => {
       fireEvent.click(screen.getByRole('button', { name: '提交' }))
       await act(async () => { await Promise.resolve() })
       expect(answer).toHaveBeenCalledWith({ answers: [{ id: 'scope', selected: [], custom: '仅工具' }] })
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('lets the user cancel this countdown and keep the request blocking', async () => {
-    vi.useFakeTimers()
-    try {
-      const { carrier, request } = timedCard(Date.now() + 1_000)
-      let settled = false
-      void request.result.then(() => { settled = true }, () => { settled = true })
-      render(<QuestionComposer matched={carrier} {...kit} />)
-
-      fireEvent.click(screen.getByRole('button', { name: '慢慢回答' }))
-
-      expect(screen.queryByText(/秒后继续工作/)).toBeNull()
-      expect(screen.queryByRole('button', { name: '慢慢回答' })).toBeNull()
-      await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
-      expect(settled).toBe(false)
-      expect(carrier.snapshot()).toMatchObject({ channel: 'waterfall', waitState: 'waiting' })
     } finally {
       vi.useRealTimers()
     }
@@ -1652,7 +1590,7 @@ describe('timed card', () => {
     expect(screen.getByRole<HTMLButtonElement>('button', { name: '提交' }).disabled).toBe(false)
   })
 
-  it('closing a continued panel only withdraws it from the seat and sends nothing', async () => {
+  it('offers no close affordance on a continued panel — closing is a pseudo-problem', () => {
     const carrier = new PendingQuestion(SID, TIMED, ToolCallId('ask-continued'))
     const answer = vi.fn(async () => true)
     const hide = vi.fn()
@@ -1663,36 +1601,14 @@ describe('timed card', () => {
 
     expect(screen.getByText('已继续工作，仍可回答')).toBeTruthy()
     expect(screen.queryByText(/秒后继续工作/)).toBeNull()
-    // The close button names the reopen path, not a dismissal of the question.
+    // The three pseudo-problem affordances are gone (ask-native-input-1128):
+    // skip, close and the countdown leave the card with no dismissal at all.
     expect(screen.queryByLabelText('放弃整组问题')).toBeNull()
-    fireEvent.click(screen.getByLabelText('收起问题面板，可从工具调用重新打开'))
-
-    await vi.waitFor(() => { expect(hide).toHaveBeenCalledOnce() })
+    expect(screen.queryByLabelText('收起问题面板，可从工具调用重新打开')).toBeNull()
+    expect(document.querySelector('[class*="headerActions"] button')).toBeNull()
+    expect(hide).not.toHaveBeenCalled()
     expect(answer).not.toHaveBeenCalled()
     expect(carrier.snapshot()).toMatchObject({ state: 'continued', channel: 'rpc', closed: false })
-  })
-
-  it('closing a card-keyed panel with no channel left still just withdraws it', () => {
-    const carrier = new PendingQuestion(SID, TIMED, ToolCallId('ask-gap'))
-    const hide = vi.fn()
-    carrier.attachSeat({ hide })
-    render(<QuestionComposer matched={carrier} {...kit} />)
-
-    fireEvent.click(screen.getByLabelText('收起问题面板，可从工具调用重新打开'))
-
-    expect(hide).toHaveBeenCalledOnce()
-    expect(screen.queryByText('当前无法提交，请稍候再试。')).toBeNull()
-  })
-
-  it('reports an unavailable channel instead of cancelling into the gap', () => {
-    // A request the Host never named: closing it is the cancellation, so with
-    // no channel to carry the rejection there is nothing to do but say so.
-    const carrier = new PendingQuestion(SID, TIMED)
-    render(<QuestionComposer matched={carrier} {...kit} />)
-
-    fireEvent.click(screen.getByLabelText('放弃整组问题'))
-
-    expect(screen.getByText('当前无法提交，请稍候再试。')).toBeTruthy()
   })
 
   it('prunes drafts no card owns on mount and clears its own draft when the card closes', () => {
@@ -1845,275 +1761,6 @@ describe('QuestionComposer answer-surface wiring', () => {
   })
 })
 
-/**
- * The native answer surface (ask-panel-retire-1127 甲-a): an intent-less batch
- * takes QuestionInput — a one-line hint, one auto-growing textarea, and the
- * submit/skip row. The timed-card mechanics (countdown / 慢慢回答 / engage
- * freeze / ASK_TIMED_OUT) live in the `timed card` describe above, converted to
- * this form; this section covers the input itself, its batch assembly, its two
- * close states, its draft persistence, its trigger-pipeline wiring, and the
- * three-way intent fork at the router.
- */
-describe('QuestionInput native answer surface', () => {
-  it('renders an intent-less batch as the native input: one-line hint, no option row, no pager', () => {
-    const { carrier } = wait([
-      { id: 'one', question: '第一问', options: [{ label: '甲' }, { label: '乙' }] },
-      { id: 'two', question: '第二问' },
-    ])
-    const view = render(<QuestionComposer matched={carrier} {...kit} />)
-
-    // The frame marks the native takeover; the hint joins every stem on one line.
-    expect(view.container.querySelector('[data-question-native]')).toBeTruthy()
-    const hint = screen.getByRole('heading', { name: '第一问 · 第二问' })
-    expect(hint.className).toContain('hint')
-
-    // No option card furniture survives: no radio rows, no pager, no page
-    // text, no remark box, no expand toggles — even with options in the data.
-    expect(screen.queryByRole('radiogroup')).toBeNull()
-    expect(screen.queryByRole('radio')).toBeNull()
-    expect(screen.queryByRole('checkbox')).toBeNull()
-    expect(screen.queryByLabelText('下一题')).toBeNull()
-    expect(screen.queryByLabelText('上一题')).toBeNull()
-    expect(screen.queryByText('1 / 2')).toBeNull()
-    expect(screen.queryByRole('button', { name: '题外话' })).toBeNull()
-    expect(screen.queryByRole('button', { name: '展开' })).toBeNull()
-
-    // The native field and its submit row.
-    expect(screen.getAllByRole('textbox')).toHaveLength(1)
-    expect(answerField()).toBeTruthy()
-    expect(screen.getByRole('button', { name: '跳过' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '提交' })).toBeTruthy()
-  })
-
-  it('submits a single question text as its custom answer on Shift+Enter', () => {
-    const { carrier, answer } = wait([{ id: 'only', question: '只有一题' }])
-    render(<QuestionComposer matched={carrier} {...kit} />)
-    const field = answerField()
-    fireEvent.change(field, { target: { value: '答复内容' } })
-
-    fireEvent.keyDown(field, { key: 'Enter', shiftKey: true })
-
-    expect(answer).toHaveBeenCalledWith({ answers: [{ id: 'only', selected: [], custom: '答复内容' }] })
-  })
-
-  it('submits the same single-question shape from the 提交 button', () => {
-    const { carrier, answer } = wait([{ id: 'only', question: '只有一题' }])
-    render(<QuestionComposer matched={carrier} {...kit} />)
-    fireEvent.change(answerField(), { target: { value: '点按钮的答复' } })
-
-    fireEvent.click(screen.getByRole('button', { name: '提交' }))
-
-    expect(answer).toHaveBeenCalledWith({ answers: [{ id: 'only', selected: [], custom: '点按钮的答复' }] })
-  })
-
-  it('lifts a multi-question batch text into the note with one empty entry per question', () => {
-    const { carrier, answer } = wait([
-      { id: 'a', question: '甲问题' },
-      { id: 'b', question: '乙问题' },
-    ])
-    render(<QuestionComposer matched={carrier} {...kit} />)
-    fireEvent.change(answerField(), { target: { value: '这是给整组的答复' } })
-
-    fireEvent.click(screen.getByRole('button', { name: '提交' }))
-
-    expect(answer).toHaveBeenCalledWith({
-      answers: [{ id: 'a', selected: [] }, { id: 'b', selected: [] }],
-      note: '这是给整组的答复',
-    })
-  })
-
-  it('skipping answers every question with an empty entry and carries no note', () => {
-    const { carrier, answer } = wait([
-      { id: 'a', question: '甲问题' },
-      { id: 'b', question: '乙问题' },
-    ])
-    render(<QuestionComposer matched={carrier} {...kit} />)
-
-    fireEvent.click(screen.getByRole('button', { name: '跳过' }))
-
-    expect(answer).toHaveBeenCalledWith({ answers: [{ id: 'a', selected: [] }, { id: 'b', selected: [] }] })
-    expect(Object.keys(answer.mock.calls[0]?.[0] ?? {})).toEqual(['answers'])
-  })
-
-  it('an empty submission reports incomplete instead of sending an empty batch', () => {
-    const { carrier, answer } = wait([{ id: 'only', question: '只有一题' }])
-    render(<QuestionComposer matched={carrier} {...kit} />)
-    const submit = screen.getByRole<HTMLButtonElement>('button', { name: '提交' })
-    expect(submit.disabled).toBe(true)
-
-    // The button is inert while the field is empty; the submit gesture still
-    // runs validation, and nothing reaches the carrier.
-    expect(fireEvent.keyDown(answerField(), { key: 'Enter', shiftKey: true })).toBe(false)
-
-    expect(screen.getByRole('status').textContent).toBe(zh['error.incomplete'])
-    expect(answer).not.toHaveBeenCalled()
-  })
-
-  it('closing a tool-call-keyed panel only withdraws it from the seat', () => {
-    const carrier = new PendingQuestion(SID, [{ id: 'only', question: '只有一题' }], ToolCallId('ask-native-hide'))
-    const hide = vi.fn()
-    carrier.attachSeat({ hide })
-    const answer = vi.spyOn(carrier, 'answer')
-    render(<QuestionComposer matched={carrier} {...kit} />)
-
-    // The keyed close names the reopen path, not a cancellation of the request.
-    expect(screen.queryByLabelText('放弃整组问题')).toBeNull()
-    fireEvent.click(screen.getByLabelText('收起问题面板，可从工具调用重新打开'))
-
-    expect(hide).toHaveBeenCalledOnce()
-    expect(answer).not.toHaveBeenCalled()
-    expect(screen.queryByText('当前无法提交，请稍候再试。')).toBeNull()
-  })
-
-  it('closing an unnamed panel cancels its waterfall with ASK_CANCELLED', async () => {
-    const carrier = new PendingQuestion(SID, [{ id: 'only', question: '只有一题' }])
-    const request = createWaterfallRequest(undefined, undefined, (channel) => { carrier.detachWaterfall(channel) })
-    carrier.attachWaterfall(request.channel)
-    const answer = vi.spyOn(carrier, 'answer')
-    const cancellation = expect(request.result).rejects.toMatchObject({ name: 'UserQuestionError', code: 'ASK_CANCELLED' })
-    render(<QuestionComposer matched={carrier} {...kit} />)
-
-    expect(screen.queryByLabelText('收起问题面板，可从工具调用重新打开')).toBeNull()
-    fireEvent.click(screen.getByLabelText('放弃整组问题'))
-
-    await cancellation
-    expect(answer).not.toHaveBeenCalled()
-    expect(carrier.snapshot().channel).toBe('none')
-    expect(screen.queryByText('当前无法提交，请稍候再试。')).toBeNull()
-  })
-
-  it('keeps the typed text in drafts[0] across a remount with index pinned at 0', () => {
-    const { carrier } = wait([
-      { id: 'one', question: '甲问题' },
-      { id: 'two', question: '乙问题' },
-    ])
-    const view = render(<QuestionComposer matched={carrier} {...kit} />)
-    fireEvent.change(answerField(), { target: { value: '保留这段草稿' } })
-
-    const progress = draftInstance.getSnapshot().progressByRequest[carrier.key]
-    expect(progress?.index).toBe(0)
-    expect(progress?.drafts[0]?.custom).toBe('保留这段草稿')
-    expect(progress?.drafts).toHaveLength(2)
-
-    view.unmount()
-    render(<QuestionComposer matched={carrier} {...kit} />)
-
-    expect(answerField().value).toBe('保留这段草稿')
-  })
-})
-
-describe('QuestionInput answer-surface wiring', () => {
-  const PLAIN: PendingQuestion['questions'] = [{ id: 'only', question: '只有一题' }]
-
-  it('attaches while the field is mounted and detaches on unmount', () => {
-    const { carrier } = wait(PLAIN)
-    const harness = triggerFace()
-    const view = render(<QuestionComposer matched={carrier} {...kit} answerTriggers={harness.face} />)
-
-    expect(harness.attach).toHaveBeenCalledTimes(1)
-    expect(harness.target()).not.toBeNull()
-    expect(view.container.querySelector('[class*="triggerAnchor"]')).toBeTruthy()
-
-    // QuestionInput has no fold state: the lease releases with the unmount.
-    view.unmount()
-    expect(harness.detach).toHaveBeenCalledTimes(1)
-    expect(harness.target()).toBeNull()
-  })
-
-  it('feeds edits to the pipeline with a content revision, and focus re-tracks without bumping it', () => {
-    const { carrier } = wait(PLAIN)
-    const harness = triggerFace()
-    render(<QuestionComposer matched={carrier} {...kit} answerTriggers={harness.face} />)
-    expect(harness.track.mock.calls.at(-1)).toEqual(['', expect.any(Number), 'plain', 1])
-
-    const field = answerField()
-    fireEvent.change(field, { target: { value: '/g' } })
-    expect(harness.track.mock.calls.at(-1)).toEqual(['/g', expect.any(Number), 'plain', 2])
-
-    fireEvent.focus(field)
-    const afterFocus = harness.track.mock.calls.at(-1)!
-    expect(afterFocus[0]).toBe('/g')
-    expect(afterFocus[2]).toBe('plain')
-    expect(afterFocus[3]).toBe(2)
-  })
-
-  it('arbitrates menu keys first: claimed keys are prevented, passed keys keep the field behavior', () => {
-    const { carrier, answer } = wait(PLAIN)
-    const harness = triggerFace()
-    harness.arbitrate.mockReturnValue('consumed')
-    render(<QuestionComposer matched={carrier} {...kit} answerTriggers={harness.face} />)
-    const field = answerField()
-
-    expect(fireEvent.keyDown(field, { key: 'ArrowDown' })).toBe(false)
-    expect(harness.arbitrate).toHaveBeenLastCalledWith('down', false)
-    fireEvent.keyDown(field, { key: 'Tab', shiftKey: true })
-    expect(harness.arbitrate).toHaveBeenLastCalledWith('tabBack', false)
-
-    // A highlighted Enter settles the pick through the menu and never submits.
-    harness.arbitrate.mockReturnValue('pick-highlighted')
-    fireEvent.change(field, { target: { value: '/g' } })
-    expect(fireEvent.keyDown(field, { key: 'Enter' })).toBe(false)
-    expect(harness.arbitrate).toHaveBeenLastCalledWith('enter', false)
-    expect(answer).not.toHaveBeenCalled()
-
-    // A passing Escape reaches the field untouched (no menu open).
-    harness.arbitrate.mockReturnValue('pass')
-    expect(fireEvent.keyDown(field, { key: 'Escape' })).toBe(true)
-    expect(harness.arbitrate).toHaveBeenLastCalledWith('escape', false)
-  })
-
-  it('applies a picked text over the pick-time span, restores the caret, and refuses a stale revision', () => {
-    const { carrier } = wait(PLAIN)
-    const harness = triggerFace()
-    render(<QuestionComposer matched={carrier} {...kit} answerTriggers={harness.face} />)
-    const field = answerField()
-    fireEvent.change(field, { target: { value: '/g' } })
-    const rev = harness.rev()
-    const insert = harness.target()
-    expect(insert).not.toBeNull()
-
-    let applied = false
-    act(() => {
-      applied = insert!('/go-run ', { start: 0, end: 2, draftRev: rev }, false)
-    })
-    expect(applied).toBe(true)
-    expect(answerField().value).toBe('/go-run ')
-    expect(answerField().selectionStart).toBe('/go-run '.length)
-
-    // Content moved on: the pick-time revision is stale and must be refused.
-    act(() => {
-      applied = insert!('/stale ', { start: 0, end: 3, draftRev: rev }, false)
-    })
-    expect(applied).toBe(false)
-    expect(answerField().value).toBe('/go-run ')
-  })
-
-  it('keeps a bare Enter a newline and runs the submit gesture on Shift/Ctrl+Enter', () => {
-    const { carrier, answer } = wait(PLAIN)
-    render(<QuestionComposer matched={carrier} {...kit} />)
-    const field = answerField()
-    fireEvent.change(field, { target: { value: '第一行' } })
-
-    expect(fireEvent.keyDown(field, { key: 'Enter' })).toBe(true)
-    expect(answer).not.toHaveBeenCalled()
-
-    expect(fireEvent.keyDown(field, { key: 'Enter', ctrlKey: true })).toBe(false)
-    expect(answer).toHaveBeenCalledWith({ answers: [{ id: 'only', selected: [], custom: '第一行' }] })
-  })
-
-  it('tracks a locked field frozen while a submission is in flight', () => {
-    const { carrier, answer } = wait(PLAIN)
-    const harness = triggerFace()
-    render(<QuestionComposer matched={carrier} {...kit} answerTriggers={harness.face} />)
-    fireEvent.change(answerField(), { target: { value: '答复' } })
-
-    fireEvent.click(screen.getByRole('button', { name: '提交' }))
-
-    expect(answer).toHaveBeenCalledOnce()
-    expect(harness.track).toHaveBeenLastCalledWith(expect.any(String), expect.any(Number), 'frozen', expect.any(Number))
-  })
-})
-
 describe('intent routing at the composer fork', () => {
   it('a plan-review intent renders the plan decision card', () => {
     const carrier = new PendingQuestion(SID, [{
@@ -2155,13 +1802,12 @@ describe('intent routing at the composer fork', () => {
     expect(document.querySelector('[data-question-native]')).toBeNull()
   })
 
-  it('an intent-less request takes the native input', () => {
+  it('routes an intent-less request to the resident composer instead of a card', () => {
     const carrier = new PendingQuestion(SID, [{ id: 'plain', question: '一个普通问题' }])
-    render(<QuestionComposer matched={carrier} {...kit} />)
-
-    expect(document.querySelector('[data-question-native]')).toBeTruthy()
-    expect(screen.queryByRole('radiogroup')).toBeNull()
-    expect(document.querySelector('[data-plan-review-key]')).toBeNull()
+    // The chain selector reads this same decision (ask-native-input-1128):
+    // `native` declines the takeover, so the ordinary chat input keeps the
+    // seat and no card is drawn for the request.
+    expect(intentSurfaceOf(carrier.questions)).toEqual({ kind: 'native' })
   })
 })
 

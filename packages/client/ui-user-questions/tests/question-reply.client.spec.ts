@@ -355,9 +355,9 @@ describe('replyAnswerValues', () => {
 })
 
 describe('replyClipboardText', () => {
-  it('pairs every question with its answer and names the questions the user skipped', () => {
+  it('pairs every question with its answer and keeps a valueless question as its heading alone', () => {
     expect(replyClipboardText(replyData(), t)).toBe(
-      'Scope — Which scope?\nAnswer: Tool only, note\n\nAny notes?\nSkipped',
+      'Scope — Which scope?\nAnswer: Tool only, note\n\nAny notes?',
     )
   })
 

@@ -38,35 +38,24 @@ describe('createWaterfallRequest', () => {
 })
 
 describe('PendingQuestion', () => {
-  it.each([true, false])('retains focus before a deadline arrives only while still focused: %s', (stillFocused) => {
+  it('never adopts the request deadline as a Client clock', () => {
     vi.useFakeTimers()
     const card = new PendingQuestion(SID, QUESTIONS, CALL)
     try {
-      card.holdFocus()
-      if (!stillFocused) card.releaseFocus()
-      expect(vi.getTimerCount()).toBe(0)
-
       attached(card, Date.now() + 60_000)
-      expect(card.snapshot()).toMatchObject({
-        waitState: stillFocused ? 'focused' : 'counting',
-        countdown: { remainingMs: 60_000, running: !stillFocused },
-      })
-      card.releaseFocus()
-      expect(card.snapshot().countdown).toEqual({ remainingMs: 60_000, running: true })
+      expect(vi.getTimerCount()).toBe(0)
+      expect(card.snapshot()).toMatchObject({ state: 'open', channel: 'waterfall', closed: false })
     } finally {
       card.close()
       vi.useRealTimers()
     }
   })
 
-  it('does not start a timer when an indefinite question loses focus', () => {
+  it('never starts a local timer for an indefinite question', () => {
     vi.useFakeTimers()
     const card = new PendingQuestion(SID, QUESTIONS)
     try {
       attached(card)
-      card.holdFocus()
-      card.releaseFocus()
-      expect(card.snapshot().countdown).toBeUndefined()
       expect(vi.getTimerCount()).toBe(0)
     } finally {
       card.close()
@@ -80,62 +69,13 @@ describe('PendingQuestion', () => {
     card.subscribe(listener)
 
     card.setState('open')
-    card.timeout()
-    card.takeTime()
-    card.takeTime()
-    card.timeout()
+    card.setState('continued')
     card.close()
     card.close()
 
     expect(listener).toHaveBeenCalledTimes(2)
-    expect(card.snapshot()).toMatchObject({ state: 'open', countdown: undefined, channel: 'none', closed: true })
+    expect(card.snapshot()).toMatchObject({ state: 'continued', channel: 'none', closed: true })
     expect(card.liveKeys()).toEqual([card.key])
-  })
-
-  it('keeps a held or edited card without a countdown when a later request attaches', () => {
-    vi.useFakeTimers()
-    try {
-      const now = Date.now()
-      const held = new PendingQuestion(SID, QUESTIONS, CALL)
-      held.takeTime()
-      attached(held, now + 60_000)
-      expect(held.snapshot()).toMatchObject({ waitState: 'waiting', countdown: { remainingMs: 0, running: false } })
-
-      const edited = new PendingQuestion(SID, QUESTIONS, CALL)
-      edited.engage(now)
-      attached(edited, now + 60_000)
-      expect(edited.snapshot()).toMatchObject({ waitState: 'editing', countdown: { remainingMs: 0, running: false } })
-      expect(vi.getTimerCount()).toBe(0)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('freezes the remaining wait while focused, also across a re-delivered request', () => {
-    vi.useFakeTimers()
-    try {
-      const now = Date.now()
-      const card = new PendingQuestion(SID, QUESTIONS, CALL)
-      const first = attached(card, now + 60_000)
-      card.holdFocus(now + 10_000)
-      expect(card.snapshot()).toMatchObject({ waitState: 'focused', countdown: { remainingMs: 50_000, running: false } })
-      expect(vi.getTimerCount()).toBe(0)
-
-      // The focused hold survives the request being re-delivered: a deadline
-      // carried by the new channel is frozen too, one without leaves it as is.
-      card.detachWaterfall(first.request.channel)
-      attached(card, now + 40_000)
-      expect(card.snapshot()).toMatchObject({ waitState: 'focused', countdown: { remainingMs: 40_000, running: false } })
-      attached(card)
-      expect(card.snapshot()).toMatchObject({ waitState: 'focused', countdown: undefined })
-
-      card.releaseFocus(now + 20_000)
-      expect(card.snapshot()).toMatchObject({ waitState: 'counting', countdown: undefined })
-      card.releaseFocus(now + 20_000)
-      expect(card.snapshot().waitState).toBe('counting')
-    } finally {
-      vi.useRealTimers()
-    }
   })
 
   it('refuses to end an unnamed request that has no live channel', async () => {

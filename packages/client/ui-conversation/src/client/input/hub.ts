@@ -272,6 +272,12 @@ export class InputHub implements SessionInputResolver {
    * is always a real host entity (materialized when its workspace was picked),
    * so there is exactly one path; a refused or failed prompt is an ordinary
    * prompt failure (banner via promptError, draft kept in the composer).
+   *
+   * ask-native-input-1128: a plain text send while a question owns the Session
+   * is diverted into that question's BAD_ANSWER batch instead of the message
+   * channel — sending IS answering. Attachments have no BAD_ANSWER mapping,
+   * so a send that carries them keeps its ordinary message path (the question
+   * stays pending and answerable).
    */
   private sink(
     session: SessionFace,
@@ -282,6 +288,25 @@ export class InputHub implements SessionInputResolver {
     accept: () => void,
   ): Promise<SubmitOutcome> {
     if (text === '' && attachmentIds.length === 0) return Promise.resolve({ kind: 'success' })
+    const answer = text.trim()
+    if (attachmentIds.length === 0 && answer !== '') {
+      const divert = this.rootCtx.get('questionAnswerSink')?.answer(session.sessionId, answer)
+      if (divert !== undefined) {
+        return divert.then(outcome => outcome ?? this.send(session, text, attachmentIds, mode, signal, accept))
+      }
+    }
+    return this.send(session, text, attachmentIds, mode, signal, accept)
+  }
+
+  /** The ordinary message path: the sent draft travels as one Session message. */
+  private send(
+    session: SessionFace,
+    text: string,
+    attachmentIds: readonly DraftAttachmentId[],
+    mode: InputSubmitMode,
+    signal: AbortSignal,
+    accept: () => void,
+  ): Promise<SubmitOutcome> {
     return this.conversation().sendSession(session, text, attachmentIds, mode, signal, accept)
   }
 

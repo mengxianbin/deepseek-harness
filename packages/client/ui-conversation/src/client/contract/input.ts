@@ -11,6 +11,7 @@ import type { SessionBinding } from '@deepseek-ai/dsh-api-session-controller/cli
 import type { InboxState } from '@deepseek-ai/dsh-agent/types'
 import type { ObservableSnapshot, SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { Branded } from '@deepseek-ai/dsh-brand'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { ArbitrateKey, ArbitrateOutcome, DraftQuote, Occurrence, ReferenceInsert, TokenSpan } from './draft-editor.ts'
 import type { InputSubmitMode, MessageSubmission } from './composer-submission.ts'
 
@@ -33,6 +34,24 @@ export interface DraftAttachmentSerializationResult {
 export interface SubmitOutcome {
   readonly kind: 'success' | 'error'
   readonly text?: string
+}
+
+/**
+ * Structural face for routing a plain composer send into the pending question
+ * that owns the Session (ask-native-input-1128). The question plugin provides
+ * it; the conversation input hub reads it structurally before the ordinary
+ * message path, so a typed-and-sent draft IS the answer while a question is
+ * pending. Assembly stays on the provider's side — this face only says where
+ * the text goes, never how a batch is built.
+ */
+export interface QuestionAnswerSink {
+  /**
+   * Settle the Session's pending question with the sent draft.
+   * @param sessionId - Session whose composer sent the draft.
+   * @param text - the sent draft, verbatim.
+   * @returns the submission outcome, or `null` when no pending question owns the Session (send as an ordinary message).
+   */
+  answer(sessionId: SessionId, text: string): Promise<SubmitOutcome | null>
 }
 
 /** Command-mode credential supplied by one input-trigger source. */
@@ -137,6 +156,11 @@ export interface InputTriggerController {
 }
 
 declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** Optional pending-question answer divert, provided by ui-user-questions. */
+    questionAnswerSink?: QuestionAnswerSink
+  }
+
   interface Events {
     /**
      * Claim a command token for the scoped input machine.
