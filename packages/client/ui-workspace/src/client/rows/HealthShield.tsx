@@ -53,6 +53,7 @@ import clsx from 'clsx'
 import { IconShieldOutlineMedium, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { UseSessionHealth } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { WorkspaceBrowserProps } from '../contract/slots.ts'
+import { formatAgeSec } from '../format-age.ts'
 import { HealthDetail } from './HealthDetail.tsx'
 import css from './HealthShield.module.css'
 
@@ -100,7 +101,7 @@ export function HealthShield({ useSessionHealth, t }: HealthShieldProps) {
           ? t('health.revive.label')
           : t('health.ok.label')
   const tooltip = stale && health.staleSeconds !== undefined
-    ? t('health.stale.tooltip').replace('{s}', String(health.staleSeconds))
+    ? t('health.stale.tooltip').replace('{s}', formatAgeSec(health.staleSeconds))
     : label
   return (
     <span

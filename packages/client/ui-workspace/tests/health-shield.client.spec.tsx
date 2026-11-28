@@ -224,7 +224,7 @@ describe('HealthShield', () => {
     // The third detail section explains the red: raw error + streak age + sustained tag.
     fireEvent.click(screen.getByLabelText(label))
     const detail = document.querySelector('[data-health-detail=""]') as HTMLElement
-    expect(detail.querySelector('[data-health-section="autoRoute"]')?.textContent).toContain('控制器读数中断 312s')
+    expect(detail.querySelector('[data-health-section="autoRoute"]')?.textContent).toContain('控制器读数中断 5m 12s')
     expect(detail.textContent).toContain('持续 ≥5 分钟')
     expect(detail.textContent).toContain('connect ECONNREFUSED')
     // The other two sections keep their own verdicts (books balance).
